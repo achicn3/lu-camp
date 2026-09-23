@@ -125,8 +125,8 @@ try {
   ok("說明用實例而非公式", Boolean(turnoverTip) && turnoverTip.includes("例："));
   await page.screenshot({ path: join(SHOTS, "01-dashboard-tips.png"), fullPage: true });
 
-  // ── 2) 購物金效益：備註欄不再空白，且結論指標講人話 ──
-  await openReport(page, "購物金效益");
+  // ── 2) 購物金划不划算：備註欄不再空白，且結論指標講人話 ──
+  await openReport(page, "購物金划不划算");
   await page.waitForSelector(".inv-table tbody tr", { timeout: 15000 });
   const notes = await page.$$eval(".rpt-metric-note", (els) =>
     els.map((e) => (e.textContent ?? "").trim()),
@@ -138,11 +138,11 @@ try {
   await page.screenshot({ path: join(SHOTS, "02-effectiveness-notes.png"), fullPage: true });
 
   // ── 3) 對帳：不再出現「快取」，改為一句結論 ──
-  await openReport(page, "購物金對帳");
-  await page.waitForSelector("text=帳目核對", { timeout: 15000 });
+  await openReport(page, "購物金帳對不對");
+  await page.waitForSelector("text=每位會員的餘額對不對", { timeout: 15000 });
   const reconBody = await page.innerText("body");
   ok("對帳頁不再出現「快取」字眼", !reconBody.includes("快取"));
-  ok("改為白話結論「帳目核對」", reconBody.includes("帳目核對"));
+  ok("改為白話結論「每位會員的餘額對不對」", reconBody.includes("每位會員的餘額對不對"));
   await page.screenshot({ path: join(SHOTS, "03-reconciliation.png"), fullPage: true });
 
   // ── 4) 收購：品名提示（datalist）＋ 品牌選定後標籤化 ──

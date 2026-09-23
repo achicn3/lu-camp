@@ -13,13 +13,13 @@ export const REPORT_GROUPS = {
   庫存價值: "帳務",
   寄售應付: "帳務",
   發票月報: "帳務",
-  購物金餘額: "購物金",
-  購物金進出: "購物金",
-  購物金效益: "購物金",
-  購物金對帳: "購物金",
+  客人還沒用的購物金: "購物金",
+  購物金發出與使用: "購物金",
+  購物金划不划算: "購物金",
+  購物金帳對不對: "購物金",
 };
 
-/** 切到指定報表（名稱要與畫面完全相同，例如「購物金對帳」而不是「對帳」）。 */
+/** 切到指定報表（名稱要與畫面完全相同，例如「購物金帳對不對」而不是「對帳」）。 */
 export async function openReport(page, name) {
   const group = REPORT_GROUPS[name];
   if (!group) throw new Error(`未知的報表名稱：${name}（見 scripts/_reports.mjs）`);

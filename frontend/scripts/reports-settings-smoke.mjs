@@ -38,20 +38,20 @@ try {
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
   // 報表分組（2026-09-23）：購物金四張在「購物金」組。
-  await openReport(page, "購物金餘額");
+  await openReport(page, "客人還沒用的購物金");
   await page.waitForTimeout(800);
   const reportsText = await page.innerText("body");
   assert(/報表|購物金/.test(reportsText), "/reports renders zh-TW heading");
-  assert(/購物金餘額/.test(reportsText), "/reports shows 購物金餘額 (liability) section");
+  assert(/客人還沒用掉的總額/.test(reportsText), "/reports shows store-credit balance (liability) section");
   assert(/1,?980|報表測試客/.test(reportsText), "/reports shows seeded liability data");
   await page.screenshot({ path: `${SHOTS}/reports.png`, fullPage: true });
   console.log("  shot: reports.png");
 
   // --- /reports 對帳 tab + authenticated CSV export (Codex P2/P3) ---
-  await openReport(page, "購物金對帳");
+  await openReport(page, "購物金帳對不對");
   await page.waitForTimeout(800);
   const reconText = await page.innerText("body");
-  assert(/帳本總負債|快取/.test(reconText), "reconciliation tab renders");
+  assert(/每位會員的餘額對不對/.test(reconText), "reconciliation tab renders");
   const csvBtn = page.locator('button:has-text("CSV")');
   assert((await csvBtn.count()) > 0, "reconciliation tab has CSV export button (P3)");
   await page.screenshot({ path: `${SHOTS}/reports-reconciliation.png`, fullPage: true });
@@ -67,7 +67,7 @@ try {
   // --- /reports 流量 tab (validates timezone-aware date bounds end-to-end) ---
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
-  await openReport(page, "購物金進出");
+  await openReport(page, "購物金發出與使用");
   await page.waitForTimeout(1000);
   const flowsText = await page.innerText("body");
   assert(/起始日期|粒度|發行|期間/.test(flowsText), "flows tab renders (tz-aware date query succeeds)");
@@ -117,7 +117,7 @@ try {
       await cp.waitForTimeout(1000);
       const t = await cp.innerText("body");
       assert(/需管理者權限/.test(t), `CLERK blocked from ${path} (需管理者權限)`);
-      assert(!/一般設定|帳齡分桶/.test(t), `CLERK sees no manager content on ${path}`);
+      assert(!/一般設定|放了多久/.test(t), `CLERK sees no manager content on ${path}`);
     }
     await cp.screenshot({ path: `${SHOTS}/settings-clerk-blocked.png`, fullPage: true });
     console.log("  shot: settings-clerk-blocked.png");

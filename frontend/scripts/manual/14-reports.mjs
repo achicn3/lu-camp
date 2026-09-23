@@ -29,10 +29,10 @@ const SLUGS = {
   "庫存價值": "inventory-value",
   "寄售應付": "consignment-payables",
   "發票月報": "invoice-register",
-  "購物金餘額": "liability",
-  "購物金進出": "flows",
-  "購物金效益": "effectiveness",
-  "購物金對帳": "reconciliation",
+  "客人還沒用的購物金": "liability",
+  "購物金發出與使用": "flows",
+  "購物金划不划算": "effectiveness",
+  "購物金帳對不對": "reconciliation",
 };
 
 await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });

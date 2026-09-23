@@ -68,7 +68,7 @@ type Tab =
   | "reconciliation";
 
 // 16 張報表分成 5 組（2026-09-23 裁示）：平鋪一整排很難找；先選要看哪一類，再選哪一張。
-// 購物金的四張加上「購物金」字樣——原本叫「負債／流量／效益指標／對帳」，看不出是購物金。
+// 購物金的四張用白話命名——原本叫「負債／流量／效益指標／對帳」，既看不出是購物金、也是會計術語。
 const GROUPS: { key: string; label: string; tabs: { key: Tab; label: string }[] }[] = [
   {
     key: "daily",
@@ -110,10 +110,10 @@ const GROUPS: { key: string; label: string; tabs: { key: Tab; label: string }[] 
     key: "store-credit",
     label: "購物金",
     tabs: [
-      { key: "liability", label: "購物金餘額" },
-      { key: "flows", label: "購物金進出" },
-      { key: "effectiveness", label: "購物金效益" },
-      { key: "reconciliation", label: "購物金對帳" },
+      { key: "liability", label: "客人還沒用的購物金" },
+      { key: "flows", label: "購物金發出與使用" },
+      { key: "effectiveness", label: "購物金划不划算" },
+      { key: "reconciliation", label: "購物金帳對不對" },
     ],
   },
 ];
@@ -411,11 +411,11 @@ function DashboardPanel() {
           <dd className="money">{report.transaction_count}</dd>
         </div>
         <div className="rpt-stat">
-          <dt>購物金發出</dt>
+          <dt>送出的購物金</dt>
           <dd><MoneyText value={report.store_credit_issued} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>購物金兌付</dt>
+          <dt>客人用掉的購物金</dt>
           <dd><MoneyText value={report.store_credit_redeemed} /></dd>
         </div>
         <div className="rpt-stat">
@@ -948,12 +948,12 @@ function DailyCashPanel() {
         </label>
       </div>
 
-      <h3>各 Session</h3>
+      <h3>每次開帳</h3>
       <div className="inv-table-wrap">
         <table className="inv-table">
           <thead>
             <tr>
-              <th>班別</th>
+              <th>開帳編號</th>
               <th>狀態</th>
               <th>開帳時間</th>
               <th>零用金</th>
@@ -988,7 +988,7 @@ function DailyCashPanel() {
             ))}
           </tbody>
         </table>
-        {report.sessions.length === 0 && <p className="hint">當日無 session</p>}
+        {report.sessions.length === 0 && <p className="hint">這天沒有開帳</p>}
       </div>
 
       <h3>當日合計</h3>
@@ -1034,7 +1034,7 @@ function DailyCashPanel() {
           <dd><MoneyText value={report.total_variance} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>購物金兌付（參考）</dt>
+          <dt>客人用掉的購物金（參考）</dt>
           <dd><MoneyText value={report.total_store_credit_redeemed_display_only} /></dd>
         </div>
       </dl>
@@ -2029,7 +2029,7 @@ function LiabilityPanel() {
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/reports/store-credit/liability");
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取負債報表失敗");
+      throw new Error(extractDetail(error) ?? "讀取購物金餘額失敗");
     },
   });
   const paged = usePaged(query.data?.per_member ?? []);
@@ -2048,31 +2048,31 @@ function LiabilityPanel() {
   return (
     <div>
       <p className="rpt-intro">
-        <b>這頁在看什麼？</b>　會員手上還沒用掉的<b>購物金</b>就是店家的「負債」（未來要讓他們折抵）。
-        這裡看欠多少、放多久（帳齡）、以及每位會員各有多少。
+        <b>這頁在看什麼？</b>　會員手上還沒用掉的<b>購物金</b>，是店家將來要讓客人折抵的錢（等於欠客人的）。
+        這裡看總共多少、放了多久、以及每位會員各有多少。
       </p>
       <dl className="rpt-summary">
         <div className="rpt-stat">
-          <dt>未兌付總負債</dt>
+          <dt>客人還沒用掉的總額</dt>
           <dd><MoneyText value={report.total_outstanding} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>負債健康比<InfoTip text="未兌付購物金 ÷ 月固定支出。數字越小，代表購物金負債相對每月開銷越輕、越健康；越大代表負債偏重。" /></dt>
+          <dt>未用餘額 ÷ 每月固定開銷<InfoTip text="客人還沒用掉的購物金，約等於幾個月的固定開銷。數字越小越輕鬆；越大代表欠客人的購物金相對每月開銷偏重。" /></dt>
           <dd>{report.liability_health_ratio ?? "N/A"}</dd>
         </div>
       </dl>
-      <p className="hint">「負債健康比」＝未兌付購物金 ÷ 月固定支出；數字<b>越小越健康</b>（負債相對開銷越輕）。</p>
+      <p className="hint">上面的比值數字<b>越小越輕鬆</b>（欠客人的購物金相對每月開銷越少）。</p>
 
-      <h3>帳齡分桶</h3>
+      <h3>放了多久</h3>
       <div className="inv-table-wrap">
         <table className="inv-table">
           <thead>
             <tr>
-              <th>&lt;30 天</th>
-              <th>30-90 天</th>
-              <th>90-180 天</th>
-              <th>180-365 天</th>
-              <th>&gt;365 天</th>
+              <th>未滿 30 天</th>
+              <th>30–90 天</th>
+              <th>90–180 天</th>
+              <th>半年～一年</th>
+              <th>超過一年</th>
             </tr>
           </thead>
           <tbody>
@@ -2135,7 +2135,7 @@ function FlowsPanel() {
         },
       });
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取流量報表失敗");
+      throw new Error(extractDetail(error) ?? "讀取購物金發出與使用失敗");
     },
   });
   const paged = usePaged(query.data?.rows ?? []);
@@ -2176,7 +2176,7 @@ function FlowsPanel() {
       </div>
 
       <p className="rpt-intro">
-        <b>這頁在看什麼？</b>　「流量」就是<b>購物金的進出流水</b>——每段期間<b>發出</b>多少（收購回饋/儲值）、被<b>兌付</b>多少（結帳折抵）、以及淨變化。看購物金是越發越多還是逐漸用掉。
+        <b>這頁在看什麼？</b>　每段期間<b>送出去</b>多少購物金（收購回饋／儲值）、<b>客人用掉</b>多少（結帳折抵），以及這段期間是增加還是減少。看購物金是越送越多還是逐漸被用掉。
       </p>
       {query.isPending && <p className="hint">載入中...</p>}
       {query.isError && <ErrorBlock message={query.error.message} />}
@@ -2187,9 +2187,9 @@ function FlowsPanel() {
               <thead>
                 <tr>
                   <th>期間</th>
-                  <th>發出</th>
-                  <th>兌付</th>
-                  <th>淨變化</th>
+                  <th>送出去</th>
+                  <th>客人用掉</th>
+                  <th>本期增減</th>
                 </tr>
               </thead>
               <tbody>
@@ -2244,7 +2244,7 @@ function formatMetricValue(key: string, raw: string | null): string {
   return formatRate(raw);
 }
 
-// 每個指標的白話說明（顯示於「備註」欄；名稱沿用財務模型用語，說明負責讓店長看得懂）。
+// 每個指標的白話說明（顯示於「說明」欄）。
 // 結論指標是「每千元損益」，其餘六項都是算出它的原料。
 const METRIC_NOTES: Record<string, string> = {
   take_rate: "收購時，客人選購物金（而不是拿現金）的比例。越高代表方案越受歡迎。",
@@ -2263,6 +2263,10 @@ const METRIC_NOTES: Record<string, string> = {
     "結論指標：每發出 1,000 元購物金，店家最後淨賺（正數）或淨賠（負數）多少。" +
     "由上面六項推算，正數代表這個方案划算。",
 };
+
+const ESTIMATE_NOTE =
+  "標「推估」的數字無法從帳本直接算出（帳本看不出客人本來會不會買），只能推估；" +
+  "資料越少越不準，請當作參考，不要當成精確的賺賠。";
 
 function EffectivenessPanel() {
   const defaults = defaultDateRange();
@@ -2284,7 +2288,7 @@ function EffectivenessPanel() {
         },
       );
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取效益指標失敗");
+      throw new Error(extractDetail(error) ?? "讀取購物金划不划算失敗");
     },
   });
 
@@ -2306,7 +2310,7 @@ function EffectivenessPanel() {
   return (
     <div>
       <p className="rpt-intro">
-        <b>這頁在看什麼？</b>　評估<b>購物金方案值不值得</b>的進階指標——例如顧客多花了多少、回購情形、平均溢價等（偏經營分析，店長參考）。每個指標都有說明文字。
+        <b>這頁在看什麼？</b>　評估<b>購物金方案划不划算</b>——例如客人多花了多少、多送的購物金有沒有被用掉（偏經營分析，店長參考）。最後一列是結論，每一項都有說明。
       </p>
       <div className="rpt-filters">
         <label>
@@ -2327,22 +2331,20 @@ function EffectivenessPanel() {
             <table className="inv-table">
               <thead>
                 <tr>
-                  <th>指標</th>
-                  <th>值</th>
-                  <th>備註</th>
+                  <th>項目</th>
+                  <th>數字</th>
+                  <th>說明</th>
                 </tr>
               </thead>
               <tbody>
                 {METRIC_KEYS.map((key) => {
                   const isEstimate = report.estimate_fields.includes(key);
-                  const isAlpha = key === "alpha_incremental";
                   const val = metricValue(key);
                   return (
                     <tr key={key}>
                       <td>
                         {EFFECTIVENESS_LABELS[key]}
-                        {isEstimate && <span className="rpt-badge-estimate">估計值</span>}
-                        {isAlpha && <span className="rpt-badge-proxy">代理法</span>}
+                        {isEstimate && <span className="rpt-badge-estimate">推估</span>}
                       </td>
                       <td className="rpt-metric-value">{formatMetricValue(key, val)}</td>
                       <td className="rpt-metric-note">{METRIC_NOTES[key] ?? ""}</td>
@@ -2354,10 +2356,11 @@ function EffectivenessPanel() {
           </div>
 
           {report.alpha_sample_insufficient && (
-            <p className="rpt-note">樣本不足</p>
+            <p className="rpt-note">資料還太少，數字僅供參考</p>
           )}
 
-          <p className="hint">{report.alpha_method_note}</p>
+          {/* 後端的 alpha_method_note 是給匯出檔的技術說明（含代號與文件章節），畫面改用白話。 */}
+          <p className="hint">{ESTIMATE_NOTE}</p>
 
           <DownloadButtons onDownload={handleDownload} />
         </>
@@ -2376,7 +2379,7 @@ function ReconciliationPanel() {
         "/api/v1/reports/store-credit/reconciliation",
       );
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取對帳報表失敗");
+      throw new Error(extractDetail(error) ?? "讀取購物金帳目檢查失敗");
     },
   });
 
@@ -2393,12 +2396,12 @@ function ReconciliationPanel() {
   return (
     <div>
       <p className="rpt-intro">
-        <b>這頁在看什麼？</b>　系統自動<b>核對購物金帳目是否一致</b>（帳本記的負債 vs 各會員餘額加總）。兩邊相符代表帳沒問題；不符會標出來，請通知店長/工程。
+        <b>這頁在看什麼？</b>　系統自動<b>檢查購物金的帳對不對</b>：每一筆送出、用掉的紀錄加起來，要等於各會員現在的餘額。對得上代表帳沒問題；對不上會標出來，請通知店長／工程。
       </p>
       <dl className="rpt-summary">
         <div className="rpt-stat">
           <dt>
-            購物金總負債
+            客人還沒用掉的總額
             <InfoTip text={TIP_OUTSTANDING} />
           </dt>
           <dd><MoneyText value={report.ledger_total_outstanding} /></dd>
@@ -2406,24 +2409,24 @@ function ReconciliationPanel() {
         {/* 「帳本 vs 快取」是內部實作（同一筆餘額存兩份：流水帳與預先算好的總數）；
             店長只需要知道帳目對不對得起來，故收斂成一句結論，不再暴露「快取」字眼。 */}
         <div className="rpt-stat">
-          <dt>帳目核對</dt>
+          <dt>每位會員的餘額對不對</dt>
           <dd className={report.cached_total_trustworthy ? "rpt-ok" : "rpt-mismatch"}>
             {report.cached_total_trustworthy
               ? "正常"
               : // mismatches 也含帳本鏈驗證的逐列異常（contact_id=-1），不等於帳戶數，故稱「筆」。
-                `不一致（${report.mismatches.length} 筆異常，請聯絡工程）`}
+                `對不上（${report.mismatches.length} 筆異常，請聯絡工程）`}
           </dd>
         </div>
       </dl>
 
       {report.mismatches.length > 0 && (
         <>
-          <h3>不一致帳戶</h3>
+          <h3>對不上的會員</h3>
           <div className="inv-table-wrap">
             <table className="inv-table">
               <thead>
                 <tr>
-                  <th>帳戶</th>
+                  <th>會員</th>
                   <th>詳情</th>
                 </tr>
               </thead>
@@ -2440,7 +2443,7 @@ function ReconciliationPanel() {
         </>
       )}
       {report.mismatches.length === 0 && (
-        <p className="hint rpt-ok">所有帳戶一致，無異常。</p>
+        <p className="hint rpt-ok">每位會員的餘額都對得上，沒有異常。</p>
       )}
 
       <DownloadButtons onDownload={handleDownload} />

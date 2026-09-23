@@ -92,13 +92,13 @@ export const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
 };
 
 export const EFFECTIVENESS_LABELS: Record<string, string> = {
-  take_rate: "選用率",
-  avg_premium_rate: "平均溢價率",
-  beta_retention: "沉澱率 (beta)",
-  excess_spend_rate: "超額消費率",
-  alpha_incremental: "新增比例 (alpha)",
-  gross_margin_m: "毛利率 (m)",
-  delta_per_1000: "每千元損益 (delta)",
+  take_rate: "選購物金的比例",
+  avg_premium_rate: "平均多送幾成",
+  beta_retention: "一直沒被用掉的比例",
+  excess_spend_rate: "用購物金時另外再付錢的比例",
+  alpha_incremental: "因購物金多做到的生意",
+  gross_margin_m: "商品毛利率",
+  delta_per_1000: "每送 1,000 元購物金，店家淨賺／賠多少",
 };
 
 /** Granularity options for flows report. */

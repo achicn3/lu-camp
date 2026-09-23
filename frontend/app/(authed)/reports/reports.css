@@ -83,17 +83,6 @@
   vertical-align: middle;
 }
 
-.rpt-badge-proxy {
-  display: inline-block;
-  background: var(--info);
-  color: #fff;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  margin-left: var(--sp-1);
-  vertical-align: middle;
-}
-
 .rpt-note {
   background: #fdf6e3;
   border-left: 3px solid var(--warn);

@@ -439,10 +439,10 @@ const REPORT_GROUPS: Record<string, string> = {
   庫存價值: "帳務",
   寄售應付: "帳務",
   發票月報: "帳務",
-  購物金餘額: "購物金",
-  購物金進出: "購物金",
-  購物金效益: "購物金",
-  購物金對帳: "購物金",
+  客人還沒用的購物金: "購物金",
+  購物金發出與使用: "購物金",
+  購物金划不划算: "購物金",
+  購物金帳對不對: "購物金",
 };
 
 async function openReport(name: string) {
@@ -518,7 +518,7 @@ describe("ReportsPage", () => {
     renderPage();
     // Default tab is now dashboard; navigate to liability
     await screen.findByText("120,000"); // wait for dashboard
-    await openReport("購物金餘額");
+    await openReport("客人還沒用的購物金");
 
     // total outstanding
     expect(await screen.findByText("58,000")).toBeTruthy();
@@ -532,6 +532,13 @@ describe("ReportsPage", () => {
 
     // liability health ratio
     expect(screen.getByText("1.45")).toBeTruthy();
+
+    // 白話用詞：不出現會計術語
+    expect(screen.getByText("客人還沒用掉的總額")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "放了多久" })).toBeTruthy();
+    expect(screen.getByText("未滿 30 天")).toBeTruthy();
+    expect(screen.getByText("超過一年")).toBeTruthy();
+    expect(screen.queryByText(/兌付|帳齡|負債健康比/)).toBeNull();
   });
 
   it("flows tab shows period/issued/redeemed/net_change", async () => {
@@ -540,11 +547,15 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000"); // wait for dashboard to load first
 
-    await openReport("購物金進出");
+    await openReport("購物金發出與使用");
     expect(await screen.findByText("2026-06-17")).toBeTruthy();
     expect(screen.getByText("5,000")).toBeTruthy();
     expect(screen.getByText("2,000")).toBeTruthy();
     expect(screen.getByText("3,000")).toBeTruthy();
+    for (const header of ["送出去", "客人用掉", "本期增減"]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeTruthy();
+    }
+    expect(screen.queryByText(/兌付|流量|淨變化/)).toBeNull();
   });
 
   it("effectiveness tab shows estimate labels and alpha proxy note", async () => {
@@ -553,23 +564,23 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await openReport("購物金效益");
+    await openReport("購物金划不划算");
 
     // Wait for effectiveness data
     await waitFor(() => {
-      expect(screen.getByText("選用率")).toBeTruthy();
+      expect(screen.getByText("選購物金的比例")).toBeTruthy();
     });
 
-    // estimate_fields should be labelled
-    const betaRow = screen.getByText("沉澱率 (beta)").closest("tr") ?? screen.getByText("沉澱率 (beta)").parentElement;
-    expect(betaRow?.textContent).toContain("估計值");
+    // 推估的指標要標示（不再用 beta/alpha 等代號）
+    const betaRow = screen.getByText("一直沒被用掉的比例").closest("tr");
+    expect(betaRow?.textContent).toContain("推估");
 
-    const alphaRow = screen.getByText("新增比例 (alpha)").closest("tr") ?? screen.getByText("新增比例 (alpha)").parentElement;
-    expect(alphaRow?.textContent).toContain("估計值");
-    expect(alphaRow?.textContent).toContain("代理法");
+    const alphaRow = screen.getByText("因購物金多做到的生意").closest("tr");
+    expect(alphaRow?.textContent).toContain("推估");
 
-    // alpha_method_note displayed
-    expect(screen.getByText(/代理假設低頻會員消費由購物金誘發/)).toBeTruthy();
+    // 後端的技術說明（α、docs 章節）不上畫面，改一句白話
+    expect(screen.getByText(/標「推估」的數字無法從帳本直接算出/)).toBeTruthy();
+    expect(screen.queryByText(/代理|α|alpha|beta|delta|估計值|溢價/)).toBeNull();
   });
 
   it("effectiveness tab shows 'sample insufficient' note when flagged", async () => {
@@ -600,10 +611,10 @@ describe("ReportsPage", () => {
 
     renderPage();
     await screen.findByText("120,000");
-    await openReport("購物金效益");
+    await openReport("購物金划不划算");
 
     await waitFor(() => {
-      expect(screen.getByText("樣本不足")).toBeTruthy();
+      expect(screen.getByText("資料還太少，數字僅供參考")).toBeTruthy();
     });
   });
 
@@ -615,11 +626,11 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await openReport("購物金對帳");
+    await openReport("購物金帳對不對");
     await waitFor(() => {
-      expect(screen.getByText("購物金總負債")).toBeTruthy();
+      expect(screen.getByText("客人還沒用掉的總額")).toBeTruthy();
       expect(screen.getByText("58,000")).toBeTruthy();
-      expect(screen.getByText("帳目核對")).toBeTruthy();
+      expect(screen.getByText("每位會員的餘額對不對")).toBeTruthy();
       expect(screen.getByText("正常")).toBeTruthy();
     });
     expect(screen.queryByText(/快取/)).toBeNull();
@@ -659,8 +670,8 @@ describe("ReportsPage", () => {
     renderPage();
     // Default tab is now "dashboard", wait for it
     await screen.findByText("120,000");
-    await openReport("購物金對帳");
-    await screen.findByText("所有帳戶一致，無異常。");
+    await openReport("購物金帳對不對");
+    await screen.findByText("每位會員的餘額都對得上，沒有異常。");
 
     await userEvent.click(screen.getByRole("button", { name: "CSV" }));
     await waitFor(() => expect(downloads).toHaveLength(1));
@@ -738,6 +749,12 @@ describe("ReportsPage", () => {
     expect(screen.getAllByText("-200").length).toBeGreaterThanOrEqual(2);
     // 班別狀態顯示中文，不是 API 的英文值
     expect(screen.getByText("已結帳")).toBeTruthy();
+    // 用店裡的說法「開帳」，不出現英文 Session
+    expect(screen.getByRole("heading", { name: "每次開帳" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "開帳編號" })).toBeTruthy();
+    expect(screen.queryByText(/session/i)).toBeNull();
+    expect(screen.getByText("客人用掉的購物金（參考）")).toBeTruthy();
+    expect(screen.queryByText(/兌付/)).toBeNull();
   });
 
   it("sales margin tab shows margin metrics", async () => {
@@ -850,7 +867,7 @@ describe("ReportsPage", () => {
     await screen.findByText("120,000"); // dashboard loads
 
     // Navigate to store credit liability tab
-    await openReport("購物金餘額");
+    await openReport("客人還沒用的購物金");
     expect(await screen.findByText("58,000")).toBeTruthy();
     expect(screen.getByText("Alice")).toBeTruthy();
   });
@@ -879,9 +896,14 @@ describe("報表分組", () => {
       within(screen.getByRole("tablist", { name: "報表" }))
         .getAllByRole("tab")
         .map((t) => t.textContent),
-    ).toEqual(["購物金餘額", "購物金進出", "購物金效益", "購物金對帳"]);
+    ).toEqual([
+      "客人還沒用的購物金",
+      "購物金發出與使用",
+      "購物金划不划算",
+      "購物金帳對不對",
+    ]);
     // 看不出是購物金的舊名稱不再出現。
-    for (const old of ["負債", "流量", "效益指標"]) {
+    for (const old of ["負債", "流量", "效益指標", "購物金餘額", "購物金進出", "購物金效益", "購物金對帳"]) {
       expect(screen.queryByRole("tab", { name: old })).toBeNull();
     }
   });

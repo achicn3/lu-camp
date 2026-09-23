@@ -54,8 +54,8 @@ describe("date bounds (timezone-aware)", () => {
 describe("EFFECTIVENESS_LABELS", () => {
   it("has all 7 metrics", () => {
     expect(Object.keys(EFFECTIVENESS_LABELS)).toHaveLength(7);
-    expect(EFFECTIVENESS_LABELS.take_rate).toBe("選用率");
-    expect(EFFECTIVENESS_LABELS.delta_per_1000).toBe("每千元損益 (delta)");
+    expect(EFFECTIVENESS_LABELS.take_rate).toBe("選購物金的比例");
+    expect(EFFECTIVENESS_LABELS.delta_per_1000).toBe("每送 1,000 元購物金，店家淨賺／賠多少");
   });
 });
 
