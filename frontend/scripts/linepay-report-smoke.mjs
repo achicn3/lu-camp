@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { PNG } from "pngjs";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { openReport } from "./_reports.mjs";
 
 const BASE = "http://localhost:3000";
 const API = "http://localhost:8000";
@@ -130,7 +131,7 @@ try {
   await page.click('button:has-text("登入")');
   await page.waitForURL(`${BASE}/`);
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
-  await page.click('button:has-text("銷售毛利")');
+  await openReport(page, "銷售毛利");
   await page.waitForSelector("text=淨毛利（扣支付手續費）", { timeout: 15000 });
   ok("毛利報表出現「淨毛利（扣支付手續費）」", true);
   ok(

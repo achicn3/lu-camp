@@ -4,6 +4,7 @@
 // Run inside the playwright docker image; BASE_URL/API_URL via env.
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { openReport } from "./_reports.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? "/tmp";
@@ -37,8 +38,7 @@ try {
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
   // 報表分組（2026-09-23）：購物金四張在「購物金」組。
-  await page.click('[role="tab"]:has-text("購物金")');
-  await page.click('[role="tab"]:has-text("購物金餘額")');
+  await openReport(page, "購物金餘額");
   await page.waitForTimeout(800);
   const reportsText = await page.innerText("body");
   assert(/報表|購物金/.test(reportsText), "/reports renders zh-TW heading");
@@ -48,7 +48,7 @@ try {
   console.log("  shot: reports.png");
 
   // --- /reports 對帳 tab + authenticated CSV export (Codex P2/P3) ---
-  await page.click('[role="tab"]:has-text("購物金對帳")');
+  await openReport(page, "購物金對帳");
   await page.waitForTimeout(800);
   const reconText = await page.innerText("body");
   assert(/帳本總負債|快取/.test(reconText), "reconciliation tab renders");
@@ -67,8 +67,7 @@ try {
   // --- /reports 流量 tab (validates timezone-aware date bounds end-to-end) ---
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
-  await page.click('[role="tab"]:has-text("購物金")');
-  await page.click('[role="tab"]:has-text("購物金進出")');
+  await openReport(page, "購物金進出");
   await page.waitForTimeout(1000);
   const flowsText = await page.innerText("body");
   assert(/起始日期|粒度|發行|期間/.test(flowsText), "flows tab renders (tz-aware date query succeeds)");

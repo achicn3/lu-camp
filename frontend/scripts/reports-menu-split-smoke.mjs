@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { openReport } from "./_reports.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
@@ -35,7 +36,7 @@ try {
   ok("儀表板：二手營收卡", (await page.locator("dt:has-text('二手營收')").count()) > 0);
   await page.screenshot({ path: `${SHOTS}/m2-01-dashboard-split.png` });
 
-  await page.click('[role="tab"]:has-text("銷售毛利")');
+  await openReport(page, "銷售毛利");
   await page.waitForSelector(".inv-table");
   ok(
     "銷售毛利分頁：餐飲/二手分列",

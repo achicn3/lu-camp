@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { openReport } from "./_reports.mjs";
 
 const BASE = stripTrailingSlash(process.env.SMOKE_BASE ?? "http://localhost:3000");
 const API_BASE = stripTrailingSlash(process.env.SMOKE_API_BASE ?? "http://localhost:8000");
@@ -244,7 +245,7 @@ try {
   await page.screenshot({ path: `${SHOTS}/09-return-done.png`, fullPage: true });
   // 9) 報表：折扣與贈品各自看得到數字
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
-  await page.locator('button:has-text("臨時折扣")').click();
+  await openReport(page, "臨時折扣");
   await page.waitForSelector("text=折扣總額", { timeout: 15_000 });
   ok(
     "折扣報表有數字",
@@ -253,7 +254,7 @@ try {
   );
   await page.screenshot({ path: `${SHOTS}/10-report-discounts.png`, fullPage: true });
 
-  await page.locator('button:has-text("贈品")').first().click();
+  await openReport(page, "贈品");
   await page.waitForSelector("text=原價價值", { timeout: 15_000 });
   ok(
     "贈品報表有數字",

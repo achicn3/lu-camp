@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 
 import { BASE, login, makeShot, note, shotsDir, statePath } from "./_lib.mjs";
+import { openReport } from "../_reports.mjs";
 
 const dir = shotsDir("14-reports-gift-discount");
 const shot = makeShot(dir);
@@ -25,12 +26,12 @@ if (!hasState) await login(page);
 await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2000);
 
-await page.locator('button:has-text("臨時折扣")').click();
+await openReport(page, "臨時折扣");
 await page.waitForSelector("text=折扣總額", { timeout: 20000 });
 await page.waitForTimeout(1500);
 await shot(page, "discounts", { fullPage: true });
 
-await page.locator('button:has-text("贈品")').first().click();
+await openReport(page, "贈品");
 await page.waitForSelector("text=原價價值", { timeout: 20000 });
 await page.waitForTimeout(1500);
 await shot(page, "gifts", { fullPage: true });

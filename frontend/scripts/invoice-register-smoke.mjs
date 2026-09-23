@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { openReport } from "./_reports.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = strip(process.env.SMOKE_BASE ?? "http://localhost:3000");
 const API_BASE = strip(process.env.SMOKE_API_BASE ?? "http://localhost:8000");
@@ -108,14 +110,17 @@ try {
   const pageErrors = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
 
-  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  // 關掉開店前檢查導向；等頁面載入完成再填，免得表單在 React 接手前以 GET 送出。
+  await skipOpeningCheckRedirect(page);
+  await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.getByLabel("帳號").fill(USERNAME);
   await page.getByLabel("密碼").fill(PASSWORD);
   await page.getByRole("button", { name: "登入" }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20000 });
 
-  await page.goto(`${BASE}/reports`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("tab", { name: "發票月報" }).click();
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await openReport(page, "發票月報");
   // **只找合計卡片的標題**：說明文字裡也會出現「銷項合計」四個字，
   // 用全頁文字定位會一次命中三個元素而炸掉（Playwright strict mode）。
   const statLabel = (label) => page.locator(".rpt-stat dt", { hasText: label });

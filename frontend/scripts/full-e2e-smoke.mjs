@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 import { validNationalId } from "./_national-id.mjs";
+import { openReport } from "./_reports.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "full-e2e");
@@ -501,7 +502,7 @@ try {
   );
   await shot(page, "report-dashboard");
   // 趨勢（餐飲營收線 + 餐飲/二手欄）
-  await page.click('[role="tab"]:has-text("趨勢")');
+  await openReport(page, "趨勢");
   await page.waitForSelector(".rpt-trend-chart", { timeout: 8000 });
   await page.waitForTimeout(800);
   ok(
@@ -517,7 +518,7 @@ try {
     ["庫存價值", "report-inventory-value"],
     ["寄售應付", "report-consignment-payables"],
   ]) {
-    await page.click(`[role="tab"]:has-text("${tab}")`);
+    await openReport(page, tab);
     await page.waitForTimeout(900);
     const errored = await page.locator("text=/讀取.*失敗/").count();
     ok(`12) 報表分頁渲染：${tab}`, errored === 0);

@@ -3,6 +3,7 @@
 // 依 docs/20 配方執行；BASE_URL / SMOKE_SHOTS / SEED_USER(_PASSWORD) 由 env 帶入。
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { openReport } from "./_reports.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const API_OVERRIDE = process.env.SMOKE_API_BASE?.replace(/\/+$/, "") ?? null;
@@ -66,7 +67,7 @@ try {
   await page.waitForTimeout(1000);
 
   for (const { tab, shot, expect } of FINANCE_TABS) {
-    await page.click(`[role="tab"]:has-text("${tab}"), button:has-text("${tab}")`);
+    await openReport(page, tab);
     await waitForReport(page);
     const text = await page.innerText("body");
     assert(expect.test(text), `分頁「${tab}」渲染關鍵字`);
@@ -90,7 +91,7 @@ try {
   }
 
   // 趨勢圖粒度切換（季）能渲染、不報錯。
-  await page.click('[role="tab"]:has-text("趨勢"), button:has-text("趨勢")');
+  await openReport(page, "趨勢");
   await waitForReport(page);
   const granularity = page.locator("select").first();
   assert((await granularity.count()) === 1, "趨勢有粒度選單");

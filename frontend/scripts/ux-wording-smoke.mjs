@@ -7,6 +7,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { openReport } from "./_reports.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API_BASE = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -102,7 +104,10 @@ try {
   const jsErrors = [];
   page.on("pageerror", (e) => jsErrors.push(String(e)));
 
-  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  // 關掉開店前檢查導向；等頁面載入完成再填，免得表單在 React 接手前以 GET 送出。
+  await skipOpeningCheckRedirect(page);
+  await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', USER);
   await page.fill('input[name="password"]', PASS);
   await page.click('button[type="submit"]');
@@ -121,8 +126,7 @@ try {
   await page.screenshot({ path: join(SHOTS, "01-dashboard-tips.png"), fullPage: true });
 
   // ── 2) 購物金效益：備註欄不再空白，且結論指標講人話 ──
-  await page.click('[role="tab"]:has-text("購物金")');
-  await page.click('[role="tab"]:has-text("購物金效益")');
+  await openReport(page, "購物金效益");
   await page.waitForSelector(".inv-table tbody tr", { timeout: 15000 });
   const notes = await page.$$eval(".rpt-metric-note", (els) =>
     els.map((e) => (e.textContent ?? "").trim()),
@@ -134,8 +138,7 @@ try {
   await page.screenshot({ path: join(SHOTS, "02-effectiveness-notes.png"), fullPage: true });
 
   // ── 3) 對帳：不再出現「快取」，改為一句結論 ──
-  // 精確比對：「對帳」子字串也會命中「現金對帳」分頁。
-  await page.getByRole("tab", { name: "對帳", exact: true }).click();
+  await openReport(page, "購物金對帳");
   await page.waitForSelector("text=帳目核對", { timeout: 15000 });
   const reconBody = await page.innerText("body");
   ok("對帳頁不再出現「快取」字眼", !reconBody.includes("快取"));
@@ -144,6 +147,8 @@ try {
 
   // ── 4) 收購：品名提示（datalist）＋ 品牌選定後標籤化 ──
   await page.goto(`${BASE}/acquisition`, { waitUntil: "networkidle" });
+  // 品名收在可展開的「品名：…」區塊裡（選型號會自動帶入），手填要先展開。
+  await page.locator('.acq-row summary:has-text("品名")').first().click();
   await page.waitForSelector('input[aria-label="品名"]', { timeout: 15000 });
   const nameInput = page.locator('input[aria-label="品名"]').first();
   ok("品名欄位掛上建議清單", (await nameInput.getAttribute("list")) !== null);

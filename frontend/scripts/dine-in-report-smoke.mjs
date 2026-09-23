@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { openReport } from "./_reports.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -181,7 +182,7 @@ try {
   await page.waitForURL(`${BASE}/`);
 
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
-  await page.getByRole("tab", { name: "餐飲內用/外帶" }).click();
+  await openReport(page, "餐飲內用/外帶");
   await page.waitForSelector("table.rpt-dine-in-summary", { timeout: 20000 });
   ok("報表分頁載入", true);
 

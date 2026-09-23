@@ -2,6 +2,7 @@
 import { mkdirSync } from "node:fs";
 
 import { chromium } from "playwright";
+import { openReport } from "./_reports.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const SHOTS = process.env.SMOKE_SHOTS ?? "/tmp/lu-camp-shots/reports-demo";
@@ -21,7 +22,7 @@ try {
 
   async function shot(tabLabel, file) {
     if (tabLabel) {
-      await page.click(`button:has-text("${tabLabel}")`);
+      await openReport(page, tabLabel);
       await page.waitForTimeout(1200); // 等查詢與（趨勢）圖渲染
     }
     await page.screenshot({ path: `${SHOTS}/${file}`, fullPage: true });
