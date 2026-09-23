@@ -67,23 +67,55 @@ type Tab =
   | "effectiveness"
   | "reconciliation";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "dashboard", label: "今日營運" },
-  { key: "insights", label: "經營洞察" },
-  { key: "trends", label: "趨勢" },
-  { key: "dine-in", label: "餐飲內用/外帶" },
-  { key: "daily-cash", label: "現金對帳" },
-  { key: "sales-margin", label: "銷售毛利" },
-  { key: "discounts", label: "臨時折扣" },
-  { key: "gifts", label: "贈品" },
-  { key: "campaign-performance", label: "活動成效" },
-  { key: "inventory-value", label: "庫存價值" },
-  { key: "consignment-payables", label: "寄售應付" },
-  { key: "invoice-register", label: "發票月報" },
-  { key: "liability", label: "負債" },
-  { key: "flows", label: "流量" },
-  { key: "effectiveness", label: "效益指標" },
-  { key: "reconciliation", label: "對帳" },
+// 16 張報表分成 5 組（2026-09-23 裁示）：平鋪一整排很難找；先選要看哪一類，再選哪一張。
+// 購物金的四張加上「購物金」字樣——原本叫「負債／流量／效益指標／對帳」，看不出是購物金。
+const GROUPS: { key: string; label: string; tabs: { key: Tab; label: string }[] }[] = [
+  {
+    key: "daily",
+    label: "每天看",
+    tabs: [
+      { key: "dashboard", label: "今日營運" },
+      { key: "daily-cash", label: "現金對帳" },
+    ],
+  },
+  {
+    key: "sales",
+    label: "賣得如何",
+    tabs: [
+      { key: "sales-margin", label: "銷售毛利" },
+      { key: "insights", label: "經營洞察" },
+      { key: "trends", label: "趨勢" },
+      { key: "dine-in", label: "餐飲內用/外帶" },
+    ],
+  },
+  {
+    key: "promotions",
+    label: "促銷",
+    tabs: [
+      { key: "campaign-performance", label: "活動成效" },
+      { key: "discounts", label: "臨時折扣" },
+      { key: "gifts", label: "贈品" },
+    ],
+  },
+  {
+    key: "accounting",
+    label: "帳務",
+    tabs: [
+      { key: "inventory-value", label: "庫存價值" },
+      { key: "consignment-payables", label: "寄售應付" },
+      { key: "invoice-register", label: "發票月報" },
+    ],
+  },
+  {
+    key: "store-credit",
+    label: "購物金",
+    tabs: [
+      { key: "liability", label: "購物金餘額" },
+      { key: "flows", label: "購物金進出" },
+      { key: "effectiveness", label: "購物金效益" },
+      { key: "reconciliation", label: "購物金對帳" },
+    ],
+  },
 ];
 
 // -- 指標說明（滑鼠移到 ⓘ 顯示；以店長看得懂的白話為準，不用會計術語）--
@@ -2459,6 +2491,7 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
+  const activeGroup = GROUPS.find((group) => group.tabs.some((t) => t.key === tab)) ?? GROUPS[0];
   // 不以 token 的 role 把關：永不過期 token 的 role claim 可能過時（升/降權後未重新登入）。
   // 改以後端授權為準——探測一個 MANAGER-only 端點，依其 401/403 決定是否顯示「需管理者權限」。
   const access = useQuery({
@@ -2501,8 +2534,23 @@ export default function ReportsPage() {
     <section>
       <h1 className="page-title">報表</h1>
 
-      <div className="inv-tabs rpt-tabs-wrap" role="tablist">
-        {TABS.map(({ key, label }) => (
+      <div className="settle-tabs rpt-groups" role="tablist" aria-label="報表分類">
+        {GROUPS.map((group) => (
+          <button
+            key={group.key}
+            type="button"
+            role="tab"
+            aria-selected={group.key === activeGroup.key}
+            className={`chip ${group.key === activeGroup.key ? "chip-active" : ""}`}
+            // 換組就看那一組的第一張，不必再多點一次。
+            onClick={() => setTab(group.tabs[0].key)}
+          >
+            {group.label}
+          </button>
+        ))}
+      </div>
+      <div className="inv-tabs rpt-tabs-wrap" role="tablist" aria-label="報表">
+        {activeGroup.tabs.map(({ key, label }) => (
           <button
             key={key}
             type="button"

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // /reports 報表頁測試：MANAGER 權限檢查、購物金報表四分頁渲染、效益指標估計值/代理法標示。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -424,6 +424,34 @@ afterEach(() => {
   clearToken();
 });
 
+
+// 報表分成 5 組（2026-09-23 裁示）：切到某張報表要先點它所在的分組。
+const REPORT_GROUPS: Record<string, string> = {
+  今日營運: "每天看",
+  現金對帳: "每天看",
+  銷售毛利: "賣得如何",
+  經營洞察: "賣得如何",
+  趨勢: "賣得如何",
+  "餐飲內用/外帶": "賣得如何",
+  活動成效: "促銷",
+  臨時折扣: "促銷",
+  贈品: "促銷",
+  庫存價值: "帳務",
+  寄售應付: "帳務",
+  發票月報: "帳務",
+  購物金餘額: "購物金",
+  購物金進出: "購物金",
+  購物金效益: "購物金",
+  購物金對帳: "購物金",
+};
+
+async function openReport(name: string) {
+  const group = REPORT_GROUPS[name];
+  if (!group) throw new Error(`未知報表 ${name}`);
+  await userEvent.click(await screen.findByRole("tab", { name: group }));
+  await userEvent.click(await screen.findByRole("tab", { name }));
+}
+
 describe("ReportsPage", () => {
   it("backend 403 sees permission notice (server-driven gate)", async () => {
     loginAs("CLERK");
@@ -461,7 +489,7 @@ describe("ReportsPage", () => {
     stubReportsFetch();
     renderPage();
     await screen.findByText("120,000"); // dashboard 先載入
-    await userEvent.click(screen.getByRole("tab", { name: "經營洞察" }));
+    await openReport("經營洞察");
     expect(await screen.findByText("Snow Peak")).toBeTruthy();
     expect(screen.getByText("在庫 > 90 天件數")).toBeTruthy();
     expect(screen.getByText("寄售抽成")).toBeTruthy();
@@ -478,7 +506,7 @@ describe("ReportsPage", () => {
     );
     renderPage();
     await screen.findByText("120,000");
-    await userEvent.click(screen.getByRole("tab", { name: "經營洞察" }));
+    await openReport("經營洞察");
     expect(await screen.findByText("Snow Peak")).toBeTruthy(); // insights 成功
     expect(await screen.findByText("趨勢粒度桶數過多")).toBeTruthy(); // 趨勢錯誤有顯示
     expect(screen.queryByText("趨勢載入中…")).toBeNull(); // 不再卡在載入中
@@ -490,7 +518,7 @@ describe("ReportsPage", () => {
     renderPage();
     // Default tab is now dashboard; navigate to liability
     await screen.findByText("120,000"); // wait for dashboard
-    await userEvent.click(screen.getByRole("tab", { name: "負債" }));
+    await openReport("購物金餘額");
 
     // total outstanding
     expect(await screen.findByText("58,000")).toBeTruthy();
@@ -512,7 +540,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000"); // wait for dashboard to load first
 
-    await userEvent.click(screen.getByRole("tab", { name: "流量" }));
+    await openReport("購物金進出");
     expect(await screen.findByText("2026-06-17")).toBeTruthy();
     expect(screen.getByText("5,000")).toBeTruthy();
     expect(screen.getByText("2,000")).toBeTruthy();
@@ -525,7 +553,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "效益指標" }));
+    await openReport("購物金效益");
 
     // Wait for effectiveness data
     await waitFor(() => {
@@ -572,7 +600,7 @@ describe("ReportsPage", () => {
 
     renderPage();
     await screen.findByText("120,000");
-    await userEvent.click(screen.getByRole("tab", { name: "效益指標" }));
+    await openReport("購物金效益");
 
     await waitFor(() => {
       expect(screen.getByText("樣本不足")).toBeTruthy();
@@ -587,7 +615,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "對帳" }));
+    await openReport("購物金對帳");
     await waitFor(() => {
       expect(screen.getByText("購物金總負債")).toBeTruthy();
       expect(screen.getByText("58,000")).toBeTruthy();
@@ -631,7 +659,7 @@ describe("ReportsPage", () => {
     renderPage();
     // Default tab is now "dashboard", wait for it
     await screen.findByText("120,000");
-    await userEvent.click(screen.getByRole("tab", { name: "對帳" }));
+    await openReport("購物金對帳");
     await screen.findByText("所有帳戶一致，無異常。");
 
     await userEvent.click(screen.getByRole("button", { name: "CSV" }));
@@ -672,7 +700,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000"); // wait for dashboard
 
-    await userEvent.click(screen.getByRole("tab", { name: "趨勢" }));
+    await openReport("趨勢");
     // Wait for trend data - periods appear in both SVG chart and data table
     await waitFor(() => {
       expect(screen.getAllByText("2026-06-19").length).toBeGreaterThanOrEqual(1);
@@ -701,7 +729,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "現金對帳" }));
+    await openReport("現金對帳");
     // Total expected appears in both session row and totals
     await waitFor(() => {
       expect(screen.getAllByText("66,500").length).toBeGreaterThanOrEqual(2);
@@ -718,7 +746,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "銷售毛利" }));
+    await openReport("銷售毛利");
     // gross_turnover
     expect(await screen.findByText("500,000")).toBeTruthy();
     // recognized_revenue
@@ -754,7 +782,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "贈品" }));
+    await openReport("贈品");
     expect(await screen.findByRole("columnheader", { name: "期間贈品" })).toBeTruthy();
     expect(screen.getByRole("rowheader", { name: "送出" })).toBeTruthy();
     expect(screen.getByRole("rowheader", { name: "退回" })).toBeTruthy();
@@ -770,7 +798,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "庫存價值" }));
+    await openReport("庫存價值");
     // total owned cost
     expect(await screen.findByText("310,000")).toBeTruthy();
     // total owned retail
@@ -787,7 +815,7 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000");
 
-    await userEvent.click(screen.getByRole("tab", { name: "寄售應付" }));
+    await openReport("寄售應付");
     // Total pending
     expect(await screen.findByText("25,000")).toBeTruthy();
     // Total paid
@@ -822,8 +850,39 @@ describe("ReportsPage", () => {
     await screen.findByText("120,000"); // dashboard loads
 
     // Navigate to store credit liability tab
-    await userEvent.click(screen.getByRole("tab", { name: "負債" }));
+    await openReport("購物金餘額");
     expect(await screen.findByText("58,000")).toBeTruthy();
     expect(screen.getByText("Alice")).toBeTruthy();
+  });
+});
+
+describe("報表分組", () => {
+  it("16 張報表分成 5 組；預設在「每天看」，切到購物金只看得到購物金的四張", async () => {
+    loginAs("MANAGER");
+    stubReportsFetch();
+    renderPage();
+    const groups = await screen.findByRole("tablist", { name: "報表分類" });
+    expect(within(groups).getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "每天看",
+      "賣得如何",
+      "促銷",
+      "帳務",
+      "購物金",
+    ]);
+    const reports = screen.getByRole("tablist", { name: "報表" });
+    expect(within(reports).getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "今日營運",
+      "現金對帳",
+    ]);
+    await userEvent.click(within(groups).getByRole("tab", { name: "購物金" }));
+    expect(
+      within(screen.getByRole("tablist", { name: "報表" }))
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["購物金餘額", "購物金進出", "購物金效益", "購物金對帳"]);
+    // 看不出是購物金的舊名稱不再出現。
+    for (const old of ["負債", "流量", "效益指標"]) {
+      expect(screen.queryByRole("tab", { name: old })).toBeNull();
+    }
   });
 });

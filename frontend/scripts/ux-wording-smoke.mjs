@@ -120,8 +120,9 @@ try {
   ok("說明用實例而非公式", Boolean(turnoverTip) && turnoverTip.includes("例："));
   await page.screenshot({ path: join(SHOTS, "01-dashboard-tips.png"), fullPage: true });
 
-  // ── 2) 效益指標：備註欄不再空白，且結論指標講人話 ──
-  await page.click('[role="tab"]:has-text("效益指標")');
+  // ── 2) 購物金效益：備註欄不再空白，且結論指標講人話 ──
+  await page.click('[role="tab"]:has-text("購物金")');
+  await page.click('[role="tab"]:has-text("購物金效益")');
   await page.waitForSelector(".inv-table tbody tr", { timeout: 15000 });
   const notes = await page.$$eval(".rpt-metric-note", (els) =>
     els.map((e) => (e.textContent ?? "").trim()),
