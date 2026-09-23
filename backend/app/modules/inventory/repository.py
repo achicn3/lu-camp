@@ -1040,6 +1040,61 @@ class InventoryRepository:
         )
         return list((await self._session.execute(stmt)).all())
 
+    async def price_hint_count(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> int:
+        """行情母體的件數（決定要不要退回全部歷史，也是逐筆紀錄的總數）。"""
+        stmt = select(func.count()).where(
+            *self._price_hint_scope(store_id, brand_id, product_model_id, since)
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def price_hint_typical(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> Any:
+        """收購價與上架售價的第 25／75 百分位（不分成色）。
+
+        用 percentile_disc 取**實際出現過的價格**、不內插：內插會算出 1,137.5 這種
+        沒人收過的數字，還得再捨入一次。收購價為 NULL 的件由聚合自動略過。
+        """
+        cost = SerializedItem.acquisition_cost
+        listed = SerializedItem.listed_price
+        stmt = select(
+            func.percentile_disc(0.25).within_group(cost).label("cost_low"),
+            func.percentile_disc(0.75).within_group(cost).label("cost_high"),
+            func.percentile_disc(0.25).within_group(listed).label("listed_low"),
+            func.percentile_disc(0.75).within_group(listed).label("listed_high"),
+        ).where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+        return (await self._session.execute(stmt)).one()
+
+    async def price_hint_records(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[SerializedItem]:
+        """行情母體逐筆，新到舊；併列 id 排序，翻頁才不會重複或漏筆。"""
+        stmt = (
+            select(SerializedItem)
+            .where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+            .order_by(SerializedItem.created_at.desc(), SerializedItem.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def latest_priced_item(
         self,
         store_id: int,

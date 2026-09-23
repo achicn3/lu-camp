@@ -402,6 +402,18 @@ class LatestAcquisitionRead(BaseModel):
     listed_price: NTDAmount
 
 
+class TypicalPriceRange(BaseModel):
+    """一般行情：收購價與上架售價各自的中間一半（第 25～75 百分位、取實際出現過的價格）。
+
+    最低～最高會被一筆特價或填錯的價格拉開；店員第一眼看這個。不分成色。
+    """
+
+    cost_low: NTDAmountOpt = None
+    cost_high: NTDAmountOpt = None
+    listed_low: NTDAmount
+    listed_high: NTDAmount
+
+
 class PriceHintRead(BaseModel):
     """收購定價提示：同品牌＋型號的歷史行情，依成色分列。
 
@@ -413,8 +425,29 @@ class PriceHintRead(BaseModel):
     window_months: int
     used_all_time: bool
     total_count: int
+    # 件數少於 4 時為 None（中間一半沒有意義）。
+    typical: TypicalPriceRange | None = None
     grades: list[GradePriceStat]
     latest: LatestAcquisitionRead | None = None
+
+
+class PriceHintRecord(BaseModel):
+    """行情提示的一筆紀錄：哪天收的、什麼成色、收多少、上架多少、現在賣掉了沒。"""
+
+    acquired_at: datetime
+    grade: Grade
+    cost: NTDAmountOpt = None
+    listed_price: NTDAmount
+    status: SerializedItemStatus
+
+
+class PriceHintRecordsRead(BaseModel):
+    """行情提示的逐筆紀錄（新到舊、分頁）；期間與母體和 PriceHintRead 相同。"""
+
+    window_months: int
+    used_all_time: bool
+    total: int
+    items: list[PriceHintRecord]
 
 
 class SerializedFilterOptions(BaseModel):

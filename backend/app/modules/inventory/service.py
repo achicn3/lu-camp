@@ -406,6 +406,23 @@ class InventoryService:
     # 由好到差；店員視線由上往下就是價格由高到低。E 是散裝、不會出現在序號品，殿後即可。
     _GRADE_ORDER = (Grade.N, Grade.S, Grade.A, Grade.B, Grade.C, Grade.D, Grade.E)
 
+    # 「一般行情」取中間一半；少於這個件數時中間一半沒有意義，前端改看逐筆。
+    PRICE_HINT_TYPICAL_MIN_COUNT = 4
+
+    async def _price_hint_since(
+        self, store_id: int, brand_id: int, product_model_id: int
+    ) -> tuple[datetime | None, bool]:
+        """行情期間：近一年；近一年沒收過才退回全部歷史（回傳 since 與是否用了全部歷史）。
+
+        彙總與逐筆紀錄共用這一支，兩邊的件數才會對得起來。
+        """
+        since = datetime.now(UTC) - self._PRICE_HINT_WINDOW
+        if await self._repo.price_hint_count(store_id, brand_id, product_model_id, since):
+            return since, False
+        # 近一年沒收過就退回全部歷史並明說是舊資料——總比什麼都不顯示好。
+        has_any = await self._repo.price_hint_count(store_id, brand_id, product_model_id, None)
+        return None, has_any > 0
+
     async def acquisition_price_hint(
         self, store_id: int, *, brand_id: int, product_model_id: int
     ) -> dict[str, Any]:
@@ -413,14 +430,18 @@ class InventoryService:
 
         唯讀，不寫任何資料。查無歷史回空提示（不是 404），前端才好安靜地不顯示。
         """
-        since: datetime | None = datetime.now(UTC) - self._PRICE_HINT_WINDOW
+        since, used_all_time = await self._price_hint_since(store_id, brand_id, product_model_id)
         rows = await self._repo.price_hint_by_grade(store_id, brand_id, product_model_id, since)
-        used_all_time = False
-        if not rows:
-            # 近一年沒收過就退回全部歷史並明說是舊資料——總比什麼都不顯示好。
-            since = None
-            rows = await self._repo.price_hint_by_grade(store_id, brand_id, product_model_id, None)
-            used_all_time = bool(rows)
+        total_count = sum(r.count for r in rows)
+        typical = None
+        if total_count >= self.PRICE_HINT_TYPICAL_MIN_COUNT:
+            t = await self._repo.price_hint_typical(store_id, brand_id, product_model_id, since)
+            typical = {
+                "cost_low": t.cost_low,
+                "cost_high": t.cost_high,
+                "listed_low": t.listed_low,
+                "listed_high": t.listed_high,
+            }
 
         order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
         grades = sorted(rows, key=lambda r: order.get(r.grade, len(order)))
@@ -429,7 +450,8 @@ class InventoryService:
         return {
             "window_months": self.PRICE_HINT_WINDOW_MONTHS,
             "used_all_time": used_all_time,
-            "total_count": sum(r.count for r in grades),
+            "total_count": total_count,
+            "typical": typical,
             "grades": [
                 {
                     "grade": r.grade,
@@ -449,6 +471,37 @@ class InventoryService:
                 "cost": latest.acquisition_cost,
                 "listed_price": latest.listed_price,
             },
+        }
+
+    async def acquisition_price_hint_records(
+        self,
+        store_id: int,
+        *,
+        brand_id: int,
+        product_model_id: int,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        """行情提示的逐筆紀錄（新到舊、可翻頁），與彙總同一個期間與母體。唯讀。"""
+        since, used_all_time = await self._price_hint_since(store_id, brand_id, product_model_id)
+        total = await self._repo.price_hint_count(store_id, brand_id, product_model_id, since)
+        items = await self._repo.price_hint_records(
+            store_id, brand_id, product_model_id, since, limit=limit, offset=offset
+        )
+        return {
+            "window_months": self.PRICE_HINT_WINDOW_MONTHS,
+            "used_all_time": used_all_time,
+            "total": total,
+            "items": [
+                {
+                    "acquired_at": item.created_at,
+                    "grade": item.grade,
+                    "cost": item.acquisition_cost,
+                    "listed_price": item.listed_price,
+                    "status": item.status,
+                }
+                for item in items
+            ],
         }
 
     async def get_serialized_detail(

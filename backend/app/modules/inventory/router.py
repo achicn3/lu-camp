@@ -32,6 +32,7 @@ from app.modules.inventory.schemas import (
     ItemUpdateRequest,
     NoteUpdateRequest,
     PriceHintRead,
+    PriceHintRecordsRead,
     PriceUpdateRequest,
     PricingRuleRead,
     PricingRulesUpdate,
@@ -149,6 +150,38 @@ async def acquisition_price_hint(
         user.store_id, brand_id=brand_id, product_model_id=product_model_id
     )
     return PriceHintRead.model_validate(hint)
+
+
+# 一頁上限：收購頁一次看一頁，不必一口氣拉整年。
+PRICE_HINT_RECORDS_MAX_LIMIT = 100
+
+
+@router.get(
+    "/serialized-items/price-hint/records",
+    response_model=PriceHintRecordsRead,
+    operation_id="acquisitionPriceHintRecords",
+)
+async def acquisition_price_hint_records(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int, Query(description="品牌 id（必填）")],
+    product_model_id: Annotated[int, Query(description="型號 id（必填）")],
+    limit: Annotated[int, Query(ge=1, le=PRICE_HINT_RECORDS_MAX_LIMIT)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> PriceHintRecordsRead:
+    """收購定價提示的逐筆紀錄：同品牌＋型號每一件的收購日、成色、收購價、上架價與狀態。
+
+    與 `/serialized-items/price-hint` 同一個期間（近一年，沒有才退回全部）與母體（只計買斷、
+    排除作廢收購），件數對得起來。權限同行情提示，一般店員可看。
+    """
+    records = await InventoryService(session).acquisition_price_hint_records(
+        user.store_id,
+        brand_id=brand_id,
+        product_model_id=product_model_id,
+        limit=limit,
+        offset=offset,
+    )
+    return PriceHintRecordsRead.model_validate(records)
 
 
 @router.get(

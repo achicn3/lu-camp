@@ -458,3 +458,190 @@ async def test_requires_brand_and_model(
 async def test_requires_authentication(client: httpx.AsyncClient) -> None:
     resp = await client.get(PATH, params={"brand_id": 1, "product_model_id": 1})
     assert resp.status_code == 401
+
+
+# ── 一般行情（中間一半）與逐筆紀錄（2026-09-23 裁示）─────────────────────────
+#
+# 最低～最高會被一筆特價或填錯的價格整個拉開；「一般行情」取中間一半（第 25～75 百分位，
+# 取實際出現過的價格、不內插），店員第一眼看這個。筆數太少時中間一半沒有意義，不給。
+
+RECORDS_PATH = "/api/v1/serialized-items/price-hint/records"
+
+
+async def test_typical_range_ignores_outliers(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """8 件裡一件特價 300、一件填錯 9000：一般行情只看中間一半，不被拉開。"""
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    pairs = [
+        ("300", "1680"),
+        ("1100", "2300"),
+        ("1150", "2400"),
+        ("1200", "2500"),
+        ("1300", "2600"),
+        ("1400", "2900"),
+        ("1500", "3000"),
+        ("2400", "9000"),
+    ]
+    for cost, listed in pairs:
+        await _seed_item(
+            db_session,
+            store_id,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            acquisition_cost=cost,
+            listed_price=listed,
+        )
+
+    resp = await client.get(
+        PATH, params={"brand_id": brand_id, "product_model_id": model_id}, headers=_auth(store_id)
+    )
+    assert resp.status_code == 200, resp.text
+    typical = resp.json()["typical"]
+    assert typical == {
+        "cost_low": "1100",
+        "cost_high": "1400",
+        "listed_low": "2300",
+        "listed_high": "2900",
+    }
+
+
+async def test_typical_range_needs_at_least_four_items(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """只收過 3 件：中間一半沒有意義，不給一般行情（前端改看逐筆）。"""
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    for cost in ("100", "200", "300"):
+        await _seed_item(
+            db_session,
+            store_id,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            acquisition_cost=cost,
+            listed_price="500",
+        )
+
+    resp = await client.get(
+        PATH, params={"brand_id": brand_id, "product_model_id": model_id}, headers=_auth(store_id)
+    )
+    assert resp.json()["typical"] is None
+
+
+async def test_records_list_newest_first_with_paging(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """逐筆紀錄：新到舊、可翻頁、總數是整個期間的件數，並帶目前狀態。"""
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    for days_ago in range(1, 8):  # 7 件，1～7 天前
+        await _seed_item(
+            db_session,
+            store_id,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            acquisition_cost=str(100 * days_ago),
+            listed_price=str(300 * days_ago),
+            status=SerializedItemStatus.SOLD if days_ago == 2 else SerializedItemStatus.IN_STOCK,
+            days_ago=days_ago,
+        )
+
+    params = {"brand_id": brand_id, "product_model_id": model_id, "limit": 5}
+    first = await client.get(RECORDS_PATH, params=params, headers=_auth(store_id))
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["total"] == 7
+    assert body["window_months"] == 12
+    assert body["used_all_time"] is False
+    assert [r["cost"] for r in body["items"]] == ["100", "200", "300", "400", "500"]
+    assert body["items"][1]["status"] == "SOLD"
+    assert body["items"][0]["listed_price"] == "300"
+    assert body["items"][0]["grade"] == "A"
+
+    second = await client.get(RECORDS_PATH, params={**params, "offset": 5}, headers=_auth(store_id))
+    assert [r["cost"] for r in second.json()["items"]] == ["600", "700"]
+
+
+async def test_records_use_same_scope_as_hint(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """逐筆紀錄與上面的彙總同一個母體：排除寄售、作廢收購、他店、一年以前的件。"""
+    store_id = await _seed_store(db_session)
+    other_store = await _seed_store(db_session, "他店")
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+
+    async def seed(
+        store: int,
+        cost: str | None,
+        *,
+        ownership: OwnershipType = OwnershipType.OWNED,
+        status: SerializedItemStatus = SerializedItemStatus.IN_STOCK,
+        days_ago: int = 30,
+    ) -> None:
+        await _seed_item(
+            db_session,
+            store,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            listed_price="500",
+            acquisition_cost=cost,
+            ownership=ownership,
+            status=status,
+            days_ago=days_ago,
+        )
+
+    await seed(store_id, "100")
+    await seed(store_id, None, ownership=OwnershipType.CONSIGNMENT)
+    await seed(store_id, "999", status=SerializedItemStatus.WRITTEN_OFF)
+    await seed(store_id, "888", days_ago=400)
+    await seed(other_store, "777")
+
+    resp = await client.get(
+        RECORDS_PATH,
+        params={"brand_id": brand_id, "product_model_id": model_id},
+        headers=_auth(store_id),
+    )
+    body = resp.json()
+    assert body["total"] == 1
+    assert [r["cost"] for r in body["items"]] == ["100"]
+
+
+async def test_records_fall_back_to_all_time_like_hint(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """近一年沒收過：跟彙總一樣退回全部歷史並標明，兩邊的件數才對得起來。"""
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        acquisition_cost="50",
+        listed_price="90",
+        days_ago=500,
+    )
+
+    resp = await client.get(
+        RECORDS_PATH,
+        params={"brand_id": brand_id, "product_model_id": model_id},
+        headers=_auth(store_id),
+    )
+    body = resp.json()
+    assert body["used_all_time"] is True
+    assert body["total"] == 1
+
+
+async def test_records_limit_is_bounded(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    for limit in (0, 101):
+        resp = await client.get(
+            RECORDS_PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id, "limit": limit},
+            headers=_auth(store_id),
+        )
+        assert resp.status_code == 422
