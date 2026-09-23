@@ -1058,6 +1058,24 @@ describe("/purchasing/[id] 採購單明細", () => {
     expect(screen.queryByRole("button", { name: "印標籤 瓦斯罐" })).toBeNull();
   });
 
+  it("收貨與補登發票的欄位用一般人懂的字，不出現「原票」", async () => {
+    loginAs("CLERK");
+    const received = {
+      ...ORDERED_PO,
+      status: "PARTIAL",
+      lines: [{ ...ORDERED_PO.lines[0], received_qty: 4 }],
+      receipts: [{ id: 1, received_at: "2026-06-20T02:00:00Z", invoice: null }],
+    };
+    stubFetch(detailRoutes(received));
+    const user = userEvent.setup();
+    renderDetail();
+    await screen.findByText("補登進項發票");
+    await user.click(screen.getByRole("button", { name: "收貨入庫" }));
+    await screen.findByRole("dialog", { name: "確認收貨" });
+    expect(document.body.innerHTML).not.toContain("原票");
+    expect(screen.getByText(/未稅金額（照發票填/)).toBeTruthy();
+  });
+
   it("收貨對話框發票草稿不跨次殘留（取消/重開即清空）", async () => {
     loginAs("CLERK");
     stubFetch(detailRoutes(ORDERED_PO));

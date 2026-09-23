@@ -59,14 +59,14 @@ export function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receipt
           value={net}
           onChange={(e) => setNet(e.target.value)}
           inputMode="numeric"
-          placeholder="原票未稅額"
+          placeholder="未稅金額"
           aria-label="補登發票未稅金額"
         />
         <input
           value={tax}
           onChange={(e) => setTax(e.target.value)}
           inputMode="numeric"
-          placeholder="原票稅額"
+          placeholder="稅額"
           aria-label="補登發票稅額"
         />
         <input

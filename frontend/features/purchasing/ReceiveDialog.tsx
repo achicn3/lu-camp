@@ -98,7 +98,7 @@ export function ReceiveDialog({
       ];
       const hasInvoice = invoiceParts.some((value) => value !== "");
       if (hasInvoice && invoiceParts.some((value) => value === "")) {
-        throw new Error("進項發票號碼、日期、原票未稅額、稅額與總額都要填寫");
+        throw new Error("進項發票的號碼、日期、未稅金額、稅額與含稅金額都要填寫");
       }
       const body: PurchaseOrderReceiveBody = hasInvoice
         ? {
@@ -214,7 +214,7 @@ export function ReceiveDialog({
                 />
               </label>
               <label className="field">
-                <span className="field-label">原票未稅金額（整數元）</span>
+                <span className="field-label">未稅金額（照發票填，整數元）</span>
                 <input
                   value={invNet}
                   onChange={(e) => setInvNet(e.target.value)}
@@ -223,7 +223,7 @@ export function ReceiveDialog({
                 />
               </label>
               <label className="field">
-                <span className="field-label">原票稅額（整數元）</span>
+                <span className="field-label">稅額（照發票填，整數元）</span>
                 <input
                   value={invTax}
                   onChange={(e) => setInvTax(e.target.value)}
@@ -232,7 +232,7 @@ export function ReceiveDialog({
                 />
               </label>
               <label className="field">
-                <span className="field-label">含稅金額（整數元）</span>
+                <span className="field-label">含稅金額（照發票填，整數元）</span>
                 <input
                   value={invTotal}
                   onChange={(e) => setInvTotal(e.target.value)}
