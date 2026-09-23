@@ -129,4 +129,14 @@ describe("庫存：販售籃", () => {
     await waitFor(() => expect(patched).toEqual([{ unit_price: "15" }]));
     expect(await screen.findByText(/請補印籃子標籤/)).toBeTruthy();
   });
+
+  it("「停止加入收購」只擋新的收購，架上剩下的照賣（不叫「停用」免得誤會）", async () => {
+    stub();
+    renderPanel("MANAGER");
+    await screen.findByText("無品牌營釘");
+    expect(screen.queryByRole("button", { name: "停用" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "停止加入收購" }));
+    await waitFor(() => expect(patched).toEqual([{ is_active: false }]));
+    expect(await screen.findByText(/剩下的貨照常可以賣/)).toBeTruthy();
+  });
 });

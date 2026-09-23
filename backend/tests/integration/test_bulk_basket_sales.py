@@ -8,8 +8,10 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.inventory.basket_repository import BulkBasketRepository
 from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.models import BulkLot, StockMovement
 from app.modules.inventory.service import InventoryService
@@ -349,3 +352,51 @@ async def test_insights_margin_uses_allocation_cost_not_representative_lot(
     )
     [row] = report.category_breakdown
     assert (row.units_sold, row.revenue, row.margin) == (12, Decimal(240), Decimal(240 - 66))
+
+
+async def test_baskets_are_locked_in_id_order_regardless_of_cart_order(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """兩台收銀各以 A→B、B→A 結帳時不可互卡：整筆交易先依 id 鎖籃，再逐行處理（Codex 對抗審）。"""
+    shop = await _shop(db_session)
+    first_id, _, _ = await _basket_with_two_sources(db_session, shop)
+    svc = BulkBasketService(db_session)
+    second = await svc.create(
+        shop.store_id, name="營繩", unit_price=Decimal("30"), actor_user_id=shop.user_id
+    )
+    lot = await _lot(db_session, shop, code=f"BK-C-{shop.store_id}", qty=5, cost="50")
+    lot.unit_price = Decimal("30")
+    await svc.add_existing_lot(shop.store_id, second.basket.id, lot.id, actor_user_id=shop.user_id)
+    await db_session.commit()
+
+    locked: list[int] = []
+    original = BulkBasketRepository.get_for_update
+
+    async def record(self: BulkBasketRepository, store_id: int, basket_id: int) -> object:
+        locked.append(basket_id)
+        return await original(self, store_id, basket_id)
+
+    monkeypatch.setattr(BulkBasketRepository, "get_for_update", record)
+    monkeypatch.setattr(
+        BulkBasketRepository,
+        "lock_for_sale",
+        _recording_lock_for_sale(BulkBasketRepository.lock_for_sale, locked),
+    )
+    resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_basket_line(second.basket.id, 1), _basket_line(first_id, 1)]},
+        headers=shop.h("bk-sale-lock-order"),
+    )
+    assert resp.status_code == 201, resp.text
+    ordered = sorted((first_id, second.basket.id))
+    assert locked[:2] == ordered, locked
+
+
+def _recording_lock_for_sale(original: Any, locked: list[int]) -> Any:
+    async def wrapper(
+        self: BulkBasketRepository, store_id: int, basket_ids: list[int], lot_ids: list[int]
+    ) -> None:
+        locked.extend(sorted(basket_ids))
+        await original(self, store_id, basket_ids, lot_ids)
+
+    return wrapper

@@ -1,6 +1,6 @@
 """散裝販售籃的資料存取（ADR-025）。唯一直接碰 bulk_baskets 的層。"""
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.inventory.models import BulkBasket, BulkLot
@@ -79,3 +79,27 @@ class BulkBasketRepository:
             .with_for_update()
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def lock_for_sale(self, store_id: int, basket_ids: list[int], lot_ids: list[int]) -> None:
+        """結帳前置：先依 id 鎖本單所有籃子，再依 id 鎖這些籃的來源與直接指名的散裝。
+
+        之後逐行（購物車序）的扣減只再觸碰已持有的鎖；兩台收銀以相反順序賣同幾籃時
+        不會互卡（AB-BA 死結）。籃先於來源，與改籃價／入籃的鎖序一致。
+        """
+        if basket_ids:
+            await self._session.execute(
+                select(BulkBasket.id)
+                .where(BulkBasket.store_id == store_id, BulkBasket.id.in_(basket_ids))
+                .order_by(BulkBasket.id)
+                .with_for_update()
+            )
+        if basket_ids or lot_ids:
+            await self._session.execute(
+                select(BulkLot.id)
+                .where(
+                    BulkLot.store_id == store_id,
+                    or_(BulkLot.basket_id.in_(basket_ids), BulkLot.id.in_(lot_ids)),
+                )
+                .order_by(BulkLot.id)
+                .with_for_update()
+            )

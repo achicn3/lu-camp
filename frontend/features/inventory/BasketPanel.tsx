@@ -85,7 +85,7 @@ export function BasketPanel() {
             checked={showInactive}
             onChange={(e) => setShowInactive(e.target.checked)}
           />
-          含已停用
+          含不再加入收購的
         </label>
       </form>
       {notice !== null && (
@@ -174,7 +174,9 @@ function BasketRow({
       onNotice(
         changes.unit_price !== undefined
           ? `「${data.name}」已改為每件 ${money(data.unit_price)} 元，請補印籃子標籤貼上。`
-          : `「${data.name}」已${data.is_active ? "啟用" : "停用"}。`,
+          : changes.is_active
+            ? `「${data.name}」已恢復，收購時可以再選它。`
+            : `「${data.name}」不再加入新的收購；剩下的貨照常可以賣，舊標籤不用撕。`,
       );
     },
   });
@@ -199,7 +201,7 @@ function BasketRow({
     <tr className={basket.is_active ? undefined : "inv-row-muted"}>
       <td>
         {basket.name}
-        {!basket.is_active && <span className="hint">（已停用）</span>}
+        {!basket.is_active && <span className="hint">（不再加入收購）</span>}
       </td>
       <td className="mono">{basket.code}</td>
       <td className="money">
@@ -242,13 +244,15 @@ function BasketRow({
           </>
         )}
         {isManager && (
+          // 只擋新的收購加入，不擋販售（架上的貨還是要賣完）；所以不叫「停用」。
           <button
             type="button"
             className="btn-ghost"
             onClick={() => save.mutate({ is_active: !basket.is_active })}
             disabled={save.isPending}
+            title="收購時不再列出這一籃；剩下的貨照常可以賣"
           >
-            {basket.is_active ? "停用" : "啟用"}
+            {basket.is_active ? "停止加入收購" : "恢復加入收購"}
           </button>
         )}
         <button

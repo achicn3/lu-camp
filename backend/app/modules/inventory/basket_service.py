@@ -138,7 +138,9 @@ class BulkBasketService:
         if basket is None:
             raise BulkBasketNotFound(f"找不到販售籃 {basket_id}")
         if not basket.is_active:
-            raise BulkBasketConflict(f"販售籃「{basket.name}」已停用，不能再加入新的收購")
+            raise BulkBasketConflict(
+                f"販售籃「{basket.name}」已設為不再加入收購；要加請先到庫存頁恢復"
+            )
         return basket
 
     async def attach_new_lot(self, basket: BulkBasket, lot: BulkLot) -> None:
@@ -203,6 +205,12 @@ class BulkBasketService:
             parts.append((lot, take))
             need -= take
         return basket, parts
+
+    async def prelock_for_sale(
+        self, store_id: int, basket_ids: list[int], lot_ids: list[int]
+    ) -> None:
+        """結帳前依 id 鎖定本單用到的籃子與散裝來源（防兩台收銀反序互卡）。"""
+        await self._repo.lock_for_sale(store_id, sorted(set(basket_ids)), sorted(set(lot_ids)))
 
     # ── 管理 ──
 

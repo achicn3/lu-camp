@@ -1065,6 +1065,13 @@ class SalesService:
         ]
         await self._inventory.prelock_serialized_for_sale(store_id, serialized_codes)
 
+        # 散裝同理（ADR-025）：販售籃與散裝來源也先依 id 一次鎖好，再逐行扣減。
+        await self._baskets.prelock_for_sale(
+            store_id,
+            [line.bulk_basket_id for line in lines if line.bulk_basket_id is not None],
+            [line.bulk_lot_id for line in lines if line.bulk_lot_id is not None],
+        )
+
         # 門市活動折扣（docs/21 C2）：結帳當下取生效中活動（status=ACTIVE 且 now ∈ 窗），
         # 逐行依品項種類/擁有型態與活動開關套折後價（無活動→原價）。
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
