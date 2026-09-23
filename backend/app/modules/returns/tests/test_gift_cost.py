@@ -32,6 +32,8 @@ async def test_gift_report_filters_candidates_before_quantity_aggregation(
     )
 
     sales = Mock()
+    # 非販售籃行沒有來源分配 → 走整行比例攤的原路徑（ADR-025）。
+    sales.bulk_allocation_costs = AsyncMock(return_value={})
     sales.gift_line_snapshots = AsyncMock(
         return_value={
             12: GiftLineSnapshot(
@@ -91,6 +93,8 @@ async def test_gift_report_batches_filtered_quantity_lookup(
     repo.return_quantities_for_sale_line_ids = AsyncMock(return_value=[])
 
     sales = Mock()
+    # 非販售籃行沒有來源分配 → 走整行比例攤的原路徑（ADR-025）。
+    sales.bulk_allocation_costs = AsyncMock(return_value={})
     sales.gift_line_snapshots = AsyncMock(side_effect=lambda _store, ids: {
         line_id: snapshots[line_id] for line_id in ids
     })

@@ -25,7 +25,8 @@ from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.models import BulkLot, StockMovement
 from app.modules.inventory.service import InventoryService
 from app.modules.reports.service import ReportsService
-from app.modules.sales.models import SaleBulkAllocation, SaleLine
+from app.modules.returns.service import ReturnsService
+from app.modules.sales.models import GiftReason, SaleBulkAllocation, SaleLine
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -400,3 +401,42 @@ def _recording_lock_for_sale(original: Any, locked: list[int]) -> Any:
         await original(self, store_id, basket_ids, lot_ids)
 
     return wrapper
+
+
+async def test_gift_return_cost_follows_source_allocations(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """販售籃當贈品送出後部分退回：贈品報表沖回的成本＝實際回到各來源的成本（Codex 第三輪）。"""
+    shop = await _shop(db_session)
+    basket_id, _, _ = await _basket_with_two_sources(db_session, shop)
+    reason = GiftReason(store_id=shop.store_id, code="PROMO", name="活動贈品")
+    db_session.add(reason)
+    await db_session.commit()
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [
+                {**_basket_line(basket_id, 12), "line_kind": "GIFT", "gift_reason_id": reason.id}
+            ]
+        },
+        headers=shop.h("bk-sale-gift"),
+    )
+    assert sale.status_code == 201, sale.text
+    body = sale.json()
+    resp = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": body["id"],
+            "reason": "顧客退回贈品",
+            "lines": [{"sale_line_id": body["lines"][0]["id"], "qty": 3}],
+        },
+        headers=shop.h("bk-ret-gift"),
+    )
+    assert resp.status_code == 201, resp.text
+    [adjustment] = await ReturnsService(db_session).gift_return_adjustments(
+        shop.store_id,
+        datetime.now(UTC) - timedelta(hours=1),
+        datetime.now(UTC) + timedelta(hours=1),
+    )
+    # 退回 3 支＝乙 2 支（16）＋甲 1 支（5）＝21；整行按比例攤會得 round(66×3/12)=17。
+    assert (adjustment.qty, adjustment.cost) == (3, Decimal(21))

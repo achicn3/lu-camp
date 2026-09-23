@@ -2474,6 +2474,19 @@ class SalesService:
                 # MENU：無庫存，略過。
         return sale
 
+    async def bulk_allocation_costs(
+        self, sale_line_ids: list[int]
+    ) -> dict[int, list[tuple[int, Decimal]]]:
+        """販售籃行的來源分配 [(件數, 成本快照)…]（依分配順序）；非籃子行不在結果裡。
+
+        報表沖回退貨成本用（`bulk_allocation.returned_cost`），與退貨實際回補的順序一致。
+        """
+        grouped = await self._repo.bulk_allocations_by_line(sale_line_ids)
+        return {
+            line_id: [(row.qty, Decimal(row.cost_snapshot)) for row in rows]
+            for line_id, rows in grouped.items()
+        }
+
     async def restore_bulk_line(
         self,
         store_id: int,

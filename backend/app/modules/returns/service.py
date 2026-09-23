@@ -29,6 +29,7 @@ from app.modules.returns.repository import (
     ReturnsMarginAdjustments,
     ReturnsRepository,
 )
+from app.modules.sales.bulk_allocation import returned_cost
 from app.modules.sales.linepay import LinePayClient
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
@@ -429,11 +430,16 @@ class ReturnsService:
             snapshots = await self._gift_snapshots(
                 store_id, [row.sale_line_id for row in quantities]
             )
+        # 販售籃贈品（ADR-025）：退回成本依來源分配逐批計算，與庫存實際回到哪一批一致。
+        allocations = await SalesService(self._session).bulk_allocation_costs(
+            [row.sale_line_id for row in quantities]
+        )
         adjustments: list[GiftReturnAdjustment] = []
         for quantity in quantities:
             snapshot = snapshots.get(quantity.sale_line_id)
             if snapshot is None:
                 continue
+            allocs = allocations.get(quantity.sale_line_id)
             adjustments.append(
                 GiftReturnAdjustment(
                     reason_id=snapshot.reason_id,
@@ -441,11 +447,18 @@ class ReturnsService:
                     description=snapshot.description,
                     qty=quantity.period_qty,
                     retail_value=snapshot.retail_unit_price * quantity.period_qty,
-                    cost=_gift_return_cost(
-                        snapshot.cost,
-                        line_qty=snapshot.qty,
-                        prior_qty=quantity.prior_qty,
-                        period_qty=quantity.period_qty,
+                    cost=(
+                        Decimal(
+                            returned_cost(allocs, quantity.prior_qty + quantity.period_qty)
+                            - returned_cost(allocs, quantity.prior_qty)
+                        )
+                        if allocs
+                        else _gift_return_cost(
+                            snapshot.cost,
+                            line_qty=snapshot.qty,
+                            prior_qty=quantity.prior_qty,
+                            period_qty=quantity.period_qty,
+                        )
                     ),
                 )
             )
