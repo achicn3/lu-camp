@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -53,7 +54,9 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
 async function fillRow(row, { name, price, cost, category }) {
-  await row.getByLabel("品名").fill(name);
+  // 品名收在可展開的「品名：…」區塊裡（選型號會自動帶入），手填要先展開。
+  await row.locator('summary:has-text("品名")').click();
+  await row.getByLabel("品名", { exact: true }).fill(name);
   await row.locator("select").first().selectOption("A");
   const cat = row.getByLabel("分類");
   await cat.click();
@@ -63,11 +66,14 @@ async function fillRow(row, { name, price, cost, category }) {
   if (await create.count()) await create.first().click();
   else await page.locator(`button:has-text("${category}")`).first().click();
   await row.getByLabel("上架售價（含稅與手續費）").fill(String(price));
-  await row.getByLabel("收購價").fill(String(cost));
+  await row.getByLabel("收購價", { exact: true }).fill(String(cost));
 }
 
 try {
-  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  // 關掉開店前檢查的每日導向；等頁面載入完成再填，免得表單在 React 接手前就以 GET 送出。
+  await skipOpeningCheckRedirect(page);
+  await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', USERNAME);
   await page.fill('input[name="password"]', PASSWORD);
   await page.click('button:has-text("登入")');

@@ -44,7 +44,8 @@ const CATEGORY = `露營用品-${String(RUN).slice(-5)}`;
 let categoryCreated = false;
 
 async function fillRow(page, index, { name, cost, listed }) {
-  const row = page.locator(".acq-rows .acq-row").nth(index);
+  // 收合的列仍掛著（隱藏），只找看得到的列。
+  const row = page.locator(".acq-rows .acq-row:visible").nth(index);
   const category = row.getByLabel("分類", { exact: true });
   await category.click();
   await category.fill(CATEGORY);

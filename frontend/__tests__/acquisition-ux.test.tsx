@@ -109,6 +109,11 @@ afterEach(() => {
   localStorage.clear();
 });
 
+/** 畫面上看得到的品名欄（收合的列仍掛著，但包在 hidden 裡）。 */
+function visibleNameInputs(): HTMLElement[] {
+  return screen.getAllByLabelText("品名").filter((el) => el.closest("[hidden]") === null);
+}
+
 async function submitOneConsignment(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("tab", { name: "寄售" }));
   await user.type(screen.getByLabelText("賣方搜尋"), "王");
@@ -165,10 +170,39 @@ describe("收購頁操作速度改善", () => {
     await user.click(screen.getByRole("button", { name: "＋ 新增一列" }));
     const summary = screen.getByRole("button", { name: /編輯第 1 列/ });
     expect(summary.textContent).toContain("底片相機");
-    // 只剩新的那一列是展開的。
-    expect(screen.getAllByLabelText("品名")).toHaveLength(1);
+    // 只剩新的那一列是展開的（收合的列仍掛著、只是隱藏，選過的值才不會不見）。
+    expect(visibleNameInputs()).toHaveLength(1);
     await user.click(summary);
-    expect(screen.getAllByLabelText("品名")).toHaveLength(2);
+    expect(visibleNameInputs()).toHaveLength(2);
+  });
+
+  it("收合再展開，下拉選過的分類仍在（Codex 審查）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("tab", { name: "寄售" }));
+    await user.type(screen.getByLabelText("品名"), "底片相機");
+    await user.click(screen.getByLabelText("分類"));
+    await user.click(await screen.findByRole("option", { name: "相機" }));
+    await user.click(screen.getByRole("button", { name: "＋ 新增一列" }));
+    await user.click(screen.getByRole("button", { name: /編輯第 1 列/ }));
+    const firstRow = document.querySelectorAll(".acq-rows .acq-row")[0] as HTMLElement;
+    expect(within(firstRow).getByText("相機")).toBeTruthy();
+  });
+
+  it("只有件數不對的列也會在送出時自動展開（Codex 審查）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByLabelText("品名"), "焚火台");
+    const qty = screen.getByLabelText("件數");
+    await user.clear(qty);
+    await user.type(qty, "0");
+    await user.click(screen.getByRole("button", { name: "＋ 新增一列" }));
+    expect(screen.getByRole("button", { name: /編輯第 1 列/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "送出收購" }));
+    expect((await screen.findAllByText(/第 1 列：件數需為/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /編輯第 1 列/ })).toBeNull();
   });
 
   it("底部固定摘要列顯示件數與送出鈕", async () => {
@@ -200,7 +234,7 @@ describe("收購頁操作速度改善", () => {
     await user.click(screen.getByRole("button", { name: "送出收購" }));
     expect(await screen.findByText(/第 1 列：分類必選/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /編輯第 1 列/ })).toBeNull();
-    expect(screen.getAllByLabelText("品名")).toHaveLength(2);
+    expect(visibleNameInputs()).toHaveLength(2);
   });
 
   it("送出成功後自動捲到完成卡片（結果、標籤、繼續收都在那裡）", async () => {

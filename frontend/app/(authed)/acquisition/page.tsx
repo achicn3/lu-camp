@@ -37,7 +37,6 @@ import {
   type AcquisitionDraft,
   type ItemDraft,
   type LotDraft,
-  serializedRowErrors,
   validateDraft,
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
@@ -1588,12 +1587,17 @@ export default function AcquisitionPage() {
     if (found.length > 0) {
       setErrors(found);
       // 出錯的列若是收合的，展開它：錯誤訊息只在頁尾、那列卻是一行摘要，店員找不到要改哪裡。
-      if (!isBulk) {
+      // 以錯誤訊息的「第 N 列」判斷，任何列層級的檢查（含件數）都涵蓋到。
+      const badRows = new Set(
+        found.flatMap((message) => {
+          const match = /^第 (\d+) 列/.exec(message);
+          return match ? [Number(match[1]) - 1] : [];
+        }),
+      );
+      if (!isBulk && badRows.size > 0) {
         setRows((prev) =>
           prev.map((row, index) =>
-            row.collapsed && serializedRowErrors(type, index, row).length > 0
-              ? { ...row, collapsed: false }
-              : row,
+            row.collapsed && badRows.has(index) ? { ...row, collapsed: false } : row,
           ),
         );
       }
@@ -1652,18 +1656,20 @@ export default function AcquisitionPage() {
         />
       ) : (
         <div className="acq-rows">
-          {rows.map((row, i) =>
-            row.collapsed ? (
-              <CollapsedRow
-                key={row.rowKey}
-                index={i}
-                row={row}
-                type={type}
-                onExpand={() => patchRow(row.rowKey, { collapsed: false })}
-              />
-            ) : (
+          {rows.map((row, i) => (
+            // 收合時列不卸掉、只隱藏：下拉選單顯示的名稱只存在元件裡，卸掉再掛回來會變空白，
+            // 畫面看起來沒選、送出的 id 卻還在（Codex 審查）。
+            <div key={row.rowKey}>
+              {row.collapsed && (
+                <CollapsedRow
+                  index={i}
+                  row={row}
+                  type={type}
+                  onExpand={() => patchRow(row.rowKey, { collapsed: false })}
+                />
+              )}
+              <div hidden={row.collapsed}>
             <ItemRowCard
-              key={row.rowKey}
               type={type}
               index={i}
               row={row}
@@ -1682,8 +1688,9 @@ export default function AcquisitionPage() {
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
             />
-            ),
-          )}
+              </div>
+            </div>
+          ))}
           <button
             type="button"
             className="btn-ghost"
