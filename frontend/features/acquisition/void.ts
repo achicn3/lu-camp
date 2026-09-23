@@ -10,13 +10,6 @@ export function canVoid(acq: VoidableFields): boolean {
   return acq.voided_at === null && acq.type !== "CONSIGNMENT";
 }
 
-/** 不可作廢時的中文說明（對應後端 409 已作廢／422 寄售不支援）；可作廢回 null。 */
-export function voidBlockReason(acq: VoidableFields): string | null {
-  if (acq.voided_at !== null) return "此收購已作廢，不可重複作廢";
-  if (acq.type === "CONSIGNMENT") return "寄售收購不支援作廢，請走寄售退貨／結算反轉流程";
-  return null;
-}
-
 // 後端 detail 已是分案 zh-TW（每種 409/422 各有明確訊息），故優先顯示；缺漏時才依 status 退回。
 // 以 HTTP status 當退路（穩定）而非比對 detail 字串（易碎）。
 const FALLBACK_BY_STATUS: Record<number, string> = {

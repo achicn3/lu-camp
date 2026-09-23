@@ -7,6 +7,7 @@ type AcquisitionType = components["schemas"]["AcquisitionType"];
 type PayoutMethod = components["schemas"]["PayoutMethod"];
 type ContactRole = components["schemas"]["ContactRole"];
 type Basis = components["schemas"]["BulkAcquisitionBasis"];
+type VoidBlock = components["schemas"]["AcquisitionVoidBlock"];
 
 export const ACQ_TYPE_LABEL: Record<AcquisitionType, string> = {
   BUYOUT: "買斷",
@@ -29,4 +30,13 @@ export const BASIS_LABEL: Record<Basis, string> = {
   WEIGHT: "秤斤",
   BAG: "整袋",
   UNSPECIFIED: "未指定",
+};
+
+/** 收購紀錄清單上「這張現在不能作廢」的原因（後端 void_block 算好，這裡只負責講人話）。 */
+export const VOID_BLOCK_LABEL: Record<VoidBlock, string> = {
+  CONSIGNMENT: "寄售不能作廢，請走寄售退貨",
+  ALREADY_VOIDED: "已作廢",
+  HAS_SOLD_ITEMS: "已有商品賣出，不能作廢",
+  CREDIT_SPENT: "購物金已被用掉，不能作廢",
+  NO_OPEN_CASH_SESSION: "要退回現金，請先開帳",
 };

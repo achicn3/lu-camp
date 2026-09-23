@@ -2,7 +2,7 @@
 // ④ 買斷兩件 → 第一件自動收合成一行摘要、底部固定摘要列顯示件數與應付
 // ② 送出後自動送印標籤（以 route 代替硬體代理的 /print/label，攔下實際送出的張數）
 // ③ 「繼續收這位賣方」→ 賣方保留、直接收下一筆
-// ⑤ 補印憑證聯／作廢收購收在頁尾「更多操作」
+// ⑤ 補印憑證聯收在頁尾「更多操作」；作廢改到收購紀錄（2026-09-23）
 // 需 backend + frontend 已起、已 seed（dev-manager）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/acquisition-ux-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -144,7 +144,7 @@ try {
   const more = page.locator("details.acq-more");
   await more.locator("summary").click();
   ok("補印憑證聯收在「更多操作」", await more.getByRole("heading", { name: "補印收購憑證聯" }).isVisible());
-  ok("作廢收購收在「更多操作」", await more.getByRole("heading", { name: /作廢收購/ }).isVisible());
+  ok("「更多操作」改放收購紀錄連結（作廢在那裡）", await more.getByRole("link", { name: "收購紀錄" }).isVisible());
   await page.screenshot({ path: join(SHOTS, "05-more-actions.png"), fullPage: true });
 
   // 手機寬度

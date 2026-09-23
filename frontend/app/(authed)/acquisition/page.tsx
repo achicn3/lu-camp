@@ -3,6 +3,7 @@
 // （品牌/型號/分類 combobox + 雙重約束定價輔助）→ 撥款（現金/購物金/混合）→ 送出。
 // 全中文（labels 單一真實來源）；金額整數元、走 OpenAPI 生成型別 client；標籤列印待後端（不放假按鈕）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   type FormEvent,
   useEffect,
@@ -44,7 +45,6 @@ import { NOTE_MAX_LENGTH } from "@/features/inventory/inventory";
 import { isValidNationalId } from "@/features/member/national-id";
 import { InfoTip } from "@/features/shared/InfoTip";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
-import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { openCashDrawer, printAcquisitionReceipt, printLabel } from "@/lib/agent";
 import { fetchSignaturePngBase64 } from "@/lib/signature";
@@ -1937,9 +1937,12 @@ export default function AcquisitionPage() {
 
       {/* 少用的功能收在最下面，頁面一打開就是收購表單。 */}
       <details className="acq-more">
-        <summary>更多操作：補印收購憑證聯{isManager ? "、作廢收購" : ""}</summary>
+        <summary>更多操作：補印收購憑證聯、查看過去的收購</summary>
         <ReprintAcquisitionReceipt />
-        {isManager && <VoidAcquisitionSection />}
+        {/* 作廢只剩收購紀錄一個入口（2026-09-23）：不必記單號，清單上直接按。 */}
+        <p className="acq-records-link">
+          查看過去的收購{isManager ? "或作廢" : ""}：<Link href="/acquisition/records">收購紀錄</Link>
+        </p>
       </details>
     </section>
   );

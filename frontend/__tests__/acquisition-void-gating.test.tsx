@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// F6.5 作廢入口角色閘：管理者於收購頁可見「作廢收購（限管理者）」查詢區；店員看不到。
-// （後端 ManagerDep 為最終權威；此測試只驗前端 UX 隱藏。）
+// 收購頁的作廢入口（2026-09-23 裁示）：舊的「輸入單號作廢」拿掉，改放連到收購紀錄的連結——
+// 作廢只剩收購紀錄清單一個入口（該頁的作廢鈕限管理者，後端 ManagerDep 為最終權威）。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -51,19 +51,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("作廢收購入口角色閘", () => {
-  it("管理者可見作廢查詢區", async () => {
+describe("收購頁的作廢入口改到收購紀錄", () => {
+  it("管理者：不再有輸入單號作廢，改成連到收購紀錄", async () => {
     auth.role = "MANAGER";
     stubFetch();
     renderPage();
-    expect(await screen.findByText("作廢收購（限管理者）")).toBeTruthy();
+    const link = await screen.findByRole("link", { name: /收購紀錄/ });
+    expect(link.getAttribute("href")).toBe("/acquisition/records");
+    expect(screen.queryByText("作廢收購（限管理者）")).toBeNull();
+    expect(screen.queryByLabelText("收購單號")).toBeNull();
   });
 
-  it("店員看不到作廢查詢區", async () => {
+  it("店員也看得到收購紀錄連結（清單店員可看）", async () => {
     auth.role = "CLERK";
     stubFetch();
     renderPage();
     await waitFor(() => expect(screen.getByText("收購鑑價入庫")).toBeTruthy());
+    expect(screen.getByRole("link", { name: /收購紀錄/ })).toBeTruthy();
     expect(screen.queryByText("作廢收購（限管理者）")).toBeNull();
   });
 });

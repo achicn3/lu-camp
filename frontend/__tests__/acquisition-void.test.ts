@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canVoid, voidBlockReason, voidErrorMessage } from "@/features/acquisition/void";
+import { canVoid, voidErrorMessage } from "@/features/acquisition/void";
 
 describe("canVoid", () => {
   it("買斷/散裝未作廢 → 可作廢", () => {
@@ -12,18 +12,6 @@ describe("canVoid", () => {
   });
   it("寄售 → 不可作廢", () => {
     expect(canVoid({ voided_at: null, type: "CONSIGNMENT" })).toBe(false);
-  });
-});
-
-describe("voidBlockReason", () => {
-  it("已作廢回對應提示", () => {
-    expect(voidBlockReason({ voided_at: "2026-06-19T00:00:00Z", type: "BUYOUT" })).toMatch(/已作廢/);
-  });
-  it("寄售回對應提示", () => {
-    expect(voidBlockReason({ voided_at: null, type: "CONSIGNMENT" })).toMatch(/寄售/);
-  });
-  it("可作廢回 null", () => {
-    expect(voidBlockReason({ voided_at: null, type: "BUYOUT" })).toBeNull();
   });
 });
 

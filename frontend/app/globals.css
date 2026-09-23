@@ -2476,20 +2476,6 @@ a.btn-ghost {
 .acq-void-after-create {
   margin-top: var(--sp-3);
 }
-.acq-void-section {
-  margin-top: var(--sp-6);
-}
-.acq-void-lookup {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--sp-3);
-}
-.acq-void-summary {
-  margin-top: var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
 .acq-void-reason {
   width: 100%;
   resize: vertical;
@@ -4284,4 +4270,65 @@ a.btn-ghost {
 /* 報表分組（2026-09-23）：上排分組膠囊、下排該組的報表分頁。 */
 .rpt-groups {
   margin-bottom: var(--sp-2);
+}
+
+/* 收購紀錄清單（2026-09-23）：滿版表格、篩選列、列上作廢（限管理者）。 */
+.acq-records-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.acq-records-page .card {
+  max-width: none;
+}
+.acq-records-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.acq-records-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.acq-records-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+}
+.acq-records-filters .member-allsearch {
+  margin: 0;
+}
+.acq-records-wrap {
+  overflow-x: auto;
+}
+.acq-records-table th,
+.acq-records-table td {
+  white-space: nowrap;
+  vertical-align: top;
+}
+/* 品項可能很長，只有這欄允許換行。 */
+.acq-records-table td:nth-child(5) {
+  white-space: normal;
+  min-width: 12rem;
+}
+.acq-records-voided td {
+  color: var(--ink-soft);
+}
+.acq-records-void {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.acq-records-link {
+  margin: var(--sp-3) 0 0;
+}
+/* 不能作廢的原因要讀得完：這格允許換行。 */
+.acq-records-table td .acq-records-void .row-sub {
+  white-space: normal;
+  max-width: 11rem;
 }

@@ -93,6 +93,8 @@ try {
   ok("建立並選取賣方", true);
 
   // 4) 鑑價列：品名、成色、品牌（建）、分類（建，seed 規則）
+  // 品名收在可展開的區塊裡（選了品牌型號就自動帶入，要手打才展開）。
+  await page.locator('.acq-row summary:has-text("品名")').first().click();
   await page.fill('input[aria-label="品名"]', "登山外套");
   await page.locator(".acq-row select").first().selectOption("A");
 
@@ -109,6 +111,8 @@ try {
   ok("分類查無即建（seed 定價規則）", true);
 
   // 5) 估計轉售價（未稅）→ 建議最高收購成本 + 上架售價自動帶入含稅價
+  // 直接輸入未稅轉售價收在「其他估價方式」裡（主要改用折數估價）。
+  await page.locator('.acq-row summary:has-text("其他估價方式")').first().click();
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   await page.waitForSelector("text=建議最高收購成本");
   ok("顯示建議最高收購成本", true);
@@ -148,16 +152,16 @@ try {
   ok("作廢完成並顯示反轉摘要", true);
   await page.screenshot({ path: `${SHOTS}/03-void-done.png` });
 
-  // 8) F6.5：以單號查詢確認已作廢、且不再出現作廢入口
-  await page.fill('input[aria-label="收購單號"]', orderId);
-  await page.click('button:has-text("查詢")');
-  await page.waitForSelector("text=作廢時間");
-  ok("查詢顯示已作廢（作廢時間）", true);
+  // 8) 收購紀錄清單確認已作廢、作廢鈕反灰（2026-09-23 起作廢入口在收購紀錄）
+  await page.goto(`${BASE}/acquisition/records`, { waitUntil: "networkidle" });
+  const voidedRow = page.locator("tr", { has: page.getByText(`#${orderId}`, { exact: true }) });
+  await voidedRow.waitFor();
+  ok("收購紀錄顯示已作廢", (await voidedRow.innerText()).includes("已作廢"));
   ok(
-    "已作廢單不再出現作廢入口",
-    (await page.locator('.acq-void-section button:has-text("作廢收購")').count()) === 0,
+    "已作廢單的作廢鈕反灰",
+    await voidedRow.getByRole("button", { name: "作廢", exact: true }).isDisabled(),
   );
-  await page.screenshot({ path: `${SHOTS}/04-void-lookup.png` });
+  await page.screenshot({ path: `${SHOTS}/04-void-records.png` });
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

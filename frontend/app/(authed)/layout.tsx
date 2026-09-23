@@ -31,6 +31,7 @@ const PRIMARY_NAV: NavItem[] = [
 
 const MORE_NAV: NavItem[] = [
   { href: "/opening-check", label: "開店前檢查", ready: true },
+  { href: "/acquisition/records", label: "收購紀錄", ready: true },
   { href: "/signing", label: "簽署紀錄", ready: true },
   { href: "/inventory", label: "庫存", ready: true },
   { href: "/consignment", label: "寄售付款", ready: true },

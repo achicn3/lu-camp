@@ -213,14 +213,14 @@ describe("收購頁操作速度改善", () => {
     expect(within(bar).getByRole("button", { name: "送出收購" })).toBeTruthy();
   });
 
-  it("補印憑證聯與作廢收購收進「更多操作」，不佔主要動線", async () => {
+  it("補印憑證聯收進「更多操作」；作廢改到收購紀錄（2026-09-23）", async () => {
     stub();
     renderPage("MANAGER");
     const reprint = await screen.findByRole("heading", { name: "補印收購憑證聯" });
     const more = reprint.closest("details");
     expect(more).not.toBeNull();
     expect(within(more as HTMLElement).getByText(/更多操作/)).toBeTruthy();
-    expect(within(more as HTMLElement).getByRole("heading", { name: /作廢收購/ })).toBeTruthy();
+    expect(within(more as HTMLElement).getByRole("link", { name: /收購紀錄/ })).toBeTruthy();
   });
 
   it("送出時某一列沒填完：自動展開那一列，不讓錯誤藏在收合的摘要裡", async () => {
