@@ -36,15 +36,16 @@ try {
   ok("設定頁：不再出現 hash", !/\bhash\b/i.test(settings));
   ok("設定頁：出現「可清除的簽名圖檔」", settings.includes("可清除的簽名圖檔"));
 
-  // ── 採購頁：搜尋框在「建立採購單」面板裡，要先展開 ──
-  await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "＋ 建立採購單" }).click();
-  await page.waitForSelector(".pur-create");
+  // ── 建立採購單頁：找商品用品名／品牌／型號，畫面不出現 SKU 或商品編號（2026-09-23 改版）──
+  await page.goto(`${BASE}/purchasing/new`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${OUT}/02-purchasing.png`, fullPage: true });
   const purchasingHtml = await page.content();
-  ok("採購頁：搜尋框提示為「輸入品名或商品編號」", purchasingHtml.includes("輸入品名或商品編號"));
-  ok("採購頁：畫面文字不再出現 SKU", !(await page.locator("body").innerText()).includes("SKU"));
+  const purchasingText = await page.locator("body").innerText();
+  ok("採購頁：搜尋框提示為「輸入品名、品牌或型號」", purchasingHtml.includes("輸入品名、品牌或型號"));
+  ok("採購頁：畫面文字不再出現 SKU", !purchasingText.includes("SKU"));
+  ok("採購頁：新增商品不再要填商品編號", !purchasingText.includes("商品編號"));
 
   // ── 庫存頁：「商品編號」表頭在**一般商品**分頁，預設分頁是序號品 ──
   await page.goto(`${BASE}/inventory`, { waitUntil: "networkidle" });

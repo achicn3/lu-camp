@@ -333,30 +333,35 @@ async function main() {
     }
   });
 
-  // ── 5 採購（重點：新的供應商下拉 + 明細 + 防呆 + 收貨）──
+  // ── 5 採購（2026-09-23 改版：滿版列表 → 建立採購單頁 → 明細頁收貨）──
   await section("採購補貨", async () => {
     await go(page, "/purchasing");
-    // 建立採購單預設收合，先展開才能截圖與操作。
-    await page.locator('button.pur-create-toggle:has-text("＋ 建立採購單")').click();
-    await T(page, 400);
-    await shotV(page, "50-purchasing", ".pur-lowstock");
-    // 新功能：供應商「查無即建」下拉
+    await T(page, 600);
+    await shot(page, "50-purchasing");
+    // 採購單清單：狀態篩選 chips + 翻頁（先截，免得進建立頁後回不來）
+    if (await page.locator(".pur-orders").count()) {
+      await page.locator('.pur-orders .chip:has-text("待收貨")').click().catch(() => {});
+      await T(page, 600);
+      await shotV(page, "56-pur-orders-filter", ".pur-orders");
+    }
+    // 建立採購單頁：供應商「查無即建」下拉
+    await go(page, "/purchasing/new");
     const sup = page.locator('.combo:has(label:text-is("供應商")) .combo-input').first();
     if (await sup.count()) {
       await sup.click();
       await sup.fill("山");
       await T(page, 600);
-      await shotV(page, "51-pur-supplier-combo", ".pur-create");
+      await shotV(page, "51-pur-supplier-combo", ".pur-create-page");
       const supOpt = page.locator(".combo-option").first();
       if (await supOpt.count()) await supOpt.click();
       await T(page, 300);
     }
-    // 搜尋一般商品 → 下拉 → 加入明細
+    // 搜尋既有商品（品名／品牌／型號）→ 加入明細
     const ps = page.locator('input[aria-label="搜尋一般商品"]');
     if (await ps.count()) {
       await ps.fill("瓦斯");
       await T(page, 800);
-      await shotV(page, "52-pur-product-search", ".pur-create");
+      await shotV(page, "52-pur-product-search", ".pur-create-page");
       const addBtn = page.locator(".pur-search-results button").first();
       if (await addBtn.count()) await addBtn.click();
       await T(page, 400);
@@ -366,28 +371,25 @@ async function main() {
       if (await qty.count()) await qty.fill("12");
       if (await cost.count()) await cost.fill("60");
       await T(page, 300);
-      await shotV(page, "53-pur-lines", ".pur-create");
+      await shotV(page, "53-pur-lines", ".pur-create-page");
       // 防呆：數量設 0
       if (await qty.count()) {
         await qty.fill("0");
         await T(page, 300);
-        await shotV(page, "54-pur-qty-error", ".pur-create");
+        await shotV(page, "54-pur-qty-error", ".pur-create-page");
         await qty.fill("12");
       }
     }
-    // 收貨確認對話框（截完取消）
-    const recv = page.locator('button:has-text("收貨入庫")').first();
+    // 收貨確認對話框（從列表進第一張待收貨的明細頁；截完取消）
+    await go(page, "/purchasing");
+    const recv = page.locator('.pur-orders a:has-text("收貨入庫")').first();
     if (await recv.count()) {
       await recv.click();
+      await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]').catch(() => {});
       await T(page, 500);
       await shot(page, "55-pur-receive-confirm");
       await page.locator('[role="dialog"] button:has-text("取消")').click().catch(() => {});
-    }
-    // 採購單清單：狀態篩選 chips + 分頁（不再一次倒出全部）
-    if (await page.locator(".pur-orders").count()) {
-      await page.locator('.pur-orders .chip:has-text("待收貨")').click().catch(() => {});
-      await T(page, 600);
-      await shotV(page, "56-pur-orders-filter", ".pur-orders");
+      await go(page, "/purchasing");
     }
     // 供應商分頁：搜尋 + 分頁
     await page.locator('.settle-tabs .chip:has-text("供應商")').click().catch(() => {});

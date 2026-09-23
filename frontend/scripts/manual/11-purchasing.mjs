@@ -13,7 +13,16 @@ await login(page);
 await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
 await page.waitForTimeout(1500);
 await shot(page, "po-tab-empty", { content: true });
-await shot(page, "low-stock", { locator: '.card:has(h2:text("低庫存提醒"))' });
+// 低庫存提示是列表頂端一條，有低庫存才出現；展開看明細。
+// 截圖依呼叫順序編號，這張不論有沒有低庫存都要截，後面的圖號才不會位移。
+const lowStock = page.getByRole("region", { name: "低庫存提醒" });
+if (await lowStock.count()) {
+  await lowStock.getByRole("button", { name: "查看" }).click();
+  await page.waitForTimeout(500);
+  await shot(page, "low-stock", { locator: ".pur-lowstock-banner" });
+} else {
+  await shot(page, "low-stock", { content: true });
+}
 
 // ── 供應商 ──
 await page.click('.settle-tabs button:has-text("供應商")');
@@ -45,9 +54,10 @@ await shot(page, "supplier-search", { locator: '.card:has(h2:text("供應商清�
 // ── 採購單 ──
 await page.click('.settle-tabs button:has-text("採購單")');
 await page.waitForTimeout(1200);
-await page.click('button:has-text("＋ 建立採購單")');
+await page.click('.pur-page-head a:has-text("＋ 建立採購單")');
+await page.waitForURL(`${BASE}/purchasing/new`);
 await page.waitForTimeout(1000);
-await shot(page, "po-create-empty", { locator: '.card:has(h2:text("建立採購單"))' });
+await shot(page, "po-create-empty", { content: true });
 
 // 供應商 combobox
 const supplierInput = page.getByLabel("供應商", { exact: true });
@@ -60,35 +70,31 @@ await page.waitForTimeout(600);
 // 加入商品
 await page.fill('input[aria-label="搜尋一般商品"]', "瓦斯");
 await page.waitForTimeout(1200);
-await shot(page, "po-product-search", { locator: '.card:has(h2:text("建立採購單"))' });
-await page.locator('.pur-product-results button, .card:has(h2:text("建立採購單")) ul button').first().click();
+await shot(page, "po-product-search", { locator: ".pur-create-page" });
+await page.locator(".pur-search-results ul button").first().click();
 await page.waitForTimeout(800);
-await page.locator('.pur-line-table input, table input').first().fill("24");
+await page.locator(".pur-lines .pur-qty").first().fill("24");
 await page.waitForTimeout(300);
-const costInput = page.locator('.card:has(h2:text("建立採購單")) table input').nth(1);
-await costInput.fill("120");
+await page.locator(".pur-lines .pur-cost").first().fill("120");
 await page.waitForTimeout(600);
-await shot(page, "po-lines", { locator: '.card:has(h2:text("建立採購單"))' });
+await shot(page, "po-lines", { locator: ".pur-create-page" });
 
+// 送出後直接進採購單明細頁（取代舊的詳情視窗）
 await page.click('button:has-text("送出採購")');
-await page.waitForTimeout(2500);
-await shot(page, "po-created", { content: true });
+await page.waitForURL(/\/purchasing\/\d+$/, { timeout: 10000 });
+await page.waitForTimeout(1500);
+await shot(page, "po-detail", { content: true });
 
-// 狀態篩選
+// 回列表看狀態篩選
+await page.click('a:has-text("← 回採購單列表")');
+await page.waitForURL(`${BASE}/purchasing`);
 await page.click('.settle-tabs button:has-text("待收貨")');
 await page.waitForTimeout(1500);
-await shot(page, "po-filter-pending", { locator: ".pur-po-list, .card" });
+await shot(page, "po-created", { content: true });
+await shot(page, "po-filter-pending", { locator: ".pur-orders" });
 
-// 詳細
-await page.locator('tbody tr button:has-text("詳細")').first().click();
-await page.waitForSelector('[aria-label="採購單詳情"]', { timeout: 10000 });
-await page.waitForTimeout(800);
-await shot(page, "po-detail", { locator: ".pos-dialog" });
-await page.locator('.pos-dialog button:has-text("關閉")').first().click();
-await page.waitForTimeout(600);
-
-// 收貨入庫（含進項發票）
-await page.locator('tbody tr button:has-text("收貨入庫")').first().click();
+// 收貨入庫（含進項發票）：列表的「收貨入庫」會進明細頁並直接打開收貨視窗
+await page.locator('.pur-orders tbody tr a:has-text("收貨入庫")').first().click();
 await page.waitForSelector('[aria-label="確認收貨"]', { timeout: 10000 });
 await page.waitForTimeout(800);
 await shot(page, "po-receive-dialog", { locator: ".pos-dialog" });

@@ -1,5 +1,6 @@
-// 首次採購建立一般商品煙霧：登入 → 採購搜尋無結果 → 建立一般商品（SKU 留白）→
-// 後端自動產生 SKU → 商品直接加入採購明細。預設以 dev-clerk 驗證店員權限。
+// 首次採購新增商品煙霧：登入 → 建立採購單頁搜尋無結果 → 新增商品（沒有 SKU 欄位）→
+// 後端自動產生條碼 → 商品直接加入採購明細。預設以 dev-clerk 驗證店員權限。
+// 另驗：建立回應遺失時，重整後還原原內容並以同一冪等鍵重送、不重複建檔。
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -25,17 +26,16 @@ try {
   await page.click('button:has-text("登入")');
   await page.waitForURL(`${BASE}/`);
 
-  await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "＋ 建立採購單" }).click();
+  await page.goto(`${BASE}/purchasing/new`, { waitUntil: "networkidle" });
   await page.getByLabel("搜尋一般商品").fill(productName);
-  await page.getByText("查無相符的一般商品。").waitFor();
-  await page.getByRole("button", { name: "＋ 建立一般商品" }).click();
+  await page.getByText(/查無相符的商品/).waitFor();
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
 
   if ((await page.getByLabel("一般商品名稱").inputValue()) !== productName) {
     throw new Error("搜尋文字未帶入一般商品名稱");
   }
-  if ((await page.getByLabel("一般商品編號").inputValue()) !== "") {
-    throw new Error("SKU 預設應留白");
+  if ((await page.getByLabel("一般商品編號").count()) !== 0) {
+    throw new Error("採購頁不應再出現 SKU 欄位");
   }
   await page.getByLabel("一般商品售價").fill("280");
   await page.getByLabel("一般商品低庫存提醒點").fill("5");
@@ -44,14 +44,13 @@ try {
   await page.getByRole("button", { name: "建立並加入採購單" }).click();
   const line = page.locator(".pur-lines tbody tr").filter({ hasText: productName });
   await line.waitFor();
-  const sku = (await line.locator(".row-sub").innerText()).trim();
-  if (!sku.startsWith("AUTO-")) throw new Error(`系統 SKU 格式錯誤：${sku}`);
   await page.screenshot({ path: join(SHOTS, "02-added-to-purchase-order.png"), fullPage: true });
 
   // 實際讓後端 commit，但將第一次回應替換成 500：模擬開檔成功後連線中斷。
   // 重整後應還原原 body＋原 Idempotency-Key，重送由後端回放同一商品。
   const recoveryKeys = [];
   let committedRecoveryProduct = null;
+  let replayedRecoveryProduct = null;
   await page.route("**/api/v1/catalog-products", async (route) => {
     const request = route.request();
     if (request.method() !== "POST") {
@@ -72,20 +71,22 @@ try {
       });
       return;
     }
-    await route.continue();
+    // 重送：照常送到後端，順手記下回放的商品，確認是同一筆（沒有重複建檔）。
+    const replay = await route.fetch();
+    replayedRecoveryProduct = await replay.json();
+    await route.fulfill({ response: replay });
   });
 
   await page.getByLabel("搜尋一般商品").fill(recoveryName);
-  await page.getByText("查無相符的一般商品。").waitFor();
-  await page.getByRole("button", { name: "＋ 建立一般商品" }).click();
+  await page.getByText(/查無相符的商品/).waitFor();
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
   await page.getByLabel("一般商品售價").fill("290");
   await page.getByLabel("一般商品低庫存提醒點").fill("6");
   await page.getByRole("button", { name: "建立並加入採購單" }).click();
   await page.getByText("模擬回應遺失").waitFor();
 
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "＋ 建立採購單" }).click();
-  await page.getByText("上一筆商品建立結果尚未確認").waitFor();
+  await page.getByText(/上一筆商品有沒有建好還不確定/).waitFor();
   if ((await page.getByLabel("一般商品名稱").inputValue()) !== recoveryName) {
     throw new Error("重整後未還原待確認商品名稱");
   }
@@ -97,9 +98,10 @@ try {
 
   const recoveredLine = page.locator(".pur-lines tbody tr").filter({ hasText: recoveryName });
   await recoveredLine.waitFor();
-  const recoveredSku = (await recoveredLine.locator(".row-sub").innerText()).trim();
-  if (recoveredSku !== committedRecoveryProduct.sku) {
-    throw new Error(`重試產生不同商品：${committedRecoveryProduct.sku} → ${recoveredSku}`);
+  if (replayedRecoveryProduct?.id !== committedRecoveryProduct.id) {
+    throw new Error(
+      `重試產生不同商品：#${committedRecoveryProduct.id} → #${replayedRecoveryProduct?.id}`,
+    );
   }
   if (recoveryKeys.length !== 2 || recoveryKeys[0] !== recoveryKeys[1]) {
     throw new Error("重整後未沿用原 Idempotency-Key");
@@ -107,7 +109,7 @@ try {
   await page.screenshot({ path: join(SHOTS, "04-reconciled-product.png"), fullPage: true });
 
   console.log(
-    `✅ 一般商品首次採購與回應遺失復原通過：${productName} / ${sku}；${recoveryName} / ${recoveredSku}`,
+    `✅ 首次採購新增商品與回應遺失復原通過：${productName}；${recoveryName} #${replayedRecoveryProduct.id}`,
   );
 } catch (error) {
   await page.screenshot({ path: join(SHOTS, "99-failure.png"), fullPage: true }).catch(() => {});

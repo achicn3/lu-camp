@@ -25,6 +25,7 @@ from app.modules.inventory.models import (
     BulkLot,
     CatalogProduct,
     Category,
+    ProductModel,
     SerializedItem,
     StockMovement,
 )
@@ -1475,3 +1476,36 @@ async def test_detail_edit_keeps_store_role_and_sold_price_guards(
     read = await client.get(f"/api/v1/serialized-items/by-code/{code}", headers=manager)
     assert read.json()["name"] == "雙人帳篷"
     assert read.json()["listed_price"] == "1280"
+
+
+async def test_catalog_search_matches_brand_and_model_names(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購頁不再用 SKU 找商品：輸入品牌或型號也要找得到（2026-09-23 採購改版）。"""
+    store_id = await _seed_store(db_session)
+    brand = Brand(store_id=store_id, name="Snow Peak")
+    db_session.add(brand)
+    await db_session.flush()
+    model = ProductModel(store_id=store_id, brand_id=brand.id, name="GST-120")
+    db_session.add(model)
+    await db_session.flush()
+    db_session.add(
+        CatalogProduct(
+            store_id=store_id,
+            sku="AUTO-1",
+            name="高山瓦斯罐",
+            brand_id=brand.id,
+            product_model_id=model.id,
+            unit_price=Decimal("150"),
+        )
+    )
+    db_session.add(
+        CatalogProduct(store_id=store_id, sku="AUTO-2", name="營燈", unit_price=Decimal("300"))
+    )
+    await db_session.flush()
+    for q in ("snow", "GST-120"):
+        resp = await client.get(
+            "/api/v1/catalog-products", params={"q": q}, headers=_auth(store_id)
+        )
+        assert resp.status_code == 200, resp.text
+        assert [row["name"] for row in resp.json()] == ["高山瓦斯罐"], q

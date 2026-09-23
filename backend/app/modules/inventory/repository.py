@@ -331,9 +331,14 @@ class InventoryRepository:
             conds.append(CatalogProduct.brand_id == brand_id)
         if q:
             pattern = f"%{q}%"
+            # 品牌、型號也要找得到：採購頁不再顯示 SKU，店員用「Snow Peak GST-120」找商品。
             conds.append(CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern)
                 | CatalogProduct.category_id.in_(select(Category.id).where(
-                    Category.store_id == store_id, Category.name.ilike(pattern))))
+                    Category.store_id == store_id, Category.name.ilike(pattern)))
+                | CatalogProduct.brand_id.in_(select(Brand.id).where(
+                    Brand.store_id == store_id, Brand.name.ilike(pattern)))
+                | CatalogProduct.product_model_id.in_(select(ProductModel.id).where(
+                    ProductModel.store_id == store_id, ProductModel.name.ilike(pattern))))
         if low_stock:
             conds.append(CatalogProduct.quantity_on_hand <= CatalogProduct.reorder_point)
         return conds

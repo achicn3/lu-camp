@@ -1,212 +1,208 @@
-// 採購/補貨瀏覽器煙霧測試（採購 v2）：登入 → 低庫存提醒 → 建供應商 →
-// 送出採購（qty 6，已下單）→ 分批收貨（收 4 → 部分到貨）→ 收足（收 2 → 已收貨）→
-// 詳情驗證逐項訂購/已收/待收＋收貨批次 → 草稿建立後取消。
-// 需 backend + frontend 已起、已 seed（dev-manager + seed_dev_purchasing）。
-// 執行：LD_LIBRARY_PATH=... SMOKE_BASE=http://localhost:3000 node frontend/scripts/purchasing-smoke.mjs
+// 採購/補貨瀏覽器煙霧（2026-09-23 改版）：自行用 API 造資料 →
+// 列表頁（滿版、低庫存提示、翻頁）→ 低庫存「全部帶入」進建立頁（數量補到補貨點）→
+// 新增商品（品牌→型號→品名自動帶入、建議售價自動算、不出現 SKU）→ 送出 → 明細頁 →
+// 收貨入庫 → 已收貨＋可印標籤 → 回列表看到已收貨。
+// 需 backend + frontend 已起、已 seed（dev-manager）。
+// 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/purchasing-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
+const API = process.env.SMOKE_API_BASE ?? "http://localhost:8000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "purchasing");
+const RUN = String(Date.now()).slice(-5);
+const LOW = `高山瓦斯罐-${RUN}`;
+const SUPPLIER = `山林供應商-${RUN}`;
+const BRAND = `SnowPeak-${RUN}`;
+const MODEL = `GST-${RUN}`;
 mkdirSync(SHOTS, { recursive: true });
+
 const results = [];
 function ok(name, pass, detail = "") {
-  results.push({ name, pass, detail });
-  console.log(`${pass ? "✅" : "❌"} ${name}${detail ? `：${detail}` : ""}`);
+  results.push({ name, pass });
+  console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `：${detail}` : ""}`);
 }
 
-const PROD = "高山瓦斯罐 230g";
+async function apiJson(path, { method = "GET", token, body, headers = {} } = {}) {
+  const response = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) throw new Error(`${method} ${path} → ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function seed(token) {
+  const supplier = await apiJson("/api/v1/suppliers", {
+    method: "POST",
+    token,
+    body: { name: SUPPLIER, contact: null, tax_id: null },
+  });
+  const low = await apiJson("/api/v1/catalog-products", {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": `smoke-low-${RUN}` },
+    body: { sku: null, name: LOW, unit_price: 150, reorder_point: 5 },
+  });
+  // 造 21 張草稿，讓列表出現第二頁（每頁 20）。
+  for (let i = 0; i < 21; i += 1) {
+    await apiJson("/api/v1/purchase-orders", {
+      method: "POST",
+      token,
+      body: {
+        supplier_id: supplier.id,
+        lines: [{ catalog_product_id: low.id, qty: 1, unit_cost: "90" }],
+        submit: false,
+      },
+    });
+  }
+  // 草稿不算在途；把它們取消，免得低庫存「在途」判斷被干擾。
+  const drafts = await apiJson(`/api/v1/purchase-orders?status=DRAFT&limit=50`, { token });
+  for (const po of drafts.filter((p) => p.supplier_id === supplier.id)) {
+    await apiJson(`/api/v1/purchase-orders/${po.id}/cancel`, { method: "POST", token });
+  }
+  return { supplier, low };
+}
+
+async function pickCombo(page, label, text, { create = false } = {}) {
+  const input = page.getByLabel(label, { exact: true });
+  await input.click();
+  await input.fill(text);
+  if (create) {
+    await page.click(`button:has-text("建立「${text}」")`);
+  } else {
+    await page.getByRole("option", { name: text, exact: true }).click();
+  }
+}
+
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
-
-// 目前篩選下最新（id 最大）採購單列＝第一列。
-const firstRow = () => page.locator(".pur-order-table tbody tr").first();
-
-async function openCreatePanel() {
-  const toggle = page.locator('.pur-create-toggle:has-text("建立採購單")');
-  if ((await page.locator(".pur-create").count()) === 0) await toggle.click();
-  await page.waitForSelector(".pur-create");
-}
-
-async function buildDraftLine(supplierName, qty) {
-  const supplierCombo = page.getByLabel("供應商");
-  await supplierCombo.click();
-  await supplierCombo.fill(supplierName);
-  await page.click(`.combo-option:has-text("${supplierName}")`);
-  await page.fill('input[aria-label="搜尋一般商品"]', "瓦斯");
-  await page.waitForSelector(`.pur-search-results li button:has-text("${PROD}")`);
-  await page.click(`.pur-search-results li button:has-text("${PROD}")`);
-  await page.waitForSelector(".pur-lines tbody tr");
-  await page.fill(`.pur-lines input[aria-label="數量 ${PROD}"]`, String(qty));
-  await page.fill('.pur-lines input[aria-label^="進貨單價"]', "100");
-}
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const pageErrors = [];
+page.on("pageerror", (err) => pageErrors.push(String(err)));
 
 try {
-  // 1) 登入
+  const { access_token: token } = await apiJson("/api/v1/auth/login", {
+    method: "POST",
+    body: { username: "dev-manager", password: "dev-test-123456" },
+  });
+  const { low } = await seed(token);
+  ok("API 造資料（供應商、低庫存商品、21 張已取消的採購單）", true);
+
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
   await page.fill('input[name="password"]', "dev-test-123456");
   await page.click('button:has-text("登入")');
   await page.waitForURL(`${BASE}/`);
-  ok("登入成功", true);
 
-  // 2) 進採購/補貨頁
-  await page.click('a:has-text("採購補貨")');
+  // 1) 列表頁
+  await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
+  await page.getByRole("region", { name: "低庫存提醒" }).waitFor();
+  ok("列表頁頂端有低庫存提示", true);
+  ok("右上角有建立採購單", await page.locator(".pur-page-head").getByRole("link", { name: "＋ 建立採購單" }).isVisible());
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByText(/第 1 \/ \d+ 頁/).waitFor();
+  ok("全部採購單可翻頁", true, await page.getByText(/第 1 \/ \d+ 頁/).innerText());
+  await page.screenshot({ path: join(SHOTS, "01-list.png"), fullPage: true });
+
+  // 2) 低庫存全部帶入 → 建立頁
+  await page.getByRole("link", { name: "全部帶入建立採購單" }).click();
+  await page.waitForURL(/\/purchasing\/new\?reorder=/);
+  const lowQty = page.getByLabel(`數量 ${LOW}`);
+  await lowQty.waitFor();
+  ok("低庫存商品已帶入、數量補到補貨點", (await lowQty.inputValue()) === "5", await lowQty.inputValue());
+  await pickCombo(page, "供應商", SUPPLIER);
+  // 同一個資料庫重跑時，前幾輪造的低庫存商品也會被帶進來：一律填單價，免得送出鈕停用。
+  for (const input of await page.locator('.pur-lines input[aria-label^="進貨單價"]').all()) {
+    await input.fill("100");
+  }
+
+  // 3) 新增商品：品牌→型號→品名自動帶入，建議售價自動算
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
+  ok("新增商品沒有 SKU 欄位", (await page.getByLabel("一般商品編號").count()) === 0);
+  await pickCombo(page, "品牌", BRAND, { create: true });
+  await pickCombo(page, "型號", MODEL, { create: true });
+  await page
+    .waitForFunction(
+      (model) => document.querySelector('input[aria-label="一般商品名稱"]')?.value === model,
+      MODEL,
+      { timeout: 5000 },
+    )
+    .catch(() => {});
+  const nameValue = await page.getByLabel("一般商品名稱").inputValue();
+  ok("品名自動等於型號", nameValue === MODEL, nameValue);
+  await page.getByLabel("一般商品進貨成本").fill("500");
+  await page.getByLabel("一般商品採購數量").fill("6");
+  const price = page.getByLabel("一般商品售價");
+  await page.waitForFunction(
+    () => Number(document.querySelector('input[aria-label="一般商品售價"]')?.value) > 0,
+  );
+  const priceValue = Number(await price.inputValue());
+  ok("建議售價自動算出並進位到 10 元", priceValue > 500 && priceValue % 10 === 0, String(priceValue));
+  await page.screenshot({ path: join(SHOTS, "02-new-product.png"), fullPage: true });
+  await page.getByRole("button", { name: "建立並加入採購單" }).click();
+  await page.getByLabel(`進貨單價 ${MODEL}`).waitFor();
+  ok("新商品帶著成本與數量加入明細", (await page.getByLabel(`數量 ${MODEL}`).inputValue()) === "6");
+  await page.screenshot({ path: join(SHOTS, "03-new-order.png"), fullPage: true });
+
+  // 4) 送出 → 明細頁
+  await page.getByRole("button", { name: "送出採購" }).click();
+  await page.waitForURL(/\/purchasing\/\d+$/);
+  await page.getByText(/採購單 #\d+/).waitFor();
+  ok("送出後進到明細頁", true, page.url());
+  await page.screenshot({ path: join(SHOTS, "04-detail-ordered.png"), fullPage: true });
+
+  // 5) 收貨入庫
+  await page.getByRole("button", { name: "收貨入庫" }).click();
+  await page.getByRole("dialog", { name: "確認收貨" }).waitFor();
+  await page.screenshot({ path: join(SHOTS, "05-receive-dialog.png"), fullPage: true });
+  await page.getByRole("button", { name: "確認收貨" }).click();
+  await page.locator("span.inv-badge", { hasText: "已收貨" }).waitFor();
+  ok("收貨完成、狀態已收貨", true);
+  ok(
+    "收到的商品可直接印標籤",
+    (await page.getByRole("button", { name: `印標籤 ${MODEL}` }).count()) === 1 &&
+      (await page.getByRole("button", { name: `印標籤 ${LOW}` }).count()) === 1,
+  );
+  await page.screenshot({ path: join(SHOTS, "06-detail-received.png"), fullPage: true });
+
+  // 6) 回列表
+  await page.getByRole("link", { name: "← 回採購單列表" }).click();
   await page.waitForURL(`${BASE}/purchasing`);
-  await page.waitForSelector("h1:has-text('採購 / 補貨')");
-  ok("採購/補貨頁載入", true);
+  await page.getByRole("button", { name: "已收貨", exact: true }).click();
+  await page.locator("tr", { hasText: SUPPLIER }).first().waitFor();
+  ok("列表看得到剛收貨的採購單", true);
+  const stock = await apiJson(`/api/v1/catalog-products/${low.id}`, { token });
+  ok("低庫存商品已入庫", stock.quantity_on_hand === 5, String(stock.quantity_on_hand));
 
-  // 3) 低庫存提醒常駐置頂（等清單載入完成，避免讀到「載入中…」）
-  await page.waitForSelector(".pur-lowstock .pur-lowstock-list li, .pur-lowstock .empty-state");
-  const lowText = (await page.locator(".pur-lowstock").innerText()) ?? "";
-  ok("低庫存提醒顯示現量/補貨點", lowText.includes("現量") && lowText.includes("補貨點"));
-  await page.screenshot({ path: `${SHOTS}/01-lowstock.png`, fullPage: true });
+  // 7) 手機寬度
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${BASE}/purchasing/new`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
+  await page.screenshot({ path: join(SHOTS, "07-mobile-new.png"), fullPage: true });
+  await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
+  await page.screenshot({ path: join(SHOTS, "08-mobile-list.png"), fullPage: true });
+  ok("手機寬度可用", true);
 
-  // 4) 供應商分頁：建立供應商
-  const supplierName = `煙測供應商${Date.now().toString().slice(-5)}`;
-  await page.click('.settle-tabs button:has-text("供應商")');
-  await page.waitForSelector(".pur-supplier-form");
-  await page.fill('input[aria-label="供應商名稱"]', supplierName);
-  await page.click('.pur-supplier-form button:has-text("新增供應商")');
-  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`);
-  ok("建立供應商並出現在清單", true, supplierName);
-
-  // 5) 採購單分頁：送出採購（qty 6 → 已下單）
-  await page.click('.settle-tabs button:has-text("採購單")');
-  await openCreatePanel();
-  await buildDraftLine(supplierName, 6);
-  await page.screenshot({ path: `${SHOTS}/02-build-po.png`, fullPage: true });
-  await page.click('.pur-create button:has-text("送出採購")');
-  // 切「全部」，最新列即本單
-  await page.click('.settle-tabs button:has-text("全部")');
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}")`);
-  const badge1 = await firstRow().locator(".inv-badge").innerText();
-  ok("送出採購 → 已下單", badge1.includes("已下單"), badge1);
-  await page.screenshot({ path: `${SHOTS}/03-ordered.png`, fullPage: true });
-
-  // 5b) 待到貨（Phase 2）：下單後低庫存卡的該品應顯示在途待到貨量（避免重複採購）
-  await page.waitForSelector(`.pur-lowstock-list li:has-text("${PROD}")`);
-  const gasRow = page.locator(`.pur-lowstock-list li:has-text("${PROD}")`).first();
-  await gasRow.locator(".pur-incoming").waitFor({ timeout: 5000 }).catch(() => {});
-  const gasText = await gasRow.innerText();
-  ok("低庫存卡顯示在途待到貨量", /待到貨\s*6/.test(gasText), gasText.replace(/\n/g, " "));
-
-  // 6) 分批收貨：收 4（部分到貨）＋登錄進項發票
-  await firstRow().locator('button:has-text("收貨入庫")').click();
-  await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]');
-  await page.fill(`input[aria-label="本次實收 ${PROD}"]`, "4");
-  const invoiceNo = `AB${Date.now().toString().slice(-8)}`;
-  await page.fill('input[aria-label="發票號碼"]', invoiceNo);
-  await page.fill('input[aria-label="發票日期"]', "2026-07-11");
-  await page.fill('input[aria-label="發票未稅金額"]', "1000");
-  await page.fill('input[aria-label="發票稅額"]', "50");
-  await page.fill('input[aria-label="發票含稅金額"]', "1050");
-  await page.screenshot({ path: `${SHOTS}/04-receive-partial.png`, fullPage: true });
-  await page.click('[role="dialog"] button:has-text("確認收貨")');
-  await page.waitForSelector('[role="dialog"]', { state: "detached" });
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}") .inv-badge:has-text("部分到貨")`);
-  ok("分批收貨 4/6 → 部分到貨", true);
-  await page.screenshot({ path: `${SHOTS}/05-partial.png`, fullPage: true });
-
-  // 7) 收足剩餘 2 → 已收貨
-  await firstRow().locator('button:has-text("收貨入庫")').click();
-  await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]');
-  // 本次實收預設帶入待收（2）；直接確認
-  const prefill = await page.inputValue(`input[aria-label="本次實收 ${PROD}"]`);
-  ok("收貨對話框預設帶入待收量", prefill === "2", `待收預設=${prefill}`);
-  await page.click('[role="dialog"] button:has-text("確認收貨")');
-  await page.waitForSelector('[role="dialog"]', { state: "detached" });
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}") .inv-badge:has-text("已收貨")`);
-  ok("收足剩餘 → 已收貨", true);
-  await page.screenshot({ path: `${SHOTS}/06-received.png`, fullPage: true });
-
-  // 8) 詳情：逐項訂購/已收/待收 ＋ 兩筆收貨批次（首批有發票）
-  await firstRow().locator('button:has-text("詳細")').click();
-  await page.waitForSelector('[role="dialog"][aria-label="採購單詳情"]');
-  const detailText = await page.textContent(".pur-detail");
-  const receiptCount = await page.locator(".pur-receipts-list li").count();
-  ok(
-    "詳情顯示已收 6 / 待收 0 ＋收貨批次含發票",
-    receiptCount === 2 && detailText.includes(invoiceNo) && detailText.includes("1,000"),
-    `批次數=${receiptCount}`,
-  );
-  await page.screenshot({ path: `${SHOTS}/07-detail.png`, fullPage: true });
-  await page.click('[role="dialog"] button:has-text("關閉")');
-
-  // 9) 草稿 → 取消
-  await openCreatePanel();
-  await buildDraftLine(supplierName, 3);
-  await page.click('.pur-create button:has-text("存草稿")');
-  await page.click('.settle-tabs button:has-text("草稿")');
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}") .inv-badge:has-text("草稿")`);
-  ok("存草稿 → 草稿列表可見", true);
-  await firstRow().locator('button:has-text("取消")').click();
-  await page.click('.settle-tabs button:has-text("已取消")');
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}") .inv-badge:has-text("已取消")`);
-  ok("草稿取消 → 已取消", true);
-  await page.screenshot({ path: `${SHOTS}/08-cancelled.png`, fullPage: true });
-
-  // 10) 供應商管理（Phase 3）：編輯 → 停用 → 清單顯示已停用 → 重新啟用
-  await page.click('.settle-tabs button:has-text("供應商")');
-  const supRow = page.locator(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`).first();
-  await supRow.waitFor();
-  await supRow.locator('button:has-text("編輯")').click();
-  await page.waitForSelector('[role="dialog"][aria-label="編輯供應商"]');
-  await page.fill('input[aria-label="編輯聯絡方式"]', "0900-123-456");
-  await page.click('[role="dialog"] button:has-text("儲存")');
-  await page.waitForSelector('[role="dialog"]', { state: "detached" });
-  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("0900-123-456")`);
-  ok("供應商編輯（聯絡方式）成功", true);
-  await supRow.locator('button:has-text("停用")').click();
-  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}") .inv-badge:has-text("已停用")`);
-  ok("供應商停用 → 顯示已停用", true);
-  await supRow.locator('button:has-text("啟用")').click();
-  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}") .inv-badge:has-text("啟用中")`);
-  ok("供應商重新啟用 → 顯示啟用中", true);
-  await page.screenshot({ path: `${SHOTS}/09-supplier-manage.png`, fullPage: true });
-
-  // 11) Phase 4 版面：桌面雙欄、單號/供應商搜尋、Modal 背景鎖捲動
-  await page.click('.settle-tabs button:has-text("採購單")');
-  await page.click('.settle-tabs button:has-text("全部")');
-  // 桌面雙欄：低庫存欄（rail）在主欄右側
-  const mainBox = await page.locator(".pur-workbench-main").boundingBox();
-  const railBox = await page.locator(".pur-workbench-rail").boundingBox();
-  ok(
-    "桌面雙欄：低庫存欄在主欄右側",
-    railBox && mainBox && railBox.x > mainBox.x + mainBox.width / 2,
-    `main.x=${Math.round(mainBox?.x)} rail.x=${Math.round(railBox?.x)}`,
-  );
-  // 搜尋：以供應商名過濾
-  await page.fill('input[aria-label="採購單搜尋"]', supplierName);
-  await page.click('.pur-orders form.member-allsearch button:has-text("搜尋")');
-  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}")`);
-  const allSupplierRows = await page.locator(".pur-order-table tbody tr").count();
-  const matchRows = await page
-    .locator(`.pur-order-table tbody tr:has-text("${supplierName}")`)
-    .count();
-  ok("採購單搜尋（供應商名）過濾", allSupplierRows > 0 && allSupplierRows === matchRows);
-  await page.click('.pur-orders form.member-allsearch button:has-text("清除")');
-  // Modal 背景鎖捲動：開詳情 → body overflow hidden；關閉 → 還原
-  await page.locator('.pur-order-table tbody tr button:has-text("詳細")').first().click();
-  await page.waitForSelector('[role="dialog"][aria-label="採購單詳情"]');
-  const lockedOverflow = await page.evaluate(() => document.body.style.overflow);
-  ok("開 Modal 時鎖背景捲動（body overflow hidden）", lockedOverflow === "hidden", lockedOverflow);
-  await page.click('[role="dialog"] button:has-text("關閉")');
-  await page.waitForSelector('[role="dialog"]', { state: "detached" });
-  const restoredOverflow = await page.evaluate(() => document.body.style.overflow);
-  ok("關 Modal 後還原背景捲動", restoredOverflow !== "hidden", `overflow="${restoredOverflow}"`);
-  await page.screenshot({ path: `${SHOTS}/10-desktop-layout.png`, fullPage: true });
-} catch (err) {
-  ok("煙霧流程例外", false, String(err));
+  ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));
+} catch (error) {
+  await page.screenshot({ path: join(SHOTS, "99-failure.png"), fullPage: true });
+  ok("流程例外", false, String(error));
 } finally {
   await browser.close();
 }
 
-const failed = results.filter((r) => !r.pass);
-console.log(`\n${results.length - failed.length}/${results.length} 通過`);
-process.exit(failed.length === 0 ? 0 : 1);
+const failed = results.filter((r) => !r.pass).length;
+console.log(`\n${results.length - failed}/${results.length} 通過；截圖 ${SHOTS}`);
+process.exitCode = failed > 0 ? 1 : 0;

@@ -406,7 +406,7 @@ try {
   ok("11) 寄售付款完成（現金出帳）", true);
   await shot(page, "consign-paid");
 
-  // 11b) 採購補貨：新增供應商 → ★上架一般商品 → 建採購單 → 收貨入庫（廠商商品上架全流程）
+  // 11b) 採購補貨：新增供應商 → ★新增一般商品並建採購單 → 收貨入庫（廠商商品上架全流程）
   await nav("採購補貨", "/purchasing");
   await page.waitForSelector("h1:has-text('採購 / 補貨')");
   // (a) 供應商
@@ -417,45 +417,33 @@ try {
   await page.click('.pur-supplier-form button:has-text("新增供應商")');
   await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`);
   ok("11b) 新增供應商", true, supplierName);
-  // (b) 上架一般商品（初始庫存 0）
-  await page.click('.settle-tabs button:has-text("採購單")');
-  // 建立/上架/低庫存收進 <details class="pur-tools"> 摺疊區（0b67e1a 改版）：先展開。
-  await page.locator(".pur-tools > summary").click();
-  await page.waitForSelector(".pur-catalog-form");
+  // (b)(c) 建立採購單頁：選供應商 → 新增商品（沒有 SKU，條碼由系統產生）→ 設量與進貨價 → 送出
+  await page.goto(`${BASE}/purchasing/new`, { waitUntil: "networkidle" });
   const gasName = `高山瓦斯罐-${RUN}`;
-  await page.locator('.pur-catalog-form input[aria-label="SKU"]').fill(`GAS-${RUN}`);
-  await page.locator('.pur-catalog-form input[aria-label="品名"]').fill(gasName);
-  await page.locator('.pur-catalog-form input[aria-label="售價"]').fill("180");
-  await page.locator('.pur-catalog-form input[aria-label="低庫存提醒點"]').fill("12");
-  await page.click('.pur-catalog-form button:has-text("上架商品")');
-  await page.waitForSelector(".pur-catalog-form .form-success", { timeout: 8000 });
-  ok("11b) ★上架一般商品（廠商採購商品建檔，初始庫存 0）", true, gasName);
-  await shot(page, "purchasing-catalog-created");
-  // (c) 建採購單（選供應商、搜尋剛上架商品、設量與進貨價）
-  // 供應商改為查無即建 combobox（1a2d0c1）：填名 → 點既有選項。
-  await page.locator(".pur-create .combo-input").fill(supplierName);
-  await page
-    .locator(".pur-create .combo-option", { hasText: supplierName })
-    .first()
-    .click();
-  await page.fill('input[aria-label="搜尋一般商品"]', gasName.slice(0, 5));
-  await page.waitForSelector(`.pur-search-results li button:has-text("${gasName}")`, { timeout: 8000 });
-  await page.click(`.pur-search-results li button:has-text("${gasName}")`);
-  await page.waitForSelector(".pur-lines tbody tr");
-  await page.locator('.pur-lines input[aria-label^="數量"]').fill("24");
-  await page.locator('.pur-lines input[aria-label^="進貨單價"]').fill("100");
+  const supplierInput = page.getByLabel("供應商", { exact: true });
+  await supplierInput.click();
+  await supplierInput.fill(supplierName);
+  await page.getByRole("option", { name: supplierName, exact: true }).click();
+  await page.fill('input[aria-label="搜尋一般商品"]', gasName);
+  await page.getByRole("button", { name: "＋ 新增商品" }).click();
+  await page.fill('input[aria-label="一般商品名稱"]', gasName);
+  await page.fill('input[aria-label="一般商品進貨成本"]', "100");
+  await page.fill('input[aria-label="一般商品採購數量"]', "24");
+  await page.fill('input[aria-label="一般商品售價"]', "180");
+  await page.fill('input[aria-label="一般商品低庫存提醒點"]', "12");
+  await page.click('button:has-text("建立並加入採購單")');
+  await page.waitForSelector(`.pur-lines input[aria-label="進貨單價 ${gasName}"]`, { timeout: 8000 });
+  ok("11b) ★新增一般商品並加入採購單（廠商採購商品建檔）", true, gasName);
   await shot(page, "purchasing-po-draft");
-  await page.click('.pur-create button:has-text("建立採購單")');
-  await page.waitForSelector(
-    '.pur-order-table tbody tr button:has-text("收貨入庫")',
-    { timeout: 8000 },
-  );
+  await page.click('button:has-text("送出採購")');
+  await page.waitForURL(/\/purchasing\/\d+$/, { timeout: 8000 });
   ok("11b) 建立採購單（已下單）", true);
   // (d) 收貨入庫 → 補庫存（上架完成）
-  await page.locator('.pur-order-table tbody tr button:has-text("收貨入庫")').first().click();
+  await page.click('button:has-text("收貨入庫")');
   await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]', { timeout: 8000 });
   await page.click('[role="dialog"] button:has-text("確認收貨")');
   await page.waitForSelector('[role="dialog"]', { state: "detached", timeout: 8000 });
+  await page.locator("span.inv-badge", { hasText: "已收貨" }).waitFor({ timeout: 8000 });
   ok("11b) ★收貨入庫完成（廠商商品上架補庫存 24 件）", true);
   await shot(page, "purchasing-received");
 

@@ -90,11 +90,13 @@ async function main() {
     await page.goto(`${BASE}/purchasing`, { waitUntil: "networkidle" });
     await T(page, 800);
     await shotV(page, "pur-01-layout", ".pur-orders");
+    // 明細是獨立頁（2026-09-23 改版），看完回列表再切供應商分頁。
     await page.locator(".pur-po-link").first().click();
     await page.locator("text=採購單 #").first().waitFor({ timeout: 5000 });
     await T(page, 400);
     await shotV(page, "pur-02-detail", ".pur-detail");
-    await page.locator('.pur-detail button:has-text("關閉")').click().catch(() => {});
+    await page.locator('a:has-text("← 回採購單列表")').click();
+    await page.waitForURL(`${BASE}/purchasing`);
     await page.locator('.settle-tabs .chip:has-text("供應商")').click();
     await T(page, 700);
     await shotV(page, "pur-03-suppliers", ".pur-supplier-list");

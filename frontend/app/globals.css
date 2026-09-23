@@ -68,6 +68,16 @@ body {
   cursor: pointer;
 }
 
+/* 以連結呈現的按鈕（Next Link 導頁）：外觀與 <button> 一致，不顯示底線。 */
+a.btn-primary,
+a.btn-secondary,
+a.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: default;
@@ -2494,49 +2504,138 @@ body {
   flex-direction: column;
   gap: var(--sp-4);
 }
-/* 採購單工作台桌面雙欄：主欄（建單＋清單）＋右側低庫存欄（sticky）；窄螢幕回單欄、低庫存置頂。
-   aside 於 DOM 在前，桌面以 grid 置右欄；min-width:0 讓主欄表格可縮不撐破。 */
-.pur-workbench {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: var(--sp-4);
-  align-items: start;
+/* 2026-09-23 採購改版：列表滿版、建立與明細各自獨立頁。 */
+.pur-page .card {
+  /* .card 預設 520px 上限是給表單用的；採購的清單、明細表與建單步驟都要滿版。 */
+  max-width: none;
 }
-.pur-workbench-main {
-  grid-column: 1;
-  grid-row: 1;
-  min-width: 0;
+.pur-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.pur-page-head .page-title {
+  margin: 0;
+}
+.pur-back {
+  align-self: flex-start;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: var(--text-sm);
+}
+.pur-back:hover {
+  color: var(--accent);
+}
+.pur-orders-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.pur-orders-toolbar .member-allsearch {
+  margin: 0;
+}
+.pur-order-row {
+  cursor: pointer;
+}
+.pur-order-row:hover td {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.pur-orders-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.pur-lowstock-banner {
+  border-left: 4px solid var(--warn);
+}
+.pur-lowstock-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.pur-lowstock-banner-head p {
+  margin: 0;
+}
+.pur-lowstock-banner-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+/* 建立採購單頁：步驟卡片由上而下，合計與送出鈕固定在底部。 */
+.pur-create-page {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  padding-bottom: calc(var(--tap-min) + var(--sp-6));
 }
-.pur-workbench-rail {
-  grid-column: 2;
-  grid-row: 1;
+.pur-create-step h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pur-step-no {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--text-sm);
+}
+.pur-add-product {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+}
+.pur-add-product .field {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.pur-create-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  z-index: 5;
+  box-shadow: 0 -4px 16px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.pur-create-footer p {
+  margin: 0;
+}
+.pur-create-footer--sticky {
   position: sticky;
-  top: calc(var(--app-header-height) + var(--sp-4));
+  bottom: var(--sp-3);
 }
-@media (max-width: 900px) {
-  .pur-workbench {
-    grid-template-columns: 1fr;
-  }
-  .pur-workbench-main,
-  .pur-workbench-rail {
-    grid-column: 1;
-    grid-row: auto;
-  }
-  .pur-workbench-rail {
-    position: static;
-  }
+.pur-create-footer .pur-create-actions button {
+  white-space: nowrap;
 }
-/* 建立採購單面板：以「＋ 建立採購單」按鈕展開，收合時只佔一顆按鈕（清單為主畫面）。 */
-.pur-create-panel {
+.pur-inline-btn {
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-2);
+}
+.pur-detail-page {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
 }
-.pur-create-toggle {
-  align-self: flex-start;
+.pur-detail-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-4);
 }
 .pur-row-actions {
   display: flex;
@@ -2546,11 +2645,6 @@ body {
 }
 .pur-row-actions .btn-primary {
   padding: 0 var(--sp-4);
-}
-/* 採購單/供應商清單需整寬，否則 7 欄表格被 .card 的 520px 擠成直排字（很醜）。 */
-.pur-orders,
-.pur-supplier-list {
-  max-width: none;
 }
 /* 已停用供應商列淡化（仍保留供歷史查閱與重新啟用）。 */
 .pur-supplier-inactive td {
@@ -2736,18 +2830,6 @@ body {
   margin: 0;
   padding: 0;
 }
-.pur-search-results--create {
-  max-height: none;
-}
-.pur-product-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-3);
-}
-.pur-product-empty > .empty-state {
-  margin: 0;
-}
 .pur-product-create {
   width: 100%;
   padding: var(--sp-3);
@@ -2814,10 +2896,11 @@ body {
 .pur-lines {
   min-width: 100%;
 }
-.pur-lines .pur-qty,
+.pur-lines .pur-qty {
+  width: 6rem;
+}
 .pur-lines .pur-cost {
-  width: 100%;
-  min-width: 3.5rem;
+  width: 9rem;
 }
 .input-error {
   border-color: var(--danger);
