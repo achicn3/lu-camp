@@ -255,6 +255,33 @@ class ConsignmentRepository:
         )
         return {(sale_id, item_id): amount for sale_id, item_id, amount in rows}
 
+    async def effective_commission_by_sale_item(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[tuple[int, int], Decimal]:
+        """(sale_id, serialized_item_id) → 有效抽成；退貨反轉者（CANCELLED／待追回）記 0。
+
+        有這一筆就代表那一行是寄售品（店家收入只認抽成）；口徑同 commission_total_for_sales。
+        """
+        if not sale_ids:
+            return {}
+        stmt = select(
+            ConsignmentSettlement.sale_id,
+            ConsignmentSettlement.serialized_item_id,
+            ConsignmentSettlement.commission_amount,
+            ConsignmentSettlement.status,
+            ConsignmentSettlement.reclaim_needed,
+        ).where(
+            ConsignmentSettlement.store_id == store_id,
+            ConsignmentSettlement.sale_id.in_(sale_ids),
+        )
+        out: dict[tuple[int, int], Decimal] = {}
+        for row in await self._session.execute(stmt):
+            reversed_ = row.status == ConsignmentSettlementStatus.CANCELLED or row.reclaim_needed
+            out[(row.sale_id, row.serialized_item_id)] = (
+                Decimal(0) if reversed_ else Decimal(row.commission_amount)
+            )
+        return out
+
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的「有效」寄售抽成合計（SC-5b/毛利推導；唯讀，店家收入只認抽成）。
 

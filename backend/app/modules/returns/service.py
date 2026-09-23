@@ -210,6 +210,12 @@ class ReturnsService:
             error_type=error_type,
         )
 
+    async def returned_qty_by_line_ids(
+        self, store_id: int, sale_line_ids: list[int]
+    ) -> dict[int, int]:
+        """指定明細**目前為止**的累計退貨量（報表逐行歸屬用）。"""
+        return await self._repo.returned_qty_by_sale_line_ids(store_id, sale_line_ids)
+
     async def returned_qty_by_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
         """該銷售各明細**目前為止**的累計退貨量。差額法退款要以它為基準。"""
         lines = await self._sales.list_lines(sale_id)

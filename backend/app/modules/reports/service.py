@@ -19,6 +19,7 @@ from app.core.time import (
     store_day_bounds,
     utc_now,
 )
+from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -176,6 +177,17 @@ def _health_ratio(total_outstanding: Decimal, monthly_outflow: Decimal) -> str |
     if monthly_outflow <= 0:
         return None
     return str((total_outstanding / monthly_outflow).quantize(Decimal("0.01")))
+
+
+@dataclass
+class _CampaignStats:
+    """活動成效逐行累加（未捨入；列輸出時才 HALF_UP 到整數元）。"""
+
+    turnover: Decimal = Decimal(0)
+    revenue: Decimal = Decimal(0)
+    margin: Decimal = Decimal(0)
+    known_revenue: Decimal = Decimal(0)
+    sale_ids: set[int] = field(default_factory=set)
 
 
 class ReportsService:
@@ -853,43 +865,73 @@ class ReportsService:
         )
 
     async def campaign_performance(self, store_id: int) -> CampaignPerformanceReport:
-        """活動成效報表（docs/21 C4）：每檔生效中/已結束活動的營運成效 + 其發出的折讓。唯讀。
+        """活動成效報表（docs/21 C4、docs/40）：每檔生效中/已結束活動的成效 + 其發出的折讓。唯讀。
 
-        營運指標以活動排定區間 [starts_at, ends_at) 取 margin_breakdown（與 R2 同源、半開區間）；
-        折讓總額依 sale_line.campaign_id 精確歸屬（非區間概算）。DRAFT/CANCELLED 無成交、不列。
-        依 starts_at 新到舊排序。
+        **只算真的套到這個活動的明細**（sale_line_campaigns）：v2 起可同時多個活動、範圍可細到
+        品牌／型號，拿活動期間的全店數字會讓每個活動顯示一樣的業績（Codex 審查）。
+        一行套到多個可疊加活動時，該行的成交額與毛利**各活動都算一次**（它確實參與了每個活動）；
+        折讓則各記各的，不重複。口徑同 margin_breakdown：扣掉已退的數量、寄售只認有效抽成、
+        沒有成本快照的行不列入毛利分母。DRAFT/CANCELLED 無成交、不列。依 starts_at 新到舊排序。
         """
-        campaigns = await self._campaigns.list_campaigns(store_id)
+        campaigns = [
+            c
+            for c in await self._campaigns.list_campaigns(store_id)
+            if c.status in (CampaignStatus.ACTIVE, CampaignStatus.ENDED)
+        ]
         discount_totals = await self._sales.discount_totals_by_campaign(store_id)
-        rows: list[CampaignPerformanceRow] = []
-        for c in campaigns:
-            if c.status not in (CampaignStatus.ACTIVE, CampaignStatus.ENDED):
+        facts = await self._sales.campaign_line_facts(store_id)
+        returned = await self._returns.returned_qty_by_line_ids(
+            store_id, list({f.sale_line_id for f in facts})
+        )
+        commissions = await self._consignment.effective_commission_by_sale_item(
+            store_id, list({f.sale_id for f in facts})
+        )
+        stats: dict[int, _CampaignStats] = {}
+        for f in facts:
+            kept_qty = f.qty - returned.get(f.sale_line_id, 0)
+            if kept_qty <= 0:
                 continue
-            # 區間 [starts_at, ends_at)；模型 CHECK 保證 ends_at > starts_at（滿足 from<to）。
-            bd = await self._sales.margin_breakdown(
-                store_id,
-                c.starts_at,
-                c.ends_at,
-                include_payment_and_gift_details=False,
-            )
-            rows.append(
-                CampaignPerformanceRow(
-                    campaign_id=c.id,
-                    name=c.name,
-                    status=c.status,
-                    discount_pct=c.discount_pct,
-                    starts_at=c.starts_at,
-                    ends_at=c.ends_at,
-                    campaign_discount_total=discount_totals.get(c.id, Decimal(0)),
-                    gross_turnover=bd.gross_turnover,
-                    recognized_revenue=bd.recognized_revenue,
-                    gross_margin=bd.gross_margin,
-                    gross_margin_rate=bd.gross_margin_rate,
-                    transaction_count=bd.transaction_count,
-                )
-            )
+            st = stats.setdefault(f.campaign_id, _CampaignStats())
+            st.sale_ids.add(f.sale_id)
+            kept = Decimal(kept_qty) / Decimal(f.qty)
+            net = Decimal(f.net_amount) * kept
+            st.turnover += net
+            commission = commissions.get((f.sale_id, f.serialized_item_id))
+            if commission is not None:  # 寄售品：店家收入只認抽成
+                st.revenue += commission
+                st.margin += commission
+                st.known_revenue += commission
+            elif f.cost_snapshot is not None:
+                st.revenue += net
+                st.margin += net - Decimal(f.cost_snapshot) * kept
+                st.known_revenue += net
+            else:  # 成本未知：計入營收，不計入毛利與毛利率分母
+                st.revenue += net
+        rows = [self._campaign_row(c, stats.get(c.id), discount_totals) for c in campaigns]
         rows.sort(key=lambda r: r.starts_at, reverse=True)
         return CampaignPerformanceReport(generated_at=_now(), store_id=store_id, rows=rows)
+
+    @staticmethod
+    def _campaign_row(
+        c: Campaign, st: _CampaignStats | None, discount_totals: dict[int, Decimal]
+    ) -> CampaignPerformanceRow:
+        st = st or _CampaignStats()
+        margin = Decimal(round_ntd(st.margin))
+        known = Decimal(round_ntd(st.known_revenue))
+        return CampaignPerformanceRow(
+            campaign_id=c.id,
+            name=c.name,
+            status=c.status,
+            discount_pct=c.discount_pct,
+            starts_at=c.starts_at,
+            ends_at=c.ends_at,
+            campaign_discount_total=discount_totals.get(c.id, Decimal(0)),
+            gross_turnover=Decimal(round_ntd(st.turnover)),
+            recognized_revenue=Decimal(round_ntd(st.revenue)),
+            gross_margin=margin,
+            gross_margin_rate=(margin / known).quantize(Decimal("0.0001")) if known > 0 else None,
+            transaction_count=len(st.sale_ids),
+        )
 
     async def daily_cash(self, store_id: int, report_date: date) -> DailyCashReport:
         """每日現金對帳（docs/19 §2.2）：依 opened_at 的台灣營業日取本店 session。

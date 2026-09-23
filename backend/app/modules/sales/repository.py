@@ -8,6 +8,7 @@ SC-5b §5B 毛利推導需要每行成本基礎：序號品/散裝批的取得�
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -662,6 +663,25 @@ class SalesRepository:
         )
         rows = await self._session.execute(stmt)
         return {cid: Decimal(total) for cid, total in rows}
+
+    async def campaign_line_facts(self, store_id: int) -> list[Any]:
+        """每個活動套到的每一行（非作廢單）：活動、單、行、序號品、數量、實付、成本快照。"""
+        stmt = (
+            select(
+                SaleLineCampaign.campaign_id,
+                SaleLine.sale_id,
+                SaleLine.id.label("sale_line_id"),
+                SaleLine.serialized_item_id,
+                SaleLine.qty,
+                SaleLine.net_amount,
+                SaleLine.cost_snapshot,
+            )
+            .join(SaleLine, SaleLineCampaign.sale_line_id == SaleLine.id)
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .where(Sale.store_id == store_id, Sale.status != SaleStatus.VOIDED)
+            .order_by(SaleLine.id)
+        )
+        return list((await self._session.execute(stmt)).all())
 
     async def goods_margin_and_revenue(
         self, store_id: int, date_from: datetime, date_to: datetime

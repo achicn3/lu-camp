@@ -17,6 +17,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -2199,6 +2200,10 @@ class SalesService:
             "buyout_margin": buyout_margin,
             "consignment_commission": commission,
         }
+
+    async def campaign_line_facts(self, store_id: int) -> list[Any]:
+        """每個活動套到的每一行（非作廢單；活動成效逐行歸屬用，見 ReportsService）。"""
+        return await self._repo.campaign_line_facts(store_id)
 
     async def discount_totals_by_campaign(self, store_id: int) -> dict[int, Decimal]:
         """各活動實際造成的折讓總額（非作廢；供活動成效報表 C4，依 sale_line.campaign_id 歸屬）。"""

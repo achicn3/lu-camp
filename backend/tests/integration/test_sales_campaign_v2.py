@@ -25,6 +25,7 @@ from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import Brand, SerializedItem
 from app.modules.reports.service import ReportsService
+from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput
 from app.modules.sales.models import SaleLine, SaleLineCampaign
 from app.modules.sales.service import SalesService
@@ -295,3 +296,82 @@ async def test_quote_api_lists_campaigns_per_line_and_for_the_whole_sale(
     assert body["lines"][0]["campaigns"] == expected
     assert body["campaigns"] == expected
     assert body["campaign_name"] == "全館九折、會員九折"
+
+
+async def test_campaign_report_only_counts_lines_the_campaign_applied_to(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """同時開兩個不同品牌的活動：各自只算自己品牌的成交；沒賣出的活動全為 0（Codex 審查）。"""
+    sp = Brand(store_id=ctx["store_id"], name="Snow Peak")
+    coleman = Brand(store_id=ctx["store_id"], name="Coleman")
+    idle = Brand(store_id=ctx["store_id"], name="沒人買的牌子")
+    db_session.add_all([sp, coleman, idle])
+    await db_session.flush()
+
+    def only(brand: Brand) -> list[CampaignTargetInput]:
+        return [
+            CampaignTargetInput(
+                mode=CampaignTargetMode.INCLUDE,
+                target_type=CampaignTargetType.BRAND,
+                target_id=brand.id,
+            )
+        ]
+
+    sp_sale = await _campaign(db_session, ctx, 30, name="Snow Peak 七折", targets=only(sp))
+    coleman_sale = await _campaign(db_session, ctx, 20, name="Coleman 八折", targets=only(coleman))
+    idle_sale = await _campaign(db_session, ctx, 10, name="沒賣出", targets=only(idle))
+    a = await _item(db_session, ctx["store_id"], "1000", brand_id=sp.id)
+    b = await _item(db_session, ctx["store_id"], "2000", brand_id=coleman.id)
+    c = await _item(db_session, ctx["store_id"], "500")  # 沒有活動
+    svc = SalesService(db_session)
+    await svc.create_sale(ctx["store_id"], ctx["clerk_id"], lines=[_line(a), _line(c)])
+    await svc.create_sale(ctx["store_id"], ctx["clerk_id"], lines=[_line(b)])
+
+    rows = {
+        r.campaign_id: r
+        for r in (await ReportsService(db_session).campaign_performance(ctx["store_id"])).rows
+    }
+    assert rows[sp_sale].gross_turnover == Decimal(700)
+    assert rows[sp_sale].gross_margin == Decimal(600)  # 700 − 成本 100
+    assert rows[sp_sale].transaction_count == 1
+    assert rows[coleman_sale].gross_turnover == Decimal(1600)
+    assert rows[coleman_sale].recognized_revenue == Decimal(1600)
+    assert rows[coleman_sale].transaction_count == 1
+    assert rows[idle_sale].gross_turnover == Decimal(0)
+    assert rows[idle_sale].gross_margin == Decimal(0)
+    assert rows[idle_sale].transaction_count == 0
+    assert rows[idle_sale].gross_margin_rate is None
+
+
+async def test_campaign_report_deducts_returned_lines(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    campaign = await _campaign(db_session, ctx, 10)
+    kept = await _item(db_session, ctx["store_id"], "1000")
+    returned = await _item(db_session, ctx["store_id"], "1000")
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"], ctx["clerk_id"], lines=[_line(kept), _line(returned)]
+    )
+    line_id = await db_session.scalar(
+        select(SaleLine.id).where(
+            SaleLine.sale_id == sale.id, SaleLine.serialized_item_id == returned.id
+        )
+    )
+    assert line_id is not None
+    await ReturnsService(db_session).create_return(
+        ctx["store_id"],
+        sale_id=sale.id,
+        lines=[ReturnLineInput(sale_line_id=line_id, qty=1)],
+        reason="尺寸不合",
+        actor_user_id=ctx["clerk_id"],
+        idempotency_key="v2-return-1",
+    )
+
+    row = next(
+        r
+        for r in (await ReportsService(db_session).campaign_performance(ctx["store_id"])).rows
+        if r.campaign_id == campaign
+    )
+    assert row.gross_turnover == Decimal(900)
+    assert row.gross_margin == Decimal(800)
+    assert row.transaction_count == 1

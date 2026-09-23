@@ -307,6 +307,12 @@ class ConsignmentService:
         """各寄售品結算存的抽成，鍵 (sale_id, serialized_item_id)（經營洞察；唯讀）。"""
         return await self._repo.commission_by_sale_item(store_id, sale_ids)
 
+    async def effective_commission_by_sale_item(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[tuple[int, int], Decimal]:
+        """(sale_id, serialized_item_id) → 有效抽成（退貨反轉記 0）；活動成效逐行歸屬用。"""
+        return await self._repo.effective_commission_by_sale_item(store_id, sale_ids)
+
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的寄售抽成合計（SC-5b §5B 毛利；唯讀，§2 經 service）。"""
         return await self._repo.commission_total_for_sales(store_id, sale_ids)

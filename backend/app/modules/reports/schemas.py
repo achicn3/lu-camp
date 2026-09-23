@@ -357,10 +357,11 @@ class EffectivenessReport(BaseModel):
 
 
 class CampaignPerformanceRow(BaseModel):
-    """單檔活動成效（docs/21 C4）。
+    """單檔活動成效（docs/21 C4、docs/40）。
 
-    營運指標取活動排定區間 [starts_at, ends_at) 的銷售（與 R2 sales-margin 同源、半開區間）；
-    campaign_discount_total 為此活動實際發出的折讓（依 sale_line.campaign_id 歸屬，非區間概算）。
+    營運指標**只算套到此活動的明細**（sale_line_campaigns；扣掉已退數量、寄售只認有效抽成），
+    疊加時一行會同時計入它參與的每個活動；transaction_count 為含任一此活動明細的交易數。
+    campaign_discount_total 為此活動實際發出的折讓（疊加時各記各的、不重複）。
     gross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。
     """
 
