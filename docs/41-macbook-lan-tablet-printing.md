@@ -78,12 +78,17 @@
    ```
 5. **macOS 防火牆**：系統設定 → 網路 → 防火牆。若有開啟，允許代理的 Python／uvicorn 接受外來連線
    （或暫時確認關閉防火牆時平板能印，以區分是不是防火牆的問題）。
-6. **重新 build 並重啟**：
-   ```
-   cd frontend && pnpm build   # 建置時會印出「建置位址：NEXT_PUBLIC_AGENT_URL=...」，確認不是 localhost
-   ```
-   然後依 §3.3 找到的方式重啟 frontend 與 hardware-agent（launchd 用 `launchctl kickstart -k`
-   或 unload/load）。
+6. **重新 build 並重啟**（**打烊、沒有平板在用時做**）：
+   `next build` 會改寫正在服務的 `.next` 目錄，前端還開著就 build，平板會在中途壞掉；
+   build 失敗時舊的輸出也可能已經被動過。所以順序是：
+   1. 依 §3.3 找到的方式**先停 frontend**（launchd 用 `launchctl bootout` 或 unload）。
+   2. build：
+      ```
+      cd frontend && pnpm build   # 會印出「建置位址：NEXT_PUBLIC_AGENT_URL=...」，確認不是 localhost
+      ```
+   3. **build 成功** → 啟動 frontend，並重啟 hardware-agent（launchd 用 `launchctl kickstart -k` 或 unload/load）。
+   4. **build 失敗** → 不要啟動半套輸出。把 `frontend/.env.local` 改回原值、在原本的 commit 上再 build 一次
+      讓店能照常營業，然後把錯誤訊息回報店主，不要自行嘗試其他改法。
 
 ## 5. 驗證（每一項都要實際做，回報結果）
 
