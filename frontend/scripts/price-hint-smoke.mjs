@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const API = process.env.SMOKE_API_BASE ?? "http://localhost:8000";
@@ -152,7 +153,9 @@ try {
     JSON.stringify(hint.grades),
   );
 
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
   await page.fill('input[name="password"]', "dev-test-123456");
   await page.click('button:has-text("登入")');
@@ -200,8 +203,9 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-hint-model-range.png"), fullPage: true });
 
   await page.getByRole("button", { name: /看各成色行情/ }).click();
-  await page.locator(".price-hint-table").waitFor();
-  const tableText = await page.locator(".price-hint-table").innerText();
+  const gradeTable = page.getByRole("table", { name: "各成色行情" });
+  await gradeTable.waitFor();
+  const tableText = await gradeTable.innerText();
   ok(
     "展開後可看各成色明細（A 與 C 都在）",
     tableText.includes("A 近全新/精品") && tableText.includes("C 普通") && tableText.includes("70"),

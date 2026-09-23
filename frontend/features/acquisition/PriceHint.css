@@ -22,3 +22,25 @@
     grid-template-columns: 1fr;
   }
 }
+
+.price-hint-heading {
+  margin: 12px 0 4px;
+  font-size: 0.9rem;
+}
+
+.price-hint-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.price-hint-scroll {
+  overflow-x: auto;
+}
+
+.price-hint-records th,
+.price-hint-records td {
+  white-space: nowrap;
+}
