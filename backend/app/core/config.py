@@ -60,9 +60,16 @@ class Settings(BaseSettings):
     r2_bucket: str = "pos"
     # 與 .env.r2 命名一致（R2_BACKUP_PASSPHRASE）：AES 加密口令,不入 repo/DB。
     r2_backup_passphrase: str = ""
-    # 備份執行的本機參數（docs/28 流程：docker exec 進 postgres 容器跑 pg_dump）。
+    # 備份執行的本機參數。Postgres 有兩種部署,備份要用哪一種由 backup_pg_mode 決定：
+    #   "docker"：跑在容器裡（docs/28 原流程）→ docker exec 進容器跑 pg_dump。
+    #   "local" ：原生裝在本機（店內 MacBook 的 Homebrew postgresql@16）→ 直接跑 pg_dump,
+    #             連線參數與密碼取自 DATABASE_URL。
+    # 預設維持 "docker" 以免既有部署行為被改變；打錯字會在啟動組裝時失敗,不會默默退回預設。
+    backup_pg_mode: str = "docker"
     backup_docker_bin: str = "docker"
     backup_db_container: str = "lu-camp-db-1"
+    # local 模式下 pg_dump/pg_restore/psql 所在目錄；留空則用 PATH 上的（launchd 的 PATH 未必有）。
+    backup_pg_bin_dir: str = ""
     backup_local_dir: str = "/home/test/lu-camp-backups"
     # 排程 tick：行程內背景任務的主開關與喚醒間隔（秒）。到期判斷另看 settings.backup_*。
     backup_scheduler_enabled: bool = True

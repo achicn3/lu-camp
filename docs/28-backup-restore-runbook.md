@@ -22,6 +22,30 @@
    資料庫而金鑰不同，**所有身分證永遠解不開、去重索引全部失效**。
    （店主手機備忘錄或紙本保險箱各抄一份；換金鑰時同步更新。）
 
+## 0.1 先確認：這台機器的 Postgres 在哪（2026-09-24 新增）
+
+備份要跑 `pg_dump`，而「資料庫在哪」有兩種部署，**指令與設定都不一樣**：
+
+| 部署 | `BACKUP_PG_MODE` | 工具怎麼跑 | 何時用 |
+|---|---|---|---|
+| 資料庫在 docker 容器 | `docker`（預設） | `docker exec <容器> pg_dump …` | 開發機、docker compose 部署 |
+| 資料庫原生裝在本機 | `local` | 直接跑 `pg_dump -h … -p … -U …` | **店內 MacBook 正式機**（Homebrew `postgresql@16`，沒有 docker） |
+
+`local` 模式的連線參數與密碼一律取自 `DATABASE_URL`（不另設一組，避免兩份真相導致
+「備份跑去打另一個庫卻照樣回報成功」）；`BACKUP_PG_BIN_DIR` 指向 `pg_dump` 所在目錄
+（launchd/systemd 的 `PATH` 未必含 Homebrew，正式機請明確指定）。
+
+> **踩過的坑（2026-09-18 ～ 09-24）**：程式原本寫死 `docker exec`，但店內正式機沒有 docker，
+> 自動備份連續 **138 次全部失敗、一次都沒成功過**，錯誤是
+> `備份子程序無法執行:FileNotFoundError`。同時 `.env.r2` 的 `R2_BUCKET` 被設成
+> `prod_backup`——該 bucket 不存在，且 **S3/R2 的 bucket 名不允許底線**，
+> 即使 docker 的問題修好也會卡在 `InvalidBucketName`。修法見本節與 §0。
+> **教訓**：備份「設定看起來有填」不等於會動，必須真的跑一次、並把檔案下載回來解密驗證。
+
+下面 §1／§2 的手動指令以 docker 部署為例；原生安裝請把 `"$DOCKER" exec lu-camp-db-1`
+整段拿掉，改成直接呼叫 `<BACKUP_PG_BIN_DIR>/pg_dump -h 127.0.0.1 -p 5432 -U lucamp`
+（密碼以 `PGPASSWORD` 環境變數帶入，**不要寫進指令列**），dump 檔直接落在本機、不需要進出容器。
+
 ## 1. 備份（dump → 加密 → 上傳）
 
 ```bash

@@ -26,11 +26,12 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.modules.backup.backend import _sha256_and_size
+from app.modules.backup.pg_exec import PgExec
 from app.shared.exceptions import RestoreError
 
 logger = logging.getLogger(__name__)
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
-_SUBPROC_TIMEOUT = 600  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
+_SUBPROC_TIMEOUT = 600  # 掛住的 pg_restore/openssl 逾時即失敗,不讓還原永久 RUNNING
 # 序列化 migrate-forward：alembic 的 in-process context 非執行緒安全,同一行程一次只跑一個升級。
 _MIGRATE_LOCK = asyncio.Lock()
 # throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
@@ -121,14 +122,15 @@ def _validate_db_name(target_db: str) -> None:
 
 
 class SubprocessR2RestoreBackend:
-    """真還原後端：boto3 下載 → openssl 解密 → docker 建庫 → pg_restore。憑證/口令建構子注入。"""
+    """真還原後端：boto3 下載 → openssl 解密 → 建庫 → pg_restore。憑證/口令建構子注入。
+
+    Postgres 工具怎麼跑（容器內／本機原生）由注入的 `pg_exec` 決定,本類別不知道 docker 的存在。
+    """
 
     def __init__(
         self,
         *,
-        docker_bin: str,
-        db_container: str,
-        db_user: str,
+        pg_exec: PgExec,
         local_dir: str,
         passphrase: str,
         r2_endpoint: str,
@@ -138,9 +140,7 @@ class SubprocessR2RestoreBackend:
     ) -> None:
         if not passphrase.strip() or not r2_access_key_id.strip() or not r2_bucket.strip():
             raise RestoreError("雲端備份的金鑰尚未設定，無法還原，請聯絡系統維護者")
-        self._docker = docker_bin
-        self._container = db_container
-        self._user = db_user
+        self._pg = pg_exec
         self._dir = Path(local_dir)
         self._passphrase = passphrase
         self._endpoint = r2_endpoint
@@ -170,11 +170,16 @@ class SubprocessR2RestoreBackend:
         except OSError as exc:
             raise RestoreError(f"還原子程序無法執行：{exc.__class__.__name__}") from exc
 
-    def _rm_container_file(self, path: str) -> None:
-        """刪容器內明文(finally 用;不 raise,但失敗必記 log——靜默失敗會留整庫明文,Codex #4）。"""
+    def _rm_staged_file(self, path: str) -> None:
+        """刪容器內明文(finally 用;不 raise,但失敗必記 log——靜默失敗會留整庫明文,Codex #4）。
+
+        本機 Postgres 模式沒有容器暫存（cleanup_argv 回 None）,該檔即流程會 unlink 的本機檔。"""
+        argv = self._pg.cleanup_argv(path)
+        if argv is None:
+            return
         try:
             r = subprocess.run(
-                [self._docker, "exec", self._container, "rm", "-f", path],
+                argv,
                 capture_output=True, timeout=60, check=False,
             )
             if r.returncode != 0:
@@ -200,8 +205,12 @@ class SubprocessR2RestoreBackend:
             os.chmod(self._dir, 0o700)
         enc_local = self._dir / f"{target_db}.dump.enc"
         dump_local = self._dir / f"{target_db}.dump"
-        d, c, u = self._docker, self._container, self._user
-        container_dump = f"/tmp/lucamp_restore_{target_db}.dump"
+        # 容器模式:容器內唯一暫存名(前綴必須是 lucamp_restore_,scheduler 的殘留明文清掃靠它);
+        # 本機模式:就是 dump_local 本身。
+        staged = self._pg.staged_path(
+            name=f"lucamp_restore_{target_db}.dump", local=dump_local
+        )
+        pg_env = self._pg.env()
         try:
             # 1) 下載
             try:
@@ -224,20 +233,28 @@ class SubprocessR2RestoreBackend:
             )
             if not dump_local.is_file() or dump_local.stat().st_size == 0:
                 raise RestoreError("解密結果為空（口令錯誤或檔案損毀）")
-            # 3) 複製進容器（唯一名）
-            self._run([d, "cp", str(dump_local), f"{c}:{container_dump}"])
+            # 3) 容器模式才要複製進去;本機模式解密後的檔已經在工具看得到的位置
+            if self._pg.needs_staging:
+                self._run(self._pg.copy_in_argv(dump_local, staged), env=pg_env)
             # 4) 建全新庫（若殘留同名先移除;絕不碰正式庫）
-            self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
-                       "-c", f'DROP DATABASE IF EXISTS "{target_db}"',
-                       "-c", f'CREATE DATABASE "{target_db}"'])
+            self._run(
+                self._pg.argv(
+                    "psql", "-d", "postgres",
+                    "-c", f'DROP DATABASE IF EXISTS "{target_db}"',
+                    "-c", f'CREATE DATABASE "{target_db}"',
+                ),
+                env=pg_env,
+            )
             # 5) pg_restore 進 throwaway 庫
-            self._run([d, "exec", c, "pg_restore", "-U", u, "-d", target_db, "--no-owner",
-                       container_dump])
+            self._run(
+                self._pg.argv("pg_restore", "-d", target_db, "--no-owner", staged),
+                env=pg_env,
+            )
         finally:
             # 明文/密文/容器暫存各出口都清（不留可讀資料落地）
             dump_local.unlink(missing_ok=True)
             enc_local.unlink(missing_ok=True)
-            self._rm_container_file(container_dump)
+            self._rm_staged_file(staged)
 
     async def fetch_and_restore(
         self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
@@ -248,10 +265,14 @@ class SubprocessR2RestoreBackend:
         _validate_db_name(target_db)
         if not target_db.startswith("lucamp_restore_"):  # 防呆:只丟 throwaway 還原庫
             raise RestoreError("drop_database 目標非 throwaway 還原庫,拒絕")
-        d, c, u = self._docker, self._container, self._user
         # WITH (FORCE) 踢掉殘餘連線後刪（PG13+）;僅丟還原庫,絕不動正式庫
-        self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
-                   "-c", f'DROP DATABASE IF EXISTS "{target_db}" WITH (FORCE)'])
+        self._run(
+            self._pg.argv(
+                "psql", "-d", "postgres",
+                "-c", f'DROP DATABASE IF EXISTS "{target_db}" WITH (FORCE)',
+            ),
+            env=self._pg.env(),
+        )
 
     async def drop_database(self, *, target_db: str) -> None:
         await asyncio.to_thread(self._drop, target_db)

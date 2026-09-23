@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.modules.backup.backend import BackupBackend, SubprocessR2Backend
 from app.modules.backup.models import BackupRun, RestoreRun
+from app.modules.backup.pg_exec import PgExec, build_pg_exec
 from app.modules.backup.restore import (
     RestoreBackend,
     RestoreVerifier,
@@ -45,18 +46,36 @@ def db_name_from_url(database_url: str) -> str:
     return make_url(database_url).database or "postgres"
 
 
+
+def build_pg_exec_from_config() -> PgExec:
+    """由設定與 DATABASE_URL 組出 Postgres 工具的執行方式（容器內／本機原生）。
+
+    連線參數刻意取自 DATABASE_URL 而非另設一組：多一組就有兩份真相,備份跑去打另一個庫
+    卻照樣回報成功是最糟的情況。
+    """
+    cfg = get_settings()
+    url = make_url(cfg.database_url)
+    return build_pg_exec(
+        mode=cfg.backup_pg_mode,
+        docker_bin=cfg.backup_docker_bin,
+        container=cfg.backup_db_container,
+        pg_bin_dir=cfg.backup_pg_bin_dir,
+        host=url.host or "127.0.0.1",
+        port=url.port or 5432,
+        user=url.username or "postgres",
+        password=url.password or "",
+    )
+
+
 def build_backup_backend() -> BackupBackend | None:
     """由 config 建真後端;R2/AES 口令未設定（空字串）→ 回 None（tick 不備份,改由健康度頁告警,
-    非靜默失敗）。db_user 由 DATABASE_URL 取。憑證/口令來自 .env.r2,不入 DB/log。"""
+    非靜默失敗）。連線參數見 build_pg_exec_from_config。憑證/口令來自 .env.r2,不入 DB/log。"""
     cfg = get_settings()
     if not cfg.r2_backup_passphrase.strip() or not cfg.r2_access_key_id.strip():
         return None
-    url = make_url(cfg.database_url)
     try:
         return SubprocessR2Backend(
-            docker_bin=cfg.backup_docker_bin,
-            db_container=cfg.backup_db_container,
-            db_user=url.username or "postgres",
+            pg_exec=build_pg_exec_from_config(),
             local_dir=cfg.backup_local_dir,
             passphrase=cfg.r2_backup_passphrase,
             r2_endpoint=cfg.r2_endpoint,
@@ -168,12 +187,9 @@ def build_restore_backend() -> RestoreBackend | None:
     cfg = get_settings()
     if not cfg.r2_backup_passphrase.strip() or not cfg.r2_access_key_id.strip():
         return None
-    url = make_url(cfg.database_url)
     try:
         return SubprocessR2RestoreBackend(
-            docker_bin=cfg.backup_docker_bin,
-            db_container=cfg.backup_db_container,
-            db_user=url.username or "postgres",
+            pg_exec=build_pg_exec_from_config(),
             local_dir=cfg.backup_local_dir,
             passphrase=cfg.r2_backup_passphrase,
             r2_endpoint=cfg.r2_endpoint,
@@ -266,7 +282,11 @@ async def reconcile_orphaned_jobs(session: AsyncSession) -> tuple[int, int]:
 
 
 def _sweep_container_plaintext_sync() -> None:
+    """清容器 /tmp 的殘留整庫明文。本機 Postgres 模式沒有容器,直接跳過——本機的殘留檔由
+    備份/還原流程的 finally 自己 unlink,不需要（也無法）用 docker 去掃。"""
     cfg = get_settings()
+    if cfg.backup_pg_mode != "docker":
+        return
     subprocess.run(
         [cfg.backup_docker_bin, "exec", cfg.backup_db_container, "sh", "-c",
          "rm -f /tmp/lucamp_backup_*.dump /tmp/lucamp_restore_*.dump"],

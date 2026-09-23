@@ -1,4 +1,4 @@
-"""備份後端抽象（docs/31 §4）：把「dump→驗證→加密→上傳→修剪」的外部程序（docker/openssl/boto3）
+"""備份後端抽象（docs/31 §4）：把「dump→驗證→加密→上傳→修剪」的外部程序（pg_dump/openssl/boto3）
 包成可注入介面,service 的狀態機才可用假替身單元測試,不真的 dump/上傳。
 
 真實作 `SubprocessR2Backend` 為 docs/28 runbook 的程式化版本(已人工演練驗證):所有步驟任一失敗
@@ -16,11 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from app.modules.backup.pg_exec import PgExec
 from app.shared.exceptions import BackupError
 
 logger = logging.getLogger(__name__)
 
-# 單一外部子程序上限（秒）：掛住的 docker/pg_dump/openssl 逾時即失敗,不讓工作永久 RUNNING。
+# 單一外部子程序上限（秒）：掛住的 pg_dump/openssl 逾時即失敗,不讓工作永久 RUNNING。
 # 10 分足以應付單店規模（實際數秒）;定得比 stale-reaper 門檻低很多,避免 reaper 誤殺還在跑的工作。
 _SUBPROC_TIMEOUT = 600
 
@@ -59,17 +60,17 @@ def _sha256_and_size(path: Path) -> tuple[str, int]:
 
 
 class SubprocessR2Backend:
-    """真後端:docker exec pg_dump → pg_restore --list 驗 → 加密 → sha256 → boto3 上傳 R2 → 修剪。
+    """真後端:pg_dump → pg_restore --list 驗 → 加密 → sha256 → boto3 上傳 R2 → 修剪。
 
-    與 docs/28 §1 同流程。所有阻塞呼叫以 asyncio.to_thread 移出事件迴圈。憑證/口令建構子注入。
+    與 docs/28 §1 同流程。Postgres 工具怎麼跑（容器內／本機原生）由注入的 `pg_exec` 決定,
+    本類別不再知道 docker 的存在。所有阻塞呼叫以 asyncio.to_thread 移出事件迴圈。
+    憑證/口令建構子注入。
     """
 
     def __init__(
         self,
         *,
-        docker_bin: str,
-        db_container: str,
-        db_user: str,
+        pg_exec: PgExec,
         local_dir: str,
         passphrase: str,
         r2_endpoint: str,
@@ -79,9 +80,7 @@ class SubprocessR2Backend:
     ) -> None:
         if not passphrase.strip() or not r2_access_key_id.strip() or not r2_bucket.strip():
             raise BackupError("雲端備份的金鑰尚未設定，請聯絡系統維護者")
-        self._docker = docker_bin
-        self._container = db_container
-        self._user = db_user
+        self._pg = pg_exec
         self._dir = Path(local_dir)
         self._passphrase = passphrase
         self._endpoint = r2_endpoint
@@ -112,12 +111,18 @@ class SubprocessR2Backend:
         except OSError as exc:
             raise BackupError(f"備份子程序無法執行:{exc.__class__.__name__}") from exc
 
-    def _rm_container_file(self, path: str) -> None:
+    def _rm_staged_file(self, path: str) -> None:
         """刪容器內明文(finally 用;不 raise,但失敗**必記 log**——這是整庫明文的唯一清理,靜默失敗
-        會讓 PII dump 無限期留在容器,Codex 第五輪 #4）。有 timeout,避免掛住。"""
+        會讓 PII dump 無限期留在容器,Codex 第五輪 #4）。有 timeout,避免掛住。
+
+        本機 Postgres 模式沒有容器暫存（cleanup_argv 回 None）,該檔就是流程 finally 會 unlink
+        的本機檔,這裡直接跳過。"""
+        argv = self._pg.cleanup_argv(path)
+        if argv is None:
+            return
         try:
             r = subprocess.run(
-                [self._docker, "exec", self._container, "rm", "-f", path],
+                argv,
                 capture_output=True, timeout=60, check=False,
             )
             if r.returncode != 0:
@@ -131,23 +136,25 @@ class SubprocessR2Backend:
             os.chmod(self._dir, 0o700)  # 目錄含明文/密文,限本使用者
         dump_local = self._dir / f"{db_name}_{stamp}.dump"
         enc_local = self._dir / f"{db_name}_{stamp}.dump.enc"
-        d, c, u = self._docker, self._container, self._user
-        # 唯一容器暫存名(避免並發互踩;且下方 finally 一定清掉,不留整庫明文於容器)
-        container_dump = f"/tmp/lucamp_backup_{db_name}_{stamp}.dump"
+        # dump 落點:容器模式是容器內唯一暫存名(避免並發互踩,finally 一定清掉);
+        # 本機模式就是 dump_local 本身,不必搬進搬出。
+        staged = self._pg.staged_path(
+            name=f"lucamp_backup_{db_name}_{stamp}.dump", local=dump_local
+        )
+        pg_env = self._pg.env()
         succeeded = False
         try:
-            # 1) 容器內 dump(custom format,含 BYTEA 簽名)
-            self._run(
-                [d, "exec", c, "pg_dump", "-U", u, "-Fc", "-d", db_name, "-f", container_dump]
-            )
+            # 1) dump(custom format,含 BYTEA 簽名)
+            self._run(self._pg.argv("pg_dump", "-Fc", "-d", db_name, "-f", staged), env=pg_env)
             # 2) 驗 dump 可讀(空/壞檔在此擋下)
-            self._run([d, "exec", c, "pg_restore", "--list", container_dump])
-            # 3) 複製出容器(host 明文,權限 0600)
-            self._run([d, "exec", c, "cat", container_dump], stdout_to=dump_local)
+            self._run(self._pg.argv("pg_restore", "--list", staged), env=pg_env)
+            # 3) 容器模式才要複製出來;本機模式 pg_dump 已經直接寫在 dump_local
+            if self._pg.needs_staging:
+                self._run(self._pg.copy_out_argv(staged), stdout_to=dump_local, env=pg_env)
             if not dump_local.is_file() or dump_local.stat().st_size == 0:
                 raise BackupError("dump 檔為空,拒絕記成功")
             with contextlib.suppress(OSError):
-                os.chmod(dump_local, 0o600)
+                os.chmod(dump_local, 0o600)  # host 明文,權限 0600
             # 4) 加密(AES-256-CBC + PBKDF2 20 萬次);口令走 env:不進 argv/ps
             self._run(
                 [
@@ -171,7 +178,7 @@ class SubprocessR2Backend:
             dump_local.unlink(missing_ok=True)
             if not succeeded:
                 enc_local.unlink(missing_ok=True)
-            self._rm_container_file(container_dump)
+            self._rm_staged_file(staged)
 
     def _client(self) -> object:
         import boto3  # type: ignore[import-untyped]  # 函式內 import:boto3 較重,僅備份路徑需要
