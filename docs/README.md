@@ -37,6 +37,7 @@
 - [贈品與臨時折扣：審查交接筆記](./33-gift-discount-handover.md)
 - [餐飲內用桌號與出餐單](./35-dine-in-table-and-kitchen-ticket.md)
 - [手開紙本發票登記](./36-manual-paper-invoice.md)
+- [MacBook 正式機：讓區網平板也能列印](./41-macbook-lan-tablet-printing.md)
 
 ## 評估與後續實作
 
