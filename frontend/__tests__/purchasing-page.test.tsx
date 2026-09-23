@@ -876,6 +876,46 @@ describe("/purchasing/new 建立採購單", () => {
     expect((screen.getByLabelText("數量 瓦斯罐") as HTMLInputElement).value).toBe("3");
   });
 
+  it("同一批商品再次帶入、建議數量變了：用這次的數量，不沿用上次的快取（Codex 第二輪）", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (new URL(url).pathname.endsWith("/catalog-products/42")) return json(CATALOG);
+      return json([]);
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrap = (node: ReactNode) => (
+      <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>
+    );
+    nav.search = "reorder=42:3";
+    const first = render(wrap(<NewPurchaseOrderPage />));
+    await waitFor(() =>
+      expect((screen.getByLabelText("數量 瓦斯罐") as HTMLInputElement).value).toBe("3"),
+    );
+    first.unmount();
+    nav.search = "reorder=42:1";
+    render(wrap(<NewPurchaseOrderPage />));
+    await waitFor(() =>
+      expect((screen.getByLabelText("數量 瓦斯罐") as HTMLInputElement).value).toBe("1"),
+    );
+  });
+
+  it("帶入的商品讀取失敗：顯示錯誤可重試，不默默少一項（Codex 第二輪）", async () => {
+    loginAs("CLERK");
+    let fail = true;
+    stubFetch((url) => {
+      if (new URL(url).pathname.endsWith("/catalog-products/42"))
+        return fail ? json({ detail: "暫時讀不到" }, 500) : json(CATALOG);
+      return json([]);
+    });
+    const user = userEvent.setup();
+    renderNew("reorder=42:3");
+    expect(await screen.findByText(/低庫存商品讀取失敗/)).toBeTruthy();
+    expect(screen.queryByLabelText("數量 瓦斯罐")).toBeNull();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "重新讀取" }));
+    expect(await screen.findByLabelText("數量 瓦斯罐")).toBeTruthy();
+  });
+
   it("從低庫存「補貨」進來：該品已在明細，數量預設補到補貨點", async () => {
     loginAs("CLERK");
     stubFetch((url) => {

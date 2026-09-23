@@ -145,19 +145,30 @@ export function CreatePurchaseOrderForm({
   // 低庫存帶入：只在第一次拿到商品時放進明細（之後店員移除的不會被加回來）。
   const seeded = useRef(false);
   const reorderProducts = useQuery({
-    queryKey: ["catalog-products", "reorder", initialItems.map((item) => item.id).join(",")],
+    // 鍵要含數量：同一批商品隔一陣子再帶入時缺口可能變了，不可沿用上次的快取。
+    queryKey: [
+      "catalog-products",
+      "reorder",
+      initialItems.map((item) => `${item.id}:${item.qty ?? ""}`).join(","),
+    ],
     enabled: initialItems.length > 0,
     queryFn: async () =>
       (
         await Promise.all(
           initialItems.map(async ({ id, qty }) => {
-            const { data } = await api.GET("/api/v1/catalog-products/{product_id}", {
-              params: { path: { product_id: id } },
-            });
+            const { data, error, response } = await api.GET(
+              "/api/v1/catalog-products/{product_id}",
+              { params: { path: { product_id: id } } },
+            );
+            // 商品已不存在（404）才略過；其他失敗要讓整批失敗、顯示可重試，
+            // 否則那項會默默從補貨單上消失。
+            if (!data) {
+              if (response.status === 404) return [];
+              throw new Error(extractDetail(error) ?? "讀取商品失敗");
+            }
             // 優先用提示算好的數量（已扣在途）；沒帶就補到補貨點（至少 1）。
-            return data
-              ? [{ product: data, qty: qty ?? Math.max(1, data.reorder_point - data.quantity_on_hand) }]
-              : [];
+            const suggested = qty ?? Math.max(1, data.reorder_point - data.quantity_on_hand);
+            return [{ product: data, qty: suggested }];
           }),
         )
       ).flat(),
@@ -371,6 +382,19 @@ export function CreatePurchaseOrderForm({
         <h2>
           <span className="pur-step-no">2</span>採購明細
         </h2>
+
+        {reorderProducts.isError && (
+          <div role="alert" className="form-error pur-reorder-error">
+            低庫存商品讀取失敗（{reorderProducts.error.message}），還沒帶進明細。
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void reorderProducts.refetch()}
+            >
+              重新讀取
+            </button>
+          </div>
+        )}
 
         {lines.length === 0 ? (
           <p className="empty-state">還沒有商品。用下方搜尋加入既有商品，或新增一個商品。</p>
