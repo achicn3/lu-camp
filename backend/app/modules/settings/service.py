@@ -14,6 +14,7 @@ from app.core.audit import write_audit_log
 from app.core.config import get_settings as get_app_settings
 from app.modules.settings.defaults import (
     DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
+    DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
     DEFAULT_BACKUP_ENABLED,
     DEFAULT_BACKUP_INTERVAL_HOURS,
     DEFAULT_BACKUP_OFFPEAK_HOUR,
@@ -78,6 +79,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         # 餐飲內用（docs/35）：暫態預設同上理；清單複製一份，避免共用模組層 list。
         dine_in_tables=list(DEFAULT_DINE_IN_TABLES),
         print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
+        auto_print_acquisition_labels=DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
     )
 
 

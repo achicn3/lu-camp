@@ -141,6 +141,10 @@ class StoreSettings(Base, TimestampMixin):
     print_kitchen_ticket: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
     )
+    # 收購送出後自動印標籤（2026-09-23 收購 UX）：幾乎每筆都要印，預設開；櫃台沒接標籤機可關。
+    auto_print_acquisition_labels: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
 
 
 class PremiumRateHistory(Base):

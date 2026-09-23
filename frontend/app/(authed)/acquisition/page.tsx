@@ -37,6 +37,7 @@ import {
   type AcquisitionDraft,
   type ItemDraft,
   type LotDraft,
+  serializedRowErrors,
   validateDraft,
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
@@ -120,7 +121,15 @@ function emptyLot(): LotDraft {
   };
 }
 
-type Row = ItemDraft & { estimatedResale: string; rowKey: string; qty: string; discount: string; costManual: boolean };
+type Row = ItemDraft & {
+  estimatedResale: string;
+  rowKey: string;
+  qty: string;
+  discount: string;
+  costManual: boolean;
+  /** 已填好、收合成一行摘要（新增下一列時自動收合，點摘要可展開再改）。 */
+  collapsed?: boolean;
+};
 
 // ── 賣方/寄售人 ──
 function SellerSection({
@@ -376,6 +385,35 @@ function ItemNameField({
 }
 
 // ── 鑑價列（買斷/寄售）──
+// ── 已填好的列：收合成一行摘要（一次收多件時不必一路往下捲）──
+function CollapsedRow({
+  index,
+  row,
+  type,
+  onExpand,
+}: {
+  index: number;
+  row: Row;
+  type: AcqType;
+  onExpand: () => void;
+}) {
+  const qty = type === "BUYOUT" ? Math.max(1, parseNtd(row.qty) ?? 1) : 1;
+  const cost = parseNtd(row.acquisitionCost);
+  const listed = parseNtd(row.listedPrice);
+  const parts = [
+    row.name,
+    row.grade ? GRADE_LABEL[row.grade] : "未選成色",
+    type === "BUYOUT" && cost !== null ? `收 ${formatNtd(cost)}${qty > 1 ? ` × ${qty}` : ""}` : null,
+    listed !== null ? `售 ${formatNtd(listed)}` : null,
+  ].filter((part): part is string => part !== null && part !== "");
+  return (
+    <button type="button" className="card acq-row-collapsed" onClick={onExpand}>
+      <span className="acq-row-collapsed-no">編輯第 {index + 1} 列</span>
+      <span>{parts.join("・")}</span>
+    </button>
+  );
+}
+
 function ItemRowCard({
   type,
   index,
@@ -909,10 +947,13 @@ function PrintLabelsAction({
   codes,
   lot,
   basket = null,
+  autoStart = false,
 }: {
   codes: string[];
   lot: string | null;
   basket?: string | null;
+  /** 設定「收購送出後自動印標籤」：畫面一出來就送印一次，店員不必再按。 */
+  autoStart?: boolean;
 }) {
   const total = codes.length + (lot !== null ? 1 : 0) + (basket !== null ? 1 : 0);
 
@@ -978,6 +1019,19 @@ function PrintLabelsAction({
     },
   });
 
+  // 只自動送一次。延到下一輪事件才送、卸下時取消：React 嚴格模式會先掛上→卸下→再掛上，
+  // 若第一次掛上就送，結果綁在被卸掉的那個實例上，畫面會永遠停在「列印中」。
+  const autoStarted = useRef(false);
+  const { mutate: startPrint } = print;
+  useEffect(() => {
+    if (!autoStart || total === 0 || autoStarted.current) return;
+    const timer = setTimeout(() => {
+      autoStarted.current = true;
+      startPrint();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [autoStart, total, startPrint]);
+
   if (total === 0) return null;
 
   return (
@@ -988,10 +1042,16 @@ function PrintLabelsAction({
         onClick={() => print.mutate()}
         disabled={print.isPending}
       >
-        {print.isPending ? "列印中…" : `列印標籤（${total} 張）`}
+        {print.isPending
+          ? "列印中…"
+          : print.isSuccess
+            ? `重新列印標籤（${total} 張）`
+            : `列印標籤（${total} 張）`}
       </button>
       {print.isSuccess && (
-        <p className="form-success">已送出 {print.data} 張標籤。</p>
+        <p className="form-success">
+          {autoStart ? "已自動送出列印" : "已送出"} {print.data} 張標籤。
+        </p>
       )}
       {print.isError && (
         <p className="form-error">列印失敗：{print.error.message}</p>
@@ -1091,6 +1151,8 @@ export default function AcquisitionPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<{
     acquisitionId: number;
+    /** 這筆的賣方：完成後可一鍵「繼續收這位賣方」，不必重新搜尋。 */
+    seller: Contact | null;
     type: AcquisitionType;
     codes: string[];
     lot: string | null;
@@ -1105,6 +1167,12 @@ export default function AcquisitionPage() {
   } | null>(null);
   // 作廢剛建立的這筆（限管理者）：開啟確認對話框／顯示作廢結果。
   const [voidTarget, setVoidTarget] = useState<number | null>(null);
+  // 送出成功後捲到完成卡片：送出鈕固定在畫面底部，卡片卻在頁尾，不捲過去看不到結果。
+  const resultRef = useRef<HTMLDivElement>(null);
+  const resultId = result?.acquisitionId ?? null;
+  useEffect(() => {
+    if (resultId !== null) resultRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [resultId]);
   const [voidedNote, setVoidedNote] = useState<string | null>(null);
   // 開錢櫃失敗提示（docs/10 §5：收購已成立，代理離線只提示、不可擋流程）。
   const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
@@ -1205,6 +1273,13 @@ export default function AcquisitionPage() {
   const payable = isBulk
     ? parseNtd(lot.acquisitionCost) ?? 0
     : rowsPayableTotal(rows, type);  // 每列＝每件收購價 × 件數（非買斷一律 1 件）
+  // 摘要列的件數：同款多件只在買斷有意義（寄售一列就是一件）；散裝看這批件數。
+  const itemCount = isBulk
+    ? parseNtd(lot.totalQty) ?? 0
+    : rows.reduce(
+        (sum, row) => sum + (type === "BUYOUT" ? Math.max(1, parseNtd(row.qty) ?? 1) : 1),
+        0,
+      );
   // 已簽切結 → 撥款以客人所選為準（D7），否則用店員選的（非手持流程）。
   const effectivePayout: PayoutMethod =
     signed && signedPayout ? signedPayout : payoutMethod;
@@ -1332,6 +1407,7 @@ export default function AcquisitionPage() {
       }
       setResult({
         acquisitionId: data.acquisition_id,
+        seller,
         type: data.type,
         codes: data.item_codes,
         lot: data.lot_code,
@@ -1511,6 +1587,16 @@ export default function AcquisitionPage() {
     }
     if (found.length > 0) {
       setErrors(found);
+      // 出錯的列若是收合的，展開它：錯誤訊息只在頁尾、那列卻是一行摘要，店員找不到要改哪裡。
+      if (!isBulk) {
+        setRows((prev) =>
+          prev.map((row, index) =>
+            row.collapsed && serializedRowErrors(type, index, row).length > 0
+              ? { ...row, collapsed: false }
+              : row,
+          ),
+        );
+      }
       return;
     }
     submit.mutate();
@@ -1526,7 +1612,6 @@ export default function AcquisitionPage() {
   return (
     <section className="acq">
       <h1 className="page-title">收購鑑價入庫</h1>
-      <ReprintAcquisitionReceipt />
 
       <fieldset
         className="acq-signature-lock"
@@ -1567,7 +1652,16 @@ export default function AcquisitionPage() {
         />
       ) : (
         <div className="acq-rows">
-          {rows.map((row, i) => (
+          {rows.map((row, i) =>
+            row.collapsed ? (
+              <CollapsedRow
+                key={row.rowKey}
+                index={i}
+                row={row}
+                type={type}
+                onExpand={() => patchRow(row.rowKey, { collapsed: false })}
+              />
+            ) : (
             <ItemRowCard
               key={row.rowKey}
               type={type}
@@ -1588,11 +1682,18 @@ export default function AcquisitionPage() {
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
             />
-          ))}
+            ),
+          )}
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => setRows((p) => [...p, emptyItem()])}
+            onClick={() =>
+              // 已填品名的列收合成一行摘要：一次收多件時不必一路往下捲。空白列保持展開。
+              setRows((p) => [
+                ...p.map((r) => (r.name.trim() ? { ...r, collapsed: true } : r)),
+                emptyItem(),
+              ])
+            }
           >
             ＋ 新增一列
           </button>
@@ -1735,17 +1836,28 @@ export default function AcquisitionPage() {
         </div>
       )}
 
-      <button
-        type="button"
-        className="btn-primary acq-submit"
-        onClick={onSubmit}
-        disabled={submit.isPending || recoveryNeeded || (signTaskId != null && !signed)}
-      >
-        送出收購
-      </button>
+      {/* 底部固定摘要：件數與應付一直看得到，送出不必捲到最底。 */}
+      <div className="card acq-summary-bar" role="region" aria-label="收購摘要">
+        <p>
+          共 {itemCount} 件
+          {!isConsignment && (
+            <>
+              ・應付 <strong className="money">{formatNtd(payable)}</strong>
+            </>
+          )}
+        </p>
+        <button
+          type="button"
+          className="btn-primary acq-submit"
+          onClick={onSubmit}
+          disabled={submit.isPending || recoveryNeeded || (signTaskId != null && !signed)}
+        >
+          送出收購
+        </button>
+      </div>
 
       {result !== null && (
-        <div className="card form-success acq-result">
+        <div className="card form-success acq-result" ref={resultRef}>
           <p>收購完成（單號 #{result.acquisitionId}）。</p>
           {drawerNotice !== null && (
             <p role="alert" className="form-error">
@@ -1759,6 +1871,7 @@ export default function AcquisitionPage() {
             <p className="hint">已加入販售籃，沿用籃上原本的標籤，不必重印。</p>
           ) : null}
           <PrintLabelsAction
+            autoStart={settings.data?.auto_print_acquisition_labels ?? false}
             codes={result.codes}
             // 入籃的散裝貼籃子的標籤（多次收購共用一張），不印這批自己的。
             lot={result.basket === null ? result.lot : null}
@@ -1776,6 +1889,18 @@ export default function AcquisitionPage() {
               </button>
               {receiptNote !== null && <p className="hint">{receiptNote}</p>}
             </div>
+          )}
+          {result.seller !== null && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setSeller(result.seller);
+                setResult(null);
+              }}
+            >
+              繼續收這位賣方（{result.seller.name}）
+            </button>
           )}
           {voidedNote === null && isManager && canVoid({ voided_at: null, type: result.type }) && (
             <button
@@ -1803,7 +1928,12 @@ export default function AcquisitionPage() {
         />
       )}
 
-      {isManager && <VoidAcquisitionSection />}
+      {/* 少用的功能收在最下面，頁面一打開就是收購表單。 */}
+      <details className="acq-more">
+        <summary>更多操作：補印收購憑證聯{isManager ? "、作廢收購" : ""}</summary>
+        <ReprintAcquisitionReceipt />
+        {isManager && <VoidAcquisitionSection />}
+      </details>
     </section>
   );
 }

@@ -152,3 +152,18 @@ async def test_purchase_default_margin_must_stay_in_range(
         "/api/v1/settings", json={"purchase_default_margin_pct": bad}, headers=_auth(token)
     )
     assert resp.status_code == 422, resp.text
+
+
+async def test_acquisition_label_auto_print_defaults_on_and_can_be_turned_off(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收購送出後自動印標籤：幾乎每筆都要印，預設開；店主可關（2026-09-23 收購 UX）。"""
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    got = await client.get("/api/v1/settings", headers=_auth(token))
+    assert got.json()["auto_print_acquisition_labels"] is True
+    resp = await client.patch(
+        "/api/v1/settings", json={"auto_print_acquisition_labels": False}, headers=_auth(token)
+    )
+    assert resp.status_code == 200, resp.text
+    again = await client.get("/api/v1/settings", headers=_auth(token))
+    assert again.json()["auto_print_acquisition_labels"] is False

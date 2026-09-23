@@ -11770,6 +11770,10 @@
             "title": "Allow Clerk Manage Categories",
             "type": "boolean"
           },
+          "auto_print_acquisition_labels": {
+            "title": "Auto Print Acquisition Labels",
+            "type": "boolean"
+          },
           "backup_enabled": {
             "title": "Backup Enabled",
             "type": "boolean"
@@ -11896,7 +11900,8 @@
           "backup_retention",
           "backup_offpeak_hour",
           "dine_in_tables",
-          "print_kitchen_ticket"
+          "print_kitchen_ticket",
+          "auto_print_acquisition_labels"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -11914,6 +11919,17 @@
               }
             ],
             "title": "Allow Clerk Manage Categories"
+          },
+          "auto_print_acquisition_labels": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Print Acquisition Labels"
           },
           "backup_enabled": {
             "anyOf": [

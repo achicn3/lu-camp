@@ -40,6 +40,7 @@ const SETTINGS = {
   // 餐飲內用（docs/35）：後端一律回這兩欄；缺了會讓桌號清單卡片整張渲染不出來。
   dine_in_tables: ["A1", "A2"],
   print_kitchen_ticket: true,
+  auto_print_acquisition_labels: true,
 };
 
 const SUGGESTION = {
@@ -305,6 +306,28 @@ describe("/settings", () => {
     expect(parsed.default_commission_pct).toBe(40);
     // 未變更的欄位不應被送出
     expect(parsed).not.toHaveProperty("premium_rate");
+  });
+
+  it("可關掉「收購送出後自動印標籤」，只送這一欄", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json({ ...SETTINGS, auto_print_acquisition_labels: false });
+      }
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    const toggle = (await screen.findByLabelText(/收購送出後自動印標籤/)) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(JSON.parse(bodies[0])).toEqual({ auto_print_acquisition_labels: false });
   });
 
   it("月固定現金支出儲存後保留成功提示，重新抓取後顯示新金額", async () => {

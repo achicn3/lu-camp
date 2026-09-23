@@ -74,6 +74,7 @@ function GeneralSettingsCard({
 
     const einvoiceEnabled = form.get("einvoice_enabled") === "on";
     const allowClerkManageCategories = form.get("allow_clerk_manage_categories") === "on";
+    const autoPrintAcquisitionLabels = form.get("auto_print_acquisition_labels") === "on";
     const taxRateRaw = String(form.get("tax_rate") ?? "");
     const commissionRaw = String(form.get("default_commission_pct") ?? "");
     const marginRaw = String(form.get("default_margin_pct") ?? "");
@@ -130,6 +131,8 @@ function GeneralSettingsCard({
     if (einvoiceEnabled !== settings.einvoice_enabled) body.einvoice_enabled = einvoiceEnabled;
     if (allowClerkManageCategories !== settings.allow_clerk_manage_categories)
       body.allow_clerk_manage_categories = allowClerkManageCategories;
+    if (autoPrintAcquisitionLabels !== settings.auto_print_acquisition_labels)
+      body.auto_print_acquisition_labels = autoPrintAcquisitionLabels;
     // 以數值比較（非字串）：後端預設可能回 "0.05"，前端顯示 5% 會重組成 "0.0500"，
     // 字串不等但數值相同 → 否則會誤判為變更、送出空操作 PATCH 並產生假稽核紀錄。
     if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
@@ -237,6 +240,14 @@ function GeneralSettingsCard({
           required
         />
         <span className="hint">非餐飲消費未達此金額則不可折抵購物金（內用餐飲一律不計入）。</span>
+      </label>
+      <label className="field field-toggle">
+        <input
+          type="checkbox"
+          name="auto_print_acquisition_labels"
+          defaultChecked={settings.auto_print_acquisition_labels}
+        />
+        <span>收購送出後自動印標籤（櫃台沒接標籤機時可關掉）</span>
       </label>
       <label className="field field-toggle">
         <input

@@ -48,6 +48,7 @@ DEFAULT_BACKUP_OFFPEAK_HOUR = 21  # 晚上 9 點（打烊後離峰）；過此�
 # 不讓店員自由打字繞過）。出餐單預設開——會用到餐飲的店，吧台一定需要這張紙。
 DEFAULT_DINE_IN_TABLES: list[str] = []
 DEFAULT_PRINT_KITCHEN_TICKET = True
+DEFAULT_AUTO_PRINT_ACQUISITION_LABELS = True
 # 桌號清單邊界：單一桌號最長 20 字（與 sales.table_no 欄寬一致）、最多 50 桌。
 MAX_DINE_IN_TABLE_LENGTH = 20
 MAX_DINE_IN_TABLES = 50

@@ -7873,6 +7873,8 @@ export interface components {
         SettingsRead: {
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories: boolean;
+            /** Auto Print Acquisition Labels */
+            auto_print_acquisition_labels: boolean;
             /** Backup Enabled */
             backup_enabled: boolean;
             /** Backup Interval Hours */
@@ -7934,6 +7936,8 @@ export interface components {
         SettingsUpdateRequest: {
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories?: boolean | null;
+            /** Auto Print Acquisition Labels */
+            auto_print_acquisition_labels?: boolean | null;
             /** Backup Enabled */
             backup_enabled?: boolean | null;
             /** Backup Interval Hours */

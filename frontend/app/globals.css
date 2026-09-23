@@ -4232,3 +4232,51 @@ a.btn-ghost {
   color: var(--ink-soft);
   cursor: not-allowed;
 }
+
+/* 收購頁操作速度改善（2026-09-23）：底部固定摘要、填好的列收合、少用功能收進「更多操作」。 */
+.acq-summary-bar {
+  position: sticky;
+  bottom: var(--sp-3);
+  z-index: 5;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  max-width: none;
+  box-shadow: 0 -4px 16px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.acq-summary-bar p {
+  margin: 0;
+}
+.acq-summary-bar .acq-submit {
+  white-space: nowrap;
+}
+.acq-row-collapsed {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.acq-row-collapsed:hover {
+  border-color: var(--accent);
+}
+.acq-row-collapsed-no {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.acq-more {
+  margin-top: var(--sp-6);
+}
+.acq-more > summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  margin-bottom: var(--sp-3);
+}

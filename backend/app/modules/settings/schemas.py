@@ -56,6 +56,7 @@ class SettingsRead(BaseModel):
     # 餐飲內用（docs/35）
     dine_in_tables: list[str]
     print_kitchen_ticket: bool
+    auto_print_acquisition_labels: bool
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -105,6 +106,7 @@ class SettingsUpdateRequest(BaseModel):
     # 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）與出餐單開關。
     dine_in_tables: list[str] | None = None
     print_kitchen_ticket: bool | None = None
+    auto_print_acquisition_labels: bool | None = None
 
     @field_validator("dine_in_tables")
     @classmethod
