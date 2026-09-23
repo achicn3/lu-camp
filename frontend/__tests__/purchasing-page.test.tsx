@@ -443,6 +443,38 @@ describe("/purchasing/new 建立採購單", () => {
     await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/purchasing/7"));
   });
 
+  it("送出成功後、換頁完成前按鈕一直鎖住，不會重複建單（Codex 第三輪）", async () => {
+    loginAs("CLERK");
+    let posts = 0;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders") && init.method === "POST") {
+        posts += 1;
+        return json(ORDERED_PO, 201);
+      }
+      return null;
+    });
+    // 換頁很慢：push 被呼叫了，但頁面還沒換走。
+    nav.push.mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderNew();
+
+    await pickSupplier(user);
+    await user.type(screen.getByLabelText("搜尋一般商品"), "瓦斯");
+    await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
+    await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
+    await user.click(screen.getByRole("button", { name: "送出採購" }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/purchasing/7"));
+
+    const submit = screen.getByRole("button", { name: "已建立，前往明細…" }) as HTMLButtonElement;
+    const draft = screen.getByRole("button", { name: "已建立" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(draft.disabled).toBe(true);
+    await user.click(submit);
+    expect(posts).toBe(1);
+  });
+
   it("搜尋結果不顯示 SKU，改顯示品牌、售價與現量", async () => {
     loginAs("CLERK");
     stubFetch((url) => {

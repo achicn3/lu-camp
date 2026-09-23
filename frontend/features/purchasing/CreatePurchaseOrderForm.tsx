@@ -360,6 +360,9 @@ export function CreatePurchaseOrderForm({
 
   const total = draftTotal(lines);
   const submittable = canSubmitPo(supplierId, lines);
+  // 建立成功後到換頁完成前一直鎖住：明細頁載入慢時再按一次，會多開一張採購單。
+  const created = create.isSuccess;
+  const submitDisabled = !submittable || create.isPending || createProduct.isPending || created;
   const creating = newProductOpen || pendingCatalogCreate !== null;
   const locked = pendingCatalogCreate !== null || createProduct.isPending;
 
@@ -703,18 +706,18 @@ export function CreatePurchaseOrderForm({
           <button
             type="button"
             className="btn-secondary"
-            disabled={!submittable || create.isPending || createProduct.isPending}
+            disabled={submitDisabled}
             onClick={() => create.mutate(false)}
           >
-            {create.isPending ? "處理中…" : "存草稿"}
+            {create.isPending ? "處理中…" : created ? "已建立" : "存草稿"}
           </button>
           <button
             type="button"
             className="btn-primary"
-            disabled={!submittable || create.isPending || createProduct.isPending}
+            disabled={submitDisabled}
             onClick={() => create.mutate(true)}
           >
-            {create.isPending ? "處理中…" : "送出採購"}
+            {create.isPending ? "處理中…" : created ? "已建立，前往明細…" : "送出採購"}
           </button>
         </div>
       </div>
