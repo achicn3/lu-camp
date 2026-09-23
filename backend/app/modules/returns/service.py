@@ -6,11 +6,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time
 from decimal import Decimal
+from itertools import batched
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.db import ID_QUERY_BATCH
 from app.core.money import round_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -213,8 +215,14 @@ class ReturnsService:
     async def returned_qty_by_line_ids(
         self, store_id: int, sale_line_ids: list[int]
     ) -> dict[int, int]:
-        """指定明細**目前為止**的累計退貨量（報表逐行歸屬用）。"""
-        return await self._repo.returned_qty_by_sale_line_ids(store_id, sale_line_ids)
+        """指定明細**目前為止**的累計退貨量（報表逐行歸屬用）。
+
+        分批查：累積多年的明細 id 會超過 asyncpg 單一查詢 32,767 個參數的上限。
+        """
+        out: dict[int, int] = {}
+        for batch in batched(sale_line_ids, ID_QUERY_BATCH):
+            out.update(await self._repo.returned_qty_by_sale_line_ids(store_id, list(batch)))
+        return out
 
     async def returned_qty_by_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
         """該銷售各明細**目前為止**的累計退貨量。差額法退款要以它為基準。"""

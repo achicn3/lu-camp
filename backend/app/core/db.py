@@ -55,3 +55,8 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
     """FastAPI 依賴：產出一個 async session，結束時自動關閉。"""
     async with get_sessionmaker()() as session:
         yield session
+
+
+# 一次 IN (...) 查詢最多帶幾個 id。asyncpg 單一查詢上限 32,767 個參數；
+# 累積多年的明細／銷售 id 要分批查，否則報表會整張打不開。
+ID_QUERY_BATCH = 5000

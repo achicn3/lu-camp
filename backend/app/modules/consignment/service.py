@@ -9,12 +9,14 @@ returns 呼叫）。
 import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
+from itertools import batched
 from typing import Any, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog, write_audit_log
+from app.core.db import ID_QUERY_BATCH
 from app.core.money import consignment_breakdown, consignment_split, format_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
@@ -310,8 +312,14 @@ class ConsignmentService:
     async def effective_commission_by_sale_item(
         self, store_id: int, sale_ids: list[int]
     ) -> dict[tuple[int, int], Decimal]:
-        """(sale_id, serialized_item_id) → 有效抽成（退貨反轉記 0）；活動成效逐行歸屬用。"""
-        return await self._repo.effective_commission_by_sale_item(store_id, sale_ids)
+        """(sale_id, serialized_item_id) → 有效抽成（退貨反轉記 0）；活動成效逐行歸屬用。
+
+        分批查：累積多年的銷售 id 會超過 asyncpg 單一查詢 32,767 個參數的上限。
+        """
+        out: dict[tuple[int, int], Decimal] = {}
+        for batch in batched(sale_ids, ID_QUERY_BATCH):
+            out.update(await self._repo.effective_commission_by_sale_item(store_id, list(batch)))
+        return out
 
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的寄售抽成合計（SC-5b §5B 毛利；唯讀，§2 經 service）。"""

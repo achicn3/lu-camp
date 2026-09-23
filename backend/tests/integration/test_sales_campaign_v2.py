@@ -23,6 +23,7 @@ from app.main import create_app
 from app.modules.campaigns.schemas import CampaignTargetInput
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.consignment.service import ConsignmentService
 from app.modules.inventory.models import Brand, SerializedItem
 from app.modules.reports.service import ReportsService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
@@ -375,3 +376,17 @@ async def test_campaign_report_deducts_returned_lines(
     assert row.gross_turnover == Decimal(900)
     assert row.gross_margin == Decimal(800)
     assert row.transaction_count == 1
+
+
+async def test_report_lookups_survive_more_ids_than_the_driver_parameter_limit(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """asyncpg 一次查詢最多 32,767 個參數；累積多年的活動明細不能讓報表整張打不開（Codex 審查）。"""
+    many = list(range(1, 40_001))
+    assert await ReturnsService(db_session).returned_qty_by_line_ids(ctx["store_id"], many) == {}
+    assert (
+        await ConsignmentService(db_session).effective_commission_by_sale_item(
+            ctx["store_id"], many
+        )
+        == {}
+    )
