@@ -191,4 +191,15 @@ describe("收購紀錄清單", () => {
     wrap(<AcquisitionRecords />);
     expect(await screen.findByText("沒有符合的收購紀錄。")).toBeTruthy();
   });
+
+  it("按「重新整理」會重新判斷能不能作廢（例如剛去開帳回來）", async () => {
+    auth.role = "MANAGER";
+    stub();
+    const user = userEvent.setup();
+    wrap(<AcquisitionRecords />);
+    await waitFor(() => rowOf(12));
+    const before = listCalls().length;
+    await user.click(screen.getByRole("button", { name: "重新整理" }));
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(before));
+  });
 });

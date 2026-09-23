@@ -98,6 +98,8 @@ export function AcquisitionRecords() {
       if (!data) throw new Error(errorDetail(error) ?? "讀取收購紀錄失敗");
       return data;
     },
+    // 能不能作廢會隨外部狀態變（例如另一個分頁剛開帳）：切回來就重抓，另有「重新整理」鈕。
+    refetchOnWindowFocus: true,
   });
 
   function resetPage<T>(set: (value: T) => void) {
@@ -176,6 +178,14 @@ export function AcquisitionRecords() {
               </button>
             )}
           </form>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={list.isFetching}
+            onClick={() => void list.refetch()}
+          >
+            {list.isFetching ? "更新中…" : "重新整理"}
+          </button>
         </div>
       </div>
 
