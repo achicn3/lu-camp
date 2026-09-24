@@ -253,6 +253,7 @@ class _AppliedDiscount:
     allocations: tuple[tuple[int, Decimal], ...] = ()
     free_units: int = 0  # 本行有幾件是買 N 送 M「送的那件」（顯示用）
     buy_n_get_m_units: int = 0  # 本行有幾件成組參加買 N 送 M
+    buy_n_get_m_eligible: bool = False  # 本行可能參加買 N 送 M（可指定送這件）
 
     @staticmethod
     def full_price(unit_price: Decimal, qty: int) -> "_AppliedDiscount":
@@ -285,6 +286,7 @@ def _campaign_discount(priced: LinePrice, original_unit: Decimal, qty: int) -> _
         priced.allocations,
         priced.free_units,
         priced.buy_n_get_m_units,
+        priced.buy_n_get_m_eligible,
     )
 
 
@@ -397,7 +399,9 @@ class QuoteLine:
     free_units: int = 0
     """本行有幾件是買 N 送 M「送的那件」（顯示用；金額已按比例分攤到整組）。"""
     buy_n_get_m_units: int = 0
-    """本行有幾件成組參加了買 N 送 M（>free_units 時可「改送這件」）。"""
+    """本行有幾件成組參加了買 N 送 M。"""
+    buy_n_get_m_eligible: bool = False
+    """本行可能參加買 N 送 M（沒湊進組的也可以被指定「送這件」）。"""
 
 
 @dataclass(frozen=True)
@@ -3198,6 +3202,7 @@ class SalesService:
             campaigns=_line_campaigns(promos, disc),
             free_units=disc.free_units,
             buy_n_get_m_units=disc.buy_n_get_m_units,
+            buy_n_get_m_eligible=disc.buy_n_get_m_eligible,
         )
 
     @staticmethod

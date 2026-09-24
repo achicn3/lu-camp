@@ -418,8 +418,10 @@ class SaleQuoteLineRead(BaseModel):
     # 買 N 送 M：本行有幾件是「送的那件」（顯示用；金額已按比例分攤到整組，docs/40 P3）。
     # 分攤不整除時 unit_price 是平均單價，小計以 line_total／net_amount 為準。
     free_units: int = 0
-    # 本行有幾件成組參加了買 N 送 M（>free_units 時 POS 提供「改送這件」）。
+    # 本行有幾件成組參加了買 N 送 M。
     buy_n_get_m_units: int = 0
+    # 本行可能參加買 N 送 M：POS 據此提供「改送這件」（沒湊進組的也可以指定）。
+    buy_n_get_m_eligible: bool = False
 
 
 class SaleQuoteResponse(BaseModel):

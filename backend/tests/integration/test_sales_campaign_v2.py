@@ -691,3 +691,4 @@ async def test_quote_api_accepts_promo_free_and_reports_groups(
     assert body["total"] == "1400"
     assert [ln["free_units"] for ln in body["lines"]] == [0, 1, 0]
     assert [ln["buy_n_get_m_units"] for ln in body["lines"]] == [1, 1, 1]
+    assert all(ln["buy_n_get_m_eligible"] for ln in body["lines"])

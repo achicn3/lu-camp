@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
@@ -181,6 +181,8 @@ class LinePrice:
     """送的那件屬於哪個買 N 送 M 活動（沒有送的件為 None）。"""
     buy_n_get_m_units: int = 0
     """本行有幾件成組參加了買 N 送 M（含送的件）。"""
+    buy_n_get_m_eligible: bool = False
+    """本行可能參加買 N 送 M（有適用的活動）——沒湊進組的也可以被指定「送這件」。"""
 
     @property
     def list_total(self) -> Decimal:
@@ -275,15 +277,17 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
         and (not campaign.stackable or not u.non_stackable)
     ]
     use_list = not campaign.stackable
-    eligible.sort(
-        key=lambda u: -(u.list_price if use_list else u.price)
-    )  # 穩定排序：同價依購物車序
+
+    def price_of(u: _Unit) -> Decimal:
+        return u.list_price if use_list else u.price
+
+    eligible.sort(key=lambda u: -price_of(u))  # 穩定排序：同價依購物車序
     count = len(eligible) // size * size
     if count == 0:
         return
     # 每組前 N 件付錢、後 M 件（最便宜的）送；再依店員的指定調換送的那件。
     groups = [eligible[start : start + size] for start in range(0, count, size)]
-    _apply_free_requests(groups, eligible[count:], campaign.buy_qty)
+    _apply_free_requests(groups, eligible[count:], campaign.buy_qty, price_of)
     # (件, 折讓, 是否為送的那件)
     plans: list[tuple[_Unit, Decimal, bool]] = []
     for group in groups:
@@ -311,26 +315,37 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
         u.free_campaign = campaign.id if free else None
 
 
-def _apply_free_requests(groups: list[list[_Unit]], leftover: list[_Unit], buy_qty: int) -> None:
-    """店員指定送的件：在組內就跟該組預設送的那件對調；沒成組的就換掉最後一組送的那件。
+def _apply_free_requests(
+    groups: list[list[_Unit]],
+    leftover: list[_Unit],
+    buy_qty: int,
+    price_of: Callable[[_Unit], Decimal],
+) -> None:
+    """店員指定送的件放進送的位置（每組後 M 格）。
 
-    送的位置有限（每組 M 件）：指定超過的依排序（貴的先）取前面的，其餘不生效。
+    送的位置有限：指定的件依排序（貴的先）取前「組數×M」件，其餘指定不生效。
+    每件優先換掉自己那組預設送的件；自己那組的送位都被指定件佔了（或本來沒成組），
+    就換掉其他組（從最後一組找）還沒被指定佔用的送位。被換下的件回到它原本的位置。
     """
-    for unit in [u for group in groups for u in group[:buy_qty] if u.free_requested] + [
-        u for u in leftover if u.free_requested
-    ]:
-        home = next((g for g in groups if unit in g[:buy_qty]), None)
-        for group in [home] if home is not None else reversed(groups):
+    slots = sum(len(g) - buy_qty for g in groups)
+    ordered = [u for g in groups for u in g] + leftover
+    ordered.sort(key=lambda u: -price_of(u))  # 與分組同一把尺；穩定排序：同價依原本順序
+    chosen = [u for u in ordered if u.free_requested][:slots]
+    chosen_ids = {id(u) for u in chosen}
+    for unit in chosen:
+        home = next((g for g in groups if any(u is unit for u in g)), None)
+        if home is not None and any(u is unit for u in home[buy_qty:]):
+            continue  # 已經在送的位置
+        candidates = ([home] if home is not None else []) + list(reversed(groups))
+        for group in candidates:
             slot = next(
-                (i for i in range(buy_qty, len(group)) if not group[i].free_requested), None
+                (i for i in range(buy_qty, len(group)) if id(group[i]) not in chosen_ids), None
             )
             if slot is None:
                 continue
             displaced = group[slot]
-            if home is not None:
-                group[group.index(unit)] = displaced
-            else:
-                leftover[leftover.index(unit)] = displaced
+            origin = home if home is not None else leftover
+            origin[next(i for i, u in enumerate(origin) if u is unit)] = displaced
             group[slot] = unit
             break
 
@@ -407,4 +422,5 @@ def _line_price(cart_line: CartLine, mine: Sequence[_Unit]) -> LinePrice:
         sum(1 for u in mine if u.free_campaign is not None),
         next((u.free_campaign for u in mine if u.free_campaign is not None), None),
         sum(1 for u in mine if u.claimed),
+        buy_n_get_m_eligible=True,
     )

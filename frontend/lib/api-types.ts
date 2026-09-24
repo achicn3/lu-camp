@@ -7650,6 +7650,11 @@ export interface components {
          */
         SaleQuoteLineRead: {
             /**
+             * Buy N Get M Eligible
+             * @default false
+             */
+            buy_n_get_m_eligible: boolean;
+            /**
              * Buy N Get M Units
              * @default 0
              */

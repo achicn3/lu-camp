@@ -11140,6 +11140,11 @@
       "SaleQuoteLineRead": {
         "description": "試算單行輸出：折後實際成交＋折讓留痕。",
         "properties": {
+          "buy_n_get_m_eligible": {
+            "default": false,
+            "title": "Buy N Get M Eligible",
+            "type": "boolean"
+          },
           "buy_n_get_m_units": {
             "default": 0,
             "title": "Buy N Get M Units",

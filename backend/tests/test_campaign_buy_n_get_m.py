@@ -308,3 +308,33 @@ def test_choosing_one_line_of_several_units_frees_only_as_many_as_slots() -> Non
     [result] = price_cart([chosen(100, CANISTER, qty=3)], [bngm(9, 2, 1)])
     assert result.free_units == 1
     assert result.line_total == Decimal(200)
+
+
+def test_expensive_choice_wins_even_over_a_chosen_default_free_item() -> None:
+    """1000 與 400 都指定送、只有一個位置：依排序取貴的 1000（Codex 審查）。"""
+    result = price_cart(
+        [chosen(1000, item(1)), line(600, item(2)), chosen(400, item(3))], [bngm(9, 2, 1)]
+    )
+    assert [r.free_units for r in result] == [1, 0, 0]
+    assert sum(r.line_total for r in result) == Decimal(1000)
+
+
+def test_choice_moves_to_another_group_when_its_own_slot_is_taken() -> None:
+    """兩組買一送一（1000,900｜500,400），指定送 1000 與 900：各佔一組送的位置。"""
+    result = price_cart(
+        [chosen(1000, item(1)), chosen(900, item(2)), line(500, item(3)), line(400, item(4))],
+        [bngm(9, 1, 1)],
+    )
+    assert [r.free_units for r in result] == [1, 1, 0, 0]
+    assert sum(r.line_total for r in result) == Decimal(900)
+
+
+def test_leftover_line_is_reported_as_choosable() -> None:
+    result = price_cart(
+        [line(500, item(1)), line(400, item(2)), line(300, item(3)), line(200, item(4))],
+        [bngm(9, 2, 1)],
+    )
+    assert [r.buy_n_get_m_eligible for r in result] == [True, True, True, True]
+    assert result[3].buy_n_get_m_units == 0
+    other = price_cart([line(200, None)], [bngm(9, 2, 1)])
+    assert other[0].buy_n_get_m_eligible is False

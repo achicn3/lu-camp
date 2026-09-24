@@ -1535,7 +1535,7 @@ describe("/pos 結帳頁", () => {
     expect(screen.queryByText("平均單價")).toBeNull();
   });
 
-  it("買 N 送 M：成組但不是送的那件可「改送這件」，重新試算帶 promo_free（docs/40 P3b）", async () => {
+  it("買 N 送 M：可參加但不是送的那件（含落單的）可「改送這件」，重新試算帶 promo_free（docs/40 P3b）", async () => {
     const quoteBodies: Record<string, unknown>[] = [];
     stubFetch((url, method, body) => {
       if (url.includes("/settings")) return json(SETTINGS);
@@ -1565,7 +1565,9 @@ describe("/pos 結帳頁", () => {
               net_amount: chosen ? "1200" : "1500",
               campaigns: [{ campaign_id: 3, name: "買二送一", discount_amount: chosen ? "600" : "300" }],
               free_units: chosen ? 1 : 0,
-              buy_n_get_m_units: 1,
+              // 沒湊進組（落單）的件也能指定送這件（Codex 審查）。
+              buy_n_get_m_units: chosen ? 1 : 0,
+              buy_n_get_m_eligible: true,
             },
           ],
           food_subtotal: "0",

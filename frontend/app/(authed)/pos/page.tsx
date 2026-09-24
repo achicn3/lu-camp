@@ -2480,7 +2480,7 @@ export default function PosPage() {
                               不擠進右側操作欄（多一顆鈕會讓整欄換行、表格被壓扁）。 */}
                           {!isGift(line) &&
                             (line.promoFree ||
-                              (ql != null && ql.buy_n_get_m_units > ql.free_units)) && (
+                              (ql != null && ql.buy_n_get_m_eligible && ql.free_units < ql.qty)) && (
                               <button
                                 type="button"
                                 className="pos-promo-free-toggle"
