@@ -6,6 +6,7 @@
 - 寄售品不進組合包。
 """
 
+import time
 from decimal import Decimal
 
 from app.modules.campaigns.pricing import (
@@ -207,3 +208,60 @@ def test_overlapping_slots_find_a_valid_assignment() -> None:
     result = price_cart([line(200, a), line(100, b)], [offer])
     assert sum(r.line_total for r in result) == Decimal(150)
     assert all(r.bundle_groups for r in result)
+
+
+def _model(n: int) -> PromoItem:
+    return PromoItem(
+        kind=CampaignItemKind.OWNED_SERIALIZED, product_model_id=n, serialized_item_id=n
+    )
+
+
+def _slot(*models: int) -> BundleSlot:
+    return BundleSlot(qty=1, includes=tuple((CampaignTargetType.PRODUCT_MODEL, m) for m in models))
+
+
+def _custom_bundle(price: int, *slots: BundleSlot) -> PromoCampaign:
+    return PromoCampaign(
+        id=5,
+        name="自訂組",
+        discount_pct=None,
+        stackable=False,
+        item_kinds=KINDS,
+        kind=CampaignKind.BUNDLE,
+        bundle_price=Decimal(price),
+        bundle_slots=slots,
+    )
+
+
+def test_overlapping_slots_pick_the_most_valuable_combination() -> None:
+    """A=100、B=90、C=1；格子 {A,C}、{A,B}：該配 A+B（190＞150 才成組），不是 C+A（Codex 審查）。"""
+    cart = [line(100, _model(1)), line(90, _model(2)), line(1, _model(3))]
+    for slots in [(_slot(1, 3), _slot(1, 2)), (_slot(1, 2), _slot(1, 3))]:
+        result = price_cart(cart, [_custom_bundle(150, *slots)])
+        assert sum(r.line_total for r in result) == Decimal(151), slots
+        assert result[2].bundle_groups == ()
+
+
+def test_zero_priced_items_never_join_a_bundle() -> None:
+    """0 元品（收購允許）不進組合包：否則會被分到負的折讓、比原價還貴（Codex 審查）。"""
+    result = price_cart(
+        [line(0, _model(1)), line(100, _model(2))], [_custom_bundle(50, _slot(1), _slot(2))]
+    )
+    assert [r.line_total for r in result] == [Decimal(0), Decimal(100)]
+    assert all(r.discount_amount >= 0 for r in result)
+
+
+def test_bundle_matching_scales_to_the_unit_limit() -> None:
+    """上限 1 萬件（同款各 5000）：不可每湊一組就把同款重試一遍（曾經要 4.8 秒）。"""
+    other = PromoItem(kind=CampaignItemKind.CATALOG, catalog_product_id=GAS + 1)
+    offer = bundle(
+        5,
+        150,
+        (CampaignTargetType.CATALOG_PRODUCT, GAS, 1),
+        (CampaignTargetType.CATALOG_PRODUCT, GAS + 1, 1),
+    )
+    started = time.perf_counter()
+    result = price_cart([line(100, CANISTER, qty=5000), line(100, other, qty=5000)], [offer])
+    assert time.perf_counter() - started < 1.5
+    assert len(result[0].bundle_groups) == 5000
+    assert sum(r.line_total for r in result) == Decimal(150 * 5000)

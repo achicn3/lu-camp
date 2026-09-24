@@ -30,7 +30,6 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
-from itertools import islice
 
 from app.core.money import discounted_price
 from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
@@ -489,26 +488,30 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
     group_no = 0
     for campaign in bundles:
         assert campaign.bundle_price is not None
-        # 每格的候選（由貴到便宜，依第 2 步後的價格）；已被佔用的件在配對時略過。
-        candidates = [
-            sorted(
-                (u for u in units if not u.claimed and _slot_matches(campaign, slot, u.item)),
-                key=lambda u: -u.price,
+        # 依「可以放進哪些格子」分堆，每堆由貴到便宜（依其他活動算完後的價格）。
+        # 0 元品不進組合包（分不到折讓，還會被分到負數）。
+        queues: dict[tuple[int, ...], deque[_Unit]] = {}
+        for u in sorted(units, key=lambda u: -u.price):
+            if u.claimed or u.list_price <= 0:
+                continue
+            fits = tuple(
+                i
+                for i, slot in enumerate(campaign.bundle_slots)
+                if _slot_matches(campaign, slot, u.item)
             )
-            for slot in campaign.bundle_slots
-        ]
-        starts = [0] * len(candidates)
+            if fits:
+                queues.setdefault(fits, deque()).append(u)
         while True:
-            picked = _pick_bundle(campaign, candidates, starts)
+            picked = _pick_bundle(campaign, queues)
             if picked is None:
                 break
             if sum((u.price for u in picked), Decimal(0)) <= campaign.bundle_price:
-                break  # 不划算：這個活動不再成組
+                break  # 最值錢的組合都不划算：這個活動不再成組
             list_prices = [u.list_price for u in picked]
             shares = _allocate(
                 sum(list_prices, Decimal(0)) - campaign.bundle_price,
                 list_prices,
-                [p - _MIN_UNIT_PRICE for p in list_prices],
+                [max(Decimal(0), p - _MIN_UNIT_PRICE) for p in list_prices],
             )
             for u, share in zip(picked, shares, strict=True):
                 u.claimed = True
@@ -519,36 +522,52 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
 
 
 def _pick_bundle(
-    campaign: PromoCampaign, candidates: list[list[_Unit]], starts: list[int]
+    campaign: PromoCampaign, queues: dict[tuple[int, ...], deque[_Unit]]
 ) -> list[_Unit] | None:
-    """為一組的每個位置配一件（二分圖配對＋擴增路徑）；湊不齊回 None。
+    """湊一組：每個位置配一件，且整組價值最高；湊不齊回 None。
 
-    格子的範圍可以重疊（第 1 格收 A 或 B、第 2 格只收 A）：先配候選最少的格子，
-    配不到時讓已配的位置改用別的件（擴增路徑），不會因為先把 A 塞進第 1 格就湊不出來
-    （Codex 審查）。每個位置都從最貴的候選試起，保留「挑最貴」的偏好。
+    格子的範圍可以重疊。由貴到便宜逐件嘗試放進去（必要時讓已放好的件換到別格＝擴增路徑），
+    放得進就留下，直到每個位置都有件。這是橫截擬陣上的貪婪法，挑出的正是價值最高的一組
+    ——先湊出「隨便一組」再判斷划不划算，可能錯過真正划算的那組（Codex 審查）。
+
+    放不進的件，同一堆（能放的格子完全相同）後面更便宜的也一定放不進（位置只會越來越滿），
+    整堆跳過——否則同款很多件時每湊一組都要把它們重試一遍。
     """
-    for index, pool in enumerate(candidates):  # 前面已被別組佔走的件跳過（指標只往後走）
-        while starts[index] < len(pool) and pool[starts[index]].claimed:
-            starts[index] += 1
-    positions = [i for i, slot in enumerate(campaign.bundle_slots) for _ in range(slot.qty)]
-    positions.sort(key=lambda i: len(candidates[i]) - starts[i])
-    owner: dict[int, int] = {}  # id(件) → 位置
-    assigned: list[_Unit | None] = [None] * len(positions)
+    positions_of: dict[int, list[int]] = {}
+    position_count = 0
+    for i, slot in enumerate(campaign.bundle_slots):
+        positions_of[i] = list(range(position_count, position_count + slot.qty))
+        position_count += slot.qty
+    holder: list[tuple[_Unit, tuple[int, ...]] | None] = [None] * position_count
 
-    def assign(position: int, seen: set[int]) -> bool:
-        slot = positions[position]
-        for u in islice(candidates[slot], starts[slot], None):
-            if u.claimed or id(u) in seen:
-                continue
-            seen.add(id(u))
-            holder = owner.get(id(u))
-            if holder is None or assign(holder, seen):
-                owner[id(u)] = position
-                assigned[position] = u
-                return True
+    def place(u: _Unit, fits: tuple[int, ...], seen: set[int]) -> bool:
+        for slot in fits:
+            for position in positions_of[slot]:
+                if position in seen:
+                    continue
+                seen.add(position)
+                current = holder[position]
+                if current is None or place(current[0], current[1], seen):
+                    holder[position] = (u, fits)
+                    return True
         return False
 
-    for position in range(len(positions)):
-        if not assign(position, set()):
+    failed: set[tuple[int, ...]] = set()
+    filled = 0
+    while filled < position_count:
+        best: tuple[int, ...] | None = None
+        for fits, queue in queues.items():
+            if fits in failed:
+                continue
+            while queue and queue[0].claimed:
+                queue.popleft()
+            if queue and (best is None or queue[0].price > queues[best][0].price):
+                best = fits
+        if best is None:
             return None
-    return [u for u in assigned if u is not None]
+        if place(queues[best][0], best, set()):
+            queues[best].popleft()
+            filled += 1
+        else:
+            failed.add(best)
+    return [entry[0] for entry in holder if entry is not None]
