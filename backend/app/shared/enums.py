@@ -470,12 +470,13 @@ class CampaignStatus(StrEnum):
 
 
 class CampaignKind(StrEnum):
-    """門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額；P3 加買 N 送 M。"""
+    """門市活動類型（docs/40 §2）。P1 打折；P2 指定特價、每件折金額；P3 買 N 送 M；P4 組合價。"""
 
     PERCENT_OFF = "PERCENT_OFF"  # 打 X 折（discount_pct）
     FIXED_PRICE = "FIXED_PRICE"  # 指定特價（fixed_price，含稅整數元）
     AMOUNT_OFF = "AMOUNT_OFF"  # 每件折多少元（amount_off，含稅整數元）
     BUY_N_GET_M = "BUY_N_GET_M"  # 買 N 送 M（buy_qty、free_qty；免費額按比例分攤到整組）
+    BUNDLE = "BUNDLE"  # 組合價（bundle_price＋組合格子；湊齊自動套用、整組退）
 
 
 class CampaignItemKind(StrEnum):

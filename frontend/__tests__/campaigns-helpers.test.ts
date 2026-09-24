@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   discountDisplay,
   scopeSummary,
-  statusLabel, offerDisplay } from "@/features/campaigns/campaigns";
+  statusLabel, offerDisplay, bundleSummary } from "@/features/campaigns/campaigns";
 
 describe("discountDisplay", () => {
   it("converts discount_pct=10 to 9 折", () => {
@@ -91,5 +91,17 @@ describe("offerDisplay（docs/40 P2）", () => {
 describe("offerDisplay（docs/40 P3）", () => {
   it("買幾送幾", () => {
     expect(offerDisplay({ kind: "BUY_N_GET_M", buy_qty: 5, free_qty: 1 })).toBe("買 5 送 1");
+  });
+});
+
+describe("組合價（docs/40 P4）", () => {
+  it("優惠說法與組合內容摘要", () => {
+    expect(offerDisplay({ kind: "BUNDLE", bundle_price: "7000" })).toBe("組合價 $7,000");
+    expect(
+      bundleSummary([
+        { qty: 1, targets: [{ label: "Amenity Dome" }] },
+        { qty: 2, targets: [{ label: "椅子" }, { label: "桌子" }] },
+      ]),
+    ).toBe("Amenity Dome ×1 ＋ 椅子或桌子 ×2");
   });
 });

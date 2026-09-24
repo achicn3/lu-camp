@@ -3,9 +3,10 @@
 // 清單（依 status 篩選）＋ 建立活動表單（含可疊加、指定商品範圍）＋ 啟用/結束/作廢操作。
 // 純呈現：折扣/金額全由後端計算，前端只做「X 折」顯示轉換。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type Dispatch, type FormEvent, type SetStateAction, useState } from "react";
 
 import {
+  bundleSummary,
   offerDisplay,
   scopeSummary,
   statusLabel,
@@ -26,6 +27,19 @@ const KIND_OPTIONS: { value: CampaignKind; label: string }[] = [
   { value: "FIXED_PRICE", label: "指定特價" },
   { value: "AMOUNT_OFF", label: "每件折金額" },
   { value: "BUY_N_GET_M", label: "買幾送幾" },
+  { value: "BUNDLE", label: "組合價" },
+];
+
+/** 組合價的一格：要湊幾件、符合哪些商品（docs/40 P4）。 */
+interface SlotDraft {
+  key: number;
+  qty: string;
+  targets: PickedTarget[];
+}
+
+const EMPTY_SLOTS: SlotDraft[] = [
+  { key: 1, qty: "1", targets: [] },
+  { key: 2, qty: "1", targets: [] },
 ];
 
 /** 買 N 送 M 的件數：1–99 的整數；不合法回 null。 */
@@ -63,7 +77,12 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [targets, setTargets] = useState<PickedTarget[]>([]);
   // 建立成功後換一個 key 讓範圍選擇器整個重來（清掉搜尋字與候選清單）。
   const [pickerKey, setPickerKey] = useState(0);
-  const [lookupPending, setLookupPending] = useState(false);
+  const [bundleSlots, setBundleSlots] = useState<SlotDraft[]>(EMPTY_SLOTS);
+  // 幾個選擇器正在查條碼（組合價每格各有一個）：任何一個還沒回來都不能送出。
+  const [lookupCount, setLookupCount] = useState(0);
+  const lookupPending = lookupCount > 0;
+  const onLookupPendingChange = (pending: boolean) =>
+    setLookupCount((c) => Math.max(0, c + (pending ? 1 : -1)));
   const [formError, setFormError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -77,8 +96,27 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         amount_off?: string;
         buy_qty?: number;
         free_qty?: number;
+        bundle_price?: string;
+        bundle_slots?: {
+          qty: number;
+          targets: { target_type: PickedTarget["target_type"]; target_id: number }[];
+        }[];
       };
-      if (kind === "BUY_N_GET_M") {
+      if (kind === "BUNDLE") {
+        if (!/^[1-9]\d*$/.test(moneyValue.trim())) {
+          throw new Error("組合價須為大於 0 的整數元");
+        }
+        const slots = bundleSlots.map((slot, index) => {
+          const qty = promoQty(slot.qty);
+          if (qty === null) throw new Error(`第 ${index + 1} 樣商品的件數須為 1-99 的整數`);
+          if (slot.targets.length === 0) throw new Error(`第 ${index + 1} 樣商品還沒選是什麼`);
+          return {
+            qty,
+            targets: slot.targets.map(({ target_type, target_id }) => ({ target_type, target_id })),
+          };
+        });
+        offer = { kind, bundle_price: moneyValue.trim(), bundle_slots: slots };
+      } else if (kind === "BUY_N_GET_M") {
         const buy = promoQty(buyQty);
         const free = promoQty(freeQty);
         if (buy === null || free === null) {
@@ -110,19 +148,24 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         body: {
           name: name.trim(),
           ...offer,
+          bundle_slots: offer.bundle_slots ?? [],
           starts_at: taipeiDateTimeLocalToUtc(startsAt),
           ends_at: taipeiDateTimeLocalToUtc(endsAt),
           applies_owned_serialized: appliesOwnedSerialized,
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
-          // 寄售品不參加買 N 送 M（裁示 7）：切到買幾送幾時一律不送寄售。
-          applies_consignment: kind === "BUY_N_GET_M" ? false : appliesConsignment,
-          stackable,
-          targets: targets.map(({ mode, target_type, target_id }) => ({
-            mode,
-            target_type,
-            target_id,
-          })),
+          // 寄售品不參加買 N 送 M、組合價（裁示 7）：切到這兩種時一律不送寄售。
+          applies_consignment: noConsignment ? false : appliesConsignment,
+          // 組合價本身就是一口價，不跟其他活動疊加；範圍由各格決定。
+          stackable: kind === "BUNDLE" ? false : stackable,
+          targets:
+            kind === "BUNDLE"
+              ? []
+              : targets.map(({ mode, target_type, target_id }) => ({
+                  mode,
+                  target_type,
+                  target_id,
+                })),
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立活動失敗");
@@ -144,13 +187,28 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setAppliesConsignment(false);
       setStackable(false);
       setTargets([]);
+      setBundleSlots(EMPTY_SLOTS);
       setPickerKey((k) => k + 1);
       // 舊選擇器被換掉後不會再回報查詢結束，這裡一併歸零，新表單才送得出去。
-      setLookupPending(false);
+      setLookupCount(0);
       onCreated();
     },
     onError: (err: Error) => setFormError(err.message),
   });
+
+  const noConsignment = kind === "BUY_N_GET_M" || kind === "BUNDLE";
+
+  function updateSlot(key: number, patch: (slot: SlotDraft) => SlotDraft) {
+    setBundleSlots((prev) => prev.map((slot) => (slot.key === key ? patch(slot) : slot)));
+  }
+
+  function slotTargetsSetter(key: number): Dispatch<SetStateAction<PickedTarget[]>> {
+    return (action) =>
+      updateSlot(key, (slot) => ({
+        ...slot,
+        targets: typeof action === "function" ? action(slot.targets) : action,
+      }));
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -215,6 +273,17 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
               符合的商品每湊滿「買＋送」件就成一組，送組內最便宜的；送的金額按價格比例分到整組每一件（退貨時退它分到的實付）。
             </p>
           </div>
+        ) : kind === "BUNDLE" ? (
+          <label className="field">
+            <span className="field-label">組合價（含稅，元）</span>
+            <input
+              inputMode="numeric"
+              value={moneyValue}
+              onChange={(e) => setMoneyValue(e.target.value)}
+              placeholder="例如 8888"
+              required
+            />
+          </label>
         ) : kind === "PERCENT_OFF" ? (
           <label className="field">
             <span className="field-label">折扣 %（1-99）</span>
@@ -264,6 +333,63 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         </label>
       </div>
 
+      {kind === "BUNDLE" && (
+        <section className="campaign-bundle" aria-label="組合內容">
+          <h3>組合內容</h3>
+          <p className="hint">
+            每一樣都湊齊才算一組，可以湊好幾組；湊齊時結帳自動套用組合價，按原價比例分到每一件。
+            只有比其他活動划算才會套用；組合包退貨必須整組退。
+          </p>
+          {bundleSlots.map((slot, index) => (
+            <div key={slot.key} className="campaign-bundle-slot">
+              <div className="campaign-bundle-slot-head">
+                <label className="field">
+                  <span className="field-label">第 {index + 1} 樣要幾件</span>
+                  <input
+                    inputMode="numeric"
+                    value={slot.qty}
+                    onChange={(e) =>
+                      updateSlot(slot.key, (s) => ({ ...s, qty: e.target.value }))
+                    }
+                  />
+                </label>
+                {bundleSlots.length > 2 && (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() =>
+                      setBundleSlots((prev) => prev.filter((s) => s.key !== slot.key))
+                    }
+                  >
+                    拿掉這一樣
+                  </button>
+                )}
+              </div>
+              <TargetPicker
+                key={`${pickerKey}-${slot.key}`}
+                legend={`第 ${index + 1} 樣商品`}
+                includeOnly
+                targets={slot.targets}
+                onChange={slotTargetsSetter(slot.key)}
+                onLookupPendingChange={onLookupPendingChange}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() =>
+              setBundleSlots((prev) => [
+                ...prev,
+                { key: Math.max(...prev.map((s) => s.key)) + 1, qty: "1", targets: [] },
+              ])
+            }
+          >
+            再加一樣
+          </button>
+        </section>
+      )}
+
       <fieldset className="campaign-scope-fieldset">
         <legend>適用品項範圍</legend>
         <label className="campaign-checkbox">
@@ -293,8 +419,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         <p className="hint">餐飲（內用）品項一律不參與活動折扣，結帳時自動以原價計算。</p>
       </fieldset>
 
-      {kind === "BUY_N_GET_M" ? (
-        <p className="hint">寄售品不參加買幾送幾。</p>
+      {noConsignment ? (
+        <p className="hint">寄售品不參加{kind === "BUNDLE" ? "組合價" : "買幾送幾"}。</p>
       ) : (
       <fieldset className="campaign-scope-fieldset">
         <legend>寄售品折扣</legend>
@@ -314,13 +440,16 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       </fieldset>
       )}
 
-      <TargetPicker
-        key={pickerKey}
-        targets={targets}
-        onChange={setTargets}
-        onLookupPendingChange={setLookupPending}
-      />
+      {kind !== "BUNDLE" && (
+        <TargetPicker
+          key={pickerKey}
+          targets={targets}
+          onChange={setTargets}
+          onLookupPendingChange={onLookupPendingChange}
+        />
+      )}
 
+      {kind !== "BUNDLE" && (
       <fieldset className="campaign-scope-fieldset">
         <legend>與其他活動一起用</legend>
         <label className="campaign-checkbox">
@@ -336,6 +465,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           同一件商品符合好幾個活動時，系統自動挑對客人最划算的算法。
         </p>
       </fieldset>
+      )}
 
       {formError !== null && (
         <p role="alert" className="form-error">{formError}</p>
@@ -568,6 +698,9 @@ export default function CampaignsPage() {
                     {scopeSummary(c)}
                     {targetSummary(c.targets) && (
                       <span className="row-sub">{targetSummary(c.targets)}</span>
+                    )}
+                    {(c.bundle_slots?.length ?? 0) > 0 && (
+                      <span className="row-sub">組合：{bundleSummary(c.bundle_slots ?? [])}</span>
                     )}
                   </td>
                   <td>

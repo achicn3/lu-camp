@@ -1896,6 +1896,100 @@
         "title": "BulkLotStatus",
         "type": "string"
       },
+      "BundleSlotInput": {
+        "description": "組合包的一個格子：符合任一範圍的商品要湊 qty 件。",
+        "properties": {
+          "qty": {
+            "maximum": 99.0,
+            "minimum": 1.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/BundleSlotTargetInput"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "qty",
+          "targets"
+        ],
+        "title": "BundleSlotInput",
+        "type": "object"
+      },
+      "BundleSlotRead": {
+        "properties": {
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "slot_no": {
+            "title": "Slot No",
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/BundleSlotTargetRead"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slot_no",
+          "qty",
+          "targets"
+        ],
+        "title": "BundleSlotRead",
+        "type": "object"
+      },
+      "BundleSlotTargetInput": {
+        "description": "格子的一條範圍（只有包含；須屬本店）。",
+        "properties": {
+          "target_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Id",
+            "type": "integer"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CampaignTargetType"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_id"
+        ],
+        "title": "BundleSlotTargetInput",
+        "type": "object"
+      },
+      "BundleSlotTargetRead": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Id",
+            "type": "integer"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CampaignTargetType"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_id",
+          "label"
+        ],
+        "title": "BundleSlotTargetRead",
+        "type": "object"
+      },
       "CalculationMethod": {
         "description": "折扣的計算方式。店員輸入的原始值記在 requested_value，\n系統實際套用的金額記在 applied_amount——報表一律用後者，不重算。",
         "enum": [
@@ -2075,6 +2169,31 @@
             "title": "Applies Owned Serialized",
             "type": "boolean"
           },
+          "bundle_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,13}0*$)\\d{0,12}\\.\\d{0,0}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundle Price"
+          },
+          "bundle_slots": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BundleSlotInput"
+            },
+            "maxItems": 10,
+            "title": "Bundle Slots",
+            "type": "array"
+          },
           "buy_qty": {
             "anyOf": [
               {
@@ -2170,12 +2289,13 @@
         "type": "object"
       },
       "CampaignKind": {
-        "description": "門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額；P3 加買 N 送 M。",
+        "description": "門市活動類型（docs/40 §2）。P1 打折；P2 指定特價、每件折金額；P3 買 N 送 M；P4 組合價。",
         "enum": [
           "PERCENT_OFF",
           "FIXED_PRICE",
           "AMOUNT_OFF",
-          "BUY_N_GET_M"
+          "BUY_N_GET_M",
+          "BUNDLE"
         ],
         "title": "CampaignKind",
         "type": "string"
@@ -2221,6 +2341,22 @@
               }
             ],
             "title": "Amount Off"
+          },
+          "bundle_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundle Price"
+          },
+          "bundles_sold": {
+            "default": 0,
+            "title": "Bundles Sold",
+            "type": "integer"
           },
           "buy_qty": {
             "anyOf": [
@@ -2386,6 +2522,25 @@
           "applies_owned_serialized": {
             "title": "Applies Owned Serialized",
             "type": "boolean"
+          },
+          "bundle_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundle Price"
+          },
+          "bundle_slots": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BundleSlotRead"
+            },
+            "title": "Bundle Slots",
+            "type": "array"
           },
           "buy_qty": {
             "anyOf": [
@@ -11113,6 +11268,30 @@
         "title": "SaleLineType",
         "type": "string"
       },
+      "SaleQuoteBundleRead": {
+        "description": "本行有幾件進了哪一組組合價（docs/40 P4）：group_no 在同一筆試算內從 0 起。",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "group_no": {
+            "title": "Group No",
+            "type": "integer"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group_no",
+          "campaign_id",
+          "qty"
+        ],
+        "title": "SaleQuoteBundleRead",
+        "type": "object"
+      },
       "SaleQuoteCampaignRead": {
         "description": "套到的一個門市活動與它折了多少（一行或整筆；docs/40）。",
         "properties": {
@@ -11140,6 +11319,14 @@
       "SaleQuoteLineRead": {
         "description": "試算單行輸出：折後實際成交＋折讓留痕。",
         "properties": {
+          "bundle_groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleQuoteBundleRead"
+            },
+            "title": "Bundle Groups",
+            "type": "array"
+          },
           "buy_n_get_m_eligible": {
             "default": false,
             "title": "Buy N Get M Eligible",

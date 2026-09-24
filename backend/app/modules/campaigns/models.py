@@ -37,20 +37,24 @@ class Campaign(Base, TimestampMixin):
     __tablename__ = "campaigns"
     __table_args__ = (
         # 類型與數值一致（docs/40 P2、P3）：打折只填 discount_pct，特價只填 fixed_price，
-        # 折金額只填 amount_off，買 N 送 M 只填 buy_qty／free_qty 且不可開寄售（裁示 7）。
+        # 折金額只填 amount_off，買 N 送 M 只填 buy_qty／free_qty，組合價只填 bundle_price；
+        # 後兩者不可開寄售（裁示 7）。
         CheckConstraint(
             "(kind = 'PERCENT_OFF' AND discount_pct BETWEEN 1 AND 99"
             " AND fixed_price IS NULL AND amount_off IS NULL"
-            " AND buy_qty IS NULL AND free_qty IS NULL)"
+            " AND buy_qty IS NULL AND free_qty IS NULL AND bundle_price IS NULL)"
             " OR (kind = 'FIXED_PRICE' AND fixed_price > 0"
             " AND discount_pct IS NULL AND amount_off IS NULL"
-            " AND buy_qty IS NULL AND free_qty IS NULL)"
+            " AND buy_qty IS NULL AND free_qty IS NULL AND bundle_price IS NULL)"
             " OR (kind = 'AMOUNT_OFF' AND amount_off > 0"
             " AND discount_pct IS NULL AND fixed_price IS NULL"
-            " AND buy_qty IS NULL AND free_qty IS NULL)"
+            " AND buy_qty IS NULL AND free_qty IS NULL AND bundle_price IS NULL)"
             " OR (kind = 'BUY_N_GET_M' AND buy_qty BETWEEN 1 AND 99 AND free_qty BETWEEN 1 AND 99"
             " AND discount_pct IS NULL AND fixed_price IS NULL AND amount_off IS NULL"
-            " AND NOT applies_consignment)",
+            " AND bundle_price IS NULL AND NOT applies_consignment)"
+            " OR (kind = 'BUNDLE' AND bundle_price > 0"
+            " AND discount_pct IS NULL AND fixed_price IS NULL AND amount_off IS NULL"
+            " AND buy_qty IS NULL AND free_qty IS NULL AND NOT applies_consignment)",
             name="ck_campaigns_kind_value",
         ),
         CheckConstraint("ends_at > starts_at", name="ck_campaigns_window"),
@@ -72,6 +76,8 @@ class Campaign(Base, TimestampMixin):
     # 買 N 送 M（kind=BUY_N_GET_M）才有：買 buy_qty 件送 free_qty 件。
     buy_qty: Mapped[int | None] = mapped_column(Integer)
     free_qty: Mapped[int | None] = mapped_column(Integer)
+    # 組合價（kind=BUNDLE）才有：湊齊各格子的整組含稅價；格子在 campaign_bundle_slots。
+    bundle_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     applies_owned_serialized: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
     )
@@ -114,5 +120,38 @@ class CampaignTarget(Base, TimestampMixin):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
     mode: Mapped[CampaignTargetMode] = mapped_column(_enum_col(CampaignTargetMode))
+    target_type: Mapped[CampaignTargetType] = mapped_column(_enum_col(CampaignTargetType))
+    target_id: Mapped[int] = mapped_column(Integer)
+
+
+class CampaignBundleSlot(Base, TimestampMixin):
+    """組合價的一個格子（docs/40 §4）：符合任一範圍條件的商品湊 qty 件。"""
+
+    __tablename__ = "campaign_bundle_slots"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "slot_no", name="uq_campaign_bundle_slots_no"),
+        CheckConstraint("qty BETWEEN 1 AND 99", name="ck_campaign_bundle_slots_qty"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    slot_no: Mapped[int] = mapped_column(Integer)
+    qty: Mapped[int] = mapped_column(Integer)
+
+
+class CampaignBundleSlotTarget(Base, TimestampMixin):
+    """格子的範圍條件（只有「包含」）。target_id 依類型指向不同表，由 service 驗證屬本店。"""
+
+    __tablename__ = "campaign_bundle_slot_targets"
+    __table_args__ = (
+        UniqueConstraint(
+            "slot_id", "target_type", "target_id", name="uq_bundle_slot_targets_entry"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("campaign_bundle_slots.id"), index=True)
     target_type: Mapped[CampaignTargetType] = mapped_column(_enum_col(CampaignTargetType))
     target_id: Mapped[int] = mapped_column(Integer)

@@ -14,7 +14,10 @@
 4. **捨入**：每套一個活動四捨五入一次（HALF_UP 整數元），疊加依活動 id 由小到大。
    這樣每個活動分到的折讓都是整數元，加總剛好等於總折讓（不必事後再分攤）。
 5. **下限**：單價不低於 1 元——0 元是贈品，要走贈品流程（docs/32 紅線）。
-6. **買 N 送 M**（P3，整車才算得出來，見 `price_cart`）：適用的件依單價由高到低排，
+6. **組合價**（P4，整車第一步，見 `_apply_bundles`）：每個格子（範圍＋件數）都湊齊才成一組，
+   每格挑最貴的符合件；只有比這些件走其他活動更划算才成組（裁示 1），成組的件不再參加其他活動。
+   組合價按組內各件原價比例分攤（最大餘數法、每件至少 1 元、加總＝組合價）。寄售品不進組合包。
+7. **買 N 送 M**（P3，整車才算得出來，見 `price_cart`）：適用的件依單價由高到低排，
    每 N+M 件一組，組內最便宜的 M 件免費；免費額按組內各件價格比例分攤到整組（裁示 3、4），
    最大餘數法、加總不差一元。寄售品不參加（裁示 7）。每件只參加一個買 N 送 M（依活動 id）。
    可疊加的疊在第 2 步後的價格上（已用不可疊加活動的件不參加）；不可疊加的以原價算、
@@ -72,6 +75,16 @@ class PromoCampaign:
     amount_off: Decimal | None = None
     buy_qty: int | None = None
     free_qty: int | None = None
+    bundle_price: Decimal | None = None
+    bundle_slots: tuple[BundleSlot, ...] = ()
+
+
+@dataclass(frozen=True)
+class BundleSlot:
+    """組合包的一個格子：符合任一範圍條件的商品，要湊 qty 件。"""
+
+    qty: int
+    includes: tuple[tuple[CampaignTargetType, int], ...]
 
 
 @dataclass(frozen=True)
@@ -184,6 +197,8 @@ class LinePrice:
     """本行有幾件成組參加了買 N 送 M（含送的件）。"""
     buy_n_get_m_eligible: bool = False
     """本行可能參加買 N 送 M（有適用的活動）——沒湊進組的也可以被指定「送這件」。"""
+    bundle_groups: tuple[tuple[int, int, int], ...] = ()
+    """本行有哪些件進了組合包：(組號（本車內從 0 起）, 活動 id, 件數)。"""
 
     @property
     def list_total(self) -> Decimal:
@@ -228,6 +243,8 @@ class _Unit:
     free_requested: bool = False
     claimed: bool = False
     free_campaign: int | None = None
+    bundle: tuple[int, int] | None = None
+    """(組號, 活動 id)：這件進了哪一組組合包。"""
 
 
 def _allocate(total: Decimal, weights: Sequence[Decimal], caps: Sequence[Decimal]) -> list[Decimal]:
@@ -373,8 +390,11 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
     """
     by_id = {c.id: c for c in campaigns}
     bngms = sorted((c for c in campaigns if c.kind == CampaignKind.BUY_N_GET_M), key=lambda c: c.id)
+    bundles = sorted((c for c in campaigns if c.kind == CampaignKind.BUNDLE), key=lambda c: c.id)
+    cart_wide = bngms + bundles  # 要看整車才算得出來的活動
     units: list[_Unit] = []
     results: list[LinePrice | None] = []
+    bngm_lines: set[int] = set()  # 有買 N 送 M 適用的行（POS 據此提供「改送這件」）
     for index, cart_line in enumerate(lines):
         item = cart_line.item
         if item is None or cart_line.qty <= 0:
@@ -383,7 +403,7 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
             )
             continue
         single = price_unit(cart_line.unit_price, item, campaigns)
-        if not any(_bngm_may_apply(c, item) for c in bngms):
+        if not any(_bngm_may_apply(c, item) for c in cart_wide):
             results.append(
                 LinePrice(
                     cart_line.unit_price,
@@ -394,7 +414,9 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
             )
             continue
         if len(units) + cart_line.qty > MAX_PROMO_UNITS:
-            raise SaleLineInvalid(f"參加買幾送幾的商品一次最多 {MAX_PROMO_UNITS} 件，請分筆結帳")
+            raise SaleLineInvalid(
+                f"參加買幾送幾／組合價的商品一次最多 {MAX_PROMO_UNITS} 件，請分筆結帳"
+            )
         non_stackable = any(not by_id[cid].stackable for cid, _ in single.allocations)
         units.extend(
             _Unit(
@@ -408,14 +430,19 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
             )
             for _ in range(cart_line.qty)
         )
-        results.append(None)  # 買 N 送 M 算完再由各件彙總
+        if any(_bngm_may_apply(c, item) for c in bngms):
+            bngm_lines.add(index)
+        results.append(None)  # 組合價、買 N 送 M 算完再由各件彙總
+    _apply_bundles(units, bundles)
     for campaign in bngms:
         _apply_buy_n_get_m(units, campaign)
     by_line: dict[int, list[_Unit]] = {}
     for u in units:
         by_line.setdefault(u.line, []).append(u)
     return [
-        result if result is not None else _line_price(lines[index], by_line[index])
+        result
+        if result is not None
+        else _line_price(lines[index], by_line[index], bngm=index in bngm_lines)
         for index, result in enumerate(results)
     ]
 
@@ -424,7 +451,7 @@ def _bngm_may_apply(campaign: PromoCampaign, item: PromoItem) -> bool:
     return item.kind not in _CONSIGNMENT_KINDS and campaign_applies(campaign, item)
 
 
-def _line_price(cart_line: CartLine, mine: Sequence[_Unit]) -> LinePrice:
+def _line_price(cart_line: CartLine, mine: Sequence[_Unit], *, bngm: bool) -> LinePrice:
     """把一行展開的各件彙總回本行合計（各活動的折讓依第一次出現的順序）。"""
     totals: dict[int, Decimal] = {}
     for u in mine:
@@ -437,6 +464,77 @@ def _line_price(cart_line: CartLine, mine: Sequence[_Unit]) -> LinePrice:
         tuple(totals.items()),
         sum(1 for u in mine if u.free_campaign is not None),
         next((u.free_campaign for u in mine if u.free_campaign is not None), None),
-        sum(1 for u in mine if u.claimed),
-        buy_n_get_m_eligible=True,
+        sum(1 for u in mine if u.claimed and u.bundle is None),
+        # 全部件都進了組合包的行，就沒有能「改送」的件了。
+        buy_n_get_m_eligible=bngm and any(u.bundle is None for u in mine),
+        bundle_groups=_bundle_groups(mine),
     )
+
+
+def _bundle_groups(mine: Sequence[_Unit]) -> tuple[tuple[int, int, int], ...]:
+    counts: dict[tuple[int, int], int] = {}
+    for u in mine:
+        if u.bundle is not None:
+            counts[u.bundle] = counts.get(u.bundle, 0) + 1
+    return tuple((group, cid, qty) for (group, cid), qty in sorted(counts.items()))
+
+
+def _slot_matches(campaign: PromoCampaign, slot: BundleSlot, item: PromoItem) -> bool:
+    return _bngm_may_apply(campaign, item) and any(_target_matches(t, item) for t in slot.includes)
+
+
+def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None:
+    """組合價（見模組說明第 6 點）：依活動 id，一組一組湊，湊不齊或不划算就換下一個活動。"""
+    group_no = 0
+    for campaign in bundles:
+        assert campaign.bundle_price is not None
+        # 每格的候選（由貴到便宜，依第 2 步後的價格）；已被佔用的件在取用時略過。
+        candidates = [
+            sorted(
+                (u for u in units if not u.claimed and _slot_matches(campaign, slot, u.item)),
+                key=lambda u: -u.price,
+            )
+            for slot in campaign.bundle_slots
+        ]
+        cursors = [0] * len(candidates)
+        while True:
+            picked = _pick_bundle(campaign, candidates, cursors)
+            if picked is None:
+                break
+            if sum((u.price for u in picked), Decimal(0)) <= campaign.bundle_price:
+                for u in picked:
+                    u.claimed = False  # 不划算：放回去，這個活動不再成組
+                break
+            list_prices = [u.list_price for u in picked]
+            shares = _allocate(
+                sum(list_prices, Decimal(0)) - campaign.bundle_price,
+                list_prices,
+                [p - _MIN_UNIT_PRICE for p in list_prices],
+            )
+            for u, share in zip(picked, shares, strict=True):
+                u.price = u.list_price - share
+                u.allocations = [(campaign.id, share)] if share > 0 else []
+                u.bundle = (group_no, campaign.id)
+            group_no += 1
+
+
+def _pick_bundle(
+    campaign: PromoCampaign, candidates: list[list[_Unit]], cursors: list[int]
+) -> list[_Unit] | None:
+    """依格子順序各取所需件數（先標成已佔用，避免同一件填兩格）；湊不齊回 None 並放回。"""
+    picked: list[_Unit] = []
+    for index, slot in enumerate(campaign.bundle_slots):
+        taken = 0
+        while taken < slot.qty and cursors[index] < len(candidates[index]):
+            u = candidates[index][cursors[index]]
+            cursors[index] += 1
+            if u.claimed:
+                continue
+            u.claimed = True
+            picked.append(u)
+            taken += 1
+        if taken < slot.qty:
+            for u in picked:
+                u.claimed = False
+            return None
+    return picked

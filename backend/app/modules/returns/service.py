@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time
 from decimal import Decimal
@@ -18,6 +18,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
+from app.modules.returns.bundle_policy import BundleGroupMembers, bundles_to_return
 from app.modules.returns.invoice_policy import (
     InvoiceFacts,
     ReturnInvoiceAction,
@@ -229,6 +230,23 @@ class ReturnsService:
         lines = await self._sales.list_lines(sale_id)
         return await self._repo.returned_qty_by_sale_line_ids(store_id, [line.id for line in lines])
 
+    async def _bundles_to_return(
+        self,
+        store_id: int,
+        sale_id: int,
+        requested: Mapping[int, int],
+        previous: Mapping[int, int],
+        sale_lines: Sequence[SaleLine],
+    ) -> list[int]:
+        """這次退貨整組退回哪些組合價；只退一部分 → ReturnLineInvalid（docs/40 §8）。"""
+        groups = await SalesService(self._session).unreturned_bundle_groups(store_id, sale_id)
+        return bundles_to_return(
+            requested,
+            previous,
+            {line.id: line.qty for line in sale_lines},
+            [BundleGroupMembers(group_id=gid, members=members) for gid, members in groups],
+        )
+
     async def preview_return(
         self,
         store_id: int,
@@ -257,6 +275,8 @@ class ReturnsService:
                 raise ReturnLineInvalid(
                     f"銷售明細 {sale_line_id} 可退數量不足（已退 {previous.get(sale_line_id, 0)}）"
                 )
+        # 預覽就擋：店員只勾了組合包的一部分時，送出前就該看到「必須整組退」。
+        await self._bundles_to_return(store_id, sale_id, requested, previous, sale_lines)
         is_full_return = _invoice_lines_fully_returned(sale_lines, after)
         decision = await self._decide_invoice_action(
             store_id, sale_id, is_full_return=is_full_return
@@ -604,6 +624,12 @@ class ReturnsService:
             refund_amount += line_refund
             selected.append((line, qty, line_refund))
 
+        # 組合價必須整組退（裁示 5）——跟發票判斷一樣，得在任何外部退款之前擋下。
+        sales_service = SalesService(self._session)
+        bundle_groups_returned = await self._bundles_to_return(
+            store_id, sale.id, requested, previous, sale_lines
+        )
+
         # ── 發票處置政策（必須在任何退款動作之前）────────────────────────────────
         # LINE Pay 退款是**外部 API**，一旦呼叫就不會因交易回滾而收回；因此凡是可能「拒絕本次
         # 退貨」的判斷，都必須在此先做完，不得等到退款之後才擋。
@@ -724,6 +750,9 @@ class ReturnsService:
                 idempotency_key=idempotency_key,
                 idempotency_fingerprint=_return_fingerprint(sale.id, requested, clean_reason),
             )
+        )
+        await sales_service.mark_bundle_groups_returned(
+            store_id, bundle_groups_returned, customer_return.id
         )
 
         for tender_type, amount in refund_allocations:

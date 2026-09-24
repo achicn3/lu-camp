@@ -217,6 +217,39 @@ class SaleLineCampaign(Base, TimestampMixin):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
 
 
+class SaleBundleGroup(Base, TimestampMixin):
+    """一筆銷售裡成交的一組組合價（docs/40 P4）。退貨必須整組退（裁示 5）。
+
+    returned_return_id：整組退回時由哪張退貨單退的；NULL＝還沒退。
+    """
+
+    __tablename__ = "sale_bundle_groups"
+    __table_args__ = (CheckConstraint("bundle_price > 0", name="ck_sale_bundle_groups_price_pos"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    bundle_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    returned_return_id: Mapped[int | None] = mapped_column(ForeignKey("returns.id"))
+
+
+class SaleBundleMember(Base, TimestampMixin):
+    """組合包裡的件：哪一行、幾件（一行可能只有部分件數在組內，例如 3 罐瓦斯只有 2 罐進組）。"""
+
+    __tablename__ = "sale_bundle_members"
+    __table_args__ = (
+        UniqueConstraint("bundle_group_id", "sale_line_id", name="uq_sale_bundle_members_entry"),
+        CheckConstraint("qty > 0", name="ck_sale_bundle_members_qty_pos"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    bundle_group_id: Mapped[int] = mapped_column(ForeignKey("sale_bundle_groups.id"), index=True)
+    sale_line_id: Mapped[int] = mapped_column(ForeignKey("sale_lines.id"), index=True)
+    qty: Mapped[int] = mapped_column()
+
+
 class SaleCampaignOverride(Base, TimestampMixin):
     """店員在這一筆按了「這筆不套用」的活動（docs/40 P1c；不需核准、原因可不填，另寫 audit_log）。
 

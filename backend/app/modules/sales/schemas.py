@@ -392,6 +392,14 @@ class SaleQuoteCampaignRead(BaseModel):
     discount_amount: NTDAmount
 
 
+class SaleQuoteBundleRead(BaseModel):
+    """本行有幾件進了哪一組組合價（docs/40 P4）：group_no 在同一筆試算內從 0 起。"""
+
+    group_no: int
+    campaign_id: int
+    qty: int
+
+
 class SaleDisabledCampaignRead(BaseModel):
     """這一筆被店員取消套用的活動。"""
 
@@ -422,6 +430,8 @@ class SaleQuoteLineRead(BaseModel):
     buy_n_get_m_units: int = 0
     # 本行可能參加買 N 送 M：POS 據此提供「改送這件」（沒湊進組的也可以指定）。
     buy_n_get_m_eligible: bool = False
+    # 組合價：本行有哪些件進了哪一組（POS 據此把同組的行框在一起、標「組合價」）。
+    bundle_groups: list[SaleQuoteBundleRead] = []
 
 
 class SaleQuoteResponse(BaseModel):

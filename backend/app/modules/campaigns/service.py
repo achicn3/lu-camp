@@ -12,12 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
 from app.core.money import DISCOUNT_PCT_MAX, DISCOUNT_PCT_MIN
-from app.modules.campaigns.models import Campaign, CampaignTarget
-from app.modules.campaigns.pricing import PromoCampaign
+from app.modules.campaigns.models import (
+    Campaign,
+    CampaignBundleSlot,
+    CampaignBundleSlotTarget,
+    CampaignTarget,
+)
+from app.modules.campaigns.pricing import BundleSlot, PromoCampaign
 from app.modules.campaigns.repository import CampaignRepository
 from app.modules.campaigns.schemas import (
+    BUNDLE_SLOTS_MIN,
     PROMO_QTY_MAX,
     PROMO_QTY_MIN,
+    BundleSlotInput,
+    BundleSlotRead,
+    BundleSlotTargetRead,
     CampaignRead,
     CampaignTargetInput,
     CampaignTargetRead,
@@ -47,6 +56,8 @@ def _validate_kind_value(
     buy_qty: int | None = None,
     free_qty: int | None = None,
     applies_consignment: bool = False,
+    bundle_price: Decimal | None = None,
+    bundle_slots: list[BundleSlotInput] | None = None,
 ) -> None:
     """類型與數值必須一致：只填那一種的數值（DB CHECK 也守著，這裡給看得懂的訊息）。"""
     values: dict[CampaignKind, tuple[object, ...]] = {
@@ -54,6 +65,7 @@ def _validate_kind_value(
         CampaignKind.FIXED_PRICE: (fixed_price,),
         CampaignKind.AMOUNT_OFF: (amount_off,),
         CampaignKind.BUY_N_GET_M: (buy_qty, free_qty),
+        CampaignKind.BUNDLE: (bundle_price,),
     }
     if any(v is None for v in values[kind]) or any(
         v is not None for k, vs in values.items() if k != kind for v in vs
@@ -61,7 +73,11 @@ def _validate_kind_value(
         raise InvalidDiscountPct(
             "活動類型與數值不一致：只能填這種活動的折扣、特價、折金額或買幾送幾"
         )
-    if kind == CampaignKind.BUY_N_GET_M:
+    if kind != CampaignKind.BUNDLE and bundle_slots:
+        raise InvalidDiscountPct("只有組合價活動可以設定組合內容")
+    if kind == CampaignKind.BUNDLE:
+        _validate_bundle(bundle_price, bundle_slots or [], applies_consignment)
+    elif kind == CampaignKind.BUY_N_GET_M:
         assert buy_qty is not None and free_qty is not None
         if not (
             PROMO_QTY_MIN <= buy_qty <= PROMO_QTY_MAX and PROMO_QTY_MIN <= free_qty <= PROMO_QTY_MAX
@@ -79,6 +95,19 @@ def _validate_kind_value(
         money = fixed_price if kind == CampaignKind.FIXED_PRICE else amount_off
         if money is None or money <= 0:
             raise InvalidDiscountPct("特價與折金額必須大於 0")
+
+
+def _validate_bundle(
+    bundle_price: Decimal | None, slots: list[BundleSlotInput], applies_consignment: bool
+) -> None:
+    """組合價：至少兩格、每格有範圍、每件至少 1 元、不開寄售（schema 也擋，這裡是服務層防線）。"""
+    if len(slots) < BUNDLE_SLOTS_MIN or any(not slot.targets for slot in slots):
+        raise InvalidDiscountPct(f"組合價至少要有 {BUNDLE_SLOTS_MIN} 樣商品，每樣都要指定是什麼")
+    units = sum(slot.qty for slot in slots)
+    if bundle_price is None or bundle_price < units:
+        raise InvalidDiscountPct(f"組合價不能低於 {units} 元（每件至少 1 元）")
+    if applies_consignment:
+        raise InvalidDiscountPct("寄售品不能進組合包")
 
 
 def _item_kinds(campaign: Campaign) -> frozenset[CampaignItemKind]:
@@ -102,6 +131,7 @@ _READ_COLUMNS = (
     "amount_off",
     "buy_qty",
     "free_qty",
+    "bundle_price",
     "applies_owned_serialized",
     "applies_owned_bulk",
     "applies_catalog",
@@ -143,6 +173,8 @@ class CampaignService:
         amount_off: Decimal | None = None,
         buy_qty: int | None = None,
         free_qty: int | None = None,
+        bundle_price: Decimal | None = None,
+        bundle_slots: list[BundleSlotInput] | None = None,
     ) -> Campaign:
         """建立活動（DRAFT）。驗證折扣 1-99、區間 ends>starts、名稱非空、範圍屬本店；寫稽核。
 
@@ -151,7 +183,15 @@ class CampaignService:
         if not name.strip():
             raise CampaignConflict("活動名稱不可為空")
         _validate_kind_value(
-            kind, discount_pct, fixed_price, amount_off, buy_qty, free_qty, applies_consignment
+            kind,
+            discount_pct,
+            fixed_price,
+            amount_off,
+            buy_qty,
+            free_qty,
+            applies_consignment,
+            bundle_price,
+            bundle_slots,
         )
         if ends_at <= starts_at:
             raise CampaignConflict("活動結束時間必須晚於開始時間")
@@ -164,6 +204,7 @@ class CampaignService:
             amount_off=amount_off,
             buy_qty=buy_qty,
             free_qty=free_qty,
+            bundle_price=bundle_price,
             starts_at=starts_at,
             ends_at=ends_at,
             applies_owned_serialized=applies_owned_serialized,
@@ -182,7 +223,30 @@ class CampaignService:
                 raise InvalidCampaignTarget(
                     f"活動範圍裡有找不到或不屬本店的項目（{target_type.value} #{target_id}）"
                 )
+        slot_targets = [
+            list(dict.fromkeys((t.target_type, t.target_id) for t in slot.targets))
+            for slot in bundle_slots or []
+        ]
+        for target_type, target_id in (t for targets_ in slot_targets for t in targets_):
+            if await self._target_label(store_id, target_type, target_id) is None:
+                raise InvalidCampaignTarget(
+                    f"組合內容裡有找不到或不屬本店的項目（{target_type.value} #{target_id}）"
+                )
         saved = await self._repo.add(campaign)
+        for slot_no, (slot, targets_) in enumerate(
+            zip(bundle_slots or [], slot_targets, strict=True), start=1
+        ):
+            await self._repo.add_bundle_slot(
+                CampaignBundleSlot(
+                    store_id=store_id, campaign_id=saved.id, slot_no=slot_no, qty=slot.qty
+                ),
+                [
+                    CampaignBundleSlotTarget(
+                        store_id=store_id, target_type=target_type, target_id=target_id
+                    )
+                    for target_type, target_id in targets_
+                ],
+            )
         await self._repo.add_targets(
             [
                 CampaignTarget(
@@ -259,6 +323,7 @@ class CampaignService:
         """目前生效中的全部活動，整理成定價輸入（含範圍條件）；結帳／報價／客顯共用。"""
         campaigns = await self._repo.list_effective(store_id, now)
         targets = await self._repo.targets_for(store_id, [c.id for c in campaigns])
+        slots_by_campaign = await self._slots_by_campaign(store_id, campaigns)
         by_campaign: dict[int, list[CampaignTarget]] = {}
         for t in targets:
             by_campaign.setdefault(t.campaign_id, []).append(t)
@@ -273,6 +338,13 @@ class CampaignService:
                 amount_off=c.amount_off,
                 buy_qty=c.buy_qty,
                 free_qty=c.free_qty,
+                bundle_price=c.bundle_price,
+                bundle_slots=tuple(
+                    BundleSlot(
+                        qty=slot.qty, includes=tuple((t.target_type, t.target_id) for t in targets_)
+                    )
+                    for slot, targets_ in slots_by_campaign.get(c.id, [])
+                ),
                 item_kinds=_item_kinds(c),
                 includes=tuple(
                     (t.target_type, t.target_id)
@@ -303,15 +375,50 @@ class CampaignService:
                     label=label if label is not None else f"#{t.target_id}（已不存在）",
                 )
             )
+        slot_reads: dict[int, list[BundleSlotRead]] = {}
+        for campaign_id, pairs in (await self._slots_by_campaign(store_id, campaigns)).items():
+            slot_reads[campaign_id] = [
+                BundleSlotRead(
+                    slot_no=slot.slot_no,
+                    qty=slot.qty,
+                    targets=[
+                        BundleSlotTargetRead(
+                            target_type=t.target_type,
+                            target_id=t.target_id,
+                            label=await self._label_or_missing(
+                                store_id, t.target_type, t.target_id
+                            ),
+                        )
+                        for t in targets_
+                    ],
+                )
+                for slot, targets_ in pairs
+            ]
         return [
             CampaignRead.model_validate(
                 {
                     **{col: getattr(c, col) for col in _READ_COLUMNS},
                     "targets": reads.get(c.id, []),
+                    "bundle_slots": slot_reads.get(c.id, []),
                 }
             )
             for c in campaigns
         ]
+
+    async def _slots_by_campaign(
+        self, store_id: int, campaigns: list[Campaign]
+    ) -> dict[int, list[tuple[CampaignBundleSlot, list[CampaignBundleSlotTarget]]]]:
+        bundle_ids = [c.id for c in campaigns if c.kind == CampaignKind.BUNDLE]
+        out: dict[int, list[tuple[CampaignBundleSlot, list[CampaignBundleSlotTarget]]]] = {}
+        for slot, targets_ in await self._repo.bundle_slots_for(store_id, bundle_ids):
+            out.setdefault(slot.campaign_id, []).append((slot, targets_))
+        return out
+
+    async def _label_or_missing(
+        self, store_id: int, target_type: CampaignTargetType, target_id: int
+    ) -> str:
+        label = await self._target_label(store_id, target_type, target_id)
+        return label if label is not None else f"#{target_id}（已不存在）"
 
     async def to_read(self, store_id: int, campaign: Campaign) -> CampaignRead:
         return (await self.to_reads(store_id, [campaign]))[0]
@@ -365,6 +472,7 @@ class CampaignService:
             "amount_off": None if campaign.amount_off is None else str(campaign.amount_off),
             "buy_qty": campaign.buy_qty,
             "free_qty": campaign.free_qty,
+            "bundle_price": None if campaign.bundle_price is None else str(campaign.bundle_price),
         }
         await write_audit_log(
             self._session,

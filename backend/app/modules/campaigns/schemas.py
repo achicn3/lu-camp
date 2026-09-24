@@ -39,6 +39,37 @@ class CampaignTargetRead(CampaignTargetInput):
     """顯示用名稱（型號含品牌、單件含條碼）。"""
 
 
+# 組合價的格子數（docs/40 §4）：至少兩格才叫組合。
+BUNDLE_SLOTS_MIN = 2
+BUNDLE_SLOTS_MAX = 10
+
+
+class BundleSlotTargetInput(BaseModel):
+    """格子的一條範圍（只有包含；須屬本店）。"""
+
+    target_type: CampaignTargetType
+    target_id: Annotated[int, Field(gt=0)]
+
+
+class BundleSlotTargetRead(BundleSlotTargetInput):
+    label: str
+
+
+class BundleSlotInput(BaseModel):
+    """組合包的一個格子：符合任一範圍的商品要湊 qty 件。"""
+
+    qty: PromoQty
+    targets: Annotated[
+        list[BundleSlotTargetInput], Field(min_length=1, max_length=CAMPAIGN_TARGETS_MAX)
+    ]
+
+
+class BundleSlotRead(BaseModel):
+    slot_no: int
+    qty: int
+    targets: list[BundleSlotTargetRead]
+
+
 class CampaignCreateRequest(BaseModel):
     """建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。
 
@@ -55,6 +86,9 @@ class CampaignCreateRequest(BaseModel):
     # 買 N 送 M（docs/40 P3）：兩個都要填；寄售品一律不參加（裁示 7）。
     buy_qty: PromoQty | None = None
     free_qty: PromoQty | None = None
+    # 組合價（docs/40 P4）：整組含稅價＋至少兩個格子；寄售品不進組合包（裁示 7）。
+    bundle_price: NTDPositive | None = None
+    bundle_slots: Annotated[list[BundleSlotInput], Field(max_length=BUNDLE_SLOTS_MAX)] = []
     starts_at: AwareDateTime
     ends_at: AwareDateTime
     applies_owned_serialized: bool = True
@@ -73,6 +107,7 @@ class CampaignCreateRequest(BaseModel):
             CampaignKind.FIXED_PRICE: (self.fixed_price,),
             CampaignKind.AMOUNT_OFF: (self.amount_off,),
             CampaignKind.BUY_N_GET_M: (self.buy_qty, self.free_qty),
+            CampaignKind.BUNDLE: (self.bundle_price,),
         }
         if any(v is None for v in values[self.kind]):
             raise ValueError("請填這種活動的數值（折扣／特價／折金額／買幾送幾）")
@@ -80,7 +115,21 @@ class CampaignCreateRequest(BaseModel):
             raise ValueError("只能填這種活動的數值，其他類型的欄位請留空")
         if self.kind == CampaignKind.BUY_N_GET_M and self.applies_consignment:
             raise ValueError("寄售品不能參加買 N 送 M")
+        if self.kind != CampaignKind.BUNDLE and self.bundle_slots:
+            raise ValueError("只有組合價活動可以設定組合內容")
+        if self.kind == CampaignKind.BUNDLE:
+            self._check_bundle()
         return self
+
+    def _check_bundle(self) -> None:
+        if len(self.bundle_slots) < BUNDLE_SLOTS_MIN:
+            raise ValueError(f"組合價至少要有 {BUNDLE_SLOTS_MIN} 樣商品")
+        units = sum(slot.qty for slot in self.bundle_slots)
+        assert self.bundle_price is not None
+        if self.bundle_price < units:
+            raise ValueError(f"組合價不能低於 {units} 元（每件至少 1 元）")
+        if self.applies_consignment:
+            raise ValueError("寄售品不能進組合包")
 
 
 class CampaignRead(BaseModel):
@@ -93,6 +142,8 @@ class CampaignRead(BaseModel):
     amount_off: NTDAmountOpt = None
     buy_qty: int | None = None
     free_qty: int | None = None
+    bundle_price: NTDAmountOpt = None
+    bundle_slots: list[BundleSlotRead] = []
     applies_owned_serialized: bool
     applies_owned_bulk: bool
     applies_catalog: bool

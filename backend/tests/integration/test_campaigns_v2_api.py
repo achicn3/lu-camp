@@ -276,3 +276,86 @@ async def test_buy_n_get_m_values_must_be_valid(
     # 別種活動不可帶 buy_qty／free_qty
     resp = await client.post(PATH, json=_payload(buy_qty=2), headers=_auth(mgr))
     assert resp.status_code == 422, resp.text
+
+
+# ── P4：組合價 ───────────────────────────────────────────────────────
+
+
+async def _two_models(db: AsyncSession, store_id: int) -> tuple[int, int]:
+    brand = Brand(store_id=store_id, name="Snow Peak")
+    db.add(brand)
+    await db.flush()
+    tent = ProductModel(store_id=store_id, brand_id=brand.id, name="Amenity Dome")
+    chair = ProductModel(store_id=store_id, brand_id=brand.id, name="Low Chair")
+    db.add_all([tent, chair])
+    await db.flush()
+    return tent.id, chair.id
+
+
+def _bundle(tent: int, chair: int, **overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "name": "帳篷＋椅子組合",
+        "kind": "BUNDLE",
+        "bundle_price": "7000",
+        "bundle_slots": [
+            {"qty": 1, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": tent}]},
+            {"qty": 2, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": chair}]},
+        ],
+        "starts_at": "2026-06-01T00:00:00Z",
+        "ends_at": "2026-07-01T00:00:00Z",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_create_bundle_reads_back_slots_with_labels(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, mgr = await _store(db_session)
+    tent, chair = await _two_models(db_session, store_id)
+    resp = await client.post(PATH, json=_bundle(tent, chair), headers=_auth(mgr))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["kind"], body["bundle_price"]) == ("BUNDLE", "7000")
+    assert [
+        (s["slot_no"], s["qty"], [t["label"] for t in s["targets"]]) for s in body["bundle_slots"]
+    ] == [(1, 1, ["Snow Peak Amenity Dome"]), (2, 2, ["Snow Peak Low Chair"])]
+    got = await client.get(f"{PATH}/{body['id']}", headers=_auth(mgr))
+    assert len(got.json()["bundle_slots"]) == 2
+
+
+async def test_bundle_values_must_be_valid(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, mgr = await _store(db_session)
+    tent, chair = await _two_models(db_session, store_id)
+    one_slot = [{"qty": 1, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": tent}]}]
+    bad: list[dict[str, object]] = [
+        {"bundle_price": None},
+        {"bundle_slots": one_slot},  # 至少兩格
+        {"bundle_slots": [{"qty": 1, "targets": []}, *one_slot]},  # 每格要有範圍
+        {"bundle_price": "2"},  # 組合價低於件數（每件至少 1 元）
+        {"applies_consignment": True},  # 寄售不進組合包
+        {"discount_pct": 10},
+    ]
+    for extra in bad:
+        resp = await client.post(PATH, json=_bundle(tent, chair, **extra), headers=_auth(mgr))
+        assert resp.status_code == 422, (extra, resp.text)
+    # 別種活動不可帶組合格子
+    resp = await client.post(PATH, json=_payload(bundle_slots=one_slot), headers=_auth(mgr))
+    assert resp.status_code == 422, resp.text
+
+
+async def test_bundle_target_from_another_store_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, mgr = await _store(db_session)
+    tent, chair = await _two_models(db_session, store_id)
+    slots = [
+        {"qty": 1, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": 999_999}]},
+        {"qty": 1, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": chair}]},
+    ]
+    resp = await client.post(
+        PATH, json=_bundle(tent, chair, bundle_slots=slots), headers=_auth(mgr)
+    )
+    assert resp.status_code == 422, resp.text

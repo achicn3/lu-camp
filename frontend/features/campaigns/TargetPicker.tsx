@@ -89,11 +89,17 @@ export function TargetPicker({
   targets,
   onChange,
   onLookupPendingChange,
+  legend = "指定商品（選填）",
+  includeOnly = false,
 }: {
   targets: PickedTarget[];
   onChange: Dispatch<SetStateAction<PickedTarget[]>>;
   /** 條碼查詢進行中時通知表單：查詢回來前不可建立活動，否則會少了這個範圍。 */
   onLookupPendingChange: (pending: boolean) => void;
+  /** 標題（組合價的每一格用「第 N 樣商品」）。 */
+  legend?: string;
+  /** 只有「包含」（組合價的格子）：不顯示包含／排除切換與說明。 */
+  includeOnly?: boolean;
 }) {
   const [mode, setMode] = useState<TargetMode>("INCLUDE");
   const [type, setType] = useState<TargetType>("BRAND");
@@ -191,13 +197,16 @@ export function TargetPicker({
   const excludes = targets.filter((t) => t.mode === "EXCLUDE");
 
   return (
-    <fieldset className="campaign-scope-fieldset" aria-label="指定商品（選填）">
-      <legend>指定商品（選填）</legend>
-      <p className="hint">
-        不指定＝上面勾的品項全部適用。可細到品牌、型號或單件，每種都可以加很多個；
-        「不套用」優先於「只套用在」。
-      </p>
+    <fieldset className="campaign-scope-fieldset" aria-label={legend}>
+      <legend>{legend}</legend>
+      {!includeOnly && (
+        <p className="hint">
+          不指定＝上面勾的品項全部適用。可細到品牌、型號或單件，每種都可以加很多個；
+          「不套用」優先於「只套用在」。
+        </p>
+      )}
 
+      {!includeOnly && (
       <div className="campaign-target-modes">
         <label className="campaign-checkbox">
           <input
@@ -218,6 +227,7 @@ export function TargetPicker({
           這些商品不套用
         </label>
       </div>
+      )}
 
       <div className="campaign-target-picker">
         <label className="field">
@@ -309,7 +319,7 @@ export function TargetPicker({
         </div>
       )}
 
-      <TargetChips title="只套用在" items={includes} onChange={onChange} />
+      <TargetChips title={includeOnly ? "符合其中一樣就算" : "只套用在"} items={includes} onChange={onChange} />
       <TargetChips title="不套用" items={excludes} onChange={onChange} />
     </fieldset>
   );

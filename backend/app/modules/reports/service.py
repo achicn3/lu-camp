@@ -908,6 +908,7 @@ class ReportsService:
             else:  # 成本未知：計入營收，不計入毛利與毛利率分母
                 st.revenue += net
         not_applied = await self._sales.campaign_override_counts(store_id)
+        bundles_sold = await self._sales.bundles_sold_by_campaign(store_id)
         reads = {r.id: r for r in await self._campaigns.to_reads(store_id, campaigns)}
         rows = [
             self._campaign_row(c, stats.get(c.id), discount_totals).model_copy(
@@ -915,6 +916,7 @@ class ReportsService:
                     "stackable": c.stackable,
                     "targets": reads[c.id].targets,
                     "not_applied_count": not_applied.get(c.id, 0),
+                    "bundles_sold": bundles_sold.get(c.id, 0),
                 }
             )
             for c in campaigns
@@ -939,6 +941,7 @@ class ReportsService:
             amount_off=c.amount_off,
             buy_qty=c.buy_qty,
             free_qty=c.free_qty,
+            bundle_price=c.bundle_price,
             starts_at=c.starts_at,
             ends_at=c.ends_at,
             campaign_discount_total=discount_totals.get(c.id, Decimal(0)),

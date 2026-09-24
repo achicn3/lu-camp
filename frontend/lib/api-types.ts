@@ -4090,6 +4090,42 @@ export interface components {
          */
         BulkLotStatus: "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
         /**
+         * BundleSlotInput
+         * @description 組合包的一個格子：符合任一範圍的商品要湊 qty 件。
+         */
+        BundleSlotInput: {
+            /** Qty */
+            qty: number;
+            /** Targets */
+            targets: components["schemas"]["BundleSlotTargetInput"][];
+        };
+        /** BundleSlotRead */
+        BundleSlotRead: {
+            /** Qty */
+            qty: number;
+            /** Slot No */
+            slot_no: number;
+            /** Targets */
+            targets: components["schemas"]["BundleSlotTargetRead"][];
+        };
+        /**
+         * BundleSlotTargetInput
+         * @description 格子的一條範圍（只有包含；須屬本店）。
+         */
+        BundleSlotTargetInput: {
+            /** Target Id */
+            target_id: number;
+            target_type: components["schemas"]["CampaignTargetType"];
+        };
+        /** BundleSlotTargetRead */
+        BundleSlotTargetRead: {
+            /** Label */
+            label: string;
+            /** Target Id */
+            target_id: number;
+            target_type: components["schemas"]["CampaignTargetType"];
+        };
+        /**
          * CalculationMethod
          * @description 折扣的計算方式。店員輸入的原始值記在 requested_value，
          *     系統實際套用的金額記在 applied_amount——報表一律用後者，不重算。
@@ -4174,6 +4210,13 @@ export interface components {
              * @default true
              */
             applies_owned_serialized: boolean;
+            /** Bundle Price */
+            bundle_price?: number | string | null;
+            /**
+             * Bundle Slots
+             * @default []
+             */
+            bundle_slots: components["schemas"]["BundleSlotInput"][];
             /** Buy Qty */
             buy_qty?: number | null;
             /** Discount Pct */
@@ -4201,10 +4244,10 @@ export interface components {
         };
         /**
          * CampaignKind
-         * @description 門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額；P3 加買 N 送 M。
+         * @description 門市活動類型（docs/40 §2）。P1 打折；P2 指定特價、每件折金額；P3 買 N 送 M；P4 組合價。
          * @enum {string}
          */
-        CampaignKind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF" | "BUY_N_GET_M";
+        CampaignKind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF" | "BUY_N_GET_M" | "BUNDLE";
         /**
          * CampaignPerformanceReport
          * @description 活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。
@@ -4232,6 +4275,13 @@ export interface components {
         CampaignPerformanceRow: {
             /** Amount Off */
             amount_off?: string | null;
+            /** Bundle Price */
+            bundle_price?: string | null;
+            /**
+             * Bundles Sold
+             * @default 0
+             */
+            bundles_sold: number;
             /** Buy Qty */
             buy_qty?: number | null;
             /** Campaign Discount Total */
@@ -4297,6 +4347,13 @@ export interface components {
             applies_owned_bulk: boolean;
             /** Applies Owned Serialized */
             applies_owned_serialized: boolean;
+            /** Bundle Price */
+            bundle_price?: string | null;
+            /**
+             * Bundle Slots
+             * @default []
+             */
+            bundle_slots: components["schemas"]["BundleSlotRead"][];
             /** Buy Qty */
             buy_qty?: number | null;
             /**
@@ -7633,6 +7690,18 @@ export interface components {
          */
         SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT" | "MENU";
         /**
+         * SaleQuoteBundleRead
+         * @description 本行有幾件進了哪一組組合價（docs/40 P4）：group_no 在同一筆試算內從 0 起。
+         */
+        SaleQuoteBundleRead: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Group No */
+            group_no: number;
+            /** Qty */
+            qty: number;
+        };
+        /**
          * SaleQuoteCampaignRead
          * @description 套到的一個門市活動與它折了多少（一行或整筆；docs/40）。
          */
@@ -7649,6 +7718,11 @@ export interface components {
          * @description 試算單行輸出：折後實際成交＋折讓留痕。
          */
         SaleQuoteLineRead: {
+            /**
+             * Bundle Groups
+             * @default []
+             */
+            bundle_groups: components["schemas"]["SaleQuoteBundleRead"][];
             /**
              * Buy N Get M Eligible
              * @default false

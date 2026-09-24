@@ -24,6 +24,8 @@ from app.modules.sales.models import (
     Sale,
     SaleAdjustment,
     SaleBulkAllocation,
+    SaleBundleGroup,
+    SaleBundleMember,
     SaleCampaignOverride,
     SaleLine,
     SaleLineCampaign,
@@ -132,6 +134,46 @@ class SalesRepository:
 
     async def add_line_campaigns(self, rows: list[SaleLineCampaign]) -> None:
         self._session.add_all(rows)
+        await self._session.flush()
+
+    async def add_bundle_group(
+        self, group: SaleBundleGroup, members: list[SaleBundleMember]
+    ) -> None:
+        self._session.add(group)
+        await self._session.flush()
+        for member in members:
+            member.bundle_group_id = group.id
+        self._session.add_all(members)
+        await self._session.flush()
+
+    async def unreturned_bundle_members(
+        self, store_id: int, sale_id: int
+    ) -> list[tuple[int, int, int]]:
+        """一筆銷售還沒退回的組合價：[(組 id, 銷售明細 id, 組內件數)]，依組、明細排序。"""
+        stmt = (
+            select(SaleBundleGroup.id, SaleBundleMember.sale_line_id, SaleBundleMember.qty)
+            .join(SaleBundleMember, SaleBundleMember.bundle_group_id == SaleBundleGroup.id)
+            .where(
+                SaleBundleGroup.store_id == store_id,
+                SaleBundleGroup.sale_id == sale_id,
+                SaleBundleGroup.returned_return_id.is_(None),
+            )
+            .order_by(SaleBundleGroup.id, SaleBundleMember.sale_line_id)
+        )
+        return [(g, line, qty) for g, line, qty in (await self._session.execute(stmt)).all()]
+
+    async def mark_bundle_groups_returned(
+        self, store_id: int, group_ids: list[int], return_id: int
+    ) -> None:
+        if not group_ids:
+            return
+        groups = await self._session.scalars(
+            select(SaleBundleGroup).where(
+                SaleBundleGroup.store_id == store_id, SaleBundleGroup.id.in_(group_ids)
+            )
+        )
+        for group in groups:
+            group.returned_return_id = return_id
         await self._session.flush()
 
     async def add_bulk_allocations(self, rows: list[SaleBulkAllocation]) -> None:
@@ -676,6 +718,20 @@ class SalesRepository:
             .join(Sale, SaleCampaignOverride.sale_id == Sale.id)
             .where(Sale.store_id == store_id, Sale.status != SaleStatus.VOIDED)
             .group_by(SaleCampaignOverride.campaign_id)
+        )
+        return {cid: int(n) for cid, n in await self._session.execute(stmt)}
+
+    async def bundles_sold_by_campaign(self, store_id: int) -> dict[int, int]:
+        """各組合價活動賣出幾組（非作廢單、扣掉整組退回的）。"""
+        stmt = (
+            select(SaleBundleGroup.campaign_id, func.count())
+            .join(Sale, SaleBundleGroup.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                SaleBundleGroup.returned_return_id.is_(None),
+            )
+            .group_by(SaleBundleGroup.campaign_id)
         )
         return {cid: int(n) for cid, n in await self._session.execute(stmt)}
 

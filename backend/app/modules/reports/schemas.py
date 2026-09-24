@@ -377,6 +377,9 @@ class CampaignPerformanceRow(BaseModel):
     # 買 N 送 M（docs/40 P3）
     buy_qty: int | None = None
     free_qty: int | None = None
+    # 組合價（docs/40 P4）：整組價與賣出組數（扣掉整組退回的）
+    bundle_price: NTDAmountOpt = None
+    bundles_sold: int = 0
     starts_at: datetime
     ends_at: datetime
     campaign_discount_total: NTDAmount

@@ -4409,6 +4409,20 @@ a.btn-ghost {
   font-size: var(--text-sm);
   color: var(--accent);
 }
+/* 組合價：同組的行左側色條＋組號標籤（docs/40 P4，裁示 6：POS 要顯示清楚）。 */
+.pos-row-bundle td:first-child {
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+.pos-line-bundle {
+  display: inline-block;
+  margin: 2px 0;
+  padding: 0 var(--sp-2);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
 /* 買 N 送 M：品項格內的「改送這件／取消送這件」小連結（docs/40 P3b）。 */
 .pos-promo-free-toggle {
   display: inline-block;
@@ -4449,6 +4463,35 @@ a.btn-ghost {
 }
 
 /* 門市活動優惠方式（docs/40 P2）。 */
+/* 組合價：每一樣商品一個框，件數與選擇器放在一起（docs/40 P4）。 */
+.campaign-bundle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.campaign-bundle-slot {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  background: var(--surface);
+}
+.campaign-bundle-slot-head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.campaign-bundle-slot-head .field {
+  max-width: 10rem;
+}
+.campaign-bundle-slot .campaign-scope-fieldset {
+  border: none;
+  padding: 0;
+  margin: var(--sp-2) 0 0;
+}
+.campaign-bundle > .btn-secondary {
+  align-self: flex-start;
+}
 /* 買幾送幾：兩個件數欄並排，說明另起一行。 */
 .campaign-bngm {
   display: flex;

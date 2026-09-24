@@ -27,6 +27,7 @@ from app.modules.sales.schemas import (
     LinePayRefundResolveRequest,
     SaleCreateRequest,
     SaleDisabledCampaignRead,
+    SaleQuoteBundleRead,
     SaleQuoteCampaignRead,
     SaleQuoteLineRead,
     SaleQuoteRequest,
@@ -488,6 +489,10 @@ async def quote_sale(
                 free_units=ql.free_units,
                 buy_n_get_m_units=ql.buy_n_get_m_units,
                 buy_n_get_m_eligible=ql.buy_n_get_m_eligible,
+                bundle_groups=[
+                    SaleQuoteBundleRead(group_no=g, campaign_id=c, qty=q)
+                    for g, c, q in ql.bundle_groups
+                ],
             )
             for ql in quote.lines
         ],

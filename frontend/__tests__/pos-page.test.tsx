@@ -1587,6 +1587,50 @@ describe("/pos 結帳頁", () => {
     expect(screen.getByRole("button", { name: "取消送這件 雙人帳篷(測試)" })).toBeTruthy();
   });
 
+  it("組合價：同組的行標「組合價・第 1 組」（docs/40 P4）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1500",
+          campaign_id: 4,
+          campaign_name: "帳篷組",
+          campaigns: [{ campaign_id: 4, name: "帳篷組", discount_amount: "300" }],
+          disabled_campaigns: [],
+          lines: [
+            {
+              line_type: "SERIALIZED",
+              description: "雙人帳篷(測試)",
+              qty: 1,
+              unit_price: "1500",
+              line_total: "1500",
+              original_unit_price: "1800",
+              discount_amount: "300",
+              line_kind: "NORMAL",
+              manual_discount_amount: "0",
+              net_amount: "1500",
+              campaigns: [{ campaign_id: 4, name: "帳篷組", discount_amount: "300" }],
+              free_units: 0,
+              buy_n_get_m_units: 0,
+              buy_n_get_m_eligible: true,
+              bundle_groups: [{ group_no: 0, campaign_id: 4, qty: 1 }],
+            },
+          ],
+          food_subtotal: "0",
+          store_credit_max: "1500",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "TENT1");
+    expect(await screen.findByText("組合價・第 1 組")).toBeTruthy();
+  });
+
   it("這筆不套用：取消某個活動→重新試算、可恢復；結帳帶上取消的活動（docs/40 P1c）", async () => {
     const quoteBodies: Record<string, unknown>[] = [];
     let saleBody = "";

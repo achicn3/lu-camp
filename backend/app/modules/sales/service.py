@@ -66,6 +66,8 @@ from app.modules.sales.models import (
     SaleAdjustment,
     SaleAdjustmentAllocation,
     SaleBulkAllocation,
+    SaleBundleGroup,
+    SaleBundleMember,
     SaleCampaignOverride,
     SaleLine,
     SaleLineCampaign,
@@ -254,6 +256,7 @@ class _AppliedDiscount:
     free_units: int = 0  # 本行有幾件是買 N 送 M「送的那件」（顯示用）
     buy_n_get_m_units: int = 0  # 本行有幾件成組參加買 N 送 M
     buy_n_get_m_eligible: bool = False  # 本行可能參加買 N 送 M（可指定送這件）
+    bundle_groups: tuple[tuple[int, int, int], ...] = ()  # (組號, 活動 id, 件數)
 
     @staticmethod
     def full_price(unit_price: Decimal, qty: int) -> "_AppliedDiscount":
@@ -287,6 +290,7 @@ def _campaign_discount(priced: LinePrice, original_unit: Decimal, qty: int) -> _
         priced.free_units,
         priced.buy_n_get_m_units,
         priced.buy_n_get_m_eligible,
+        priced.bundle_groups,
     )
 
 
@@ -402,6 +406,8 @@ class QuoteLine:
     """本行有幾件成組參加了買 N 送 M。"""
     buy_n_get_m_eligible: bool = False
     """本行可能參加買 N 送 M（沒湊進組的也可以被指定「送這件」）。"""
+    bundle_groups: tuple[tuple[int, int, int], ...] = ()
+    """本行有哪些件進了組合價：(組號, 活動 id, 件數)。"""
 
 
 @dataclass(frozen=True)
@@ -1217,6 +1223,8 @@ class SalesService:
                 raise InvalidSaleTender(f"銷售總額不可超過資料庫金額上限 {MAX_NTD}")
             if line.line_type == SaleLineType.MENU:
                 food_subtotal += line_total
+
+        await self._record_bundle_groups(store_id, sale.id, promos, priced_lines)
 
         # 臨時折扣：折扣**必須落到明細**（Σ net_amount 要等於 sale.total）——發票的品項
         # 小計合計不等於發票總額會被平台拒送且永遠卡住，退貨也依 net_amount 退實付。
@@ -2270,6 +2278,10 @@ class SalesService:
         """各活動在幾筆（非作廢）交易被店員按了「這筆不套用」（活動成效報表用）。"""
         return await self._repo.campaign_override_counts(store_id)
 
+    async def bundles_sold_by_campaign(self, store_id: int) -> dict[int, int]:
+        """各組合價活動賣出幾組（扣掉整組退回；活動成效報表用，docs/40 §9）。"""
+        return await self._repo.bundles_sold_by_campaign(store_id)
+
     async def campaign_line_facts(self, store_id: int) -> list[Any]:
         """每個活動套到的每一行（非作廢單；活動成效逐行歸屬用，見 ReportsService）。"""
         return await self._repo.campaign_line_facts(store_id)
@@ -2699,6 +2711,21 @@ class SalesService:
         if sale is not None and sale.invoice_status == SaleInvoiceStatus.PENDING_ALLOWANCE:
             sale.invoice_status = SaleInvoiceStatus.ALLOWANCE
             await self._session.flush()
+
+    async def unreturned_bundle_groups(
+        self, store_id: int, sale_id: int
+    ) -> list[tuple[int, tuple[tuple[int, int], ...]]]:
+        """還沒退回的組合價（退貨整組退用，docs/40 §8）：[(組 id, ((銷售明細 id, 件數), ...))]。"""
+        grouped: dict[int, list[tuple[int, int]]] = {}
+        for group_id, line_id, qty in await self._repo.unreturned_bundle_members(store_id, sale_id):
+            grouped.setdefault(group_id, []).append((line_id, qty))
+        return [(group_id, tuple(members)) for group_id, members in grouped.items()]
+
+    async def mark_bundle_groups_returned(
+        self, store_id: int, group_ids: list[int], return_id: int
+    ) -> None:
+        """整組退回的組合價記下是哪張退貨單退的。"""
+        await self._repo.mark_bundle_groups_returned(store_id, group_ids, return_id)
 
     async def lock_sale_row(self, store_id: int, sale_id: int) -> Sale | None:
         """鎖定銷售列（FOR UPDATE；跨模組經 service，§2）。
@@ -3203,6 +3230,7 @@ class SalesService:
             free_units=disc.free_units,
             buy_n_get_m_units=disc.buy_n_get_m_units,
             buy_n_get_m_eligible=disc.buy_n_get_m_eligible,
+            bundle_groups=disc.bundle_groups,
         )
 
     @staticmethod
@@ -3583,6 +3611,40 @@ class SalesService:
                 entity_id=str(sale_id),
                 before=None,
                 after={"campaign_id": campaign.id, "has_reason": clean is not None},
+            )
+
+    async def _record_bundle_groups(
+        self,
+        store_id: int,
+        sale_id: int,
+        promos: Sequence[PromoCampaign],
+        priced_lines: Sequence[LinePrice],
+    ) -> None:
+        """成交的組合價落盤（docs/40 P4）：一組一列＋哪一行幾件在組內；退貨據此要求整組退。"""
+        members: dict[int, list[tuple[int, int]]] = {}  # 組號 → [(行序, 件數)]
+        campaign_of: dict[int, int] = {}
+        for index, priced in enumerate(priced_lines):
+            for group_no, campaign_id, qty in priced.bundle_groups:
+                members.setdefault(group_no, []).append((index, qty))
+                campaign_of[group_no] = campaign_id
+        if not members:
+            return
+        prices = {p.id: p.bundle_price for p in promos}
+        line_ids = [line.id for line in await self._repo.list_lines(sale_id)]
+        for group_no in sorted(members):
+            price = prices[campaign_of[group_no]]
+            assert price is not None
+            await self._repo.add_bundle_group(
+                SaleBundleGroup(
+                    store_id=store_id,
+                    sale_id=sale_id,
+                    campaign_id=campaign_of[group_no],
+                    bundle_price=price,
+                ),
+                [
+                    SaleBundleMember(store_id=store_id, sale_line_id=line_ids[index], qty=qty)
+                    for index, qty in members[group_no]
+                ],
             )
 
     async def _record_free_item_choices(

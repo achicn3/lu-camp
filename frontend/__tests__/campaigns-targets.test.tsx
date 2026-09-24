@@ -391,4 +391,57 @@ describe("活動範圍與疊加", () => {
     expect(await screen.findByText("買幾件、送幾件須為 1-99 的整數")).toBeTruthy();
     expect(posted).toBeNull();
   });
+
+  it("組合價：每樣各選商品與件數，送出組合內容；不送範圍與疊加（docs/40 P4）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "帳篷椅子組");
+    await user.click(screen.getByLabelText("組合價"));
+    expect(screen.queryByRole("group", { name: "指定商品（選填）" })).toBeNull();
+    expect(screen.queryByLabelText("可以和其他活動疊加")).toBeNull();
+    await user.type(screen.getByLabelText("組合價（含稅，元）"), "7000");
+
+    const first = screen.getByRole("group", { name: "第 1 樣商品" });
+    await user.type(within(first).getByLabelText("搜尋品牌"), "Snow");
+    await user.click(await within(first).findByRole("button", { name: "加入 Snow Peak" }));
+    const second = screen.getByRole("group", { name: "第 2 樣商品" });
+    await user.type(within(second).getByLabelText("搜尋品牌"), "Cole");
+    await user.click(await within(second).findByRole("button", { name: "加入 Coleman" }));
+    const qty = screen.getByLabelText("第 2 樣要幾件");
+    await user.clear(qty);
+    await user.type(qty, "2");
+
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      kind: "BUNDLE",
+      bundle_price: "7000",
+      bundle_slots: [
+        { qty: 1, targets: [{ target_type: "BRAND", target_id: 5 }] },
+        { qty: 2, targets: [{ target_type: "BRAND", target_id: 6 }] },
+      ],
+      applies_consignment: false,
+      stackable: false,
+      targets: [],
+    });
+  });
+
+  it("組合價：還沒選商品的那一樣會擋下", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "錯的");
+    await user.click(screen.getByLabelText("組合價"));
+    await user.type(screen.getByLabelText("組合價（含稅，元）"), "7000");
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    expect(await screen.findByText("第 1 樣商品還沒選是什麼")).toBeTruthy();
+    expect(posted).toBeNull();
+  });
 });

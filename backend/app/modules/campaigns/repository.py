@@ -5,7 +5,12 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.campaigns.models import Campaign, CampaignTarget
+from app.modules.campaigns.models import (
+    Campaign,
+    CampaignBundleSlot,
+    CampaignBundleSlotTarget,
+    CampaignTarget,
+)
 from app.shared.enums import CampaignStatus
 
 
@@ -74,6 +79,51 @@ class CampaignRepository:
     async def add_targets(self, targets: list[CampaignTarget]) -> None:
         self._session.add_all(targets)
         await self._session.flush()
+
+    async def add_bundle_slot(
+        self, slot: CampaignBundleSlot, targets: list[CampaignBundleSlotTarget]
+    ) -> None:
+        self._session.add(slot)
+        await self._session.flush()
+        for target in targets:
+            target.slot_id = slot.id
+        self._session.add_all(targets)
+        await self._session.flush()
+
+    async def bundle_slots_for(
+        self, store_id: int, campaign_ids: list[int]
+    ) -> list[tuple[CampaignBundleSlot, list[CampaignBundleSlotTarget]]]:
+        """一批活動的組合格子與各格範圍（依活動、格號排序）。"""
+        if not campaign_ids:
+            return []
+        slots = list(
+            (
+                await self._session.scalars(
+                    select(CampaignBundleSlot)
+                    .where(
+                        CampaignBundleSlot.store_id == store_id,
+                        CampaignBundleSlot.campaign_id.in_(campaign_ids),
+                    )
+                    .order_by(CampaignBundleSlot.campaign_id, CampaignBundleSlot.slot_no)
+                )
+            ).all()
+        )
+        if not slots:
+            return []
+        targets = (
+            await self._session.scalars(
+                select(CampaignBundleSlotTarget)
+                .where(
+                    CampaignBundleSlotTarget.store_id == store_id,
+                    CampaignBundleSlotTarget.slot_id.in_([s.id for s in slots]),
+                )
+                .order_by(CampaignBundleSlotTarget.id)
+            )
+        ).all()
+        by_slot: dict[int, list[CampaignBundleSlotTarget]] = {}
+        for t in targets:
+            by_slot.setdefault(t.slot_id, []).append(t)
+        return [(s, by_slot.get(s.id, [])) for s in slots]
 
     async def targets_for(self, store_id: int, campaign_ids: list[int]) -> list[CampaignTarget]:
         """一批活動的範圍條件（依 id，順序穩定）。"""

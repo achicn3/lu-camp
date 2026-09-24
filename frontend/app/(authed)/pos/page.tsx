@@ -2447,8 +2447,12 @@ export default function PosPage() {
                       (discounted || giftLine) && ql?.original_unit_price != null
                         ? (parseNtd(ql.original_unit_price) ?? line.unitPrice)
                         : null;
+                    const bundles = ql?.bundle_groups ?? [];
                     return (
-                      <tr key={line.key}>
+                      <tr
+                        key={line.key}
+                        className={bundles.length > 0 ? "pos-row-bundle" : undefined}
+                      >
                         <td>
                           {line.description}
                           {isGift(line) && (
@@ -2462,6 +2466,13 @@ export default function PosPage() {
                               {ql?.campaigns?.map((c) => c.name).join("、")}
                             </span>
                           )}
+                          {/* 組合價（docs/40 P4）：同一組的行標同一個組號，左側色條框起來。 */}
+                          {bundles.map((b) => (
+                            <span key={b.group_no} className="pos-line-bundle">
+                              組合價・第 {b.group_no + 1} 組
+                              {b.qty < line.qty ? `（其中 ${b.qty} 件）` : ""}
+                            </span>
+                          ))}
                           {/* 買 N 送 M（docs/40 P3）：送的金額已按比例分到整組，這裡只標哪件是送的。 */}
                           {(ql?.free_units ?? 0) > 0 && (
                             <span className="pos-line-free">

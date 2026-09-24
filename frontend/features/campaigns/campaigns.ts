@@ -5,6 +5,7 @@ import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type CampaignStatus = components["schemas"]["CampaignStatus"];
+type CampaignKind = components["schemas"]["CampaignKind"];
 
 /** Convert discount_pct (% off) to traditional zh-TW "X 折" display. */
 export function discountDisplay(discountPct: number): string {
@@ -54,15 +55,19 @@ export function targetSummary(
   return parts.join("；");
 }
 
-/** 活動優惠的白話說法：「9 折」「特價 $690」「每件折 $100」「買 5 送 1」（docs/40 P2、P3）。 */
+/** 活動優惠的白話說法：「9 折」「特價 $690」「每件折 $100」「買 5 送 1」「組合價 $7,000」。 */
 export function offerDisplay(c: {
-  kind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF" | "BUY_N_GET_M";
+  kind: CampaignKind;
   discount_pct?: number | null;
   fixed_price?: string | null;
   amount_off?: string | null;
   buy_qty?: number | null;
   free_qty?: number | null;
+  bundle_price?: string | null;
 }): string {
+  if (c.kind === "BUNDLE" && c.bundle_price != null) {
+    return `組合價 $${formatNtd(parseNtd(c.bundle_price) ?? 0)}`;
+  }
   if (c.kind === "BUY_N_GET_M" && c.buy_qty != null && c.free_qty != null) {
     return `買 ${c.buy_qty} 送 ${c.free_qty}`;
   }
@@ -75,3 +80,12 @@ export function offerDisplay(c: {
   return c.discount_pct != null ? discountDisplay(c.discount_pct) : "-";
 }
 
+
+/** 組合內容摘要：「Snow Peak Amenity Dome ×1 ＋ 椅子或桌子 ×2」（docs/40 P4）。 */
+export function bundleSummary(
+  slots: { qty: number; targets: { label: string }[] }[],
+): string {
+  return slots
+    .map((slot) => `${slot.targets.map((t) => t.label).join("或")} ×${slot.qty}`)
+    .join(" ＋ ");
+}
