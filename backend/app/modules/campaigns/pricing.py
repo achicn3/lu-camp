@@ -29,6 +29,7 @@ from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from app.core.money import discounted_price
 from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
+from app.shared.exceptions import SaleLineInvalid
 
 _MIN_UNIT_PRICE = Decimal(1)
 # 單件就能算價的活動類型（第 2 步）；買 N 送 M 要看整車（第 3 步）。
@@ -37,6 +38,8 @@ _UNIT_KINDS = frozenset(
 )
 # 買 N 送 M 一律排除寄售品（裁示 7）。
 _CONSIGNMENT_KINDS = frozenset({CampaignItemKind.CONSIGNMENT_SERIALIZED})
+# 一筆裡參加買 N 送 M 的件數上限：要逐件分組，不設限會被超大數量拖垮（Codex 審查）。
+MAX_PROMO_UNITS = 10_000
 
 
 @dataclass(frozen=True)
@@ -255,8 +258,7 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
         u
         for u in units
         if not u.claimed
-        and u.item.kind not in _CONSIGNMENT_KINDS
-        and campaign_applies(campaign, u.item)
+        and _bngm_may_apply(campaign, u.item)
         and (not campaign.stackable or not u.non_stackable)
     ]
     use_list = not campaign.stackable
@@ -288,24 +290,46 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
         if use_list:
             u.price, u.allocations = u.list_price, []
         u.price -= share
-        u.allocations.append((campaign.id, share))
+        if share > 0:  # 分到 0 元不是折讓（sale_line_campaigns 也要求 > 0），但仍算在這組裡
+            u.allocations.append((campaign.id, share))
         u.claimed = True
         u.free = free
 
 
 def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) -> list[LinePrice]:
-    """整台購物車的活動定價（報價、結帳共用；docs/40 §5）：先逐件（第 2 步），再買 N 送 M。"""
-    units: list[_Unit] = []
+    """整台購物車的活動定價（報價、結帳共用；docs/40 §5）：先逐件（第 2 步），再買 N 送 M。
+
+    只有可能參加買 N 送 M 的行才展開成單件（上限 `MAX_PROMO_UNITS` 件）；其他行照單價 × 數量。
+    """
     by_id = {c.id: c for c in campaigns}
+    bngms = sorted((c for c in campaigns if c.kind == CampaignKind.BUY_N_GET_M), key=lambda c: c.id)
+    units: list[_Unit] = []
+    results: list[LinePrice | None] = []
     for index, cart_line in enumerate(lines):
-        if cart_line.item is None or cart_line.qty <= 0:
+        item = cart_line.item
+        if item is None or cart_line.qty <= 0:
+            results.append(
+                LinePrice(cart_line.unit_price, cart_line.qty, cart_line.unit_price * cart_line.qty)
+            )
             continue
-        single = price_unit(cart_line.unit_price, cart_line.item, campaigns)
+        single = price_unit(cart_line.unit_price, item, campaigns)
+        if not any(_bngm_may_apply(c, item) for c in bngms):
+            results.append(
+                LinePrice(
+                    cart_line.unit_price,
+                    cart_line.qty,
+                    single.unit_price * cart_line.qty,
+                    tuple((cid, amount * cart_line.qty) for cid, amount in single.allocations),
+                )
+            )
+            continue
+        if len(units) + cart_line.qty > MAX_PROMO_UNITS:
+            raise SaleLineInvalid(f"參加買幾送幾的商品一次最多 {MAX_PROMO_UNITS} 件，請分筆結帳")
         non_stackable = any(not by_id[cid].stackable for cid, _ in single.allocations)
         units.extend(
             _Unit(
                 index,
-                cart_line.item,
+                item,
                 cart_line.unit_price,
                 single.unit_price,
                 list(single.allocations),
@@ -313,16 +337,24 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
             )
             for _ in range(cart_line.qty)
         )
-    for campaign in sorted(campaigns, key=lambda c: c.id):
-        if campaign.kind == CampaignKind.BUY_N_GET_M:
-            _apply_buy_n_get_m(units, campaign)
-    return [_line_price(index, cart_line, units) for index, cart_line in enumerate(lines)]
+        results.append(None)  # 買 N 送 M 算完再由各件彙總
+    for campaign in bngms:
+        _apply_buy_n_get_m(units, campaign)
+    by_line: dict[int, list[_Unit]] = {}
+    for u in units:
+        by_line.setdefault(u.line, []).append(u)
+    return [
+        result if result is not None else _line_price(lines[index], by_line[index])
+        for index, result in enumerate(results)
+    ]
 
 
-def _line_price(index: int, cart_line: CartLine, units: Sequence[_Unit]) -> LinePrice:
-    mine = [u for u in units if u.line == index]
-    if not mine:
-        return LinePrice(cart_line.unit_price, cart_line.qty, cart_line.unit_price * cart_line.qty)
+def _bngm_may_apply(campaign: PromoCampaign, item: PromoItem) -> bool:
+    return item.kind not in _CONSIGNMENT_KINDS and campaign_applies(campaign, item)
+
+
+def _line_price(cart_line: CartLine, mine: Sequence[_Unit]) -> LinePrice:
+    """把一行展開的各件彙總回本行合計（各活動的折讓依第一次出現的順序）。"""
     totals: dict[int, Decimal] = {}
     for u in mine:
         for cid, amount in u.allocations:

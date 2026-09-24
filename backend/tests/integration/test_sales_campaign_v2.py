@@ -464,7 +464,6 @@ async def test_fixed_price_and_amount_off_at_checkout(
     assert (await _allocations(db_session, sale.id))[item.id] == [(fixed.id, Decimal(310))]
 
 
-
 # ── P3：買 N 送 M ───────────────────────────────────────────────────
 
 
@@ -533,7 +532,10 @@ async def test_buy_n_get_m_within_one_catalog_line(
     """同一行 3 罐 100 元買二送一：本行 200；各件分攤不整除，單價存平均（67）、小計才是準的。"""
     campaign = await _bngm(db_session, ctx, 2, 1)
     product = CatalogProduct(
-        store_id=ctx["store_id"], sku="GAS-1", name="瓦斯罐", unit_price=Decimal(100),
+        store_id=ctx["store_id"],
+        sku="GAS-1",
+        name="瓦斯罐",
+        unit_price=Decimal(100),
         quantity_on_hand=10,
     )
     db_session.add(product)
@@ -600,3 +602,19 @@ async def test_campaign_report_credits_buy_n_get_m(
     assert row.gross_turnover == Decimal(1600)
     assert row.transaction_count == 1
     assert (row.kind, row.buy_qty, row.free_qty) == ("BUY_N_GET_M", 2, 1)
+
+
+async def test_buy_n_get_m_with_a_zero_share_line_still_checks_out(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """1000 + 10 買一送一：10 元那件分到 0 元折讓——報價能過、結帳也要能過（Codex 審查）。"""
+    campaign = await _bngm(db_session, ctx, 1, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "10")]
+    lines = [_line(i) for i in items]
+    service = SalesService(db_session)
+
+    quote = await service.quote_sale(ctx["store_id"], lines=lines)
+    sale = await service.create_sale(ctx["store_id"], ctx["clerk_id"], lines=lines)
+
+    assert quote.total == sale.total == Decimal(1000)
+    assert await _allocations(db_session, sale.id) == {items[0].id: [(campaign, Decimal(10))]}

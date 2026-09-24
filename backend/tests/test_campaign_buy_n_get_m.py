@@ -9,6 +9,8 @@
 
 from decimal import Decimal
 
+import pytest
+
 from app.modules.campaigns.pricing import (
     CartLine,
     PromoCampaign,
@@ -17,6 +19,7 @@ from app.modules.campaigns.pricing import (
     price_unit,
 )
 from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
+from app.shared.exceptions import SaleLineInvalid
 
 KINDS = frozenset(
     {
@@ -213,3 +216,25 @@ def test_cart_without_buy_n_get_m_matches_per_unit_pricing() -> None:
     single = price_unit(Decimal(1000), CANISTER, campaigns)
     assert result.line_total == single.unit_price * 2
     assert result.allocations == tuple((cid, a * 2) for cid, a in single.allocations)
+
+
+def test_zero_share_is_not_recorded_as_an_allocation() -> None:
+    """1000＋10 買一送一：送的 10 元分成 10／0；0 元不記成活動明細（Codex 審查）。"""
+    result = price_cart([line(1000, item(1)), line(10, item(2))], [bngm(9, 1, 1)])
+    assert [r.line_total for r in result] == [Decimal(990), Decimal(10)]
+    assert result[0].allocations == ((9, Decimal(10)),)
+    assert result[1].allocations == ()
+    assert result[1].original_unit_price is None
+    assert all(a > 0 for r in result for _, a in r.allocations)
+
+
+def test_large_quantity_without_buy_n_get_m_is_priced_per_line() -> None:
+    """沒有買 N 送 M 適用時不逐件展開：數量再大也只是乘法（Codex 審查）。"""
+    [result] = price_cart([line(100, CANISTER, qty=10**9)], [pct(1, 10)])
+    assert result.line_total == Decimal(90) * 10**9
+    assert result.allocations == ((1, Decimal(10) * 10**9),)
+
+
+def test_absurd_quantity_under_buy_n_get_m_is_rejected() -> None:
+    with pytest.raises(SaleLineInvalid):
+        price_cart([line(100, CANISTER, qty=10**9)], [bngm(9, 5, 1)])
