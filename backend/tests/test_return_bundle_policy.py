@@ -14,8 +14,10 @@ def test_returning_unrelated_lines_touches_no_bundle() -> None:
     assert bundles_to_return({CHAIR: 1}, {}, QTY, [GROUP]) == []
 
 
-def test_unbundled_units_go_first() -> None:
-    assert bundles_to_return({GAS: 1}, {}, QTY, [GROUP]) == []
+def test_touching_a_bundled_line_at_all_requires_the_whole_group() -> None:
+    """同一行混了組內／組外的件時，按行平均的退價對組外那件也不準（Codex 審查）：一律整組整行退。"""
+    with pytest.raises(ReturnLineInvalid, match="整組"):
+        bundles_to_return({GAS: 1}, {}, QTY, [GROUP])
 
 
 def test_touching_bundled_units_requires_the_whole_group() -> None:
@@ -31,7 +33,7 @@ def test_whole_group_returns_every_remaining_unit_of_its_lines() -> None:
         bundles_to_return({TENT: 1, GAS: 2}, {}, QTY, [GROUP])
 
 
-def test_unbundled_unit_returned_earlier_is_not_required_again() -> None:
+def test_units_returned_before_the_bundle_existed_are_not_required_again() -> None:
     assert bundles_to_return({TENT: 1, GAS: 2}, {GAS: 1}, QTY, [GROUP]) == [7]
 
 

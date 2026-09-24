@@ -111,10 +111,21 @@ export function TargetPicker({
   const [lookingUp, setLookingUp] = useState(false);
   // 表單建立成功後會換 key 重掛：舊的查詢晚回來時不可再把範圍塞進下一張活動。
   const mounted = useRef(true);
+  // 查詢中被拿掉（組合價移除那一樣、切換活動類型）：卸載時要替它回報「查完了」，
+  // 否則表單的查詢中計數永遠降不回 0，建立鈕一直鎖著（Codex 審查）。
+  const pending = useRef(false);
+  const reportPending = useRef(onLookupPendingChange);
+  useEffect(() => {
+    reportPending.current = onLookupPendingChange;
+  }, [onLookupPendingChange]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (pending.current) {
+        pending.current = false;
+        reportPending.current(false);
+      }
     };
   }, []);
   const options = useOptions(type, q, type === "PRODUCT_MODEL" ? brand : null);
@@ -142,6 +153,7 @@ export function TargetPicker({
     // 查詢期間店員可能切換包含／排除：以按下「加入」當下的選擇為準。
     const pickedMode = mode;
     setLookingUp(true);
+    pending.current = true;
     onLookupPendingChange(true);
     let data;
     try {
@@ -154,6 +166,7 @@ export function TargetPicker({
     } finally {
       if (mounted.current) {
         setLookingUp(false);
+        pending.current = false;
         onLookupPendingChange(false);
       }
     }

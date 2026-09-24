@@ -444,4 +444,22 @@ describe("活動範圍與疊加", () => {
     expect(await screen.findByText("第 1 樣商品還沒選是什麼")).toBeTruthy();
     expect(posted).toBeNull();
   });
+
+  it("條碼查詢中把那一樣拿掉（或切換類型），建立鈕不會永遠卡在查詢中（Codex 審查）", async () => {
+    stub([], { holdBarcode: true });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.click(screen.getByLabelText("組合價"));
+    await user.click(screen.getByRole("button", { name: "再加一樣" }));
+    const third = screen.getByRole("group", { name: "第 3 樣商品" });
+    await user.selectOptions(within(third).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(third).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(third).getByRole("button", { name: "加入這件" }));
+    expect(await screen.findByRole("button", { name: "查詢商品中…" })).toBeTruthy();
+    const removes = screen.getAllByRole("button", { name: "拿掉這一樣" });
+    await user.click(removes[removes.length - 1]);
+    expect(await screen.findByRole("button", { name: "建立活動" })).toBeTruthy();
+    releaseCode();
+  });
 });

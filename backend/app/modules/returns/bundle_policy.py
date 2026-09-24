@@ -1,12 +1,12 @@
 """組合價的整組退規則（docs/40 §8、裁示 5；純函式）。
 
-一行可能只有部分件數在組內（例如 3 罐瓦斯只有 2 罐進組）。組外的件可以先退、不牽動組合；
-一旦這次退貨會動到組內的件，那一組用到的**每一行都要把剩下的件全部退回**，同一行又屬於
-別組的，那組也一起退（一路連下去）。
+一行可能只有部分件數在組內（例如 3 罐瓦斯只有 2 罐進組）。只要這次退貨動到組合用到的任何一行，
+那一組用到的**每一行都要把剩下的件全部退回**，同一行又屬於別組的，那組也一起退（一路連下去）。
 
-為什麼是「整行」而不只是組內件數：退款依一行的實付按件數平均（差額法），同一行組內與組外
-的件實付不同。只退組內件數，留下來的那件等於用平均價（含組合折扣）買到——拿著折扣走人
-（Codex 審查）。整行退回時平均就等於實付，一元不差。
+為什麼是「整組整行」：退款依一行的實付按件數平均（差額法），同一行組內與組外的件實付不同。
+只退組內件數，留下來的那件等於用含組合折扣的平均價買到（店家吃虧）；先退組外那件，又只退到
+平均價（客人吃虧）——兩個方向都不準（Codex 審查）。整行退回時平均就等於實付，一元不差。
+要分開退，得先把組內／組外的實付分開記，那是另一個工程。
 """
 
 from collections.abc import Mapping, Sequence
@@ -30,16 +30,9 @@ def bundles_to_return(
     groups: Sequence[BundleGroupMembers],
 ) -> list[int]:
     """這次退貨會整組退回哪些組合；動到組內的件卻沒把相關的行整行退回 → ReturnLineInvalid。"""
-    bundled: dict[int, int] = {}
-    for group in groups:
-        for line_id, qty in group.members:
-            bundled[line_id] = bundled.get(line_id, 0) + qty
-
+    bundled_lines = {line_id for group in groups for line_id, _ in group.members}
     whole_lines = {
-        line_id
-        for line_id, qty in requested.items()
-        if line_id in bundled
-        and previous.get(line_id, 0) + qty > line_qty[line_id] - bundled[line_id]
+        line_id for line_id, qty in requested.items() if qty > 0 and line_id in bundled_lines
     }
     returning: set[int] = set()
     changed = True

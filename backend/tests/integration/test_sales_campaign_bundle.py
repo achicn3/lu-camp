@@ -201,22 +201,24 @@ async def test_returning_the_whole_bundle_marks_it_returned(
     assert group is not None and group.returned_return_id == result.id
 
 
-async def test_unbundled_units_of_a_line_can_be_returned_alone(
+async def test_mixed_line_is_returned_with_its_whole_bundle(
     ctx: dict[str, int], db_session: AsyncSession
 ) -> None:
-    """3 罐只有 2 罐在組內：退 1 罐可以（算組外那罐），退第 2 罐就碰到組合、要整組退。"""
+    """3 罐只有 2 罐在組內：這行按行平均退價對哪一罐都不準，所以只能連同整組、整行一起退。"""
     await _bundle(db_session, ctx, 6000, 2)
     tent = await _tent(db_session, ctx)
     sale = await SalesService(db_session).create_sale(
         ctx["store_id"], ctx["clerk_id"], lines=_lines(tent, ctx, 3)
     )
     tent_line, gas_line = await _line_ids(db_session, sale.id)
-    loose = await _return(db_session, ctx, sale.id, [(gas_line, 1)], "bd-loose")
-    with pytest.raises(ReturnLineInvalid, match="整組"):
-        await _return(db_session, ctx, sale.id, [(gas_line, 1)], "bd-loose-2")
-    rest = await _return(db_session, ctx, sale.id, [(tent_line, 1), (gas_line, 2)], "bd-rest")
-    # 全部退完：兩次退款加起來剛好是整筆實付，不多不少
-    assert loose.refund_amount + rest.refund_amount == sale.total
+    for key, lines in [
+        ("bd-loose", [(gas_line, 1)]),
+        ("bd-bundle-only", [(tent_line, 1), (gas_line, 2)]),
+    ]:
+        with pytest.raises(ReturnLineInvalid, match="整組"):
+            await _return(db_session, ctx, sale.id, lines, key)
+    whole = await _return(db_session, ctx, sale.id, [(tent_line, 1), (gas_line, 3)], "bd-all")
+    assert whole.refund_amount == sale.total
 
 
 async def test_campaign_report_counts_bundles_sold_net_of_returns(
