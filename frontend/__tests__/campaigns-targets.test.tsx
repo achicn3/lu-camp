@@ -287,5 +287,20 @@ describe("活動範圍與疊加", () => {
     await within(scope).findByText("展示帳篷（ITM-9）");
     await waitFor(() => expect(submit.disabled).toBe(false));
   });
+
+  it("條碼查詢中不能再查第二個（避免重疊查詢提早解鎖送出）", async () => {
+    stub([], { holdBarcode: true });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(scope).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(scope).getByRole("button", { name: "加入這件" }));
+    const busy = within(scope).getByRole("button", { name: "查詢中…" }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    releaseCode();
+    await within(scope).findByText("展示帳篷（ITM-9）");
+  });
 });
 

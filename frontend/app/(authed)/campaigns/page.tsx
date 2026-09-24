@@ -94,6 +94,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setStackable(false);
       setTargets([]);
       setPickerKey((k) => k + 1);
+      // 舊選擇器被換掉後不會再回報查詢結束，這裡一併歸零，新表單才送得出去。
+      setLookupPending(false);
       onCreated();
     },
     onError: (err: Error) => setFormError(err.message),

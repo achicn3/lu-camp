@@ -101,6 +101,8 @@ export function TargetPicker({
   // 型號兩段式：先選品牌、再列該品牌的型號（型號名稱常重複，單查型號會分不出是哪個牌子）。
   const [brand, setBrand] = useState<Option | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 一次只查一個條碼：兩個查詢重疊時，先回來的會把「查詢中」解除，後一個還沒回來就能送出。
+  const [lookingUp, setLookingUp] = useState(false);
   // 表單建立成功後會換 key 重掛：舊的查詢晚回來時不可再把範圍塞進下一張活動。
   const mounted = useRef(true);
   useEffect(() => {
@@ -130,9 +132,10 @@ export function TargetPicker({
 
   async function addByCode() {
     const code = q.trim();
-    if (!code) return;
+    if (!code || lookingUp) return;
     // 查詢期間店員可能切換包含／排除：以按下「加入」當下的選擇為準。
     const pickedMode = mode;
+    setLookingUp(true);
     onLookupPendingChange(true);
     let data;
     try {
@@ -140,7 +143,10 @@ export function TargetPicker({
         params: { path: { item_code: code } },
       }));
     } finally {
-      if (mounted.current) onLookupPendingChange(false);
+      if (mounted.current) {
+        setLookingUp(false);
+        onLookupPendingChange(false);
+      }
     }
     if (!mounted.current) return;
     if (!data) {
@@ -249,8 +255,13 @@ export function TargetPicker({
           />
         </label>
         {type === "SERIALIZED_ITEM" && (
-          <button type="button" className="btn-secondary" onClick={() => void addByCode()}>
-            加入這件
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={lookingUp}
+            onClick={() => void addByCode()}
+          >
+            {lookingUp ? "查詢中…" : "加入這件"}
           </button>
         )}
       </div>
