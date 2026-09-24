@@ -2514,7 +2514,9 @@ export default function PosPage() {
                         <td>
                           <Money value={subtotalVal} />
                         </td>
-                        <td className="pos-line-actions">
+                        {/* flex 放在內層 div：td 本身設 flex 會脫離表格排版，底線對不齊（店主回報）。 */}
+                        <td>
+                          <div className="pos-line-actions">
                           {isGift(line) ? (
                             <button
                               type="button"
@@ -2574,6 +2576,7 @@ export default function PosPage() {
                           >
                             移除
                           </button>
+                          </div>
                         </td>
                       </tr>
                     );
