@@ -45,6 +45,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [targets, setTargets] = useState<PickedTarget[]>([]);
   // 建立成功後換一個 key 讓範圍選擇器整個重來（清掉搜尋字與候選清單）。
   const [pickerKey, setPickerKey] = useState(0);
+  const [lookupPending, setLookupPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -100,6 +101,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (lookupPending) return;
     setFormError(null);
     create.mutate();
   }
@@ -199,7 +201,12 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         )}
       </fieldset>
 
-      <TargetPicker key={pickerKey} targets={targets} onChange={setTargets} />
+      <TargetPicker
+        key={pickerKey}
+        targets={targets}
+        onChange={setTargets}
+        onLookupPendingChange={setLookupPending}
+      />
 
       <fieldset className="campaign-scope-fieldset">
         <legend>與其他活動一起用</legend>
@@ -224,9 +231,9 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       <button
         type="submit"
         className="btn-primary"
-        disabled={create.isPending}
+        disabled={create.isPending || lookupPending}
       >
-        {create.isPending ? "建立中..." : "建立活動"}
+        {create.isPending ? "建立中..." : lookupPending ? "查詢商品中…" : "建立活動"}
       </button>
     </form>
   );

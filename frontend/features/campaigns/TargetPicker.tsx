@@ -2,7 +2,7 @@
 // 門市活動的「指定商品」範圍（docs/40 P1b）：包含或排除品牌、型號、分類、一般商品、販售籃、單件商品。
 // 沒有任何「只套用在」＝上面勾的品項種類全部適用；「不套用」永遠優先。實際比對在後端定價。
 import { useQuery } from "@tanstack/react-query";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -88,9 +88,12 @@ function useOptions(type: TargetType, q: string, brand: Option | null) {
 export function TargetPicker({
   targets,
   onChange,
+  onLookupPendingChange,
 }: {
   targets: PickedTarget[];
   onChange: Dispatch<SetStateAction<PickedTarget[]>>;
+  /** 條碼查詢進行中時通知表單：查詢回來前不可建立活動，否則會少了這個範圍。 */
+  onLookupPendingChange: (pending: boolean) => void;
 }) {
   const [mode, setMode] = useState<TargetMode>("INCLUDE");
   const [type, setType] = useState<TargetType>("BRAND");
@@ -98,6 +101,14 @@ export function TargetPicker({
   // 型號兩段式：先選品牌、再列該品牌的型號（型號名稱常重複，單查型號會分不出是哪個牌子）。
   const [brand, setBrand] = useState<Option | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 表單建立成功後會換 key 重掛：舊的查詢晚回來時不可再把範圍塞進下一張活動。
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const options = useOptions(type, q, type === "PRODUCT_MODEL" ? brand : null);
   const pickingModel = type === "PRODUCT_MODEL" && brand !== null;
   const choosingBrandForModel = type === "PRODUCT_MODEL" && brand === null;
@@ -122,9 +133,16 @@ export function TargetPicker({
     if (!code) return;
     // 查詢期間店員可能切換包含／排除：以按下「加入」當下的選擇為準。
     const pickedMode = mode;
-    const { data } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
-      params: { path: { item_code: code } },
-    });
+    onLookupPendingChange(true);
+    let data;
+    try {
+      ({ data } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
+        params: { path: { item_code: code } },
+      }));
+    } finally {
+      if (mounted.current) onLookupPendingChange(false);
+    }
+    if (!mounted.current) return;
     if (!data) {
       setError(`找不到條碼 ${code} 的商品`);
       return;

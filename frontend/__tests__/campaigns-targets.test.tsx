@@ -269,4 +269,23 @@ describe("活動範圍與疊加", () => {
     await within(scope).findByText("展示帳篷（ITM-9）");
     expect(within(scope).getByText("Snow Peak")).toBeTruthy();
   });
+
+  it("條碼查詢還沒回來前不能建立活動，免得少了範圍變成全館活動（Codex 審查）", async () => {
+    stub([], { holdBarcode: true });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await fillBasics(user);
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(scope).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(scope).getByRole("button", { name: "加入這件" }));
+
+    const submit = screen.getByRole("button", { name: /建立活動|查詢商品中/ }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    releaseCode();
+    await within(scope).findByText("展示帳篷（ITM-9）");
+    await waitFor(() => expect(submit.disabled).toBe(false));
+  });
 });
+
