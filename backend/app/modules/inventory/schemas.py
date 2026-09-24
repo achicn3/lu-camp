@@ -402,6 +402,21 @@ class LatestAcquisitionRead(BaseModel):
     listed_price: NTDAmount
     # 折數（一位小數，如 "6.5"）：收購時點選的優先，否則上架售價 ÷ 參考價 × 10；都沒有為 None。
     discount: str | None = None
+    # 參考價（收購時查的原價或目前最低價）；沒填為 None。
+    reference_price: NTDAmountOpt = None
+
+
+class ReferencePriceSummary(BaseModel):
+    """歷史參考價（2026-09-25 店主要求）：同款通常差不多，店員不必每次重查。
+
+    latest 是最近一件**有填**參考價的；low／high 是期間內有填的最低與最高。
+    """
+
+    count: int
+    latest: NTDAmount
+    latest_at: datetime
+    low: NTDAmount
+    high: NTDAmount
 
 
 class DiscountRange(BaseModel):
@@ -440,6 +455,8 @@ class PriceHintRead(BaseModel):
     typical: TypicalPriceRange | None = None
     # 歷史折數（2026-09-24 店主要求）；沒有任何一件有折數時為 None。
     discounts: DiscountRange | None = None
+    # 歷史參考價；沒有任何一件填過參考價時為 None。
+    reference_prices: ReferencePriceSummary | None = None
     grades: list[GradePriceStat]
     latest: LatestAcquisitionRead | None = None
 
@@ -453,6 +470,7 @@ class PriceHintRecord(BaseModel):
     listed_price: NTDAmount
     status: SerializedItemStatus
     discount: str | None = None
+    reference_price: NTDAmountOpt = None
 
 
 class PriceHintRecordsRead(BaseModel):

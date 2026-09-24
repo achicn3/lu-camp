@@ -487,6 +487,21 @@ class InventoryService:
             }
         )
 
+        ref_stats, ref_latest = await self._repo.price_hint_reference_prices(
+            store_id, brand_id, product_model_id, since
+        )
+        reference_prices = (
+            None
+            if ref_latest is None
+            else {
+                "count": ref_stats.count,
+                "latest": ref_latest.retail_price,
+                "latest_at": ref_latest.created_at,
+                "low": ref_stats.low,
+                "high": ref_stats.high,
+            }
+        )
+
         order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
         grades = sorted(rows, key=lambda r: order.get(r.grade, len(order)))
         latest = await self._repo.latest_priced_item(store_id, brand_id, product_model_id, since)
@@ -497,6 +512,7 @@ class InventoryService:
             "total_count": total_count,
             "typical": typical,
             "discounts": discounts,
+            "reference_prices": reference_prices,
             "grades": [
                 {
                     "grade": r.grade,
@@ -516,6 +532,7 @@ class InventoryService:
                 "cost": latest.acquisition_cost,
                 "listed_price": latest.listed_price,
                 "discount": self._item_discount(latest),
+                "reference_price": latest.retail_price,
             },
         }
 
@@ -546,6 +563,7 @@ class InventoryService:
                     "listed_price": item.listed_price,
                     "status": item.status,
                     "discount": self._item_discount(item),
+                    "reference_price": item.retail_price,
                 }
                 for item in items
             ],

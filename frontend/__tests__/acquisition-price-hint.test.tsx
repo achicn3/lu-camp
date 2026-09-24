@@ -348,4 +348,29 @@ describe("一般行情與逐筆紀錄", () => {
     await screen.findByText(/同型號以前收過 3 件/);
     expect(screen.queryByText(/折數/)).toBeNull();
   });
+
+  it("顯示歷史參考價：最近一次與範圍（店主 2026-09-25）", async () => {
+    stubHint({
+      ...A_AND_C,
+      reference_prices: {
+        count: 3,
+        latest: "1280",
+        latest_at: "2026-09-20T05:00:00Z",
+        low: "1200",
+        high: "1280",
+      },
+      latest: { ...A_AND_C.latest, reference_price: "1280" },
+    });
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    expect(await screen.findByText(/歷史參考價：最近 1,280/)).toBeTruthy();
+    expect(screen.getByText(/3 件有填，1,200–1,280/)).toBeTruthy();
+    expect(screen.getByText(/參考價 1,280/)).toBeTruthy();
+  });
+
+  it("沒有人填過參考價就不講", async () => {
+    stubHint(A_AND_C);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    await screen.findByText(/同型號以前收過 3 件/);
+    expect(screen.queryByText(/參考價/)).toBeNull();
+  });
 });

@@ -786,3 +786,71 @@ async def test_discount_prefers_the_one_chosen_at_acquisition(
         )
     ).json()
     assert hint["discounts"] == {"count": 2, "low": "6.5", "high": "7", "typical": False}
+
+
+# ── 歷史參考價（2026-09-25 店主：「收購頁也要加上歷史參考價」）────────────────
+# 參考價＝收購時查的原價或目前最低價（retail_price）。同款通常差不多，店員不必每次重查。
+
+
+async def test_reference_price_summary_latest_and_range(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="500",
+        retail_price="1200",
+        days_ago=20,
+    )
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="600",
+        retail_price="1280",
+        days_ago=3,
+    )
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="400",
+        days_ago=1,
+    )
+    query = {"brand_id": brand_id, "product_model_id": model_id}
+    hint = (await client.get(PATH, params=query, headers=_auth(store_id))).json()
+    reference = hint["reference_prices"]
+    assert (reference["count"], reference["low"], reference["high"], reference["latest"]) == (
+        2,
+        "1200",
+        "1280",
+        "1280",
+    )
+    assert reference["latest_at"] is not None
+    assert hint["latest"]["reference_price"] is None  # 最近那件沒填
+    records = (await client.get(f"{PATH}/records", params=query, headers=_auth(store_id))).json()
+    assert [r["reference_price"] for r in records["items"]] == [None, "1280", "1200"]
+
+
+async def test_no_reference_prices_means_none(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session, store_id, brand_id=brand_id, product_model_id=model_id, listed_price="500"
+    )
+    hint = (
+        await client.get(
+            PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id},
+            headers=_auth(store_id),
+        )
+    ).json()
+    assert hint["reference_prices"] is None

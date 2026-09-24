@@ -1,4 +1,4 @@
-// 收購頁「歷史折數＋六折以上紅字」煙霧（店主 2026-09-24）：
+// 收購頁「歷史折數＋歷史參考價＋六折以上紅字」煙霧（店主 2026-09-24、09-25）：
 // 用 API 造 3 件同款買斷（點過 5 折、6.5 折，一件沒填參考價），確認行情提示講「歷史折數 5–6.5 折」、
 // 最近一次標折數、逐筆紀錄有折數欄；再在收購列點 6 折看到紅字提醒、5 折不出現。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/price-hint-discount-smoke.mjs
@@ -130,11 +130,13 @@ try {
   const hintText = await hintBox.innerText();
   ok("行情提示講歷史折數 5–6.5 折（2 件有折數）", hintText.includes("歷史折數：5–6.5 折") && hintText.includes("有折數紀錄的 2 件"), hintText.replace(/\n/g, " | "));
   ok("最近一次標折數或不標（最近那件沒填參考價）", !hintText.includes("undefined"));
+  ok("行情提示講歷史參考價（2026-09-25）", hintText.includes("歷史參考價：最近 1,000") && hintText.includes("2 件都是 1,000"), hintText.replace(/\n/g, " | "));
   await page.getByRole("button", { name: "看各成色行情與最近紀錄" }).click();
   const recent = page.getByRole("table", { name: "最近 5 筆" });
   await recent.waitFor();
   const recentText = await recent.innerText();
   ok("逐筆紀錄有折數欄", recentText.includes("折數") && recentText.includes("6.5 折") && recentText.includes("5 折"), recentText.replace(/\s+/g, " "));
+  ok("逐筆紀錄有參考價欄", recentText.includes("參考價") && recentText.includes("1,000"));
   await hintBox.screenshot({ path: join(SHOTS, "01-hint-discount.png") });
 
   await page.getByLabel("參考價（原價或目前最低價）").fill("1000");

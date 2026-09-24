@@ -8903,6 +8903,17 @@
           "listed_price": {
             "title": "Listed Price",
             "type": "string"
+          },
+          "reference_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Price"
           }
         },
         "required": [
@@ -10296,6 +10307,16 @@
               }
             ]
           },
+          "reference_prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferencePriceSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "total_count": {
             "title": "Total Count",
             "type": "integer"
@@ -10364,6 +10385,17 @@
           "listed_price": {
             "title": "Listed Price",
             "type": "string"
+          },
+          "reference_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Price"
           },
           "status": {
             "$ref": "#/components/schemas/SerializedItemStatus"
@@ -11071,6 +11103,41 @@
           "cached_total_trustworthy"
         ],
         "title": "ReconciliationReport",
+        "type": "object"
+      },
+      "ReferencePriceSummary": {
+        "description": "歷史參考價（2026-09-25 店主要求）：同款通常差不多，店員不必每次重查。\n\nlatest 是最近一件**有填**參考價的；low／high 是期間內有填的最低與最高。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "high": {
+            "title": "High",
+            "type": "string"
+          },
+          "latest": {
+            "title": "Latest",
+            "type": "string"
+          },
+          "latest_at": {
+            "format": "date-time",
+            "title": "Latest At",
+            "type": "string"
+          },
+          "low": {
+            "title": "Low",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "latest",
+          "latest_at",
+          "low",
+          "high"
+        ],
+        "title": "ReferencePriceSummary",
         "type": "object"
       },
       "RestoreRunRead": {

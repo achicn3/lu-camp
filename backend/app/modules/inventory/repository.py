@@ -1158,6 +1158,37 @@ class InventoryRepository:
         )
         return (await self._session.execute(stmt)).one()
 
+    async def price_hint_reference_prices(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> tuple[Any, SerializedItem | None]:
+        """歷史參考價：有填的件數、最低、最高，以及最近一件有填參考價的商品。"""
+        scope = [
+            *self._price_hint_scope(store_id, brand_id, product_model_id, since),
+            SerializedItem.retail_price > 0,
+        ]
+        stats = (
+            await self._session.execute(
+                select(
+                    func.count().label("count"),
+                    func.min(SerializedItem.retail_price).label("low"),
+                    func.max(SerializedItem.retail_price).label("high"),
+                ).where(*scope)
+            )
+        ).one()
+        latest = (
+            await self._session.scalars(
+                select(SerializedItem)
+                .where(*scope)
+                .order_by(SerializedItem.created_at.desc(), SerializedItem.id.desc())
+                .limit(1)
+            )
+        ).first()
+        return stats, latest
+
     async def price_hint_records(
         self,
         store_id: int,

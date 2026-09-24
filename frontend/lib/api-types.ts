@@ -6798,6 +6798,8 @@ export interface components {
             grade: components["schemas"]["Grade"];
             /** Listed Price */
             listed_price: string;
+            /** Reference Price */
+            reference_price?: string | null;
         };
         /**
          * LiabilityReport
@@ -7364,6 +7366,7 @@ export interface components {
             /** Grades */
             grades: components["schemas"]["GradePriceStat"][];
             latest?: components["schemas"]["LatestAcquisitionRead"] | null;
+            reference_prices?: components["schemas"]["ReferencePriceSummary"] | null;
             /** Total Count */
             total_count: number;
             typical?: components["schemas"]["TypicalPriceRange"] | null;
@@ -7389,6 +7392,8 @@ export interface components {
             grade: components["schemas"]["Grade"];
             /** Listed Price */
             listed_price: string;
+            /** Reference Price */
+            reference_price?: string | null;
             status: components["schemas"]["SerializedItemStatus"];
         };
         /**
@@ -7671,6 +7676,27 @@ export interface components {
             }[];
             /** Store Id */
             store_id: number;
+        };
+        /**
+         * ReferencePriceSummary
+         * @description 歷史參考價（2026-09-25 店主要求）：同款通常差不多，店員不必每次重查。
+         *
+         *     latest 是最近一件**有填**參考價的；low／high 是期間內有填的最低與最高。
+         */
+        ReferencePriceSummary: {
+            /** Count */
+            count: number;
+            /** High */
+            high: string;
+            /** Latest */
+            latest: string;
+            /**
+             * Latest At
+             * Format: date-time
+             */
+            latest_at: string;
+            /** Low */
+            low: string;
         };
         /**
          * RestoreRunRead

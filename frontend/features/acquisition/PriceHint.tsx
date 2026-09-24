@@ -90,6 +90,7 @@ export function PriceHint({
   const latest = hint.latest ?? null;
   const typical = hint.typical ?? null;
   const discounts = hint.discounts ?? null;
+  const reference = hint.reference_prices ?? null;
   const costExtremes = combinedRange(hint.grades, "cost_min", "cost_max");
   const listedExtremes = combinedRange(hint.grades, "listed_min", "listed_max");
 
@@ -132,6 +133,20 @@ export function PriceHint({
           <span className="price-hint-sub-inline">（有折數紀錄的 {discounts.count} 件）</span>
         </p>
       )}
+      {reference === null ? null : (
+        <p className="price-hint-discount">
+          {/* 歷史參考價（2026-09-25 店主要求）：收購時查的原價或目前最低價，同款通常差不多，不必每次重查。 */}
+          歷史參考價：最近 {range(reference.latest, reference.latest)}
+          <span className="price-hint-sub-inline">
+            （{formatTaipeiDate(reference.latest_at)}
+            {reference.count > 1
+              ? reference.low === reference.high
+                ? `；${reference.count} 件都是 ${range(reference.low, reference.high)}`
+                : `；${reference.count} 件有填，${range(reference.low, reference.high)}`
+              : ""}）
+          </span>
+        </p>
+      )}
       <p className="price-hint-sub">
         {hint.used_all_time ? "全部歷史" : `近 ${hint.window_months} 個月`}・本店買斷商品・金額為新台幣。
         上架售價含稅，依商品目前記錄，非成交價；僅供估價參考。
@@ -144,6 +159,7 @@ export function PriceHint({
           {GRADE_LABEL[latest.grade] ?? latest.grade}）：
           {range(latest.cost, latest.cost) === null ? "未填收購價" : `收 ${range(latest.cost, latest.cost)}`}
           、上架 {range(latest.listed_price, latest.listed_price) ?? "未填上架價"}
+          {latest.reference_price != null ? `、參考價 ${range(latest.reference_price, latest.reference_price)}` : ""}
           {latest.discount != null ? `（${latest.discount} 折）` : ""}
         </p>
       )}
