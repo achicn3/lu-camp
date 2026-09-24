@@ -17,6 +17,11 @@ NTDAmountOpt = Annotated[
     PlainSerializer(lambda d: None if d is None else format_ntd(d), return_type=str | None),
 ]
 
+# 買 N 送 M 的件數（N、M 各 1–99）。
+PROMO_QTY_MIN = 1
+PROMO_QTY_MAX = 99
+PromoQty = Annotated[int, Field(ge=PROMO_QTY_MIN, le=PROMO_QTY_MAX)]
+
 # 一個活動最多掛幾條範圍條件（包含＋排除）；再多就該用分類或品牌。
 CAMPAIGN_TARGETS_MAX = 200
 
@@ -47,6 +52,9 @@ class CampaignCreateRequest(BaseModel):
     discount_pct: Annotated[int, Field(ge=1, le=99)] | None = None
     fixed_price: NTDPositive | None = None
     amount_off: NTDPositive | None = None
+    # 買 N 送 M（docs/40 P3）：兩個都要填；寄售品一律不參加（裁示 7）。
+    buy_qty: PromoQty | None = None
+    free_qty: PromoQty | None = None
     starts_at: AwareDateTime
     ends_at: AwareDateTime
     applies_owned_serialized: bool = True
@@ -60,15 +68,18 @@ class CampaignCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _kind_matches_value(self) -> Self:
-        values = {
-            CampaignKind.PERCENT_OFF: self.discount_pct,
-            CampaignKind.FIXED_PRICE: self.fixed_price,
-            CampaignKind.AMOUNT_OFF: self.amount_off,
+        values: dict[CampaignKind, tuple[object, ...]] = {
+            CampaignKind.PERCENT_OFF: (self.discount_pct,),
+            CampaignKind.FIXED_PRICE: (self.fixed_price,),
+            CampaignKind.AMOUNT_OFF: (self.amount_off,),
+            CampaignKind.BUY_N_GET_M: (self.buy_qty, self.free_qty),
         }
-        if values[self.kind] is None:
-            raise ValueError("請填這種活動的數值（折扣／特價／折金額）")
-        if any(v is not None for k, v in values.items() if k != self.kind):
+        if any(v is None for v in values[self.kind]):
+            raise ValueError("請填這種活動的數值（折扣／特價／折金額／買幾送幾）")
+        if any(v is not None for k, vs in values.items() if k != self.kind for v in vs):
             raise ValueError("只能填這種活動的數值，其他類型的欄位請留空")
+        if self.kind == CampaignKind.BUY_N_GET_M and self.applies_consignment:
+            raise ValueError("寄售品不能參加買 N 送 M")
         return self
 
 
@@ -80,6 +91,8 @@ class CampaignRead(BaseModel):
     discount_pct: int | None
     fixed_price: NTDAmountOpt = None
     amount_off: NTDAmountOpt = None
+    buy_qty: int | None = None
+    free_qty: int | None = None
     applies_owned_serialized: bool
     applies_owned_bulk: bool
     applies_catalog: bool

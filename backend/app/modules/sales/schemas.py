@@ -347,9 +347,8 @@ class SaleCreateRequest(BaseModel):
 
 
 NTDAmountOpt = Annotated[
-    Decimal | None, PlainSerializer(
-        lambda d: None if d is None else format_ntd(d), return_type=str | None
-    )
+    Decimal | None,
+    PlainSerializer(lambda d: None if d is None else format_ntd(d), return_type=str | None),
 ]
 
 
@@ -412,6 +411,9 @@ class SaleQuoteLineRead(BaseModel):
     net_amount: NTDAmount
     # 本行套到的活動與各自折讓（加總＝discount_amount；可疊加時會有多個）。
     campaigns: list[SaleQuoteCampaignRead] = []
+    # 買 N 送 M：本行有幾件是「送的那件」（顯示用；金額已按比例分攤到整組，docs/40 P3）。
+    # 分攤不整除時 unit_price 是平均單價，小計以 line_total／net_amount 為準。
+    free_units: int = 0
 
 
 class SaleQuoteResponse(BaseModel):

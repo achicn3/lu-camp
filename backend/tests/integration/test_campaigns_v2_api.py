@@ -224,3 +224,55 @@ async def test_kind_and_value_must_match(
         }
         resp = await client.post(PATH, json=payload, headers=_auth(mgr))
         assert resp.status_code == 422, (extra, resp.text)
+
+
+# ── P3：買 N 送 M ───────────────────────────────────────────────────
+
+
+def _bngm(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "name": "瓦斯罐買五送一",
+        "kind": "BUY_N_GET_M",
+        "buy_qty": 5,
+        "free_qty": 1,
+        "applies_catalog": True,
+        "starts_at": "2026-06-01T00:00:00Z",
+        "ends_at": "2026-07-01T00:00:00Z",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_create_buy_n_get_m_campaign(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    resp = await client.post(PATH, json=_bngm(), headers=_auth(mgr))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["kind"], body["buy_qty"], body["free_qty"], body["discount_pct"]) == (
+        "BUY_N_GET_M",
+        5,
+        1,
+        None,
+    )
+    assert body["applies_consignment"] is False
+
+
+async def test_buy_n_get_m_values_must_be_valid(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    bad: list[dict[str, object]] = [
+        {"free_qty": None},  # 沒給送幾件
+        {"buy_qty": 0},
+        {"free_qty": 100},
+        {"discount_pct": 10},  # 多給別種的值
+        {"applies_consignment": True},  # 寄售品不能參加買 N 送 M（裁示 7）
+    ]
+    for extra in bad:
+        resp = await client.post(PATH, json=_bngm(**extra), headers=_auth(mgr))
+        assert resp.status_code == 422, (extra, resp.text)
+    # 別種活動不可帶 buy_qty／free_qty
+    resp = await client.post(PATH, json=_payload(buy_qty=2), headers=_auth(mgr))
+    assert resp.status_code == 422, resp.text

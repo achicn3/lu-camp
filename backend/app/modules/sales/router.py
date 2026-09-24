@@ -485,6 +485,7 @@ async def quote_sale(
                 manual_discount_amount=ql.manual_discount_amount,
                 net_amount=ql.net_amount,
                 campaigns=[_campaign_read(c) for c in ql.campaigns],
+                free_units=ql.free_units,
             )
             for ql in quote.lines
         ],

@@ -2460,6 +2460,15 @@ export default function PosPage() {
                               {ql?.campaigns?.map((c) => c.name).join("、")}
                             </span>
                           )}
+                          {/* 買 N 送 M（docs/40 P3）：送的金額已按比例分到整組，這裡只標哪件是送的。 */}
+                          {(ql?.free_units ?? 0) > 0 && (
+                            <span className="pos-line-free">
+                              {line.lineType === "SERIALIZED"
+                                ? "這件是送的"
+                                : `其中 ${ql?.free_units} 件是送的`}
+                              （金額已分攤到同組）
+                            </span>
+                          )}
                         </td>
                         <td>
                           {originalUnit !== null ? (
@@ -2472,6 +2481,12 @@ export default function PosPage() {
                           ) : (
                             <Money value={unitVal} />
                           )}
+                          {/* 分攤不整除時單價是平均，小計才是準的（不要讓人拿單價×數量去對）。 */}
+                          {ql != null &&
+                            (parseNtd(ql.unit_price) ?? 0) * ql.qty !==
+                              (parseNtd(ql.line_total) ?? 0) && (
+                              <span className="row-sub">平均單價</span>
+                            )}
                         </td>
                         <td>
                           {line.lineType === "SERIALIZED" ? (

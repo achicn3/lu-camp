@@ -1492,6 +1492,49 @@ describe("/pos 結帳頁", () => {
     expect(printed.lines[0].original_unit_price).toBe("1800");
   });
 
+  it("買 N 送 M：標出送的那件，單價不整除時標平均單價（docs/40 P3）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1201",
+          campaign_id: 3,
+          campaign_name: "買二送一",
+          campaigns: [{ campaign_id: 3, name: "買二送一", discount_amount: "599" }],
+          disabled_campaigns: [],
+          lines: [
+            {
+              line_type: "SERIALIZED",
+              description: "雙人帳篷(測試)",
+              qty: 1,
+              unit_price: "1201",
+              line_total: "1201",
+              original_unit_price: "1800",
+              discount_amount: "599",
+              line_kind: "NORMAL",
+              manual_discount_amount: "0",
+              net_amount: "1201",
+              campaigns: [{ campaign_id: 3, name: "買二送一", discount_amount: "599" }],
+              free_units: 1,
+            },
+          ],
+          food_subtotal: "0",
+          store_credit_max: "1201",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "TENT1");
+    expect(await screen.findByText(/這件是送的/)).toBeTruthy();
+    // 序號品 1 件：單價×數量＝小計，不需要標平均單價
+    expect(screen.queryByText("平均單價")).toBeNull();
+  });
+
   it("這筆不套用：取消某個活動→重新試算、可恢復；結帳帶上取消的活動（docs/40 P1c）", async () => {
     const quoteBodies: Record<string, unknown>[] = [];
     let saleBody = "";

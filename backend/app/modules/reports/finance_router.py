@@ -842,11 +842,13 @@ async def gifts(
 
 
 def _campaign_offer_text(row: CampaignPerformanceRow) -> str:
-    """「打 9 折」「特價 690」「每件折 100」（docs/40 P2）。"""
+    """「打 9 折」「特價 690」「每件折 100」「買 5 送 1」（docs/40 P2、P3）。"""
     if row.kind == CampaignKind.FIXED_PRICE and row.fixed_price is not None:
         return f"特價 {format_ntd(row.fixed_price)}"
     if row.kind == CampaignKind.AMOUNT_OFF and row.amount_off is not None:
         return f"每件折 {format_ntd(row.amount_off)}"
+    if row.kind == CampaignKind.BUY_N_GET_M:
+        return f"買 {row.buy_qty} 送 {row.free_qty}"
     return f"折扣 {row.discount_pct}%"
 
 

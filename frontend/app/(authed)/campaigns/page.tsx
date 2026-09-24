@@ -25,7 +25,14 @@ const KIND_OPTIONS: { value: CampaignKind; label: string }[] = [
   { value: "PERCENT_OFF", label: "打折" },
   { value: "FIXED_PRICE", label: "指定特價" },
   { value: "AMOUNT_OFF", label: "每件折金額" },
+  { value: "BUY_N_GET_M", label: "買幾送幾" },
 ];
+
+/** 買 N 送 M 的件數：1–99 的整數；不合法回 null。 */
+function promoQty(value: string): number | null {
+  if (!/^[1-9]\d?$/.test(value.trim())) return null;
+  return parseInt(value, 10);
+}
 
 const PAGE_SIZE = 20;
 
@@ -44,6 +51,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [kind, setKind] = useState<CampaignKind>("PERCENT_OFF");
   const [discountPct, setDiscountPct] = useState("");
   const [moneyValue, setMoneyValue] = useState("");
+  const [buyQty, setBuyQty] = useState("");
+  const [freeQty, setFreeQty] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [appliesOwnedSerialized, setAppliesOwnedSerialized] = useState(true);
@@ -59,9 +68,24 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
 
   const create = useMutation({
     mutationFn: async () => {
-      // 活動類型（docs/40 P2）：打折填折扣 %；特價、折金額填含稅整數元。只送那一種的數值。
-      let offer: { kind: CampaignKind; discount_pct?: number; fixed_price?: string; amount_off?: string };
-      if (kind === "PERCENT_OFF") {
+      // 活動類型（docs/40 P2、P3）：打折填折扣 %；特價、折金額填含稅整數元；買幾送幾填件數。
+      // 只送那一種的數值。
+      let offer: {
+        kind: CampaignKind;
+        discount_pct?: number;
+        fixed_price?: string;
+        amount_off?: string;
+        buy_qty?: number;
+        free_qty?: number;
+      };
+      if (kind === "BUY_N_GET_M") {
+        const buy = promoQty(buyQty);
+        const free = promoQty(freeQty);
+        if (buy === null || free === null) {
+          throw new Error("買幾件、送幾件須為 1-99 的整數");
+        }
+        offer = { kind, buy_qty: buy, free_qty: free };
+      } else if (kind === "PERCENT_OFF") {
         const pct = parseInt(discountPct, 10);
         if (isNaN(pct) || pct < 1 || pct > 99) {
           throw new Error("折扣 % 須為 1-99 的整數");
@@ -91,7 +115,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           applies_owned_serialized: appliesOwnedSerialized,
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
-          applies_consignment: appliesConsignment,
+          // 寄售品不參加買 N 送 M（裁示 7）：切到買幾送幾時一律不送寄售。
+          applies_consignment: kind === "BUY_N_GET_M" ? false : appliesConsignment,
           stackable,
           targets: targets.map(({ mode, target_type, target_id }) => ({
             mode,
@@ -108,6 +133,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setName("");
       setDiscountPct("");
       setMoneyValue("");
+      setBuyQty("");
+      setFreeQty("");
       setKind("PERCENT_OFF");
       setStartsAt("");
       setEndsAt("");
@@ -162,7 +189,33 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           ))}
         </fieldset>
 
-        {kind === "PERCENT_OFF" ? (
+        {kind === "BUY_N_GET_M" ? (
+          <div className="campaign-bngm">
+            <label className="field">
+              <span className="field-label">買幾件</span>
+              <input
+                inputMode="numeric"
+                value={buyQty}
+                onChange={(e) => setBuyQty(e.target.value)}
+                placeholder="例如 5"
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">送幾件</span>
+              <input
+                inputMode="numeric"
+                value={freeQty}
+                onChange={(e) => setFreeQty(e.target.value)}
+                placeholder="例如 1"
+                required
+              />
+            </label>
+            <p className="hint">
+              符合的商品每湊滿「買＋送」件就成一組，送組內最便宜的；送的金額按價格比例分到整組每一件（退貨時退它分到的實付）。
+            </p>
+          </div>
+        ) : kind === "PERCENT_OFF" ? (
           <label className="field">
             <span className="field-label">折扣 %（1-99）</span>
             <input
@@ -240,6 +293,9 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         <p className="hint">餐飲（內用）品項一律不參與活動折扣，結帳時自動以原價計算。</p>
       </fieldset>
 
+      {kind === "BUY_N_GET_M" ? (
+        <p className="hint">寄售品不參加買幾送幾。</p>
+      ) : (
       <fieldset className="campaign-scope-fieldset">
         <legend>寄售品折扣</legend>
         <label className="campaign-checkbox">
@@ -256,6 +312,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           </p>
         )}
       </fieldset>
+      )}
 
       <TargetPicker
         key={pickerKey}

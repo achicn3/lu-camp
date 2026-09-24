@@ -36,15 +36,21 @@ class Campaign(Base, TimestampMixin):
 
     __tablename__ = "campaigns"
     __table_args__ = (
-        # 類型與數值一致（docs/40 P2）：打折只填 discount_pct，特價只填 fixed_price，
-        # 折金額只填 amount_off。
+        # 類型與數值一致（docs/40 P2、P3）：打折只填 discount_pct，特價只填 fixed_price，
+        # 折金額只填 amount_off，買 N 送 M 只填 buy_qty／free_qty 且不可開寄售（裁示 7）。
         CheckConstraint(
             "(kind = 'PERCENT_OFF' AND discount_pct BETWEEN 1 AND 99"
-            " AND fixed_price IS NULL AND amount_off IS NULL)"
+            " AND fixed_price IS NULL AND amount_off IS NULL"
+            " AND buy_qty IS NULL AND free_qty IS NULL)"
             " OR (kind = 'FIXED_PRICE' AND fixed_price > 0"
-            " AND discount_pct IS NULL AND amount_off IS NULL)"
+            " AND discount_pct IS NULL AND amount_off IS NULL"
+            " AND buy_qty IS NULL AND free_qty IS NULL)"
             " OR (kind = 'AMOUNT_OFF' AND amount_off > 0"
-            " AND discount_pct IS NULL AND fixed_price IS NULL)",
+            " AND discount_pct IS NULL AND fixed_price IS NULL"
+            " AND buy_qty IS NULL AND free_qty IS NULL)"
+            " OR (kind = 'BUY_N_GET_M' AND buy_qty BETWEEN 1 AND 99 AND free_qty BETWEEN 1 AND 99"
+            " AND discount_pct IS NULL AND fixed_price IS NULL AND amount_off IS NULL"
+            " AND NOT applies_consignment)",
             name="ck_campaigns_kind_value",
         ),
         CheckConstraint("ends_at > starts_at", name="ck_campaigns_window"),
@@ -63,6 +69,9 @@ class Campaign(Base, TimestampMixin):
     # 指定特價／每件折金額（含稅整數元）；只有對應類型才有值。
     fixed_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     amount_off: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    # 買 N 送 M（kind=BUY_N_GET_M）才有：買 buy_qty 件送 free_qty 件。
+    buy_qty: Mapped[int | None] = mapped_column(Integer)
+    free_qty: Mapped[int | None] = mapped_column(Integer)
     applies_owned_serialized: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
     )

@@ -937,6 +937,8 @@ class ReportsService:
             kind=c.kind,
             fixed_price=c.fixed_price,
             amount_off=c.amount_off,
+            buy_qty=c.buy_qty,
+            free_qty=c.free_qty,
             starts_at=c.starts_at,
             ends_at=c.ends_at,
             campaign_discount_total=discount_totals.get(c.id, Decimal(0)),

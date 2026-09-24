@@ -4409,6 +4409,13 @@ a.btn-ghost {
   font-size: var(--text-sm);
   color: var(--accent);
 }
+/* 買 N 送 M：標出送的那件（docs/40 P3）。 */
+.pos-line-free {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--success);
+  font-weight: 600;
+}
 
 /* 客顯：每件套到的活動（docs/40 §7）。 */
 .kiosk-cart-campaigns {
@@ -4426,6 +4433,16 @@ a.btn-ghost {
 }
 
 /* 門市活動優惠方式（docs/40 P2）。 */
+/* 買幾送幾：兩個件數欄並排，說明另起一行。 */
+.campaign-bngm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.campaign-bngm .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
 .campaign-kind {
   display: flex;
   flex-wrap: wrap;

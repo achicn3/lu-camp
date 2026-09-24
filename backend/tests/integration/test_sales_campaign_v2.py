@@ -24,7 +24,7 @@ from app.modules.campaigns.schemas import CampaignTargetInput
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
-from app.modules.inventory.models import Brand, SerializedItem
+from app.modules.inventory.models import Brand, CatalogProduct, SerializedItem
 from app.modules.reports.service import ReportsService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import CampaignOverrideInput, SaleLineInput
@@ -462,3 +462,141 @@ async def test_fixed_price_and_amount_off_at_checkout(
     )
     assert sale.total == Decimal(690)
     assert (await _allocations(db_session, sale.id))[item.id] == [(fixed.id, Decimal(310))]
+
+
+
+# ── P3：買 N 送 M ───────────────────────────────────────────────────
+
+
+async def _bngm(
+    db: AsyncSession, ctx: dict[str, int], buy: int, free: int, *, stackable: bool = False
+) -> int:
+    now = datetime.now(UTC)
+    svc = CampaignService(db)
+    c = await svc.create_campaign(
+        ctx["store_id"],
+        name=f"買{buy}送{free}",
+        discount_pct=None,
+        kind=CampaignKind.BUY_N_GET_M,
+        buy_qty=buy,
+        free_qty=free,
+        starts_at=now - timedelta(days=1),
+        ends_at=now + timedelta(days=1),
+        applies_owned_serialized=True,
+        applies_owned_bulk=True,
+        applies_catalog=True,
+        applies_consignment=False,
+        created_by=ctx["clerk_id"],
+        stackable=stackable,
+    )
+    await svc.activate(ctx["store_id"], c.id, actor_user_id=ctx["clerk_id"])
+    return c.id
+
+
+async def test_buy_n_get_m_allocates_free_amount_and_quote_matches(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """買二送一：1000／600／400 → 送 400，按比例分到三件（200／120／80），報價與結帳同價。"""
+    campaign = await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600", "400")]
+    lines = [_line(i) for i in items]
+    service = SalesService(db_session)
+
+    quote = await service.quote_sale(ctx["store_id"], lines=lines)
+    sale = await service.create_sale(ctx["store_id"], ctx["clerk_id"], lines=lines)
+
+    assert quote.total == sale.total == Decimal(1600)
+    assert [ql.net_amount for ql in quote.lines] == [Decimal(800), Decimal(480), Decimal(320)]
+    assert [ql.free_units for ql in quote.lines] == [0, 0, 1]
+    allocations = await _allocations(db_session, sale.id)
+    assert [allocations[i.id] for i in items] == [
+        [(campaign, Decimal(200))],
+        [(campaign, Decimal(120))],
+        [(campaign, Decimal(80))],
+    ]
+    saved = (
+        await db_session.scalars(
+            select(SaleLine).where(SaleLine.sale_id == sale.id).order_by(SaleLine.id)
+        )
+    ).all()
+    assert [(s.unit_price, s.line_total, s.discount_amount) for s in saved] == [
+        (Decimal(800), Decimal(800), Decimal(200)),
+        (Decimal(480), Decimal(480), Decimal(120)),
+        (Decimal(320), Decimal(320), Decimal(80)),
+    ]
+    assert all(s.campaign_id == campaign for s in saved)
+
+
+async def test_buy_n_get_m_within_one_catalog_line(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """同一行 3 罐 100 元買二送一：本行 200；各件分攤不整除，單價存平均（67）、小計才是準的。"""
+    campaign = await _bngm(db_session, ctx, 2, 1)
+    product = CatalogProduct(
+        store_id=ctx["store_id"], sku="GAS-1", name="瓦斯罐", unit_price=Decimal(100),
+        quantity_on_hand=10,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    line = SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=product.id, qty=3)
+
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"], ctx["clerk_id"], lines=[line]
+    )
+
+    assert sale.total == Decimal(200)
+    saved = await db_session.scalar(select(SaleLine).where(SaleLine.sale_id == sale.id))
+    assert saved is not None
+    assert (saved.unit_price, saved.line_total, saved.net_amount) == (
+        Decimal(67),
+        Decimal(200),
+        Decimal(200),
+    )
+    assert (saved.original_unit_price, saved.discount_amount) == (Decimal(100), Decimal(100))
+    assert saved.campaign_id == campaign
+
+
+async def test_returning_one_item_refunds_its_allocated_price(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """退一件退它分攤後的實付，不回推剩下各件（docs/40 §8）。"""
+    await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600", "400")]
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"], ctx["clerk_id"], lines=[_line(i) for i in items]
+    )
+    line_id = await db_session.scalar(
+        select(SaleLine.id).where(
+            SaleLine.sale_id == sale.id, SaleLine.serialized_item_id == items[2].id
+        )
+    )
+    assert line_id is not None
+
+    result = await ReturnsService(db_session).create_return(
+        ctx["store_id"],
+        sale_id=sale.id,
+        lines=[ReturnLineInput(sale_line_id=line_id, qty=1)],
+        reason="不要了",
+        actor_user_id=ctx["clerk_id"],
+        idempotency_key="bngm-return-1",
+    )
+    assert result.refund_amount == Decimal(320)
+
+
+async def test_campaign_report_credits_buy_n_get_m(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    campaign = await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600", "400")]
+    await SalesService(db_session).create_sale(
+        ctx["store_id"], ctx["clerk_id"], lines=[_line(i) for i in items]
+    )
+
+    row = next(
+        r
+        for r in (await ReportsService(db_session).campaign_performance(ctx["store_id"])).rows
+        if r.campaign_id == campaign
+    )
+    assert row.gross_turnover == Decimal(1600)
+    assert row.transaction_count == 1
+    assert (row.kind, row.buy_qty, row.free_qty) == ("BUY_N_GET_M", 2, 1)

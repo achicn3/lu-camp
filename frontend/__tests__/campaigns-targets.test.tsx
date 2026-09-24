@@ -352,5 +352,43 @@ describe("活動範圍與疊加", () => {
     const offRow = screen.getByText("每件折百").closest("tr") as HTMLElement;
     expect(offRow.textContent).toContain("每件折 $100");
   });
-});
 
+  it("可以建立買幾送幾的活動，且不會送出寄售（docs/40 P3、裁示 7）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "瓦斯罐買五送一");
+    await user.click(screen.getByLabelText("對寄售品套用折扣"));
+    await user.click(screen.getByLabelText("買幾送幾"));
+    expect(screen.queryByLabelText("對寄售品套用折扣")).toBeNull();
+    await user.type(screen.getByLabelText("買幾件"), "5");
+    await user.type(screen.getByLabelText("送幾件"), "1");
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      kind: "BUY_N_GET_M",
+      buy_qty: 5,
+      free_qty: 1,
+      applies_consignment: false,
+    });
+  });
+
+  it("買幾送幾件數不合法時擋下", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "錯的");
+    await user.click(screen.getByLabelText("買幾送幾"));
+    await user.type(screen.getByLabelText("買幾件"), "0");
+    await user.type(screen.getByLabelText("送幾件"), "1");
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    expect(await screen.findByText("買幾件、送幾件須為 1-99 的整數")).toBeTruthy();
+    expect(posted).toBeNull();
+  });
+});

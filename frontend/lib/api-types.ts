@@ -4174,11 +4174,15 @@ export interface components {
              * @default true
              */
             applies_owned_serialized: boolean;
+            /** Buy Qty */
+            buy_qty?: number | null;
             /** Discount Pct */
             discount_pct?: number | null;
             ends_at: components["schemas"]["AwareDateTime"];
             /** Fixed Price */
             fixed_price?: number | string | null;
+            /** Free Qty */
+            free_qty?: number | null;
             /** @default PERCENT_OFF */
             kind: components["schemas"]["CampaignKind"];
             /** Name */
@@ -4197,10 +4201,10 @@ export interface components {
         };
         /**
          * CampaignKind
-         * @description 門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額。
+         * @description 門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額；P3 加買 N 送 M。
          * @enum {string}
          */
-        CampaignKind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF";
+        CampaignKind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF" | "BUY_N_GET_M";
         /**
          * CampaignPerformanceReport
          * @description 活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。
@@ -4228,6 +4232,8 @@ export interface components {
         CampaignPerformanceRow: {
             /** Amount Off */
             amount_off?: string | null;
+            /** Buy Qty */
+            buy_qty?: number | null;
             /** Campaign Discount Total */
             campaign_discount_total: string;
             /** Campaign Id */
@@ -4241,6 +4247,8 @@ export interface components {
             ends_at: string;
             /** Fixed Price */
             fixed_price?: string | null;
+            /** Free Qty */
+            free_qty?: number | null;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
@@ -4289,6 +4297,8 @@ export interface components {
             applies_owned_bulk: boolean;
             /** Applies Owned Serialized */
             applies_owned_serialized: boolean;
+            /** Buy Qty */
+            buy_qty?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -4305,6 +4315,8 @@ export interface components {
             ends_at: string;
             /** Fixed Price */
             fixed_price?: string | null;
+            /** Free Qty */
+            free_qty?: number | null;
             /** Id */
             id: number;
             kind: components["schemas"]["CampaignKind"];
@@ -7642,6 +7654,11 @@ export interface components {
             description: string;
             /** Discount Amount */
             discount_amount: string;
+            /**
+             * Free Units
+             * @default 0
+             */
+            free_units: number;
             line_kind: components["schemas"]["SaleLineKind"];
             /** Line Total */
             line_total: string;

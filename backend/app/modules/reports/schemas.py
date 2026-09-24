@@ -374,6 +374,9 @@ class CampaignPerformanceRow(BaseModel):
     kind: CampaignKind = CampaignKind.PERCENT_OFF
     fixed_price: NTDAmountOpt = None
     amount_off: NTDAmountOpt = None
+    # 買 N 送 M（docs/40 P3）
+    buy_qty: int | None = None
+    free_qty: int | None = None
     starts_at: datetime
     ends_at: datetime
     campaign_discount_total: NTDAmount

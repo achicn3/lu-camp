@@ -54,13 +54,18 @@ export function targetSummary(
   return parts.join("；");
 }
 
-/** 活動優惠的白話說法：「9 折」「特價 $690」「每件折 $100」（docs/40 P2）。 */
+/** 活動優惠的白話說法：「9 折」「特價 $690」「每件折 $100」「買 5 送 1」（docs/40 P2、P3）。 */
 export function offerDisplay(c: {
-  kind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF";
+  kind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF" | "BUY_N_GET_M";
   discount_pct?: number | null;
   fixed_price?: string | null;
   amount_off?: string | null;
+  buy_qty?: number | null;
+  free_qty?: number | null;
 }): string {
+  if (c.kind === "BUY_N_GET_M" && c.buy_qty != null && c.free_qty != null) {
+    return `買 ${c.buy_qty} 送 ${c.free_qty}`;
+  }
   if (c.kind === "FIXED_PRICE" && c.fixed_price != null) {
     return `特價 $${formatNtd(parseNtd(c.fixed_price) ?? 0)}`;
   }

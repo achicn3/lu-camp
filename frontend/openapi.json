@@ -2075,6 +2075,19 @@
             "title": "Applies Owned Serialized",
             "type": "boolean"
           },
+          "buy_qty": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Qty"
+          },
           "discount_pct": {
             "anyOf": [
               {
@@ -2106,6 +2119,19 @@
               }
             ],
             "title": "Fixed Price"
+          },
+          "free_qty": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Qty"
           },
           "kind": {
             "$ref": "#/components/schemas/CampaignKind",
@@ -2144,11 +2170,12 @@
         "type": "object"
       },
       "CampaignKind": {
-        "description": "門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額。",
+        "description": "門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額；P3 加買 N 送 M。",
         "enum": [
           "PERCENT_OFF",
           "FIXED_PRICE",
-          "AMOUNT_OFF"
+          "AMOUNT_OFF",
+          "BUY_N_GET_M"
         ],
         "title": "CampaignKind",
         "type": "string"
@@ -2195,6 +2222,17 @@
             ],
             "title": "Amount Off"
           },
+          "buy_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Qty"
+          },
           "campaign_discount_total": {
             "title": "Campaign Discount Total",
             "type": "string"
@@ -2229,6 +2267,17 @@
               }
             ],
             "title": "Fixed Price"
+          },
+          "free_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Qty"
           },
           "gross_margin": {
             "title": "Gross Margin",
@@ -2338,6 +2387,17 @@
             "title": "Applies Owned Serialized",
             "type": "boolean"
           },
+          "buy_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Qty"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2373,6 +2433,17 @@
               }
             ],
             "title": "Fixed Price"
+          },
+          "free_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Qty"
           },
           "id": {
             "title": "Id",
@@ -11062,6 +11133,11 @@
           "discount_amount": {
             "title": "Discount Amount",
             "type": "string"
+          },
+          "free_units": {
+            "default": 0,
+            "title": "Free Units",
+            "type": "integer"
           },
           "line_kind": {
             "$ref": "#/components/schemas/SaleLineKind"

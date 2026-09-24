@@ -55,6 +55,8 @@ async def create_campaign(
             kind=body.kind,
             fixed_price=body.fixed_price,
             amount_off=body.amount_off,
+            buy_qty=body.buy_qty,
+            free_qty=body.free_qty,
         )
     except (InvalidDiscountPct, InvalidCampaignTarget) as exc:
         await session.rollback()

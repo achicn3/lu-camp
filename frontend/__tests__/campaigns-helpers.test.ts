@@ -87,3 +87,9 @@ describe("offerDisplay（docs/40 P2）", () => {
     expect(offerDisplay({ kind: "AMOUNT_OFF", discount_pct: null, fixed_price: null, amount_off: "100" })).toBe("每件折 $100");
   });
 });
+
+describe("offerDisplay（docs/40 P3）", () => {
+  it("買幾送幾", () => {
+    expect(offerDisplay({ kind: "BUY_N_GET_M", buy_qty: 5, free_qty: 1 })).toBe("買 5 送 1");
+  });
+});
