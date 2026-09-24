@@ -1,6 +1,6 @@
-// 門市活動 v2 P4 煙霧（docs/40）：在畫面上建立「帳篷＋椅子 組合價 7000」（兩格各指定一個品牌）並啟用 →
-// POS 掃帳篷 6000、椅子 2000 → 應付 7,000、兩行都標「組合價・第 1 組」→ 結帳完成 →
-// 只退帳篷被擋（必須整組退）→ 整組退成功、退 7,000。
+// 門市活動 v2 P4 煙霧（docs/40）：在畫面上建立「帳篷＋椅子 組合價 7000、可疊加」（兩格各指定一個品牌）
+// 並啟用，另有只限這兩個品牌的可疊加九折 → POS 掃帳篷 6000、椅子 2000 → 組合 7000 再九折＝應付 6,300、
+// 兩行都標「組合價・第 1 組」→ 結帳完成 → 只退帳篷被擋（必須整組退）→ 整組退成功、退 6,300。
 // 需 backend + frontend 已起、已 seed dev-manager。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/campaigns-bundle-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -64,6 +64,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1300 } });
 const pageErrors = [];
 page.on("pageerror", (err) => pageErrors.push(String(err)));
 let token = "";
+let extraId = null;
 
 async function addBrand(slotName, brandName) {
   const slot = page.getByRole("group", { name: slotName });
@@ -102,6 +103,28 @@ try {
     },
   });
   ok("造出帳篷 6000、椅子 2000", acq.item_codes.length === 2);
+  const extra = await apiJson("/api/v1/campaigns", {
+    method: "POST",
+    token,
+    body: {
+      name: `兩牌九折-${RUN}`,
+      discount_pct: 10,
+      starts_at: new Date(Date.now() - 86_400_000).toISOString(),
+      ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+      applies_owned_serialized: true,
+      applies_owned_bulk: true,
+      applies_catalog: false,
+      applies_consignment: false,
+      stackable: true,
+      bundle_slots: [],
+      targets: [
+        { mode: "INCLUDE", target_type: "BRAND", target_id: tentBrand.id },
+        { mode: "INCLUDE", target_type: "BRAND", target_id: chairBrand.id },
+      ],
+    },
+  });
+  extraId = extra.id;
+  await apiJson(`/api/v1/campaigns/${extra.id}/activate`, { method: "POST", token });
 
   await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
@@ -119,6 +142,7 @@ try {
   await addBrand("第 2 樣商品", CHAIR_BRAND);
   await page.getByLabel("開始時間").fill(taipeiLocal(-1));
   await page.getByLabel("結束時間").fill(taipeiLocal(1));
+  await page.getByLabel("可以和其他活動疊加").check();
   await page.screenshot({ path: join(SHOTS, "01-form.png"), fullPage: true });
   await page.getByRole("button", { name: "建立活動" }).click();
   const row = page.locator("tr", { has: page.getByText(CAMPAIGN, { exact: true }) });
@@ -140,8 +164,8 @@ try {
     await page.press('input[name="code"]', "Enter");
     await page.locator(".pos-cart tbody tr", { hasText: names[i] }).waitFor();
   }
-  await page.waitForFunction(() => document.querySelector(".pos-total strong")?.textContent?.includes("7,000"));
-  ok("湊齊自動套用：應付 7,000", true);
+  await page.waitForFunction(() => document.querySelector(".pos-total strong")?.textContent?.includes("6,300"));
+  ok("湊齊自動套用、再疊九折：應付 6,300", true);
   const rows = await page.locator(".pos-cart tbody tr").allInnerTexts();
   ok("兩行都標「組合價・第 1 組」", rows.every((t) => t.includes("組合價・第 1 組")), rows.join(" | ").replace(/\s+/g, " "));
   ok("組合價的行不出現「改送這件」", rows.every((t) => !t.includes("改送這件")));
@@ -154,7 +178,7 @@ try {
   await page.getByRole("button", { name: "結帳" }).click();
   await page.waitForSelector("text=已完成");
   const completeText = await page.locator(".pos-complete").innerText();
-  ok("結帳完成（7,000）", /7,?000/.test(completeText), completeText.replace(/\s+/g, " ").slice(0, 80));
+  ok("結帳完成（6,300）", /6,?300/.test(completeText), completeText.replace(/\s+/g, " ").slice(0, 80));
   await page.screenshot({ path: join(SHOTS, "04-complete.png"), fullPage: true });
 
   const saleId = Number(/#(\d+)/.exec(completeText)?.[1]);
@@ -177,7 +201,7 @@ try {
       ],
     },
   });
-  ok("整組退成功、退 7,000", whole.status === 201 && JSON.parse(whole.text).refund_amount === "7000", whole.text.slice(0, 160));
+  ok("整組退成功、退 6,300", whole.status === 201 && JSON.parse(whole.text).refund_amount === "6300", whole.text.slice(0, 160));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/campaigns`, { waitUntil: "networkidle" });
@@ -196,7 +220,7 @@ try {
   if (token) {
     const listed = await apiJson("/api/v1/campaigns?status=ACTIVE", { token }).catch(() => []);
     for (const c of listed) {
-      if (c.name === CAMPAIGN) {
+      if (c.name === CAMPAIGN || c.id === extraId) {
         await apiJson(`/api/v1/campaigns/${c.id}/end`, { method: "POST", token }).catch(() => {});
       }
     }

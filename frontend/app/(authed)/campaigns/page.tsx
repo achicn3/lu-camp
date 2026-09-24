@@ -156,8 +156,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           applies_catalog: appliesCatalog,
           // 寄售品不參加買 N 送 M、組合價（裁示 7）：切到這兩種時一律不送寄售。
           applies_consignment: noConsignment ? false : appliesConsignment,
-          // 組合價本身就是一口價，不跟其他活動疊加；範圍由各格決定。
-          stackable: kind === "BUNDLE" ? false : stackable,
+          // 組合價也可勾疊加（2026-09-25 裁示）：組合價算完再套可疊加的活動。範圍由各格決定。
+          stackable,
           targets:
             kind === "BUNDLE"
               ? []
@@ -449,7 +449,6 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         />
       )}
 
-      {kind !== "BUNDLE" && (
       <fieldset className="campaign-scope-fieldset">
         <legend>與其他活動一起用</legend>
         <label className="campaign-checkbox">
@@ -460,12 +459,18 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           />
           可以和其他活動疊加
         </label>
-        <p className="hint">
-          可以同時進行多個活動。可疊加的活動會連乘（九折再九折＝81 折）；不可疊加的活動不會跟其他活動一起用。
-          同一件商品符合好幾個活動時，系統自動挑對客人最划算的算法。
-        </p>
+        {kind === "BUNDLE" ? (
+          <p className="hint">
+            勾了：組合價算完，還會再套其他「可疊加」的活動（例：組合價 7000，全館九折可疊加 → 6300）。
+            沒勾：組合價就是最後的價錢。不可疊加的活動一律不跟組合價一起用。
+          </p>
+        ) : (
+          <p className="hint">
+            可以同時進行多個活動。可疊加的活動會連乘（九折再九折＝81 折）；不可疊加的活動不會跟其他活動一起用。
+            同一件商品符合好幾個活動時，系統自動挑對客人最划算的算法。
+          </p>
+        )}
       </fieldset>
-      )}
 
       {formError !== null && (
         <p role="alert" className="form-error">{formError}</p>

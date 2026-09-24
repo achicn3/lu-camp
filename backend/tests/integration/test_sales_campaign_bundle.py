@@ -55,7 +55,9 @@ async def ctx(db_session: AsyncSession) -> dict[str, int]:
     return {"store_id": store.id, "clerk_id": clerk.id, "tent": tent.id, "gas": gas.id}
 
 
-async def _bundle(db: AsyncSession, ctx: dict[str, int], price: int, gas_qty: int) -> int:
+async def _bundle(
+    db: AsyncSession, ctx: dict[str, int], price: int, gas_qty: int, *, stackable: bool = False
+) -> int:
     now = datetime.now(UTC)
     svc = CampaignService(db)
     c = await svc.create_campaign(
@@ -89,6 +91,7 @@ async def _bundle(db: AsyncSession, ctx: dict[str, int], price: int, gas_qty: in
         applies_catalog=True,
         applies_consignment=False,
         created_by=ctx["clerk_id"],
+        stackable=stackable,
     )
     await svc.activate(ctx["store_id"], c.id, actor_user_id=ctx["clerk_id"])
     return c.id
@@ -268,3 +271,35 @@ async def test_preview_already_warns_about_partial_bundle(
         ],
     )
     assert preview["refund_total"] == Decimal(6000)
+
+
+async def test_stackable_bundle_takes_stackable_campaign_on_top_at_checkout(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """組合價勾可疊加（2026-09-25 裁示）：組合 6000 再九折，報價與結帳同價、兩個活動各記各的。"""
+    bundle_id = await _bundle(db_session, ctx, 6000, 2, stackable=True)
+    now = datetime.now(UTC)
+    svc = CampaignService(db_session)
+    storewide = await svc.create_campaign(
+        ctx["store_id"],
+        name="全館九折",
+        discount_pct=10,
+        starts_at=now - timedelta(days=1),
+        ends_at=now + timedelta(days=1),
+        applies_owned_serialized=True,
+        applies_owned_bulk=True,
+        applies_catalog=True,
+        applies_consignment=False,
+        created_by=ctx["clerk_id"],
+        stackable=True,
+    )
+    await svc.activate(ctx["store_id"], storewide.id, actor_user_id=ctx["clerk_id"])
+    lines = _lines(await _tent(db_session, ctx), ctx, 2)
+    service = SalesService(db_session)
+
+    quote = await service.quote_sale(ctx["store_id"], lines=lines)
+    sale = await service.create_sale(ctx["store_id"], ctx["clerk_id"], lines=lines)
+
+    # 組合 6000 分攤成 5806／97／97，每件再九折各自四捨五入（同一般疊加口徑）：5225＋87＋87
+    assert quote.total == sale.total == Decimal(5399)
+    assert {c.campaign_id for c in quote.campaigns} == {bundle_id, storewide.id}

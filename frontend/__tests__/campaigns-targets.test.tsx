@@ -392,7 +392,7 @@ describe("活動範圍與疊加", () => {
     expect(posted).toBeNull();
   });
 
-  it("組合價：每樣各選商品與件數，送出組合內容；不送範圍與疊加（docs/40 P4）", async () => {
+  it("組合價：每樣各選商品與件數，送出組合內容；不送範圍（docs/40 P4）", async () => {
     stub();
     const user = userEvent.setup();
     renderPage();
@@ -400,7 +400,6 @@ describe("活動範圍與疊加", () => {
     await user.type(screen.getByLabelText("活動名稱"), "帳篷椅子組");
     await user.click(screen.getByLabelText("組合價"));
     expect(screen.queryByRole("group", { name: "指定商品（選填）" })).toBeNull();
-    expect(screen.queryByLabelText("可以和其他活動疊加")).toBeNull();
     await user.type(screen.getByLabelText("組合價（含稅，元）"), "7000");
 
     const first = screen.getByRole("group", { name: "第 1 樣商品" });
@@ -461,5 +460,28 @@ describe("活動範圍與疊加", () => {
     await user.click(removes[removes.length - 1]);
     expect(await screen.findByRole("button", { name: "建立活動" })).toBeTruthy();
     releaseCode();
+  });
+
+  it("組合價可勾「可以和其他活動疊加」（2026-09-25 裁示）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "可疊加組合");
+    await user.click(screen.getByLabelText("組合價"));
+    await user.type(screen.getByLabelText("組合價（含稅，元）"), "7000");
+    const first = screen.getByRole("group", { name: "第 1 樣商品" });
+    await user.type(within(first).getByLabelText("搜尋品牌"), "Snow");
+    await user.click(await within(first).findByRole("button", { name: "加入 Snow Peak" }));
+    const second = screen.getByRole("group", { name: "第 2 樣商品" });
+    await user.type(within(second).getByLabelText("搜尋品牌"), "Cole");
+    await user.click(await within(second).findByRole("button", { name: "加入 Coleman" }));
+    await user.click(screen.getByLabelText("可以和其他活動疊加"));
+    expect(screen.getByText(/組合價算完，還會再套其他「可疊加」的活動/)).toBeTruthy();
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({ kind: "BUNDLE", stackable: true });
   });
 });

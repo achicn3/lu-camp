@@ -17,6 +17,7 @@
 6. **組合價**（P4，整車第一步，見 `_apply_bundles`）：每個格子（範圍＋件數）都湊齊才成一組，
    每格挑最貴的符合件；只有比這些件走其他活動更划算才成組（裁示 1），成組的件不再參加其他活動。
    組合價按組內各件原價比例分攤（最大餘數法、每件至少 1 元、加總＝組合價）。寄售品不進組合包。
+   組合價勾「可疊加」時，分攤完再套適用的可疊加單件活動；不可疊加的一律不併用。
 7. **買 N 送 M**（P3，整車才算得出來，見 `price_cart`）：適用的件依單價由高到低排，
    每 N+M 件一組，組內最便宜的 M 件免費；免費額按組內各件價格比例分攤到整組（裁示 3、4），
    最大餘數法、加總不差一元。寄售品不參加（裁示 7）。每件只參加一個買 N 送 M（依活動 id）。
@@ -433,7 +434,7 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
         if any(_bngm_may_apply(c, item) for c in bngms):
             bngm_lines.add(index)
         results.append(None)  # 組合價、買 N 送 M 算完再由各件彙總
-    _apply_bundles(units, bundles)
+    _apply_bundles(units, bundles, [c for c in campaigns if c.kind in _UNIT_KINDS and c.stackable])
     for campaign in bngms:
         _apply_buy_n_get_m(units, campaign)
     by_line: dict[int, list[_Unit]] = {}
@@ -483,8 +484,14 @@ def _slot_matches(campaign: PromoCampaign, slot: BundleSlot, item: PromoItem) ->
     return _bngm_may_apply(campaign, item) and any(_target_matches(t, item) for t in slot.includes)
 
 
-def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None:
-    """組合價（見模組說明第 6 點）：依活動 id，一組一組湊，湊不齊或不划算就換下一個活動。"""
+def _apply_bundles(
+    units: list[_Unit], bundles: Sequence[PromoCampaign], stackables: Sequence[PromoCampaign]
+) -> None:
+    """組合價（見模組說明第 6 點）：依活動 id，一組一組湊，湊不齊或不划算就換下一個活動。
+
+    組合價活動勾了「可疊加」：組合價分攤完，每件再依序套上適用它的**可疊加**單件活動
+    （打折／特價／折金額；2026-09-25 裁示）。不可疊加的活動一律不跟組合價併用。
+    """
     group_no = 0
     for campaign in bundles:
         assert campaign.bundle_price is not None
@@ -505,18 +512,30 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
             picked = _pick_bundle(campaign, queues)
             if picked is None:
                 break
-            if sum((u.price for u in picked), Decimal(0)) <= campaign.bundle_price:
-                break  # 最值錢的組合都不划算：這個活動不再成組
             list_prices = [u.list_price for u in picked]
             shares = _allocate(
                 sum(list_prices, Decimal(0)) - campaign.bundle_price,
                 list_prices,
                 [max(Decimal(0), p - _MIN_UNIT_PRICE) for p in list_prices],
             )
+            # 每件成組後的價錢；組合價可疊加時連同疊上去的活動一起算，才拿去比划不划算。
+            plans: list[tuple[_Unit, Decimal, list[tuple[int, Decimal]]]] = []
             for u, share in zip(picked, shares, strict=True):
+                price = u.list_price - share
+                allocations = [(campaign.id, share)] if share > 0 else []
+                if campaign.stackable:
+                    on_top = _chain(price, [c for c in stackables if campaign_applies(c, u.item)])
+                    price = on_top.unit_price
+                    allocations.extend(on_top.allocations)
+                plans.append((u, price, allocations))
+            if sum((p for _, p, _ in plans), Decimal(0)) >= sum(
+                (u.price for u in picked), Decimal(0)
+            ):
+                break  # 最值錢的組合都不划算：這個活動不再成組
+            for u, price, allocations in plans:
                 u.claimed = True
-                u.price = u.list_price - share
-                u.allocations = [(campaign.id, share)] if share > 0 else []
+                u.price = price
+                u.allocations = allocations
                 u.bundle = (group_no, campaign.id)
             group_no += 1
 

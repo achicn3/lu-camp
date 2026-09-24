@@ -265,3 +265,35 @@ def test_bundle_matching_scales_to_the_unit_limit() -> None:
     assert time.perf_counter() - started < 1.5
     assert len(result[0].bundle_groups) == 5000
     assert sum(r.line_total for r in result) == Decimal(150 * 5000)
+
+
+def _stackable(c: PromoCampaign) -> PromoCampaign:
+    return PromoCampaign(**{**c.__dict__, "stackable": True})
+
+
+def test_stackable_bundle_takes_stackable_campaigns_on_top() -> None:
+    """組合價勾「可疊加」（2026-09-25 裁示）：組合價算完再套可疊加的活動（7000 再九折＝6300）。"""
+    storewide = PromoCampaign(
+        id=1, name="全館九折", discount_pct=10, stackable=True, item_kinds=KINDS
+    )
+    offer = _stackable(bundle(5, 7000, *TENT_CHAIR))
+    result = price_cart([line(6000, tent(1)), line(2000, chair(2))], [storewide, offer])
+    assert [r.line_total for r in result] == [Decimal(4725), Decimal(1575)]
+    assert result[0].allocations == ((5, Decimal(750)), (1, Decimal(525)))
+
+
+def test_non_stackable_campaigns_never_join_a_stackable_bundle() -> None:
+    other = pct(1, 10)
+    offer = _stackable(bundle(5, 7000, *TENT_CHAIR))
+    result = price_cart([line(6000, tent(1)), line(2000, chair(2))], [other, offer])
+    assert sum(r.line_total for r in result) == Decimal(7000)
+
+
+def test_bundle_not_marked_stackable_stays_at_bundle_price() -> None:
+    storewide = PromoCampaign(
+        id=1, name="全館九折", discount_pct=10, stackable=True, item_kinds=KINDS
+    )
+    result = price_cart(
+        [line(6000, tent(1)), line(2000, chair(2))], [storewide, bundle(5, 7000, *TENT_CHAIR)]
+    )
+    assert sum(r.line_total for r in result) == Decimal(7000)
