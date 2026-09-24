@@ -152,6 +152,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         " FROM sale_bundle_groups",
     ),
     ("交易-組合價組內件數", "SELECT COALESCE(SUM(qty),0) FROM sale_bundle_members"),
+    # 收購佇列（docs/42）：現場收件的批次與估價列；付款前沒有庫存可對，弄丟就不知道收了誰的什麼。
+    ("收購佇列-批次數", "SELECT count(*) FROM intake_batches"),
+    (
+        "收購佇列-估價列（列數/件數）",
+        "SELECT count(*)::text || '/' || COALESCE(SUM(qty),0)::text FROM intake_lines",
+    ),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),

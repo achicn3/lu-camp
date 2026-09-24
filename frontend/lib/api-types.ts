@@ -1806,6 +1806,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Intake Batches
+         * @description 佇列：預設只列還沒處理完的（到簽署為止），先到先處理；`include_closed` 連已結束的一起列。
+         */
+        get: operations["listIntakeBatches"];
+        put?: never;
+        /**
+         * Create Intake Batch
+         * @description 報到收件：建立批次、配當日 A 編號（同店同日從 A001 起）。
+         */
+        post: operations["createIntakeBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Intake Batch */
+        get: operations["getIntakeBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Intake Batch
+         * @description 客人放棄整批（簽署以前）；列不刪，東西有沒有領回逐列記。
+         */
+        post: operations["cancelIntakeBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Intake Line
+         * @description 新增一列估價（隨時存檔，可中途離開再回來）。
+         */
+        post: operations["addIntakeLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/lines/{line_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Intake Line
+         * @description 刪掉估價中打錯的列；估完後不能刪（改用處置）。
+         */
+        delete: operations["deleteIntakeLine"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Intake Line
+         * @description 修改估價列（只改有帶的欄位）；簽署以前都能改，含叫號議價時改成交價。
+         */
+        patch: operations["updateIntakeLine"];
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/lines/{line_id}/disposition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Intake Disposition
+         * @description 叫號時逐列處置（可部分接受）；沒成交的件是否已交還客人一起記。
+         */
+        patch: operations["setIntakeDisposition"];
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Intake Ready
+         * @description 估完 → 待確認（等叫號議價）。
+         */
+        post: operations["markIntakeReady"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}": {
         parameters: {
             query?: never;
@@ -6029,6 +6174,194 @@ export interface components {
             in_stock_over_90d: number;
             /** Owned Serialized */
             owned_serialized: number;
+        };
+        /**
+         * IntakeBatchCreateRequest
+         * @description 報到收件：選好賣方、和客人一起點清件數。
+         */
+        IntakeBatchCreateRequest: {
+            /** Contact Id */
+            contact_id: number;
+            /** Declared Item Count */
+            declared_item_count: number;
+            /** Note */
+            note?: string | null;
+        };
+        /** IntakeBatchRead */
+        IntakeBatchRead: {
+            /** Accepted Item Count */
+            accepted_item_count: number;
+            /** Accepted Total */
+            accepted_total: string;
+            /** Cancel Reason */
+            cancel_reason?: string | null;
+            /** Contact Id */
+            contact_id: number;
+            /** Contact Name */
+            contact_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Deal Total */
+            deal_total: string;
+            /** Declared Item Count */
+            declared_item_count: number;
+            /** Id */
+            id: number;
+            /** Item Count */
+            item_count: number;
+            /** Line Count */
+            line_count: number;
+            /** Lines */
+            lines: components["schemas"]["IntakeLineRead"][];
+            /** Note */
+            note?: string | null;
+            status: components["schemas"]["IntakeBatchStatus"];
+            /**
+             * Ticket Date
+             * Format: date
+             */
+            ticket_date: string;
+            /** Ticket Label */
+            ticket_label: string;
+            /** Ticket No */
+            ticket_no: number;
+        };
+        /**
+         * IntakeBatchStatus
+         * @description 收購佇列批次狀態（docs/42 §3）。I1 只用到取消以前的前三個；其餘由 I3／I4 推進。
+         * @enum {string}
+         */
+        IntakeBatchStatus: "PENDING_ESTIMATE" | "ESTIMATING" | "AWAITING_CONFIRM" | "SIGNED" | "PAID" | "PARTIALLY_LISTED" | "LISTED" | "CANCELLED";
+        /** IntakeCancelRequest */
+        IntakeCancelRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * IntakeDisposition
+         * @description 叫號確認時每一列的處置（docs/42 §5）。
+         * @enum {string}
+         */
+        IntakeDisposition: "PENDING" | "ACCEPTED" | "CUSTOMER_KEPT" | "STORE_DECLINED";
+        /**
+         * IntakeDispositionRequest
+         * @description 叫號時的處置；沒成交的件是否已交還客人一起記。
+         */
+        IntakeDispositionRequest: {
+            /** Accepted Qty */
+            accepted_qty?: number | null;
+            disposition: components["schemas"]["IntakeDisposition"];
+            /**
+             * Returned To Customer
+             * @default false
+             */
+            returned_to_customer: boolean;
+        };
+        /** IntakeLineCreateRequest */
+        IntakeLineCreateRequest: {
+            /** @default BUYOUT */
+            acquisition_type: components["schemas"]["AcquisitionType"];
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Commission Pct */
+            commission_pct?: number | null;
+            /** Deal Cost */
+            deal_cost?: number | string | null;
+            /** Discount Pct */
+            discount_pct?: number | null;
+            /** Expected Listed Price */
+            expected_listed_price?: number | string | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
+            /** Reference Price */
+            reference_price?: number | string | null;
+            /** Short Name */
+            short_name: string;
+            /** Suggested Cost */
+            suggested_cost?: number | string | null;
+        };
+        /**
+         * IntakeLineFields
+         * @description 估價列可填的欄位（新增時全帶；修改時只帶要改的）。每件金額。
+         */
+        IntakeLineFields: {
+            acquisition_type?: components["schemas"]["AcquisitionType"] | null;
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Commission Pct */
+            commission_pct?: number | null;
+            /** Deal Cost */
+            deal_cost?: number | string | null;
+            /** Discount Pct */
+            discount_pct?: number | null;
+            /** Expected Listed Price */
+            expected_listed_price?: number | string | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Qty */
+            qty?: number | null;
+            /** Reference Price */
+            reference_price?: number | string | null;
+            /** Short Name */
+            short_name?: string | null;
+            /** Suggested Cost */
+            suggested_cost?: number | string | null;
+        };
+        /** IntakeLineRead */
+        IntakeLineRead: {
+            /** Accepted Qty */
+            accepted_qty: number;
+            acquisition_type: components["schemas"]["AcquisitionType"];
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Commission Pct */
+            commission_pct?: number | null;
+            /** Deal Cost */
+            deal_cost?: string | null;
+            /** Discount Pct */
+            discount_pct?: number | null;
+            disposition: components["schemas"]["IntakeDisposition"];
+            /** Expected Listed Price */
+            expected_listed_price?: string | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Id */
+            id: number;
+            /** Line No */
+            line_no: number;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Qty */
+            qty: number;
+            /** Reference Price */
+            reference_price?: string | null;
+            /** Returned To Customer */
+            returned_to_customer: boolean;
+            /** Short Name */
+            short_name: string;
+            /** Suggested Cost */
+            suggested_cost?: string | null;
         };
         /**
          * InventoryCountRead
@@ -12426,6 +12759,306 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    listIntakeBatches: {
+        parameters: {
+            query?: {
+                include_closed?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createIntakeBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeBatchCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getIntakeBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelIntakeBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addIntakeLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeLineCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeLineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteIntakeLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+                line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateIntakeLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+                line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeLineFields"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeLineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setIntakeDisposition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+                line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeDispositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeLineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    markIntakeReady: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

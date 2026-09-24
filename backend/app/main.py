@@ -35,6 +35,7 @@ from app.modules.customerdisplay.scheduler import scheduler_loop as customer_dis
 from app.modules.einvoice.router import invoices_router as einvoice_invoices_router
 from app.modules.einvoice.router import router as einvoice_router
 from app.modules.einvoice.scheduler import scheduler_loop as einvoice_scheduler_loop
+from app.modules.intake.router import router as intake_router
 from app.modules.inventory.basket_router import router as bulk_basket_router
 from app.modules.inventory.router import router as inventory_router
 from app.modules.menu.router import router as menu_router
@@ -173,6 +174,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(contacts_router, prefix=API_PREFIX)
     app.include_router(call_ticket_router, prefix=API_PREFIX)
+    app.include_router(intake_router, prefix=API_PREFIX)
     app.include_router(cashdrawer_router, prefix=API_PREFIX)
     app.include_router(consignment_router, prefix=API_PREFIX)
     app.include_router(acquisition_router, prefix=API_PREFIX)

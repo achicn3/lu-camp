@@ -576,3 +576,25 @@ class CallTicketStatus(StrEnum):
 
     WAITING = "WAITING"
     DONE = "DONE"
+
+
+class IntakeBatchStatus(StrEnum):
+    """收購佇列批次狀態（docs/42 §3）。I1 只用到取消以前的前三個；其餘由 I3／I4 推進。"""
+
+    PENDING_ESTIMATE = "PENDING_ESTIMATE"  # 待估價：剛報到收件
+    ESTIMATING = "ESTIMATING"  # 估價中：已存了至少一列
+    AWAITING_CONFIRM = "AWAITING_CONFIRM"  # 待確認：估完、等叫號議價
+    SIGNED = "SIGNED"  # 已簽署待付款
+    PAID = "PAID"  # 已付款待整理（成本與件數已入帳）
+    PARTIALLY_LISTED = "PARTIALLY_LISTED"  # 部分上架
+    LISTED = "LISTED"  # 全部上架
+    CANCELLED = "CANCELLED"  # 取消（客人放棄整批）；列不刪，退還逐列記
+
+
+class IntakeDisposition(StrEnum):
+    """叫號確認時每一列的處置（docs/42 §5）。"""
+
+    PENDING = "PENDING"  # 待確認：還沒談定
+    ACCEPTED = "ACCEPTED"  # 接受（可部分：3 張收 2 張）
+    CUSTOMER_KEPT = "CUSTOMER_KEPT"  # 客人不售、帶回
+    STORE_DECLINED = "STORE_DECLINED"  # 店家不收、退回客人

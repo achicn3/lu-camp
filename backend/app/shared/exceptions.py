@@ -541,3 +541,15 @@ class BulkBasketConflict(DomainError):
 
     訊息直接寫給店員看得懂的原因（同 ItemDeleteBlocked）。
     """
+
+
+class IntakeBatchNotFound(DomainError):
+    """收購佇列批次或列不存在、或不屬於本店（docs/42）。"""
+
+
+class IntakeConflict(DomainError):
+    """收購佇列的狀態不允許這個操作（例如取消後改價、待確認後刪列）。"""
+
+
+class InvalidIntakeLine(DomainError):
+    """估價列內容不合法（例如用折數估價卻沒填原價、寄售沒填抽成）。"""
