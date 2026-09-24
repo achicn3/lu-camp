@@ -7,6 +7,7 @@
   不可疊加的＝不跟任何活動併用：跟第 2 步比，對客人比較划算才用（裁示 1、9）。
 """
 
+import time
 from decimal import Decimal
 
 import pytest
@@ -338,3 +339,12 @@ def test_leftover_line_is_reported_as_choosable() -> None:
     assert result[3].buy_n_get_m_units == 0
     other = price_cart([line(200, None)], [bngm(9, 2, 1)])
     assert other[0].buy_n_get_m_eligible is False
+
+
+def test_choosing_free_items_scales_to_the_unit_limit() -> None:
+    """上限 1 萬件、全部指定送：不可以逐件重掃各組（Codex 審查：曾經要 3.5 秒）。"""
+    started = time.perf_counter()
+    [result] = price_cart([chosen(100, CANISTER, qty=10_000)], [bngm(9, 1, 1)])
+    assert time.perf_counter() - started < 1.5
+    assert result.free_units == 5_000
+    assert result.line_total == Decimal(500_000)

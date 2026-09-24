@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
@@ -332,22 +333,37 @@ def _apply_free_requests(
     ordered.sort(key=lambda u: -price_of(u))  # 與分組同一把尺；穩定排序：同價依原本順序
     chosen = [u for u in ordered if u.free_requested][:slots]
     chosen_ids = {id(u) for u in chosen}
+    # 位置表與各組還沒被指定佔用的送位：每次調換都是常數時間（逐件重掃在上限時會卡住 worker）。
+    where: dict[int, tuple[list[_Unit], int, int | None]] = {}
+    for gi, group in enumerate(groups):
+        for i, u in enumerate(group):
+            where[id(u)] = (group, i, gi)
+    for i, u in enumerate(leftover):
+        where[id(u)] = (leftover, i, None)
+    open_slots = [
+        [i for i in range(len(g) - 1, buy_qty - 1, -1) if id(g[i]) not in chosen_ids]
+        for g in groups
+    ]
+    fallback = deque(reversed(range(len(groups))))  # 其他組從最後一組找起
     for unit in chosen:
-        home = next((g for g in groups if any(u is unit for u in g)), None)
-        if home is not None and any(u is unit for u in home[buy_qty:]):
+        origin, index, home = where[id(unit)]
+        if home is not None and index >= buy_qty:
             continue  # 已經在送的位置
-        candidates = ([home] if home is not None else []) + list(reversed(groups))
-        for group in candidates:
-            slot = next(
-                (i for i in range(buy_qty, len(group)) if id(group[i]) not in chosen_ids), None
-            )
-            if slot is None:
-                continue
-            displaced = group[slot]
-            origin = home if home is not None else leftover
-            origin[next(i for i, u in enumerate(origin) if u is unit)] = displaced
-            group[slot] = unit
-            break
+        if home is not None and open_slots[home]:
+            target = home
+        else:
+            while fallback and not open_slots[fallback[0]]:
+                fallback.popleft()
+            if not fallback:
+                break
+            target = fallback[0]
+        slot = open_slots[target].pop()
+        group = groups[target]
+        displaced = group[slot]
+        origin[index] = displaced
+        where[id(displaced)] = (origin, index, home)
+        group[slot] = unit
+        where[id(unit)] = (group, slot, target)
 
 
 def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) -> list[LinePrice]:
