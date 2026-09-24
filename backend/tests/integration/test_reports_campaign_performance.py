@@ -233,3 +233,5 @@ async def test_csv_export(client: httpx.AsyncClient, db_session: AsyncSession) -
     assert resp.status_code == 200
     text = resp.content.decode("utf-8-sig")
     assert "活動折讓總額" in text and "毛利" in text and "開幕活動" in text
+    # v2（docs/40 P1d）：可疊加、指定範圍、這筆不套用次數也要匯出。
+    assert "可疊加" in text and "指定範圍" in text and "這筆不套用次數" in text

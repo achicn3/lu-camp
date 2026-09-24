@@ -20,6 +20,7 @@ import {
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
+import { targetSummary } from "@/features/campaigns/campaigns";
 import { labelFor } from "@/features/shared/labels";
 import { InfoTip } from "@/features/shared/InfoTip";
 import { api } from "@/lib/api";
@@ -1962,7 +1963,8 @@ function CampaignPerformancePanel() {
   return (
     <div>
       <p className="hint">
-        每檔生效中／已結束活動的成效：成效指標取活動期間（與「銷售毛利」同源），活動折讓總額為該活動實際發出的折讓。
+        每檔生效中／已結束活動的成效：營業額、毛利與筆數只算真的套到這個活動的商品（扣掉退貨）；
+        疊加時一件商品會同時算進它參與的每個活動，折讓則各記各的。「這筆不套用」是店員在幾筆交易取消了這個活動。
       </p>
       <div className="inv-table-wrap">
         <table className="inv-table">
@@ -1978,12 +1980,19 @@ function CampaignPerformancePanel() {
               <th>毛利</th>
               <th>毛利率</th>
               <th>筆數</th>
+              <th>這筆不套用</th>
             </tr>
           </thead>
           <tbody>
             {report.rows.map((row) => (
               <tr key={row.campaign_id}>
-                <td>{row.name}</td>
+                <td>
+                  {row.name}
+                  {row.stackable && <span className="row-sub">可疊加</span>}
+                  {targetSummary(row.targets ?? []) && (
+                    <span className="row-sub">{targetSummary(row.targets ?? [])}</span>
+                  )}
+                </td>
                 <td>{labelFor(CAMPAIGN_STATUS_LABELS, row.status)}</td>
                 <td>{row.discount_pct}%</td>
                 <td>
@@ -2005,6 +2014,7 @@ function CampaignPerformancePanel() {
                   {formatRate(row.gross_margin_rate)}
                 </td>
                 <td className="money">{row.transaction_count}</td>
+                <td className="money">{row.not_applied_count ?? 0}</td>
               </tr>
             ))}
           </tbody>

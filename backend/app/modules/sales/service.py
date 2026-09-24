@@ -2241,6 +2241,10 @@ class SalesService:
             "consignment_commission": commission,
         }
 
+    async def campaign_override_counts(self, store_id: int) -> dict[int, int]:
+        """各活動在幾筆（非作廢）交易被店員按了「這筆不套用」（活動成效報表用）。"""
+        return await self._repo.campaign_override_counts(store_id)
+
     async def campaign_line_facts(self, store_id: int) -> list[Any]:
         """每個活動套到的每一行（非作廢單；活動成效逐行歸屬用，見 ReportsService）。"""
         return await self._repo.campaign_line_facts(store_id)

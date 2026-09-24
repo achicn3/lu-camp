@@ -907,7 +907,18 @@ class ReportsService:
                 st.known_revenue += net
             else:  # 成本未知：計入營收，不計入毛利與毛利率分母
                 st.revenue += net
-        rows = [self._campaign_row(c, stats.get(c.id), discount_totals) for c in campaigns]
+        not_applied = await self._sales.campaign_override_counts(store_id)
+        reads = {r.id: r for r in await self._campaigns.to_reads(store_id, campaigns)}
+        rows = [
+            self._campaign_row(c, stats.get(c.id), discount_totals).model_copy(
+                update={
+                    "stackable": c.stackable,
+                    "targets": reads[c.id].targets,
+                    "not_applied_count": not_applied.get(c.id, 0),
+                }
+            )
+            for c in campaigns
+        ]
         rows.sort(key=lambda r: r.starts_at, reverse=True)
         return CampaignPerformanceReport(generated_at=_now(), store_id=store_id, rows=rows)
 

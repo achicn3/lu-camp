@@ -7,6 +7,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, PlainSerializer
 
 from app.core.money import format_ntd, format_rate
+from app.modules.campaigns.schemas import CampaignTargetRead
 from app.shared.enums import CampaignStatus
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
@@ -377,6 +378,10 @@ class CampaignPerformanceRow(BaseModel):
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt
     transaction_count: int
+    # v2（docs/40 P1d）：是否可疊加、指定範圍（附名稱），以及店員在幾筆交易按了「這筆不套用」。
+    stackable: bool = False
+    targets: list[CampaignTargetRead] = []
+    not_applied_count: int = 0
 
 
 class DiscountReasonRow(BaseModel):

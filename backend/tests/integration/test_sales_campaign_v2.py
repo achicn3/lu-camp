@@ -27,7 +27,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.inventory.models import Brand, SerializedItem
 from app.modules.reports.service import ReportsService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
-from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.inputs import CampaignOverrideInput, SaleLineInput
 from app.modules.sales.models import SaleLine, SaleLineCampaign
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
@@ -390,3 +390,43 @@ async def test_report_lookups_survive_more_ids_than_the_driver_parameter_limit(
         )
         == {}
     )
+
+
+async def test_campaign_report_shows_stackable_scope_and_not_applied_count(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """報表每列：可疊加、指定範圍（附名稱）、店員「這筆不套用」的次數（docs/40 P1d）。"""
+    brand = Brand(store_id=ctx["store_id"], name="Snow Peak")
+    db_session.add(brand)
+    await db_session.flush()
+    targeted = await _campaign(
+        db_session,
+        ctx,
+        20,
+        name="Snow Peak 八折",
+        stackable=True,
+        targets=[
+            CampaignTargetInput(
+                mode=CampaignTargetMode.INCLUDE,
+                target_type=CampaignTargetType.BRAND,
+                target_id=brand.id,
+            )
+        ],
+    )
+    item = await _item(db_session, ctx["store_id"], "1000", brand_id=brand.id)
+    await SalesService(db_session).create_sale(
+        ctx["store_id"],
+        ctx["clerk_id"],
+        lines=[_line(item)],
+        disabled_campaigns=[CampaignOverrideInput(campaign_id=targeted, reason="客人不要")],
+    )
+
+    row = next(
+        r
+        for r in (await ReportsService(db_session).campaign_performance(ctx["store_id"])).rows
+        if r.campaign_id == targeted
+    )
+    assert row.stackable is True
+    assert [(t.mode, t.label) for t in row.targets] == [("INCLUDE", "Snow Peak")]
+    assert row.not_applied_count == 1
+    assert row.transaction_count == 0  # 被取消了，這筆不算它的成效

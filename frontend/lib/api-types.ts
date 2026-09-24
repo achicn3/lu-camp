@@ -4233,14 +4233,29 @@ export interface components {
             gross_turnover: string;
             /** Name */
             name: string;
+            /**
+             * Not Applied Count
+             * @default 0
+             */
+            not_applied_count: number;
             /** Recognized Revenue */
             recognized_revenue: string;
+            /**
+             * Stackable
+             * @default false
+             */
+            stackable: boolean;
             /**
              * Starts At
              * Format: date-time
              */
             starts_at: string;
             status: components["schemas"]["CampaignStatus"];
+            /**
+             * Targets
+             * @default []
+             */
+            targets: components["schemas"]["CampaignTargetRead"][];
             /** Transaction Count */
             transaction_count: number;
         };

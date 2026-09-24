@@ -669,6 +669,16 @@ class SalesRepository:
         rows = await self._session.execute(stmt)
         return {cid: Decimal(total) for cid, total in rows}
 
+    async def campaign_override_counts(self, store_id: int) -> dict[int, int]:
+        """各活動在幾筆（非作廢）交易被店員按了「這筆不套用」。"""
+        stmt = (
+            select(SaleCampaignOverride.campaign_id, func.count())
+            .join(Sale, SaleCampaignOverride.sale_id == Sale.id)
+            .where(Sale.store_id == store_id, Sale.status != SaleStatus.VOIDED)
+            .group_by(SaleCampaignOverride.campaign_id)
+        )
+        return {cid: int(n) for cid, n in await self._session.execute(stmt)}
+
     async def campaign_line_facts(self, store_id: int) -> list[Any]:
         """每個活動套到的每一行（非作廢單）：活動、單、行、序號品、數量、實付、成本快照。"""
         stmt = (

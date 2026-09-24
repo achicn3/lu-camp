@@ -2172,9 +2172,19 @@
             "title": "Name",
             "type": "string"
           },
+          "not_applied_count": {
+            "default": 0,
+            "title": "Not Applied Count",
+            "type": "integer"
+          },
           "recognized_revenue": {
             "title": "Recognized Revenue",
             "type": "string"
+          },
+          "stackable": {
+            "default": false,
+            "title": "Stackable",
+            "type": "boolean"
           },
           "starts_at": {
             "format": "date-time",
@@ -2183,6 +2193,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/CampaignStatus"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CampaignTargetRead"
+            },
+            "title": "Targets",
+            "type": "array"
           },
           "transaction_count": {
             "title": "Transaction Count",

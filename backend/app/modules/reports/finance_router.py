@@ -15,6 +15,7 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.core.money import format_ntd, format_rate
 from app.core.time import AwareDateTime, store_datetime_iso
+from app.modules.campaigns.schemas import CampaignTargetRead
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
     CampaignPerformanceReport,
@@ -31,6 +32,7 @@ from app.modules.reports.schemas import (
     TrendsReport,
 )
 from app.modules.reports.service import ReportsService
+from app.shared.enums import CampaignTargetMode
 from app.shared.exceptions import DomainError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -838,6 +840,18 @@ async def gifts(
     return export_response(exp, fmt)
 
 
+def _campaign_scope_text(targets: list[CampaignTargetRead]) -> str:
+    """「只限：A、B；排除：C」；沒指定回空字串（與管理頁同一種寫法）。"""
+    includes = [t.label for t in targets if t.mode == CampaignTargetMode.INCLUDE]
+    excludes = [t.label for t in targets if t.mode == CampaignTargetMode.EXCLUDE]
+    parts: list[str] = []
+    if includes:
+        parts.append("只限：" + "、".join(includes))
+    if excludes:
+        parts.append("排除：" + "、".join(excludes))
+    return "；".join(parts)
+
+
 @router.get(
     "/campaign-performance",
     response_model=CampaignPerformanceReport,
@@ -872,6 +886,9 @@ async def campaign_performance(
             "毛利",
             "毛利率",
             "交易筆數",
+            "可疊加",
+            "指定範圍",
+            "這筆不套用次數",
         ],
         rows=[
             [
@@ -886,6 +903,9 @@ async def campaign_performance(
                 format_ntd(r.gross_margin),
                 "N/A" if r.gross_margin_rate is None else format_rate(r.gross_margin_rate),
                 str(r.transaction_count),
+                "是" if r.stackable else "否",
+                _campaign_scope_text(r.targets),
+                str(r.not_applied_count),
             ]
             for r in report.rows
         ],
