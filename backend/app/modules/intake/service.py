@@ -39,6 +39,8 @@ _EDITABLE = frozenset(
 )
 # 進入「待確認」後就不刪列（改用處置記錄），之後才查得到當時收了什麼、退了什麼。
 _DELETABLE = frozenset({IntakeBatchStatus.PENDING_ESTIMATE, IntakeBatchStatus.ESTIMATING})
+# 估價列的必填欄位：修改時帶 null 不能清掉（其他欄位帶 null＝清掉那個選填值）。
+_REQUIRED_LINE_FIELDS = ("short_name", "qty", "acquisition_type")
 OPEN_STATUSES = [
     IntakeBatchStatus.PENDING_ESTIMATE,
     IntakeBatchStatus.ESTIMATING,
@@ -125,7 +127,13 @@ class IntakeService:
         """修改估價列：只改有帶的欄位（帶 null＝清掉）。簽署以前都能改。"""
         await self._editable_batch(store_id, batch_id)
         line = await self._line(store_id, batch_id, line_id)
-        for name, value in fields.model_dump(exclude_unset=True).items():
+        changes = fields.model_dump(exclude_unset=True)
+        cleared = [
+            name for name in _REQUIRED_LINE_FIELDS if name in changes and changes[name] is None
+        ]
+        if cleared:
+            raise InvalidIntakeLine("商品簡稱、數量、類型不能清空")
+        for name, value in changes.items():
             setattr(line, name, value)
         await self._check_line(store_id, line)
         if line.accepted_qty > line.qty:

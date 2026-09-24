@@ -344,3 +344,17 @@ async def test_batch_of_another_store_is_not_found(
     batch = await _batch(client, contact_id, auth)
     assert (await client.get(f"{PATH}/{batch['id']}", headers=other_auth)).status_code == 404
     assert Decimal(batch["deal_total"]) == 0
+
+
+@pytest.mark.parametrize("field", ["short_name", "qty", "acquisition_type"])
+async def test_required_fields_cannot_be_cleared(
+    client: httpx.AsyncClient, db_session: AsyncSession, field: str
+) -> None:
+    """修改時把必填欄位設成 null：回 422，不能變成 500 或寫壞資料。"""
+    _store_id, contact_id, auth = await _store(db_session)
+    batch = await _batch(client, contact_id, auth)
+    line = (await client.post(f"{PATH}/{batch['id']}/lines", json=_line(), headers=auth)).json()
+    resp = await client.patch(
+        f"{PATH}/{batch['id']}/lines/{line['id']}", json={field: None}, headers=auth
+    )
+    assert resp.status_code == 422, resp.text
