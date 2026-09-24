@@ -4371,6 +4371,16 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /**
+         * CartItemCampaignRead
+         * @description 某件商品套到的一個門市活動（客顯顯示用：只有名稱與折讓，不含活動 id）。
+         */
+        CartItemCampaignRead: {
+            /** Discount Amount */
+            discount_amount: string;
+            /** Name */
+            name: string;
+        };
         /** CartItemRead */
         CartItemRead: {
             /** Discount Amount */
@@ -4460,6 +4470,11 @@ export interface components {
             discount_total: string;
             /** Gift Retail Value */
             gift_retail_value: string;
+            /**
+             * Item Campaigns
+             * @default []
+             */
+            item_campaigns: components["schemas"]["CartItemCampaignRead"][][];
             /** Items */
             items: components["schemas"]["CartItemRead"][];
             /** Manual Discount Total */

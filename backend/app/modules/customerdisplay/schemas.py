@@ -238,9 +238,19 @@ class CartTenderRead(BaseModel):
     amount: str
 
 
+class CartItemCampaignRead(BaseModel):
+    """某件商品套到的一個門市活動（客顯顯示用：只有名稱與折讓，不含活動 id）。"""
+
+    name: str
+    discount_amount: str
+
+
 class CartSnapshotRead(BaseModel):
     content_version: str
     items: list[CartItemRead]
+    # 每件套到哪些活動（docs/40 §7），與 items 同序。只給客人看，**不進結帳的逐欄位比對**，
+    # 也不進簽署內容；舊快照沒有 → 空。
+    item_campaigns: list[list[CartItemCampaignRead]] = []
     total: str
     discount_total: str
     # 贈品原價價值僅供顯示參考：不加進應付、也不算折扣。

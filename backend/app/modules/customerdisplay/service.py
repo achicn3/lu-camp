@@ -762,6 +762,15 @@ class CustomerDisplayService:
         return {
             "content_version": _CART_SNAPSHOT_VERSION,
             "items": items,
+            # 顯示用：每件是哪個活動折的（docs/40 §7）。放在 items 之外，結帳逐欄位比對與
+            # 簽署內容都只看 items，加這個欄位不會讓舊購物車或簽署對不上。
+            "item_campaigns": [
+                [
+                    {"name": c.name, "discount_amount": _ntd(c.discount_amount)}
+                    for c in quoted.campaigns
+                ]
+                for quoted in quote.lines
+            ],
             "total": _ntd(quote.total),
             "discount_total": _ntd(discount_total),
             "manual_discount_total": _ntd(manual_discount_total),

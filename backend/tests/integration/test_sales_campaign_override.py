@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
-from app.modules.customerdisplay.schemas import CartUpsertRequest, StaffCartPayloadRead
+from app.modules.customerdisplay.schemas import (
+    CartSnapshotRead,
+    CartUpsertRequest,
+    StaffCartPayloadRead,
+)
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import SerializedItem
 from app.modules.sales.inputs import CampaignOverrideInput, SaleLineInput, TenderInput
@@ -234,3 +238,50 @@ def test_old_carts_without_the_field_still_restore() -> None:
         }
     )
     assert payload.disabled_campaigns == []
+
+
+async def test_customer_display_snapshot_lists_each_items_campaigns(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """客顯要看得到每件是哪個活動折的（docs/40 §7）；只放在快照的顯示欄，不進結帳比對。"""
+    storewide = await _campaign(db_session, ctx, 10, "全館九折")
+    await _campaign(db_session, ctx, 10, "會員九折")
+    line = await _item(db_session, ctx["store_id"])
+    member_off = await _campaign(db_session, ctx, 10, "第三個活動")
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=ctx["store_id"], actor_user_id=ctx["clerk_id"]
+    )
+    request = CartUpsertRequest.model_validate(
+        {
+            "expected_revision": None,
+            "lines": [{"line_type": "SERIALIZED", "item_code": line.item_code}],
+            "disabled_campaigns": [{"campaign_id": member_off, "reason": None}],
+        }
+    )
+    cart = await CustomerDisplayService(db_session).upsert_cart(
+        ctx["store_id"], terminal.id, request, actor_user_id=ctx["clerk_id"]
+    )
+    snapshot = CartSnapshotRead.model_validate(cart.snapshot)
+    assert [(c.name, c.discount_amount) for c in snapshot.item_campaigns[0]] == [
+        ("全館九折", "100"),
+        ("會員九折", "90"),
+    ]
+    assert storewide  # 活動 id 不外露給客顯，只給名稱與金額
+    assert "campaigns" not in snapshot.items[0].model_dump()  # 逐欄位比對的明細不變
+
+
+def test_old_snapshots_without_item_campaigns_still_read() -> None:
+    snapshot = CartSnapshotRead.model_validate(
+        {
+            "content_version": "cart-v2",
+            "items": [],
+            "total": "0",
+            "discount_total": "0",
+            "gift_retail_value": "0",
+            "manual_discount_total": "0",
+            "campaign_name": None,
+            "member": None,
+            "tenders": [],
+        }
+    )
+    assert snapshot.item_campaigns == []

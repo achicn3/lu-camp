@@ -2516,6 +2516,25 @@
         "title": "CartFreezeRequest",
         "type": "object"
       },
+      "CartItemCampaignRead": {
+        "description": "某件商品套到的一個門市活動（客顯顯示用：只有名稱與折讓，不含活動 id）。",
+        "properties": {
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "discount_amount"
+        ],
+        "title": "CartItemCampaignRead",
+        "type": "object"
+      },
       "CartItemRead": {
         "properties": {
           "discount_amount": {
@@ -2785,6 +2804,17 @@
           "gift_retail_value": {
             "title": "Gift Retail Value",
             "type": "string"
+          },
+          "item_campaigns": {
+            "default": [],
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/CartItemCampaignRead"
+              },
+              "type": "array"
+            },
+            "title": "Item Campaigns",
+            "type": "array"
           },
           "items": {
             "items": {

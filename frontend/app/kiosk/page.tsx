@@ -820,7 +820,7 @@ function CartScreen({
         aria-label="商品明細"
         onScroll={updateScrollState}
       >
-        {snapshot.items.map((item) => (
+        {snapshot.items.map((item, index) => (
           <article
             className={`kiosk-cart-item ${
               changesByItem.get(item.item_key) === "ADDED"
@@ -867,6 +867,16 @@ function CartScreen({
                   </span>
                 )}
               </p>
+              {/* 是哪個活動折的（docs/40 §7）：同時有好幾個活動時，客人才知道為什麼便宜。 */}
+              {(snapshot.item_campaigns?.[index]?.length ?? 0) > 0 && (
+                <p className="kiosk-cart-campaigns">
+                  {snapshot.item_campaigns?.[index]?.map((c) => (
+                    <span key={c.name} className="kiosk-cart-campaign">
+                      {c.name}
+                    </span>
+                  ))}
+                </p>
+              )}
             </div>
             <span className="kiosk-cart-qty">× {item.qty}</span>
             {/* 小計認**實付**：line_total 是活動折後的牌價小計，不含臨時折扣。 */}

@@ -4409,3 +4409,18 @@ a.btn-ghost {
   font-size: var(--text-sm);
   color: var(--accent);
 }
+
+/* 客顯：每件套到的活動（docs/40 §7）。 */
+.kiosk-cart-campaigns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+.kiosk-cart-campaign {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 0.9em;
+}

@@ -181,6 +181,8 @@ describe("/kiosk 客顯", () => {
                   net_amount: "10",
                 })),
               ],
+              // 每件套到哪個活動（docs/40 §7），與 items 同序；第一件是瓦斯罐。
+              item_campaigns: [[{ name: "露營季九折", discount_amount: "40" }]],
               total: "350",
               discount_total: "40",
               manual_discount_total: "0",
@@ -235,6 +237,8 @@ describe("/kiosk 客顯", () => {
     expect(screen.getByText("原價 $140")).toBeTruthy();
     expect(screen.getByText("優惠價 $120")).toBeTruthy();
     expect(screen.getByText("折扣 $40")).toBeTruthy();
+    // 客人看得到是哪個活動折的
+    expect(screen.getByText("露營季九折")).toBeTruthy();
     expect(screen.queryByText(/本行折抵/)).toBeNull();
     expect(screen.getByText("本次共折扣 $40")).toBeTruthy();
     expect(screen.queryByText("會員")).toBeNull();
