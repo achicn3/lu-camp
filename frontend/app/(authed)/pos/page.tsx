@@ -71,6 +71,7 @@ import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
 import { CampaignPanel } from "@/features/pos/CampaignPanel";
+import { disabledCampaignsSignature } from "@/features/pos/campaignOverrides";
 import { formatSalePaymentSummary } from "@/lib/payment";
 import {
   clearPersistedIdemKey,
@@ -2047,6 +2048,9 @@ export default function PosPage() {
         // 折扣目標改用購物車列的**穩定 key**：lines 已排序，目標若留位置索引，
         // 換序重掃就會換出新的冪等鍵與 LINE Pay orderId（已扣款卻找不回原單 → 可能重扣）。
         adjustments: canonicalAdjustments(activeDiscounts, lines),
+        // 「這筆不套用」只取排序後的活動 id（不含原因），與後端指紋同口徑；
+        // 順序或原因不同不可換出新鍵（Codex 對抗審：回應遺失後重試可能成交兩次）。
+        ...disabledCampaignsSignature(disabledCampaigns),
       };
       const sig = JSON.stringify(sigBody);
       // 冪等鍵**持久化**（Codex 第二輪 #2）：以購物車指紋（不含一次性付款碼）為界存 localStorage，
