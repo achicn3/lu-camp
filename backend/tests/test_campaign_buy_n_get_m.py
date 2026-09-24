@@ -238,3 +238,12 @@ def test_large_quantity_without_buy_n_get_m_is_priced_per_line() -> None:
 def test_absurd_quantity_under_buy_n_get_m_is_rejected() -> None:
     with pytest.raises(SaleLineInvalid):
         price_cart([line(100, CANISTER, qty=10**9)], [bngm(9, 5, 1)])
+
+
+def test_zero_priced_items_do_not_break_the_cart() -> None:
+    """0 元品（收購允許）成組時不能除以零；混了一般價的組照常算（Codex 審查）。"""
+    zeros = price_cart([line(0, CANISTER, qty=2)], [bngm(9, 1, 1)])
+    assert zeros[0].line_total == 0
+    assert zeros[0].allocations == ()
+    mixed = price_cart([line(0, item(1)), line(0, item(2)), line(500, item(3))], [bngm(9, 2, 1)])
+    assert [r.line_total for r in mixed] == [Decimal(0), Decimal(0), Decimal(500)]

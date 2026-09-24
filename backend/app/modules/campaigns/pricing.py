@@ -246,7 +246,10 @@ def _group_prices(
     assert campaign.free_qty is not None
     base = [u.list_price if use_list_price else u.price for u in units]
     free_amount = sum(base[-campaign.free_qty :], Decimal(0))
-    shares = _allocate(free_amount, base, [b - _MIN_UNIT_PRICE for b in base])
+    if free_amount <= 0:  # 送的都是 0 元品（收購允許 0 元）：沒東西可分，也不能除以零
+        return None
+    caps = [max(Decimal(0), b - _MIN_UNIT_PRICE) for b in base]
+    shares = _allocate(free_amount, base, caps)
     return shares if sum(shares, Decimal(0)) > 0 else None
 
 
