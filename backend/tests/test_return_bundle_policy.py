@@ -27,7 +27,7 @@ def test_touching_bundled_units_requires_the_whole_group() -> None:
 
 
 def test_whole_group_returns_every_remaining_unit_of_its_lines() -> None:
-    """退價按行平均：組內的行要整行退回（含組外的那罐），否則留下的那罐等於拿到折扣（Codex 審查）。"""
+    """退價按行平均：組內的行要整行退回（含組外的那罐），否則留下的那罐拿到折扣。"""
     assert bundles_to_return({TENT: 1, GAS: 3}, {}, QTY, [GROUP]) == [7]
     with pytest.raises(ReturnLineInvalid, match="整組"):
         bundles_to_return({TENT: 1, GAS: 2}, {}, QTY, [GROUP])

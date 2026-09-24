@@ -142,6 +142,16 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT count(*)::text || '/' || COALESCE(SUM(discount_amount),0)::text"
         " FROM sale_line_campaigns",
     ),
+    # 組合價（docs/40 P4）：格子與範圍是店長設定的；成交的組與組內件數是「整組退」的依據，
+    # 弄丟了就擋不住只退一部分（組合折扣白拿）。
+    ("活動-組合格子數", "SELECT count(*) FROM campaign_bundle_slots"),
+    ("活動-組合格子範圍數", "SELECT count(*) FROM campaign_bundle_slot_targets"),
+    (
+        "交易-組合價（組數/組合價合計）",
+        "SELECT count(*)::text || '/' || COALESCE(SUM(bundle_price),0)::text"
+        " FROM sale_bundle_groups",
+    ),
+    ("交易-組合價組內件數", "SELECT COALESCE(SUM(qty),0) FROM sale_bundle_members"),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
