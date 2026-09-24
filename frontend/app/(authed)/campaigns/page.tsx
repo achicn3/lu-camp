@@ -1,6 +1,6 @@
 "use client";
-// /campaigns 門市活動管理頁（MANAGER 專用；docs/21）。
-// 清單（依 status 篩選）＋ 建立活動表單 ＋ 啟用/結束/作廢操作。
+// /campaigns 門市活動管理頁（MANAGER 專用；docs/21、docs/40）。
+// 清單（依 status 篩選）＋ 建立活動表單（含可疊加、指定商品範圍）＋ 啟用/結束/作廢操作。
 // 純呈現：折扣/金額全由後端計算，前端只做「X 折」顯示轉換。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
@@ -9,7 +9,9 @@ import {
   discountDisplay,
   scopeSummary,
   statusLabel,
+  targetSummary,
 } from "@/features/campaigns/campaigns";
+import { type PickedTarget, TargetPicker } from "@/features/campaigns/TargetPicker";
 import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -39,6 +41,10 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [appliesOwnedBulk, setAppliesOwnedBulk] = useState(true);
   const [appliesCatalog, setAppliesCatalog] = useState(false);
   const [appliesConsignment, setAppliesConsignment] = useState(false);
+  const [stackable, setStackable] = useState(false);
+  const [targets, setTargets] = useState<PickedTarget[]>([]);
+  // 建立成功後換一個 key 讓範圍選擇器整個重來（清掉搜尋字與候選清單）。
+  const [pickerKey, setPickerKey] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -63,9 +69,12 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
           applies_consignment: appliesConsignment,
-          // 可疊加與範圍條件的畫面在 P1b（docs/40）；目前一律不疊加、不限範圍（同 v1 行為）。
-          stackable: false,
-          targets: [],
+          stackable,
+          targets: targets.map(({ mode, target_type, target_id }) => ({
+            mode,
+            target_type,
+            target_id,
+          })),
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立活動失敗");
@@ -81,6 +90,9 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setAppliesOwnedBulk(true);
       setAppliesCatalog(false);
       setAppliesConsignment(false);
+      setStackable(false);
+      setTargets([]);
+      setPickerKey((k) => k + 1);
       onCreated();
     },
     onError: (err: Error) => setFormError(err.message),
@@ -185,6 +197,24 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
             寄售品折扣一律按比例分攤：以折後價計算抽成與應付，寄售人也承擔折扣（不會由店家吸收）。
           </p>
         )}
+      </fieldset>
+
+      <TargetPicker key={pickerKey} targets={targets} onChange={setTargets} />
+
+      <fieldset className="campaign-scope-fieldset">
+        <legend>與其他活動一起用</legend>
+        <label className="campaign-checkbox">
+          <input
+            type="checkbox"
+            checked={stackable}
+            onChange={(e) => setStackable(e.target.checked)}
+          />
+          可以和其他活動疊加
+        </label>
+        <p className="hint">
+          可以同時進行多個活動。可疊加的活動會連乘（九折再九折＝81 折）；不可疊加的活動不會跟其他活動一起用。
+          同一件商品符合好幾個活動時，系統自動挑對客人最划算的算法。
+        </p>
       </fieldset>
 
       {formError !== null && (
@@ -403,7 +433,10 @@ export default function CampaignsPage() {
               {campaigns.map((c) => (
                 <tr key={c.id}>
                   <td>{c.name}</td>
-                  <td>{discountDisplay(c.discount_pct)}</td>
+                  <td>
+                    {discountDisplay(c.discount_pct)}
+                    {c.stackable && <span className="row-sub">可疊加</span>}
+                  </td>
                   <td>{formatTaipeiDateTime(c.starts_at)}</td>
                   <td>{formatTaipeiDateTime(c.ends_at)}</td>
                   <td>
@@ -411,7 +444,12 @@ export default function CampaignsPage() {
                       {statusLabel(c.status)}
                     </span>
                   </td>
-                  <td>{scopeSummary(c)}</td>
+                  <td>
+                    {scopeSummary(c)}
+                    {targetSummary(c.targets) && (
+                      <span className="row-sub">{targetSummary(c.targets)}</span>
+                    )}
+                  </td>
                   <td>
                     <CampaignActions
                       campaign={c}

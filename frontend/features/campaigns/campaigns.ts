@@ -40,3 +40,16 @@ export function scopeSummary(flags: {
   if (flags.applies_consignment) parts.push("寄售");
   return parts.length > 0 ? parts.join("、") : "-";
 }
+
+/** 指定範圍摘要：「只限：A、B；排除：C」；沒指定回空字串（docs/40）。 */
+export function targetSummary(
+  targets: { mode: "INCLUDE" | "EXCLUDE"; label: string }[],
+): string {
+  const includes = targets.filter((t) => t.mode === "INCLUDE").map((t) => t.label);
+  const excludes = targets.filter((t) => t.mode === "EXCLUDE").map((t) => t.label);
+  const parts: string[] = [];
+  if (includes.length > 0) parts.push(`只限：${includes.join("、")}`);
+  if (excludes.length > 0) parts.push(`排除：${excludes.join("、")}`);
+  return parts.join("；");
+}
+

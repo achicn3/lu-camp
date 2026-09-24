@@ -4332,3 +4332,38 @@ a.btn-ghost {
   white-space: normal;
   max-width: 11rem;
 }
+
+/* 門市活動 v2 指定商品範圍（docs/40 P1b）。 */
+.campaign-target-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.campaign-target-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.campaign-target-brand {
+  margin: 0;
+  align-self: center;
+}
+.campaign-target-options,
+.campaign-target-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.chip-remove {
+  margin-left: 6px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
