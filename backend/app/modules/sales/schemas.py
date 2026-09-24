@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.sales.inputs import (
     CARRIER_TYPE_MOBILE,
+    CampaignOverrideInput,
     InvoiceInfoInput,
     SaleLineInput,
     TenderInput,
@@ -258,6 +259,26 @@ def _validate_adjustment_targets(
             raise ValueError(f"要折扣的商品不在本次交易明細內（第 {index + 1} 項）")
 
 
+# 一筆最多取消幾個活動（再多就該直接結束活動）。
+DISABLED_CAMPAIGNS_MAX = 50
+
+
+class SaleCampaignOverrideRequest(BaseModel):
+    """「這筆不套用」某個門市活動（docs/40 P1c；不需核准、原因可不填）。"""
+
+    campaign_id: int = Field(ge=1)
+    reason: Annotated[str, Field(max_length=200)] | None = None
+
+    def to_input(self) -> CampaignOverrideInput:
+        return CampaignOverrideInput(campaign_id=self.campaign_id, reason=self.reason)
+
+
+def disabled_campaign_inputs(
+    requests: list[SaleCampaignOverrideRequest] | None,
+) -> list[CampaignOverrideInput] | None:
+    return None if requests is None else [r.to_input() for r in requests]
+
+
 class SaleCreateRequest(BaseModel):
     """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
 
@@ -280,6 +301,11 @@ class SaleCreateRequest(BaseModel):
     expected_einvoice_enabled: bool | None = None
     # 結帳當下套用的臨時折扣（贈品走 lines[].line_kind，不是折扣）。
     adjustments: list[SaleAdjustmentRequest] | None = None
+    # 店員在這一筆按「這筆不套用」的門市活動（docs/40 P1c）。
+    disabled_campaigns: (
+        Annotated[list[SaleCampaignOverrideRequest], Field(max_length=DISABLED_CAMPAIGNS_MAX)]
+        | None
+    ) = None
     # 餐飲內用/外帶與桌號（docs/35）：購物車含餐飲明細時必填，否則不得帶。
     # 兩者與購物車內容的相依關係由 service 驗證（此處看不到明細是不是餐飲）。
     service_mode: ServiceMode | None = None
@@ -313,6 +339,9 @@ class SaleCreateRequest(BaseModel):
     def to_tender_inputs(self) -> list[TenderInput] | None:
         return None if self.tenders is None else [t.to_input() for t in self.tenders]
 
+    def to_disabled_campaigns(self) -> list[CampaignOverrideInput] | None:
+        return disabled_campaign_inputs(self.disabled_campaigns)
+
     def to_invoice_info(self) -> InvoiceInfoInput | None:
         return None if self.invoice is None else self.invoice.to_input()
 
@@ -330,6 +359,13 @@ class SaleQuoteRequest(BaseModel):
     lines: list[SaleLineCreateRequest] = Field(min_length=1)
     buyer_contact_id: int | None = None
     adjustments: list[SaleAdjustmentRequest] | None = None
+    disabled_campaigns: (
+        Annotated[list[SaleCampaignOverrideRequest], Field(max_length=DISABLED_CAMPAIGNS_MAX)]
+        | None
+    ) = None
+
+    def to_disabled_campaigns(self) -> list[CampaignOverrideInput] | None:
+        return disabled_campaign_inputs(self.disabled_campaigns)
 
     @model_validator(mode="after")
     def _check_adjustment_targets(self) -> "SaleQuoteRequest":
@@ -351,6 +387,13 @@ class SaleQuoteCampaignRead(BaseModel):
     campaign_id: int
     name: str
     discount_amount: NTDAmount
+
+
+class SaleDisabledCampaignRead(BaseModel):
+    """這一筆被店員取消套用的活動。"""
+
+    campaign_id: int
+    name: str
 
 
 class SaleQuoteLineRead(BaseModel):
@@ -380,6 +423,8 @@ class SaleQuoteResponse(BaseModel):
     campaign_name: str | None
     # 整筆套到的活動（依活動 id），各自加總本筆的折讓（docs/40）。
     campaigns: list[SaleQuoteCampaignRead] = []
+    # 這一筆被按「不套用」、而且目前確實在進行的活動（POS 顯示「恢復套用」）。
+    disabled_campaigns: list[SaleDisabledCampaignRead] = []
     lines: list[SaleQuoteLineRead]
     # 餐飲（內用）小計與購物金可折抵上限（=total−food_subtotal）；POS 據此卡住購物金輸入。
     food_subtotal: NTDAmount

@@ -26,6 +26,7 @@ from app.modules.sales.schemas import (
     LinePayRefundAttemptRead,
     LinePayRefundResolveRequest,
     SaleCreateRequest,
+    SaleDisabledCampaignRead,
     SaleQuoteCampaignRead,
     SaleQuoteLineRead,
     SaleQuoteRequest,
@@ -240,6 +241,7 @@ async def create_sale(
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
             adjustments=payload.to_adjustments(),
+            disabled_campaigns=payload.to_disabled_campaigns(),
             service_mode=payload.service_mode,
             table_no=payload.table_no,
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
@@ -277,6 +279,7 @@ async def create_sale(
                     # 漏帶的話，輸家會以「無折扣」重算指紋 → 必然 409：錢已被贏家扣掉、
                     # 單也成立了，POS 卻說簽署不能重用。
                     adjustments=payload.to_adjustments(),
+                    disabled_campaigns=payload.to_disabled_campaigns(),
                     # 內用/外帶與桌號同理（docs/35）：指紋含這兩欄，漏帶會讓「購物金＋餐飲」
                     # 的並發重送必然 409。
                     service_mode=payload.service_mode,
@@ -304,6 +307,7 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                disabled_campaigns=payload.to_disabled_campaigns(),
                 # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
@@ -365,6 +369,7 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                disabled_campaigns=payload.to_disabled_campaigns(),
                 # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
@@ -406,6 +411,7 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                disabled_campaigns=payload.to_disabled_campaigns(),
                 # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
@@ -453,6 +459,7 @@ async def quote_sale(
             lines=payload.to_inputs(),
             buyer_contact_id=payload.buyer_contact_id,
             adjustments=payload.to_adjustments(),
+            disabled_campaigns=payload.to_disabled_campaigns(),
         )
     except DomainError as exc:
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
@@ -461,6 +468,10 @@ async def quote_sale(
         campaign_id=quote.campaign_id,
         campaign_name=quote.campaign_name,
         campaigns=[_campaign_read(c) for c in quote.campaigns],
+        disabled_campaigns=[
+            SaleDisabledCampaignRead(campaign_id=c.campaign_id, name=c.name)
+            for c in quote.disabled_campaigns
+        ],
         lines=[
             SaleQuoteLineRead(
                 line_type=ql.line_type,

@@ -93,3 +93,12 @@ class LinePayReturnRecovery:
     consent_signature_task_id: int | None
     unreturned_gift_note: str | None
     manual_paper_disposed: bool
+
+
+@dataclass(frozen=True)
+class CampaignOverrideInput:
+    """店員在這一筆按「這筆不套用」的門市活動（docs/40 P1c；不需核准、原因可不填）。"""
+
+    campaign_id: int
+    reason: str | None = None
+

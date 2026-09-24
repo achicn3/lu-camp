@@ -136,6 +136,7 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("活動-檔數", "SELECT count(*) FROM campaigns"),
     # 活動 v2（docs/40）：範圍條件是店長設定的（救不回來要重選），每行套用明細是報表的歸屬依據。
     ("活動-範圍條件數", "SELECT count(*) FROM campaign_targets"),
+    ("交易-活動不套用筆數", "SELECT count(*) FROM sale_campaign_overrides"),
     (
         "交易-活動折讓明細（筆數/金額）",
         "SELECT count(*)::text || '/' || COALESCE(SUM(discount_amount),0)::text"

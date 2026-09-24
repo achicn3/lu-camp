@@ -4488,6 +4488,8 @@ export interface components {
             adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
+            /** Disabled Campaigns */
+            disabled_campaigns?: components["schemas"]["SaleCampaignOverrideRequest"][] | null;
             /** Expected Revision */
             expected_revision?: number | null;
             /** Lines */
@@ -7376,6 +7378,16 @@ export interface components {
             value: number | string;
         };
         /**
+         * SaleCampaignOverrideRequest
+         * @description 「這筆不套用」某個門市活動（docs/40 P1c；不需核准、原因可不填）。
+         */
+        SaleCampaignOverrideRequest: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
          * SaleCreateRequest
          * @description 結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
          *
@@ -7391,6 +7403,8 @@ export interface components {
             cart_revision?: number | null;
             /** Cart Session Id */
             cart_session_id?: number | null;
+            /** Disabled Campaigns */
+            disabled_campaigns?: components["schemas"]["SaleCampaignOverrideRequest"][] | null;
             /** Expected Einvoice Enabled */
             expected_einvoice_enabled?: boolean | null;
             invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
@@ -7403,6 +7417,16 @@ export interface components {
             table_no?: string | null;
             /** Tenders */
             tenders?: components["schemas"]["SaleTenderRequest"][] | null;
+        };
+        /**
+         * SaleDisabledCampaignRead
+         * @description 這一筆被店員取消套用的活動。
+         */
+        SaleDisabledCampaignRead: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Name */
+            name: string;
         };
         /**
          * SaleInvoiceInfoRequest
@@ -7589,6 +7613,8 @@ export interface components {
             adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
+            /** Disabled Campaigns */
+            disabled_campaigns?: components["schemas"]["SaleCampaignOverrideRequest"][] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
         };
@@ -7606,6 +7632,11 @@ export interface components {
              * @default []
              */
             campaigns: components["schemas"]["SaleQuoteCampaignRead"][];
+            /**
+             * Disabled Campaigns
+             * @default []
+             */
+            disabled_campaigns: components["schemas"]["SaleDisabledCampaignRead"][];
             /** Food Subtotal */
             food_subtotal: string;
             /** Gift Retail Value */
@@ -8340,6 +8371,11 @@ export interface components {
              * @default []
              */
             adjustments: components["schemas"]["StaffCartAdjustmentRead"][];
+            /**
+             * Disabled Campaigns
+             * @default []
+             */
+            disabled_campaigns: components["schemas"]["SaleCampaignOverrideRequest"][];
             /** Lines */
             lines: components["schemas"]["StaffCartLineRead"][];
             service_mode?: components["schemas"]["ServiceMode"] | null;

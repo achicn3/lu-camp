@@ -39,6 +39,7 @@ async function apiJson(path, { method = "GET", token, body, headers = {}, expect
 }
 
 let browser;
+let cleanup = null;
 try {
   // --- API 準備：登入、開帳、建立並啟用活動、收購自有序號品 ---
   const { access_token: token } = await apiJson("/api/v1/auth/login", {
@@ -71,6 +72,7 @@ try {
     },
   });
   await apiJson(`/api/v1/campaigns/${camp.id}/activate`, { method: "POST", token });
+  cleanup = () => apiJson(`/api/v1/campaigns/${camp.id}/end`, { method: "POST", token });
   ok("建立並啟用活動（九折）", true);
 
   const seller = await apiJson("/api/v1/contacts", {
@@ -104,7 +106,7 @@ try {
   await page.waitForURL(`${BASE}/`);
   await page.click('a:has-text("POS 結帳")');
   await page.waitForURL(`${BASE}/pos`);
-  await page.waitForSelector("text=本期不開票");
+  await page.waitForSelector("text=這筆不開發票");
 
   // 自動送出：只填入完整碼制、不按 Enter，應自動加入購物車
   await page.fill('input[name="code"]', code);
@@ -122,7 +124,10 @@ try {
   );
   const totalText = await page.locator(".pos-total strong").textContent();
   ok("應付總額顯示折後 900", totalText?.includes("900") && !totalText.includes("1,000"), totalText ?? "");
-  ok("顯示活動折扣提示", await page.locator("text=已套用活動折扣").isVisible());
+  ok(
+    "「本筆套用的活動」列出活動",
+    (await page.getByRole("region", { name: "本筆套用的活動" }).innerText()).includes(`折扣結帳煙測 ${runId}`),
+  );
   await page.screenshot({ path: `${SHOTS}/01-pos-discounted-total.png`, fullPage: true });
 
   const checkout = page.getByRole("button", { name: "結帳" });
@@ -147,6 +152,8 @@ try {
   }
 } finally {
   if (browser) await browser.close();
+  // v2 起可同時多個活動：不結束的話會疊到同一個資料庫裡後續煙霧的價格上。
+  if (cleanup) await cleanup().catch(() => {});
 }
 const failed = results.filter((r) => !r.pass);
 console.log(`\n結果：${results.length - failed.length}/${results.length} 通過`);

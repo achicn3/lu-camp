@@ -19,6 +19,10 @@ export const RESTORE_GUARD_TIMEOUT_MS = 5000;
 type SaleLine = components["schemas"]["SaleLineCreateRequest"];
 type Tender = components["schemas"]["CartTenderRequest"];
 type Adjustment = components["schemas"]["SaleAdjustmentRequest"];
+type DisabledCampaign = components["schemas"]["SaleCampaignOverrideRequest"];
+
+// 預設值放模組層：每次 render 都 new 一個空陣列，會讓相依它的 effect 每次都重跑。
+const NO_DISABLED_CAMPAIGNS: DisabledCampaign[] = [];
 type StaffCart = components["schemas"]["StaffCartSessionRead"];
 type CartSession = components["schemas"]["CartSessionRead"];
 type CartItem = components["schemas"]["CartItemRead"];
@@ -95,6 +99,8 @@ interface PosCustomerDisplayProps {
   tenders: Tender[];
   /** 臨時折扣：客顯是權威購物車，折扣不經它，客人螢幕上的金額就會與實際扣款不同。 */
   adjustments: Adjustment[];
+  /** 「這筆不套用」的門市活動（docs/40 P1c）：同臨時折扣，必須經權威購物車，客顯金額才對。 */
+  disabledCampaigns?: DisabledCampaign[];
   /** 餐飲內用/外帶與桌號（docs/35）：跟著購物車保存，POS 重掛/還原時才不會遺失選擇。 */
   serviceMode: "DINE_IN" | "TAKEOUT" | null;
   tableNo: string | null;
@@ -125,6 +131,7 @@ type PendingSync = { fingerprint: string } & (
       buyerContactId: number | null;
       tenders: Tender[];
       adjustments: Adjustment[];
+      disabledCampaigns: DisabledCampaign[];
       serviceMode: "DINE_IN" | "TAKEOUT" | null;
       tableNo: string | null;
     }
@@ -136,6 +143,7 @@ export function PosCustomerDisplay({
   buyerContactId,
   tenders,
   adjustments,
+  disabledCampaigns = NO_DISABLED_CAMPAIGNS,
   serviceMode,
   tableNo,
   ready,
@@ -167,6 +175,7 @@ export function PosCustomerDisplay({
     buyerContactId,
     tenders,
     adjustments,
+    disabledCampaigns,
     serviceMode,
     tableNo,
   });
@@ -175,6 +184,7 @@ export function PosCustomerDisplay({
     buyerContactId,
     tenders,
     adjustments,
+    disabledCampaigns,
     serviceMode,
     tableNo,
   });
@@ -302,10 +312,11 @@ export function PosCustomerDisplay({
       buyerContactId,
       tenders,
       adjustments,
+      disabledCampaigns,
       serviceMode,
       tableNo,
     };
-  }, [adjustments, buyerContactId, lines, serviceMode, tableNo, tenders]);
+  }, [adjustments, buyerContactId, disabledCampaigns, lines, serviceMode, tableNo, tenders]);
 
   useEffect(() => {
     const terminalId = terminal.data?.id ?? null;
@@ -400,6 +411,10 @@ export function PosCustomerDisplay({
                 tenders: next.tenders.length > 0 ? next.tenders : null,
                 adjustments:
                   next.adjustments.length > 0 ? next.adjustments : null,
+                // 沒取消任何活動時不帶這個欄位：請求形狀與加欄位前相同。
+                ...(next.disabledCampaigns.length > 0
+                  ? { disabled_campaigns: next.disabledCampaigns }
+                  : {}),
                 service_mode: next.serviceMode,
                 table_no: next.tableNo,
               },
@@ -455,6 +470,7 @@ export function PosCustomerDisplay({
                 buyerContactId: latest.buyerContactId,
                 tenders: latest.tenders,
                 adjustments: latest.adjustments,
+                disabledCampaigns: latest.disabledCampaigns,
                 serviceMode: latest.serviceMode,
                 tableNo: latest.tableNo,
               }
@@ -528,6 +544,7 @@ export function PosCustomerDisplay({
               buyerContactId: latest.buyerContactId,
               tenders: latest.tenders,
               adjustments: latest.adjustments,
+                disabledCampaigns: latest.disabledCampaigns,
               serviceMode: latest.serviceMode,
               tableNo: latest.tableNo,
             }

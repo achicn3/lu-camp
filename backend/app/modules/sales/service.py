@@ -43,6 +43,7 @@ from app.modules.sales.bulk_allocation import returned_split
 from app.modules.sales.inputs import (
     CARRIER_TYPE_MOBILE,
     LINEPAY_RETURN_RECOVERY_KIND,
+    CampaignOverrideInput,
     InvoiceInfoInput,
     LinePayReturnRecovery,
     LinePayReturnRecoveryLine,
@@ -65,6 +66,7 @@ from app.modules.sales.models import (
     SaleAdjustment,
     SaleAdjustmentAllocation,
     SaleBulkAllocation,
+    SaleCampaignOverride,
     SaleLine,
     SaleLineCampaign,
     SaleTender,
@@ -321,6 +323,14 @@ def _basket_promo_item(basket: BulkBasket) -> PromoItem:
 
 
 @dataclass(frozen=True)
+class DisabledCampaign:
+    """這一筆被店員取消套用的活動。"""
+
+    campaign_id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class QuoteLineCampaign:
     """一行（或整筆）套到的一個活動與它折了多少（含稅整數元）。"""
 
@@ -397,6 +407,8 @@ class SaleQuote:
     """贈品原價價值——**僅供顯示參考**，不加進應付、也不算折扣。"""
     item_discount_amount: Decimal = Decimal(0)
     order_discount_amount: Decimal = Decimal(0)
+    disabled_campaigns: list["DisabledCampaign"] = field(default_factory=list)
+    """店員在這一筆按了「這筆不套用」、而且目前確實在進行的活動（POS 據此顯示「恢復套用」）。"""
     campaigns: list[QuoteLineCampaign] = field(default_factory=list)
     """整筆套到的活動（依活動 id），各自加總本筆的折讓。campaign_id／campaign_name 為舊欄位：
     貢獻最多的那個／全部活動名以「、」串起。"""
@@ -487,6 +499,8 @@ def _cart_fingerprint(
     adjustments: Sequence[DiscountRequest] | None = None,
     service_mode: ServiceMode | None = None,
     table_no: str | None = None,
+    *,
+    disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
 ) -> str:
     """購物車＋收款＋發票資訊＋折扣組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
 
@@ -499,7 +513,7 @@ def _cart_fingerprint(
     內用/外帶與桌號納入指紋（docs/35）：兩者雖不影響金額，卻決定出餐單印到哪一桌——
     不納入的話，A1 的單會被當成 A2 的重放，第二桌的餐點掛在第一桌名下。
     """
-    canonical = {
+    canonical: dict[str, object] = {
         "invoice_info": (
             None
             if invoice_info is None
@@ -557,6 +571,11 @@ def _cart_fingerprint(
             ]
         ),
     }
+    # 「這筆不套用」的活動（docs/40 P1c）直接改變金額，同鍵但取消內容不同就是不同的請求。
+    # 後加欄位：沒取消時不放進去，指紋維持舊形狀（部署前送出、回應遺失的重送才不會變 409）。
+    # 原因不影響金額、不進指紋；依活動 id 排序，按的順序不影響。
+    if disabled_campaigns:
+        canonical["disabled_campaigns"] = sorted({d.campaign_id for d in disabled_campaigns})
     return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
 
 
@@ -892,6 +911,7 @@ class SalesService:
         cart_session_id: int | None = None,
         cart_revision: int | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
         service_mode: ServiceMode | None = None,
         table_no: str | None = None,
         invoice_info: InvoiceInfoInput | None = None,
@@ -931,6 +951,7 @@ class SalesService:
             adjustments,
             service_mode,
             normalized_table_no,  # 用正規化值：落庫的是它，重算才對得上
+            disabled_campaigns=disabled_campaigns,
         )
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
@@ -944,6 +965,7 @@ class SalesService:
                 tenders=normalized_tenders,
                 invoice_info=invoice_info,
                 adjustments=adjustments,
+                disabled_campaigns=disabled_campaigns,
                 service_mode=service_mode,
                 table_no=normalized_table_no,
             )
@@ -967,6 +989,7 @@ class SalesService:
                     tenders=normalized_tenders,
                     invoice_info=invoice_info,
                     adjustments=adjustments,
+                    disabled_campaigns=disabled_campaigns,
                     service_mode=service_mode,
                     table_no=normalized_table_no,
                 )
@@ -1153,7 +1176,8 @@ class SalesService:
 
         # 門市活動折扣（docs/21 C2）：結帳當下取生效中活動（status=ACTIVE 且 now ∈ 窗），
         # 逐行依品項種類/擁有型態與活動開關套折後價（無活動→原價）。
-        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
+        promos, disabled = await self._effective_promos(store_id, disabled_campaigns)
+        await self._record_campaign_overrides(store_id, sale.id, clerk_user_id, disabled)
 
         # 餐飲小計（**含外帶**）：購物金折抵上限與會員點數都要扣掉它。
         # 判斷依 line_type == MENU，與內用/外帶無關——寫成「內用」會誤導。
@@ -2036,6 +2060,7 @@ class SalesService:
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
         service_mode: ServiceMode | None = None,
         table_no: str | None = None,
     ) -> Sale | None:
@@ -2051,7 +2076,14 @@ class SalesService:
         if existing is None:
             return None
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info, adjustments, service_mode, table_no
+            lines,
+            buyer_contact_id,
+            tenders,
+            invoice_info,
+            adjustments,
+            service_mode,
+            table_no,
+            disabled_campaigns=disabled_campaigns,
         ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
@@ -2072,6 +2104,7 @@ class SalesService:
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
         service_mode: ServiceMode | None = None,
         table_no: str | None = None,
     ) -> Sale:
@@ -2092,7 +2125,14 @@ class SalesService:
                 "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
             )
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info, adjustments, service_mode, table_no
+            lines,
+            buyer_contact_id,
+            tenders,
+            invoice_info,
+            adjustments,
+            service_mode,
+            table_no,
+            disabled_campaigns=disabled_campaigns,
         ):
             raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing
@@ -2901,6 +2941,7 @@ class SalesService:
         lines: list[SaleLineInput],
         buyer_contact_id: int | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
     ) -> SaleQuote:
         """結帳前試算（docs/21 C2b）：套生效活動後的折後總額與各行折讓。唯讀——不扣庫存、不收款、
         不建單。供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額、收款不對齊 → 422）。
@@ -2912,7 +2953,7 @@ class SalesService:
             raise EmptySale("結帳試算必須至少有一筆明細")
         # 試算永遠不放行停售品：同一個 service 實例若先做過補單，旗標不能殘留到這裡。
         self._allow_inactive_items = False
-        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
+        promos, disabled = await self._effective_promos(store_id, disabled_campaigns)
         quoted: list[QuoteLine] = []
         total = Decimal(0)
         food_subtotal = Decimal(0)
@@ -2992,6 +3033,9 @@ class SalesService:
             ),
             campaign_name="、".join(c.name for c in applied) if applied else None,
             campaigns=applied,
+            disabled_campaigns=[
+                DisabledCampaign(campaign_id=c.id, name=c.name) for c, _reason in disabled
+            ],
             lines=quoted,
             food_subtotal=food_subtotal,
             store_credit_max=total - food_subtotal,
@@ -3429,6 +3473,46 @@ class SalesService:
             # （disc.unit_price 在未折時等於原 listed_price）。docs/21 §8.1：折扣一律按比例分攤。
             consignment_sales.append((item.id, disc.unit_price, item.commission_pct))
         return disc.unit_price
+
+    async def _effective_promos(
+        self, store_id: int, disabled_campaigns: Sequence[CampaignOverrideInput] | None
+    ) -> tuple[list[PromoCampaign], list[tuple[PromoCampaign, str | None]]]:
+        """目前生效中的活動，扣掉店員這一筆「不套用」的（docs/40 P1c）。
+
+        回傳（要套用的, [(被取消的, 原因)]）。取消了但其實沒在進行的活動直接忽略
+        ——它本來就不影響金額，也沒什麼好記的。
+        """
+        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
+        reasons = {d.campaign_id: d.reason for d in disabled_campaigns or []}
+        kept = [p for p in promos if p.id not in reasons]
+        disabled = [(p, reasons[p.id]) for p in promos if p.id in reasons]
+        return kept, disabled
+
+    async def _record_campaign_overrides(
+        self,
+        store_id: int,
+        sale_id: int,
+        actor_user_id: int,
+        disabled: list[tuple[PromoCampaign, str | None]],
+    ) -> None:
+        """記下這一筆取消了哪些活動＋稽核（不需核准；自由文字原因不進稽核，§5）。"""
+        for campaign, reason in disabled:
+            clean = (reason or "").strip() or None
+            await self._repo.add_campaign_override(
+                SaleCampaignOverride(
+                    store_id=store_id, sale_id=sale_id, campaign_id=campaign.id, reason=clean
+                )
+            )
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="SALE_CAMPAIGN_NOT_APPLIED",
+                entity_type="sale",
+                entity_id=str(sale_id),
+                before=None,
+                after={"campaign_id": campaign.id, "has_reason": clean is not None},
+            )
 
     async def _add_priced_line(self, sale_line: SaleLine, disc: _AppliedDiscount) -> SaleLine:
         """建 sale_line，並記下它套到哪些活動、各折多少（docs/40：Σ＝discount_amount）。"""

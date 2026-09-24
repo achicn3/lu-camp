@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 
-import { discountDisplay } from "@/features/campaigns/campaigns";
+import { discountDisplay, targetSummary } from "@/features/campaigns/campaigns";
 import { MemberPanel } from "@/features/pos/MemberPanel";
 import {
   PosCustomerDisplay,
@@ -70,6 +70,7 @@ import { showsLinePayCarrierNote } from "@/lib/invoice-carrier-note";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
+import { CampaignPanel } from "@/features/pos/CampaignPanel";
 import { formatSalePaymentSummary } from "@/lib/payment";
 import {
   clearPersistedIdemKey,
@@ -80,6 +81,7 @@ type SaleRead = components["schemas"]["SaleRead"];
 type InvoiceRead = components["schemas"]["InvoiceRead"];
 type ContactRead = components["schemas"]["ContactRead"];
 type CampaignRead = components["schemas"]["CampaignRead"];
+type DisabledCampaign = components["schemas"]["SaleCampaignOverrideRequest"];
 type MenuItemRead = components["schemas"]["MenuItemRead"];
 type TerminalRead = components["schemas"]["TerminalRead"];
 type DisplayCart =
@@ -697,7 +699,8 @@ function ActiveCampaignBanner() {
     <div className="pos-campaign-banner" role="status">
       {active.map((c) => (
         <span key={c.id} className="pos-campaign-tag">
-          活動進行中：{c.name}（{discountDisplay(c.discount_pct)}／折扣 {c.discount_pct}%）
+          活動進行中：{c.name}（{discountDisplay(c.discount_pct)}／折扣 {c.discount_pct}%
+          {targetSummary(c.targets) ? `；${targetSummary(c.targets)}` : ""}）
         </span>
       ))}
       <span className="pos-campaign-hint">結帳會自動套用折扣</span>
@@ -1065,6 +1068,8 @@ export default function PosPage() {
   const [lines, setLines] = useState<CartLine[]>([]);
   // 臨時折扣以購物車列的 key 記錄（不是索引）：移除商品時索引會位移，折扣會默默跑到別的商品上。
   const [discountDrafts, setDiscountDrafts] = useState<DiscountDraft[]>([]);
+  // 「這筆不套用」的門市活動（docs/40 P1c）：跟臨時折扣一樣進試算、客顯購物車與結帳。
+  const [disabledCampaigns, setDisabledCampaigns] = useState<DisabledCampaign[]>([]);
   // 開著的對話框：贈品（要把哪一列改成贈品）／折扣（整單或某一列）。
   const [giftTargetKey, setGiftTargetKey] = useState<string | null>(null);
   const [discountTargetKey, setDiscountTargetKey] = useState<string | null>(null);
@@ -1211,6 +1216,7 @@ export default function PosPage() {
         const withNotes = await withFreshNotes(restoredLines);
         if (isStale()) return;
         setLines(withNotes);
+        setDisabledCampaigns(payload.disabled_campaigns ?? []);
         setDiscountDrafts(
           (payload.adjustments ?? []).map((adjustment, index) => ({
             id: `restored-${index}`,
@@ -1236,6 +1242,7 @@ export default function PosPage() {
         if (isStale()) return;
         setLines(withNotes);
         setDiscountDrafts([]);
+    setDisabledCampaigns([]);
       }
       // 內用/外帶與桌號（docs/35）：一併還原。少了它，被凍結的餐飲購物車重掛後會卡死——
       // 驗證要求選擇，但凍結中兩顆模式鍵都是停用的，只能作廢重簽。
@@ -1529,6 +1536,7 @@ export default function PosPage() {
       "sale-quote",
       JSON.stringify(saleLines),
       JSON.stringify(adjustments),
+      JSON.stringify(disabledCampaigns),
       member?.id ?? null,
     ],
     enabled: lines.length > 0,
@@ -1538,6 +1546,7 @@ export default function PosPage() {
           lines: saleLines,
           buyer_contact_id: member?.id ?? null,
           adjustments: adjustments.length > 0 ? adjustments : null,
+          ...(disabledCampaigns.length > 0 ? { disabled_campaigns: disabledCampaigns } : {}),
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "試算失敗");
@@ -1980,6 +1989,8 @@ export default function PosPage() {
         buyer_contact_id: member?.id ?? null,
         // 折扣入冪等指紋（body 全量納入簽章）：兩張金額不同的單不得被當成同一張重放。
         adjustments: adjustments.length > 0 ? adjustments : null,
+        // 沒取消任何活動時不帶：請求與冪等鍵的簽章維持加欄位前的形狀。
+        ...(disabledCampaigns.length > 0 ? { disabled_campaigns: disabledCampaigns } : {}),
         tenders: toTenders(plan, { linePayKey }) ?? null,
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
@@ -2162,6 +2173,7 @@ export default function PosPage() {
     setRestorePending(true);
     setLines([]);
     setDiscountDrafts([]);
+    setDisabledCampaigns([]);
     setGiftTargetKey(null);
     setDiscountTargetKey(null);
     setMember(null);
@@ -2341,6 +2353,7 @@ export default function PosPage() {
       <PosCustomerDisplay
         lines={saleLines}
         adjustments={adjustments}
+        disabledCampaigns={disabledCampaigns}
         buyerContactId={member?.id ?? null}
         tenders={customerDisplayTenders}
         ready={quoteReady}
@@ -2437,6 +2450,11 @@ export default function PosPage() {
                           )}
                           {line.note != null && line.note.trim() !== "" && (
                             <span className="pos-line-note">備註：{line.note.trim()}</span>
+                          )}
+                          {(ql?.campaigns?.length ?? 0) > 0 && (
+                            <span className="pos-line-campaigns">
+                              {ql?.campaigns?.map((c) => c.name).join("、")}
+                            </span>
                           )}
                         </td>
                         <td>
@@ -2638,8 +2656,23 @@ export default function PosPage() {
               <Money value={total} />
             </strong>
           </div>
-          {campaignNote && (
-            <p className="hint pos-campaign-note">已套用活動折扣：{campaignNote}</p>
+          {quoteReady && quote.data && (
+            <CampaignPanel
+              applied={quote.data.campaigns ?? []}
+              disabled={quote.data.disabled_campaigns ?? []}
+              locked={cartMutationLocked}
+              onDisable={(campaignId, reason) => {
+                markCartEdited();
+                setDisabledCampaigns((prev) => [
+                  ...prev.filter((d) => d.campaign_id !== campaignId),
+                  { campaign_id: campaignId, reason },
+                ]);
+              }}
+              onRestore={(campaignId) => {
+                markCartEdited();
+                setDisabledCampaigns((prev) => prev.filter((d) => d.campaign_id !== campaignId));
+              }}
+            />
           )}
           <div className="pos-discount-panel">
             <button

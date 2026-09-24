@@ -2904,6 +2904,21 @@
             ],
             "title": "Buyer Contact Id"
           },
+          "disabled_campaigns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleCampaignOverrideRequest"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Campaigns"
+          },
           "expected_revision": {
             "anyOf": [
               {
@@ -10296,6 +10311,33 @@
         "title": "SaleAdjustmentRequest",
         "type": "object"
       },
+      "SaleCampaignOverrideRequest": {
+        "description": "「這筆不套用」某個門市活動（docs/40 P1c；不需核准、原因可不填）。",
+        "properties": {
+          "campaign_id": {
+            "minimum": 1.0,
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "campaign_id"
+        ],
+        "title": "SaleCampaignOverrideRequest",
+        "type": "object"
+      },
       "SaleCreateRequest": {
         "description": "結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。\n\ntenders 省略 → service 預設單一 CASH 全額（向後相容）；提供時 Σ amount 必須等於\n伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。",
         "properties": {
@@ -10347,6 +10389,21 @@
               }
             ],
             "title": "Cart Session Id"
+          },
+          "disabled_campaigns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleCampaignOverrideRequest"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Campaigns"
           },
           "expected_einvoice_enabled": {
             "anyOf": [
@@ -10429,6 +10486,25 @@
           "lines"
         ],
         "title": "SaleCreateRequest",
+        "type": "object"
+      },
+      "SaleDisabledCampaignRead": {
+        "description": "這一筆被店員取消套用的活動。",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "name"
+        ],
+        "title": "SaleDisabledCampaignRead",
         "type": "object"
       },
       "SaleInvoiceInfoRequest": {
@@ -10902,6 +10978,21 @@
             ],
             "title": "Buyer Contact Id"
           },
+          "disabled_campaigns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleCampaignOverrideRequest"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Campaigns"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SaleLineCreateRequest"
@@ -10948,6 +11039,14 @@
               "$ref": "#/components/schemas/SaleQuoteCampaignRead"
             },
             "title": "Campaigns",
+            "type": "array"
+          },
+          "disabled_campaigns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleDisabledCampaignRead"
+            },
+            "title": "Disabled Campaigns",
             "type": "array"
           },
           "food_subtotal": {
@@ -13195,6 +13294,14 @@
               "$ref": "#/components/schemas/StaffCartAdjustmentRead"
             },
             "title": "Adjustments",
+            "type": "array"
+          },
+          "disabled_campaigns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleCampaignOverrideRequest"
+            },
+            "title": "Disabled Campaigns",
             "type": "array"
           },
           "lines": {

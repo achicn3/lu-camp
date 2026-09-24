@@ -24,6 +24,7 @@ from app.modules.sales.models import (
     Sale,
     SaleAdjustment,
     SaleBulkAllocation,
+    SaleCampaignOverride,
     SaleLine,
     SaleLineCampaign,
     SaleTender,
@@ -124,6 +125,10 @@ class SalesRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def add_campaign_override(self, row: SaleCampaignOverride) -> None:
+        self._session.add(row)
+        await self._session.flush()
 
     async def add_line_campaigns(self, rows: list[SaleLineCampaign]) -> None:
         self._session.add_all(rows)

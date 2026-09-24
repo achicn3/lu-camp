@@ -7,9 +7,14 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.money import ensure_ntd_fits_numeric_12
-from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.inputs import CampaignOverrideInput, SaleLineInput
 from app.modules.sales.pricing import DiscountRequest
-from app.modules.sales.schemas import SaleAdjustmentRequest
+from app.modules.sales.schemas import (
+    DISABLED_CAMPAIGNS_MAX,
+    SaleAdjustmentRequest,
+    SaleCampaignOverrideRequest,
+    disabled_campaign_inputs,
+)
 from app.shared.enums import (
     AdjustmentScope,
     CalculationMethod,
@@ -159,6 +164,12 @@ class CartUpsertRequest(BaseModel):
     # 臨時折扣：客顯購物車是權威購物車，折扣必須經同一條路徑進來，否則客人螢幕上看到的
     # 金額與實際結帳不同，且結帳時的快照比對會直接失敗。
     adjustments: list[SaleAdjustmentRequest] | None = None
+    # 「這筆不套用」的門市活動（docs/40 P1c）：同臨時折扣，必須經權威購物車進來，
+    # 客顯金額與實際結帳才一致；也跟著購物車保存，POS 重新載入時才還原得回來。
+    disabled_campaigns: (
+        Annotated[list[SaleCampaignOverrideRequest], Field(max_length=DISABLED_CAMPAIGNS_MAX)]
+        | None
+    ) = None
     # 餐飲內用/外帶與桌號（docs/35）：**必須跟著購物車保存**，否則 POS 重新載入被凍結的
     # 購物車時選擇會遺失；而凍結中兩顆模式鍵都是停用的，已簽名的交易就只能作廢重簽。
     service_mode: ServiceMode | None = None
@@ -184,6 +195,9 @@ class CartUpsertRequest(BaseModel):
         if self.adjustments is None:
             return None
         return [adjustment.to_request() for adjustment in self.adjustments]
+
+    def to_disabled_campaigns(self) -> list[CampaignOverrideInput] | None:
+        return disabled_campaign_inputs(self.disabled_campaigns)
 
 
 class CartCancelRequest(BaseModel):
@@ -300,11 +314,13 @@ class StaffCartPayloadRead(BaseModel):
 
     lines: list[StaffCartLineRead]
     adjustments: list[StaffCartAdjustmentRead] = []
+    # 「這筆不套用」的活動（docs/40 P1c）；舊購物車沒有 → 空。
+    disabled_campaigns: list[SaleCampaignOverrideRequest] = []
     # 餐飲內用/外帶與桌號（docs/35）；舊購物車沒有這兩欄 → None。
     service_mode: ServiceMode | None = None
     table_no: str | None = None
 
-    @field_validator("adjustments", mode="before")
+    @field_validator("adjustments", "disabled_campaigns", mode="before")
     @classmethod
     def _null_adjustments_is_empty(cls, value: object) -> object:
         """落盤的請求在沒有折扣時是 `adjustments: null`；讀取端要接得住，

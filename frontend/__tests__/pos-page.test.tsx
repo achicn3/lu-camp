@@ -1418,6 +1418,8 @@ describe("/pos 結帳頁", () => {
           total: "1620",
           campaign_id: 1,
           campaign_name: "開幕九折",
+          campaigns: [{ campaign_id: 1, name: "開幕九折", discount_amount: "180" }],
+          disabled_campaigns: [],
           lines: [],
           food_subtotal: "0",
           store_credit_max: "1620",
@@ -1467,7 +1469,9 @@ describe("/pos 結帳頁", () => {
     await waitFor(() =>
       expect(screen.getAllByText(/1,620/).length).toBeGreaterThan(0),
     );
-    expect(screen.getByText(/已套用活動折扣：開幕九折/)).toBeTruthy();
+    // 「本筆套用的活動」列出套到的活動（docs/40 P1c，取代原本一行「已套用活動折扣」）。
+    const applied = screen.getByRole("region", { name: "本筆套用的活動" });
+    expect(applied.textContent).toContain("開幕九折");
 
     const checkout = screen.getByRole("button", { name: "結帳" });
     await waitFor(() => expect(checkout).toHaveProperty("disabled", false));
@@ -1486,6 +1490,110 @@ describe("/pos 結帳頁", () => {
     expect(printed.total_discount).toBe("180");
     expect(printed.lines[0].discount_amount).toBe("180");
     expect(printed.lines[0].original_unit_price).toBe("1800");
+  });
+
+  it("這筆不套用：取消某個活動→重新試算、可恢復；結帳帶上取消的活動（docs/40 P1c）", async () => {
+    const quoteBodies: Record<string, unknown>[] = [];
+    let saleBody = "";
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        quoteBodies.push(parsed);
+        const off = Array.isArray(parsed.disabled_campaigns) && parsed.disabled_campaigns.length > 0;
+        return json({
+          total: off ? "1620" : "1458",
+          campaign_id: 1,
+          campaign_name: off ? "全館九折" : "全館九折、會員九折",
+          campaigns: off
+            ? [{ campaign_id: 1, name: "全館九折", discount_amount: "180" }]
+            : [
+                { campaign_id: 1, name: "全館九折", discount_amount: "180" },
+                { campaign_id: 2, name: "會員九折", discount_amount: "162" },
+              ],
+          disabled_campaigns: off ? [{ campaign_id: 2, name: "會員九折" }] : [],
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: off ? "1620" : "1458",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleBody = body;
+        return json({ id: 9, store_id: 1, total: "1620", payment_method: "CASH", lines: [], tenders: [] }, 201);
+      }
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "TENT1");
+
+    const panel = await screen.findByRole("region", { name: "本筆套用的活動" });
+    await waitFor(() => expect(panel.textContent).toContain("會員九折"));
+    const memberRow = within(panel).getByText("會員九折").closest("li") as HTMLElement;
+    await user.click(within(memberRow).getByRole("button", { name: "這筆不套用" }));
+    await user.type(within(panel).getByLabelText("不套用原因"), "客人不要");
+    await user.click(within(panel).getByRole("button", { name: "確定不套用" }));
+
+    await waitFor(() =>
+      expect(quoteBodies.at(-1)?.disabled_campaigns).toEqual([
+        { campaign_id: 2, reason: "客人不要" },
+      ]),
+    );
+    // 重新試算時面板會重畫，要重新找一次。
+    const refreshed = await screen.findByRole("region", { name: "本筆套用的活動" });
+    expect(await within(refreshed).findByRole("button", { name: "恢復套用" })).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText(/1,620/).length).toBeGreaterThan(0));
+
+    const checkout = screen.getByRole("button", { name: "結帳" });
+    await waitFor(() => expect(checkout).toHaveProperty("disabled", false));
+    await user.click(checkout);
+    await waitFor(() => expect(saleBody).not.toBe(""));
+    expect(JSON.parse(saleBody).disabled_campaigns).toEqual([
+      { campaign_id: 2, reason: "客人不要" },
+    ]);
+  });
+
+  it("恢復套用後，試算不再帶取消的活動", async () => {
+    const quoteBodies: Record<string, unknown>[] = [];
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        quoteBodies.push(parsed);
+        const off = Array.isArray(parsed.disabled_campaigns);
+        return json({
+          total: "1620",
+          campaign_id: 1,
+          campaign_name: "全館九折",
+          campaigns: off ? [] : [{ campaign_id: 1, name: "全館九折", discount_amount: "180" }],
+          disabled_campaigns: off ? [{ campaign_id: 1, name: "全館九折" }] : [],
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1620",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "TENT1");
+    const panel = await screen.findByRole("region", { name: "本筆套用的活動" });
+    await user.click(await within(panel).findByRole("button", { name: "這筆不套用" }));
+    await user.click(within(panel).getByRole("button", { name: "確定不套用" }));
+    await waitFor(async () => {
+      const again = await screen.findByRole("region", { name: "本筆套用的活動" });
+      expect(within(again).getByRole("button", { name: "恢復套用" })).toBeTruthy();
+    });
+    const again = screen.getByRole("region", { name: "本筆套用的活動" });
+    await user.click(within(again).getByRole("button", { name: "恢復套用" }));
+    await waitFor(() => expect("disabled_campaigns" in (quoteBodies.at(-1) ?? {})).toBe(false));
   });
 
   it("二手＋餐飲＋會員選購物金：顯示「內用餐飲不可用購物金折抵」上限訊息並停用結帳（回歸）", async () => {

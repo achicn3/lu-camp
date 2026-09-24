@@ -217,6 +217,24 @@ class SaleLineCampaign(Base, TimestampMixin):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
 
 
+class SaleCampaignOverride(Base, TimestampMixin):
+    """店員在這一筆按了「這筆不套用」的活動（docs/40 P1c；不需核准、原因可不填，另寫 audit_log）。
+
+    只記結帳當下確實在進行、且被取消的活動；原因是自由文字，只存這裡、不進稽核。
+    """
+
+    __tablename__ = "sale_campaign_overrides"
+    __table_args__ = (
+        UniqueConstraint("sale_id", "campaign_id", name="uq_sale_campaign_overrides_entry"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
+    reason: Mapped[str | None] = mapped_column(String(200))
+
+
 class SaleBulkAllocation(Base, TimestampMixin):
     """販售籃行的來源分配（ADR-025）：這一行從哪個散裝來源扣了幾件、當時成本多少。
 
