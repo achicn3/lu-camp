@@ -7,6 +7,7 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -55,12 +56,15 @@ async def _store(db: AsyncSession, name: str = "門市") -> tuple[int, int, dict
     return store.id, contact.id, {"Authorization": f"Bearer {token}"}
 
 
-async def _batch(client: httpx.AsyncClient, contact_id: int, auth: dict[str, str]) -> dict:
+async def _batch(
+    client: httpx.AsyncClient, contact_id: int, auth: dict[str, str]
+) -> dict[str, Any]:
     resp = await client.post(
         PATH, json={"contact_id": contact_id, "declared_item_count": 3}, headers=auth
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()
+    body: dict[str, Any] = resp.json()
+    return body
 
 
 def _line(**overrides: object) -> dict[str, object]:
@@ -206,12 +210,15 @@ async def test_consignment_line_uses_commission_not_cost(
 # ── 估完 → 待確認 → 逐列處置 ──────────────────────────────────────────
 
 
-async def _ready_batch(client: httpx.AsyncClient, contact_id: int, auth: dict[str, str]) -> dict:
+async def _ready_batch(
+    client: httpx.AsyncClient, contact_id: int, auth: dict[str, str]
+) -> dict[str, Any]:
     batch = await _batch(client, contact_id, auth)
     await client.post(f"{PATH}/{batch['id']}/lines", json=_line(qty=3), headers=auth)
     resp = await client.post(f"{PATH}/{batch['id']}/ready", headers=auth)
     assert resp.status_code == 200, resp.text
-    return resp.json()
+    body: dict[str, Any] = resp.json()
+    return body
 
 
 async def test_ready_requires_a_deal_price_on_every_paid_line(
