@@ -329,4 +329,23 @@ describe("一般行情與逐筆紀錄", () => {
     release();
     await screen.findByText("第 2 / 2 頁");
   });
+
+  it("顯示歷史折數（一般折數或最低～最高）與最近一次的折數（店主 2026-09-24）", async () => {
+    stubHint({
+      ...A_AND_C,
+      discounts: { count: 5, low: "5", high: "6.5", typical: true },
+      latest: { ...A_AND_C.latest, discount: "6.5" },
+    });
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    expect(await screen.findByText(/一般折數：5–6.5 折/)).toBeTruthy();
+    expect(screen.getByText(/有折數紀錄的 5 件/)).toBeTruthy();
+    expect(screen.getByText(/（6.5 折）/)).toBeTruthy();
+  });
+
+  it("沒有任何件填過參考價就不講折數", async () => {
+    stubHint(A_AND_C);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    await screen.findByText(/同型號以前收過 3 件/);
+    expect(screen.queryByText(/折數/)).toBeNull();
+  });
 });

@@ -149,6 +149,20 @@ describe("AcquisitionPage", () => {
     expect(listed().value).toBe("499");
     expect(cost().value).toBe("250");
   });
+  it("六折以上紅字提醒可能是新品、要確認成色；五折不提醒（店主 2026-09-24）", async () => {
+    stub();
+    renderPage();
+    await userEvent.type(await screen.findByLabelText("參考價（原價或目前最低價）"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "5折" }));
+    expect(screen.queryByText(/可能是新品/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "6折" }));
+    expect(screen.getByRole("alert").textContent).toContain("6 折偏高，可能是新品：請確認商品狀況並修改成色");
+    await userEvent.click(screen.getByRole("button", { name: "自訂" }));
+    const custom = screen.getByLabelText("自訂折數");
+    await userEvent.clear(custom);
+    await userEvent.type(custom, "5.9");
+    expect(screen.queryByText(/可能是新品/)).toBeNull();
+  });
   it("自訂折數在切換散裝再返回後仍可直接修改", async () => {
     stub();
     renderPage();

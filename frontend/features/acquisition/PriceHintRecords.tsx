@@ -48,6 +48,7 @@ function RecordsTable({ label, items }: { label: string; items: PriceHintRecord[
             <th scope="col">成色</th>
             <th scope="col">收購價</th>
             <th scope="col">上架售價</th>
+            <th scope="col">折數</th>
             <th scope="col">現在</th>
           </tr>
         </thead>
@@ -59,6 +60,7 @@ function RecordsTable({ label, items }: { label: string; items: PriceHintRecord[
               <td>{GRADE_LABEL[r.grade] ?? r.grade}</td>
               <td>{money(r.cost, "未填")}</td>
               <td>{money(r.listed_price, "—")}</td>
+              <td>{r.discount != null ? `${r.discount} 折` : "—"}</td>
               <td>{ITEM_STATUS_LABELS[r.status] ?? r.status}</td>
             </tr>
           ))}

@@ -89,6 +89,8 @@ async def _seed_item(
     ownership: OwnershipType = OwnershipType.OWNED,
     days_ago: int = 30,
     item_code: str | None = None,
+    retail_price: str | None = None,
+    resale_discount_pct: int | None = None,
 ) -> SerializedItem:
     item = SerializedItem(
         store_id=store_id,
@@ -101,6 +103,8 @@ async def _seed_item(
         status=status,
         brand_id=brand_id,
         product_model_id=product_model_id,
+        retail_price=None if retail_price is None else Decimal(retail_price),
+        resale_discount_pct=resale_discount_pct,
     )
     session.add(item)
     await session.flush()
@@ -645,3 +649,140 @@ async def test_records_limit_is_bounded(
             headers=_auth(store_id),
         )
         assert resp.status_code == 422
+
+
+# ── 歷史折數（2026-09-24 店主：「要加上歷史收購價跟歷史折數」）────────────────
+# 折數：收購時點選的（resale_discount_pct）優先；沒點過才用上架售價 ÷ 參考價 × 10。
+
+
+async def test_records_and_latest_show_discount(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="650",
+        retail_price="1000",
+        days_ago=5,
+    )
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="300",
+        days_ago=10,
+    )
+    query = {"brand_id": brand_id, "product_model_id": model_id}
+
+    hint = (await client.get(PATH, params=query, headers=_auth(store_id))).json()
+    assert hint["latest"]["discount"] == "6.5"
+    records = (await client.get(f"{PATH}/records", params=query, headers=_auth(store_id))).json()
+    assert [r["discount"] for r in records["items"]] == ["6.5", None]
+
+
+async def test_discount_range_is_min_max_below_four_records(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    for listed in ("400", "600"):
+        await _seed_item(
+            db_session,
+            store_id,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            listed_price=listed,
+            retail_price="1000",
+        )
+    await _seed_item(
+        db_session, store_id, brand_id=brand_id, product_model_id=model_id, listed_price="999"
+    )
+    hint = (
+        await client.get(
+            PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id},
+            headers=_auth(store_id),
+        )
+    ).json()
+    assert hint["discounts"] == {"count": 2, "low": "4", "high": "6", "typical": False}
+
+
+async def test_discount_range_uses_middle_half_from_four_records(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    for listed in ("100", "500", "550", "600", "950"):
+        await _seed_item(
+            db_session,
+            store_id,
+            brand_id=brand_id,
+            product_model_id=model_id,
+            listed_price=listed,
+            retail_price="1000",
+        )
+    hint = (
+        await client.get(
+            PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id},
+            headers=_auth(store_id),
+        )
+    ).json()
+    assert hint["discounts"] == {"count": 5, "low": "5", "high": "6", "typical": True}
+
+
+async def test_no_reference_price_means_no_discount_range(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session, store_id, brand_id=brand_id, product_model_id=model_id, listed_price="500"
+    )
+    hint = (
+        await client.get(
+            PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id},
+            headers=_auth(store_id),
+        )
+    ).json()
+    assert hint["discounts"] is None
+    assert hint["latest"]["discount"] is None
+
+
+async def test_discount_prefers_the_one_chosen_at_acquisition(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收購時點了 6.5 折、上架價後來改成 499：折數仍是當時點的 6.5，不是 499÷1000。"""
+    store_id = await _seed_store(db_session)
+    brand_id, model_id = await _seed_brand_model(db_session, store_id)
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="499",
+        retail_price="1000",
+        resale_discount_pct=65,
+    )
+    await _seed_item(
+        db_session,
+        store_id,
+        brand_id=brand_id,
+        product_model_id=model_id,
+        listed_price="700",
+        resale_discount_pct=70,
+    )
+    hint = (
+        await client.get(
+            PATH,
+            params={"brand_id": brand_id, "product_model_id": model_id},
+            headers=_auth(store_id),
+        )
+    ).json()
+    assert hint["discounts"] == {"count": 2, "low": "6.5", "high": "7", "typical": False}

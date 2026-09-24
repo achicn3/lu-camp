@@ -26,6 +26,11 @@ function range(min: string | null | undefined, max: string | null | undefined): 
   return lo === hi ? formatNtd(lo) : `${formatNtd(lo)}–${formatNtd(hi)}`;
 }
 
+/** 「5–6 折」「6.5 折」——兩端相同就只講一次。 */
+function discountRange(low: string, high: string): string {
+  return low === high ? `${low} 折` : `${low}–${high} 折`;
+}
+
 function combinedRange(stats: GradeStat[], low: "cost_min" | "listed_min", high: "cost_max" | "listed_max"): string | null {
   const mins = stats.flatMap((stat) => {
     const value = stat[low] == null ? null : parseNtd(stat[low]);
@@ -84,6 +89,7 @@ export function PriceHint({
   // 生成型別把有預設值的欄位標成 optional，先收斂成 null 再用，TS 才收斂得掉。
   const latest = hint.latest ?? null;
   const typical = hint.typical ?? null;
+  const discounts = hint.discounts ?? null;
   const costExtremes = combinedRange(hint.grades, "cost_min", "cost_max");
   const listedExtremes = combinedRange(hint.grades, "listed_min", "listed_max");
 
@@ -119,6 +125,13 @@ export function PriceHint({
           </p>
         </>
       )}
+      {discounts === null ? null : (
+        <p className="price-hint-discount">
+          {/* 歷史折數（2026-09-24 店主要求）：收購時點選的折數，沒點過才用上架售價 ÷ 參考價；都沒有的件不算。 */}
+          {discounts.typical ? "一般折數" : "歷史折數"}：{discountRange(discounts.low, discounts.high)}
+          <span className="price-hint-sub-inline">（有折數紀錄的 {discounts.count} 件）</span>
+        </p>
+      )}
       <p className="price-hint-sub">
         {hint.used_all_time ? "全部歷史" : `近 ${hint.window_months} 個月`}・本店買斷商品・金額為新台幣。
         上架售價含稅，依商品目前記錄，非成交價；僅供估價參考。
@@ -131,6 +144,7 @@ export function PriceHint({
           {GRADE_LABEL[latest.grade] ?? latest.grade}）：
           {range(latest.cost, latest.cost) === null ? "未填收購價" : `收 ${range(latest.cost, latest.cost)}`}
           、上架 {range(latest.listed_price, latest.listed_price) ?? "未填上架價"}
+          {latest.discount != null ? `（${latest.discount} 折）` : ""}
         </p>
       )}
 

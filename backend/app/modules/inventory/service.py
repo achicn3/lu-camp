@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 from uuid import uuid4
 
@@ -423,6 +423,23 @@ class InventoryService:
     # 「一般行情」取中間一半；少於這個件數時中間一半沒有意義，前端改看逐筆。
     PRICE_HINT_TYPICAL_MIN_COUNT = 4
 
+    @staticmethod
+    def _discount_text(value: Decimal | None) -> str | None:
+        """折數顯示：一位小數、HALF_UP、去掉多餘的 .0（"6.5"、"6"）。"""
+        if value is None:
+            return None
+        text = format(Decimal(value).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP), "f")
+        return text.removesuffix(".0")
+
+    @classmethod
+    def _item_discount(cls, item: SerializedItem) -> str | None:
+        """一件的折數：收購時點選的優先，沒點過才用上架售價 ÷ 參考價 × 10；都沒有就 None。"""
+        if item.resale_discount_pct is not None:
+            return cls._discount_text(Decimal(item.resale_discount_pct) / 10)
+        if item.retail_price is None or item.retail_price <= 0:
+            return None
+        return cls._discount_text(Decimal(item.listed_price) * 10 / Decimal(item.retail_price))
+
     async def _price_hint_since(
         self, store_id: int, brand_id: int, product_model_id: int
     ) -> tuple[datetime | None, bool]:
@@ -457,6 +474,19 @@ class InventoryService:
                 "listed_high": t.listed_high,
             }
 
+        d = await self._repo.price_hint_discounts(store_id, brand_id, product_model_id, since)
+        typical_discount = d.count >= self.PRICE_HINT_TYPICAL_MIN_COUNT
+        discounts = (
+            None
+            if d.count == 0
+            else {
+                "count": d.count,
+                "low": self._discount_text(d.low if typical_discount else d.min),
+                "high": self._discount_text(d.high if typical_discount else d.max),
+                "typical": typical_discount,
+            }
+        )
+
         order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
         grades = sorted(rows, key=lambda r: order.get(r.grade, len(order)))
         latest = await self._repo.latest_priced_item(store_id, brand_id, product_model_id, since)
@@ -466,6 +496,7 @@ class InventoryService:
             "used_all_time": used_all_time,
             "total_count": total_count,
             "typical": typical,
+            "discounts": discounts,
             "grades": [
                 {
                     "grade": r.grade,
@@ -484,6 +515,7 @@ class InventoryService:
                 "grade": latest.grade,
                 "cost": latest.acquisition_cost,
                 "listed_price": latest.listed_price,
+                "discount": self._item_discount(latest),
             },
         }
 
@@ -513,6 +545,7 @@ class InventoryService:
                     "cost": item.acquisition_cost,
                     "listed_price": item.listed_price,
                     "status": item.status,
+                    "discount": self._item_discount(item),
                 }
                 for item in items
             ],

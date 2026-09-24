@@ -5562,6 +5562,35 @@
         "title": "DiscountClerkRow",
         "type": "object"
       },
+      "DiscountRange": {
+        "description": "歷史折數（收購點選的折數，或上架售價 ÷ 參考價）：夠 4 件時取中間一半，否則最低～最高。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "high": {
+            "title": "High",
+            "type": "string"
+          },
+          "low": {
+            "title": "Low",
+            "type": "string"
+          },
+          "typical": {
+            "title": "Typical",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "count",
+          "low",
+          "high",
+          "typical"
+        ],
+        "title": "DiscountRange",
+        "type": "object"
+      },
       "DiscountReasonRow": {
         "description": "一個折扣原因在期間內的使用情形。",
         "properties": {
@@ -8111,6 +8140,17 @@
             ],
             "title": "Cost"
           },
+          "discount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount"
+          },
           "grade": {
             "$ref": "#/components/schemas/Grade"
           },
@@ -9483,6 +9523,16 @@
       "PriceHintRead": {
         "description": "收購定價提示：同品牌＋型號的歷史行情，依成色分列。\n\n比對鍵只用品牌＋型號（兩者都是選單、存 id，比對可靠）；成色不過濾而是分組，\n店員才能一眼比較各成色的價差。分類不納入比對——型號已經決定東西是什麼，\n再用分類過濾只會讓建檔不一致的歷史整批消失。僅計買斷，寄售不列入。",
         "properties": {
+          "discounts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiscountRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "grades": {
             "items": {
               "$ref": "#/components/schemas/GradePriceStat"
@@ -9550,6 +9600,17 @@
               }
             ],
             "title": "Cost"
+          },
+          "discount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount"
           },
           "grade": {
             "$ref": "#/components/schemas/Grade"

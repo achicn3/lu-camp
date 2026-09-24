@@ -44,3 +44,14 @@
 .price-hint-records td {
   white-space: nowrap;
 }
+
+/* 歷史折數（上架售價 ÷ 參考價）：跟一般行情同一層級，字級與區間一致。 */
+.price-hint-discount {
+  margin: var(--sp-1, 4px) 0 0;
+  font-weight: 600;
+}
+.price-hint-sub-inline {
+  font-weight: 400;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--ink-soft);
+}

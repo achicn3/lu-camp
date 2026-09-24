@@ -5459,6 +5459,20 @@ export interface components {
             discount_total: string;
         };
         /**
+         * DiscountRange
+         * @description 歷史折數（收購點選的折數，或上架售價 ÷ 參考價）：夠 4 件時取中間一半，否則最低～最高。
+         */
+        DiscountRange: {
+            /** Count */
+            count: number;
+            /** High */
+            high: string;
+            /** Low */
+            low: string;
+            /** Typical */
+            typical: boolean;
+        };
+        /**
          * DiscountReasonRow
          * @description 一個折扣原因在期間內的使用情形。
          */
@@ -6446,6 +6460,8 @@ export interface components {
             acquired_at: string;
             /** Cost */
             cost?: string | null;
+            /** Discount */
+            discount?: string | null;
             grade: components["schemas"]["Grade"];
             /** Listed Price */
             listed_price: string;
@@ -7011,6 +7027,7 @@ export interface components {
          *     再用分類過濾只會讓建檔不一致的歷史整批消失。僅計買斷，寄售不列入。
          */
         PriceHintRead: {
+            discounts?: components["schemas"]["DiscountRange"] | null;
             /** Grades */
             grades: components["schemas"]["GradePriceStat"][];
             latest?: components["schemas"]["LatestAcquisitionRead"] | null;
@@ -7034,6 +7051,8 @@ export interface components {
             acquired_at: string;
             /** Cost */
             cost?: string | null;
+            /** Discount */
+            discount?: string | null;
             grade: components["schemas"]["Grade"];
             /** Listed Price */
             listed_price: string;

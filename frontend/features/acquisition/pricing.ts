@@ -11,6 +11,9 @@ const BASIS_POINTS_PER_UNIT = 10_000;
 const PERCENT_POINTS_PER_UNIT = 100;
 const ROUND_HALF_UP_FACTOR = BigInt(2);
 
+/** 六折以上的二手價常是新品或近新品：收購頁紅字提醒店員確認成色（店主 2026-09-24）。 */
+export const NEAR_NEW_DISCOUNT_PCT = 60;
+
 /** 折數用十分位整數表示：6.5 折 → 65%，避免價格乘法使用浮點。 */
 export function discountPercent(discount: string): number | null {
   if (!/^(?:[0-9](?:\.[0-9])?|10(?:\.0)?)$/.test(discount)) return null;

@@ -22,6 +22,7 @@ import {
   creditPremiumPreview,
   acquisitionFromListedPrice,
   discountedPrice,
+  NEAR_NEW_DISCOUNT_PCT,
   discountPercent,
   gradeFromDiscount,
   marginPct,
@@ -717,6 +718,12 @@ function ItemRowCard({
               onChange={(e) => applyDiscount(row.retailPrice, e.target.value)} />
             {row.discount && gradeFromDiscount(row.discount) === null && <span className="form-error">請輸入 0.1–10 折，最多一位小數。</span>}
           </label>}
+          {/* 店主 2026-09-24：六折以上的二手價常是新品或近新品，提醒店員回頭確認成色。 */}
+          {(discountPercent(row.discount) ?? 0) >= NEAR_NEW_DISCOUNT_PCT && (
+            <p className="form-error acq-near-new" role="alert">
+              {row.discount} 折偏高，可能是新品：請確認商品狀況並修改成色。
+            </p>
+          )}
           <p className="hint">也可不填參考價與折數，直接輸入上架售價，自動計算收購價；成色請自行選擇。折後價包含稅與手續費；自動售價進位至十元。{targetMargin !== null ? `目標毛利率：${targetMargin}%（可於設定維護）` : "正在讀取毛利設定"}。價格及成色皆可手動調整。</p>
         </div>
       )}

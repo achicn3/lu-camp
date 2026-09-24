@@ -7,7 +7,8 @@
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, and_, case, delete, func, or_, select, update
+from sqlalchemy import CursorResult, Numeric, and_, case, delete, func, or_, select, update
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1127,6 +1128,34 @@ class InventoryRepository:
             func.percentile_disc(0.25).within_group(listed).label("listed_low"),
             func.percentile_disc(0.75).within_group(listed).label("listed_high"),
         ).where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+        return (await self._session.execute(stmt)).one()
+
+    async def price_hint_discounts(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> Any:
+        """歷史折數的件數、第 25／75 百分位與最低／最高。
+
+        折數優先用收購時點選的（resale_discount_pct，庫存頁也能改）；沒點過的才用
+        上架售價 ÷ 參考價 × 10。兩者都沒有的件不算。percentile_disc 取實際出現過的值，不內插。
+        """
+        discount = func.coalesce(
+            sql_cast(SerializedItem.resale_discount_pct, Numeric) / 10,
+            SerializedItem.listed_price * 10 / func.nullif(SerializedItem.retail_price, 0),
+        )
+        stmt = select(
+            func.count().label("count"),
+            func.percentile_disc(0.25).within_group(discount).label("low"),
+            func.percentile_disc(0.75).within_group(discount).label("high"),
+            func.min(discount).label("min"),
+            func.max(discount).label("max"),
+        ).where(
+            *self._price_hint_scope(store_id, brand_id, product_model_id, since),
+            discount.is_not(None),
+        )
         return (await self._session.execute(stmt)).one()
 
     async def price_hint_records(
