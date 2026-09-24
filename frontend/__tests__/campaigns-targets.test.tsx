@@ -53,19 +53,46 @@ function json(data: unknown, status = 200): Response {
 }
 
 let posted: Record<string, unknown> | null = null;
+let requested: string[] = [];
+let releaseCode: () => void = () => {};
 
-function stub(list: unknown[] = []) {
+const MODELS: Record<number, { id: number; brand_id: number; name: string }[]> = {
+  5: [
+    { id: 8, brand_id: 5, name: "Amenity Dome" },
+    { id: 81, brand_id: 5, name: "Land Lock" },
+  ],
+  6: [{ id: 90, brand_id: 6, name: "Lumiere" }],
+};
+
+function stub(list: unknown[] = [], { holdBarcode = false }: { holdBarcode?: boolean } = {}) {
   posted = null;
+  requested = [];
+  const gate = new Promise<void>((resolve) => {
+    releaseCode = resolve;
+  });
+  if (!holdBarcode) releaseCode();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const req = input instanceof Request ? input : undefined;
       const url = req?.url ?? String(input);
-      if (url.includes("/api/v1/brands")) return json([{ id: 5, store_id: 1, name: "Snow Peak" }]);
+      requested.push(url);
+      if (url.includes("/api/v1/brands")) {
+        const q = new URL(url).searchParams.get("q") ?? "";
+        const brands = [
+          { id: 5, store_id: 1, name: "Snow Peak" },
+          { id: 6, store_id: 1, name: "Coleman" },
+        ];
+        return json(brands.filter((b) => b.name.toLowerCase().includes(q.toLowerCase())));
+      }
       if (url.includes("/api/v1/product-models")) {
-        return json([{ id: 8, store_id: 1, brand_id: 5, name: "Amenity Dome" }]);
+        const params = new URL(url).searchParams;
+        const q = params.get("q") ?? "";
+        const models = MODELS[Number(params.get("brand_id"))] ?? [];
+        return json(models.filter((m) => m.name.toLowerCase().includes(q.toLowerCase())));
       }
       if (url.includes("/serialized-items/by-code/ITM-9")) {
+        await gate;
         return json({ id: 9, item_code: "ITM-9", name: "展示帳篷", listed_price: "8000" });
       }
       if (url.includes("/campaigns") && req?.method === "POST") {
@@ -169,5 +196,77 @@ describe("活動範圍與疊加", () => {
     renderPage();
     await screen.findByText("尚無活動");
     expect(screen.getByText(/不可疊加的活動不會跟其他活動一起用/)).toBeTruthy();
+  });
+
+  it("在搜尋框按 Enter 不會把整張活動送出（Codex 審查）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await fillBasics(user);
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.type(within(scope).getByLabelText("搜尋品牌"), "Snow{Enter}");
+    await within(scope).findByRole("button", { name: "加入 Snow Peak" });
+    expect(posted).toBeNull();
+  });
+
+  it("同一個活動可以加多個型號：同品牌連續加、換品牌再加（型號也能搜尋）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await fillBasics(user);
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "PRODUCT_MODEL");
+    await user.type(within(scope).getByLabelText("搜尋品牌"), "Snow");
+    await user.click(await within(scope).findByRole("button", { name: "選 Snow Peak" }));
+    await user.click(await within(scope).findByRole("button", { name: "加入 Snow Peak Amenity Dome" }));
+    // 留在同一個品牌，已加的不再列出，可以接著加
+    expect(within(scope).queryByRole("button", { name: "加入 Snow Peak Amenity Dome" })).toBeNull();
+    await user.type(within(scope).getByLabelText("搜尋型號"), "Land");
+    await user.click(await within(scope).findByRole("button", { name: "加入 Snow Peak Land Lock" }));
+    expect(requested.some((u) => u.includes("product-models") && u.includes("q=Land"))).toBe(true);
+
+    await user.click(within(scope).getByRole("button", { name: "換品牌" }));
+    await user.type(within(scope).getByLabelText("搜尋品牌"), "Cole");
+    await user.click(await within(scope).findByRole("button", { name: "選 Coleman" }));
+    await user.click(await within(scope).findByRole("button", { name: "加入 Coleman Lumiere" }));
+
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      targets: [
+        { mode: "INCLUDE", target_type: "PRODUCT_MODEL", target_id: 8 },
+        { mode: "INCLUDE", target_type: "PRODUCT_MODEL", target_id: 81 },
+        { mode: "INCLUDE", target_type: "PRODUCT_MODEL", target_id: 90 },
+      ],
+    });
+  });
+
+  it("找不到時講清楚", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.type(within(scope).getByLabelText("搜尋品牌"), "不存在的牌子");
+    expect(await within(scope).findByText("查無符合的品牌")).toBeTruthy();
+  });
+
+  it("條碼查詢還沒回來時加了別的範圍，兩個都要留著（Codex 審查）", async () => {
+    stub([], { holdBarcode: true });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(scope).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(scope).getByRole("button", { name: "加入這件" }));
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "BRAND");
+    await user.type(within(scope).getByLabelText("搜尋品牌"), "Snow");
+    await user.click(await within(scope).findByRole("button", { name: "加入 Snow Peak" }));
+    releaseCode();
+    await within(scope).findByText("展示帳篷（ITM-9）");
+    expect(within(scope).getByText("Snow Peak")).toBeTruthy();
   });
 });

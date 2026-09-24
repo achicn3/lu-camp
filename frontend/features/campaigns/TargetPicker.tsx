@@ -2,7 +2,7 @@
 // 門市活動的「指定商品」範圍（docs/40 P1b）：包含或排除品牌、型號、分類、一般商品、販售籃、單件商品。
 // 沒有任何「只套用在」＝上面勾的品項種類全部適用；「不套用」永遠優先。實際比對在後端定價。
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type Dispatch, type SetStateAction, useState } from "react";
 
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -35,24 +35,38 @@ const SEARCH_LABEL: Record<TargetType, string> = {
   SERIALIZED_ITEM: "商品條碼",
 };
 
+const NOUN: Record<TargetType, string> = {
+  BRAND: "品牌",
+  PRODUCT_MODEL: "品牌",
+  CATEGORY: "分類",
+  CATALOG_PRODUCT: "一般商品",
+  BULK_BASKET: "販售籃",
+  SERIALIZED_ITEM: "商品",
+};
+
+// 型號清單一次最多列幾筆；更多的用「搜尋型號」找（Codex 審查：不能只給前 50 個）。
+const MODEL_LIMIT = 50;
+
 interface Option {
   id: number;
   label: string;
 }
 
-/** 依類型搜尋可加入的項目（品牌、分類、一般商品、販售籃；型號走兩段式）。 */
+/** 依類型搜尋可加入的項目；型號走兩段式（先選品牌，再列／搜該品牌的型號）。 */
 function useOptions(type: TargetType, q: string, brand: Option | null) {
+  const pickingModel = type === "PRODUCT_MODEL" && brand !== null;
   return useQuery({
     queryKey: ["campaign-target-options", type, q, brand?.id ?? null],
-    enabled: type !== "SERIALIZED_ITEM" && (q.trim() !== "" || brand !== null),
+    enabled: type !== "SERIALIZED_ITEM" && (q.trim() !== "" || pickingModel),
     queryFn: async (): Promise<Option[]> => {
-      const query = { q: q.trim() || undefined, limit: 20 };
-      if (type === "PRODUCT_MODEL" && brand !== null) {
+      const term = q.trim() || undefined;
+      if (pickingModel) {
         const { data } = await api.GET("/api/v1/product-models", {
-          params: { query: { brand_id: brand.id, limit: 50 } },
+          params: { query: { brand_id: brand.id, q: term, limit: MODEL_LIMIT } },
         });
         return (data ?? []).map((m) => ({ id: m.id, label: `${brand.label} ${m.name}` }));
       }
+      const query = { q: term, limit: 20 };
       if (type === "BRAND" || type === "PRODUCT_MODEL") {
         const { data } = await api.GET("/api/v1/brands", { params: { query } });
         return (data ?? []).map((b) => ({ id: b.id, label: b.name }));
@@ -65,9 +79,7 @@ function useOptions(type: TargetType, q: string, brand: Option | null) {
         const { data } = await api.GET("/api/v1/catalog-products", { params: { query } });
         return (data ?? []).map((p) => ({ id: p.id, label: p.name }));
       }
-      const { data } = await api.GET("/api/v1/bulk-baskets", {
-        params: { query: { q: q.trim() || undefined } },
-      });
+      const { data } = await api.GET("/api/v1/bulk-baskets", { params: { query: { q: term } } });
       return (data ?? []).map((b) => ({ id: b.id, label: b.name }));
     },
   });
@@ -78,7 +90,7 @@ export function TargetPicker({
   onChange,
 }: {
   targets: PickedTarget[];
-  onChange: (targets: PickedTarget[]) => void;
+  onChange: Dispatch<SetStateAction<PickedTarget[]>>;
 }) {
   const [mode, setMode] = useState<TargetMode>("INCLUDE");
   const [type, setType] = useState<TargetType>("BRAND");
@@ -88,20 +100,28 @@ export function TargetPicker({
   const [error, setError] = useState<string | null>(null);
   const options = useOptions(type, q, type === "PRODUCT_MODEL" ? brand : null);
   const pickingModel = type === "PRODUCT_MODEL" && brand !== null;
+  const choosingBrandForModel = type === "PRODUCT_MODEL" && brand === null;
 
-  function add(option: Option) {
+  /** 一律以「最新的清單」合併：非同步的條碼查詢回來時，不會蓋掉期間加入／移除的項目。 */
+  function add(entry: PickedTarget) {
     setError(null);
-    const exists = targets.some(
-      (t) => t.mode === mode && t.target_type === type && t.target_id === option.id,
+    onChange((prev) =>
+      prev.some(
+        (t) =>
+          t.mode === entry.mode &&
+          t.target_type === entry.target_type &&
+          t.target_id === entry.target_id,
+      )
+        ? prev
+        : [...prev, entry],
     );
-    if (!exists) {
-      onChange([...targets, { mode, target_type: type, target_id: option.id, label: option.label }]);
-    }
   }
 
   async function addByCode() {
     const code = q.trim();
     if (!code) return;
+    // 查詢期間店員可能切換包含／排除：以按下「加入」當下的選擇為準。
+    const pickedMode = mode;
     const { data } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
       params: { path: { item_code: code } },
     });
@@ -109,8 +129,13 @@ export function TargetPicker({
       setError(`找不到條碼 ${code} 的商品`);
       return;
     }
-    add({ id: data.id, label: `${data.name}（${data.item_code}）` });
-    setQ("");
+    add({
+      mode: pickedMode,
+      target_type: "SERIALIZED_ITEM",
+      target_id: data.id,
+      label: `${data.name}（${data.item_code}）`,
+    });
+    setQ((current) => (current.trim() === code ? "" : current));
   }
 
   function reset(nextType: TargetType) {
@@ -120,10 +145,21 @@ export function TargetPicker({
     setError(null);
   }
 
+  function chooseBrand(option: Option) {
+    setBrand(option);
+    setQ("");
+  }
+
   // 已經加在目前這一邊（包含／排除）的，不再列成候選。
   const candidates = (options.data ?? []).filter(
     (o) => !targets.some((t) => t.mode === mode && t.target_type === type && t.target_id === o.id),
   );
+  const searchLabel = pickingModel ? "搜尋型號" : SEARCH_LABEL[type];
+  const noMatch =
+    type !== "SERIALIZED_ITEM" &&
+    q.trim() !== "" &&
+    options.isSuccess &&
+    options.data.length === 0;
   const includes = targets.filter((t) => t.mode === "INCLUDE");
   const excludes = targets.filter((t) => t.mode === "EXCLUDE");
 
@@ -131,7 +167,8 @@ export function TargetPicker({
     <fieldset className="campaign-scope-fieldset" aria-label="指定商品（選填）">
       <legend>指定商品（選填）</legend>
       <p className="hint">
-        不指定＝上面勾的品項全部適用。可細到品牌、型號或單件；「不套用」優先於「只套用在」。
+        不指定＝上面勾的品項全部適用。可細到品牌、型號或單件，每種都可以加很多個；
+        「不套用」優先於「只套用在」。
       </p>
 
       <div className="campaign-target-modes">
@@ -171,29 +208,28 @@ export function TargetPicker({
           </select>
         </label>
 
-        {pickingModel ? (
+        {pickingModel && (
           <p className="campaign-target-brand">
             品牌：{brand.label}{" "}
-            <button type="button" className="btn-ghost" onClick={() => setBrand(null)}>
+            <button type="button" className="btn-ghost" onClick={() => reset("PRODUCT_MODEL")}>
               換品牌
             </button>
           </p>
-        ) : (
-          <label className="field">
-            <span className="field-label">{SEARCH_LABEL[type]}</span>
-            <input
-              aria-label={SEARCH_LABEL[type]}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && type === "SERIALIZED_ITEM") {
-                  e.preventDefault();
-                  void addByCode();
-                }
-              }}
-            />
-          </label>
         )}
+        <label className="field">
+          <span className="field-label">{searchLabel}</span>
+          <input
+            aria-label={searchLabel}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              // 這個選擇器在建立活動的表單裡：Enter 不可以把整張活動送出（範圍還沒選完）。
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (type === "SERIALIZED_ITEM") void addByCode();
+            }}
+          />
+        </label>
         {type === "SERIALIZED_ITEM" && (
           <button type="button" className="btn-secondary" onClick={() => void addByCode()}>
             加入這件
@@ -201,22 +237,26 @@ export function TargetPicker({
         )}
       </div>
 
+      {pickingModel && (
+        <p className="hint">可以接著加同品牌的其他型號；要加別的品牌的型號，按「換品牌」。</p>
+      )}
       {error !== null && (
         <p role="alert" className="form-error">
           {error}
         </p>
       )}
+      {noMatch && <p className="hint">查無符合的{pickingModel ? "型號" : NOUN[type]}</p>}
 
-      {type !== "SERIALIZED_ITEM" && (options.data?.length ?? 0) > 0 && (
+      {type !== "SERIALIZED_ITEM" && (
         <div className="campaign-target-options">
-          {(type === "PRODUCT_MODEL" && !pickingModel ? options.data ?? [] : candidates).map((o) =>
-            type === "PRODUCT_MODEL" && !pickingModel ? (
+          {(choosingBrandForModel ? options.data ?? [] : candidates).map((o) =>
+            choosingBrandForModel ? (
               <button
                 key={o.id}
                 type="button"
                 className="chip"
                 aria-label={`選 ${o.label}`}
-                onClick={() => setBrand(o)}
+                onClick={() => chooseBrand(o)}
               >
                 {o.label} ›
               </button>
@@ -226,7 +266,9 @@ export function TargetPicker({
                 type="button"
                 className="chip"
                 aria-label={`加入 ${o.label}`}
-                onClick={() => add(o)}
+                onClick={() =>
+                  add({ mode, target_type: type, target_id: o.id, label: o.label })
+                }
               >
                 ＋ {o.label}
               </button>
@@ -235,8 +277,8 @@ export function TargetPicker({
         </div>
       )}
 
-      <TargetChips title="只套用在" items={includes} targets={targets} onChange={onChange} />
-      <TargetChips title="不套用" items={excludes} targets={targets} onChange={onChange} />
+      <TargetChips title="只套用在" items={includes} onChange={onChange} />
+      <TargetChips title="不套用" items={excludes} onChange={onChange} />
     </fieldset>
   );
 }
@@ -244,13 +286,11 @@ export function TargetPicker({
 function TargetChips({
   title,
   items,
-  targets,
   onChange,
 }: {
   title: string;
   items: PickedTarget[];
-  targets: PickedTarget[];
-  onChange: (targets: PickedTarget[]) => void;
+  onChange: Dispatch<SetStateAction<PickedTarget[]>>;
 }) {
   if (items.length === 0) return null;
   return (
@@ -263,7 +303,18 @@ function TargetChips({
             type="button"
             className="chip-remove"
             aria-label={`移除 ${t.label}`}
-            onClick={() => onChange(targets.filter((x) => x !== t))}
+            onClick={() =>
+              onChange((prev) =>
+                prev.filter(
+                  (x) =>
+                    !(
+                      x.mode === t.mode &&
+                      x.target_type === t.target_type &&
+                      x.target_id === t.target_id
+                    ),
+                ),
+              )
+            }
           >
             ×
           </button>
