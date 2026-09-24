@@ -23,6 +23,8 @@ _FINGERPRINT_KWARGS = (
     "adjustments",
     "service_mode",
     "table_no",
+    # 「這筆不套用」的門市活動（docs/40 P1c）。
+    "disabled_campaigns",
 )
 
 
@@ -63,7 +65,11 @@ def test_fingerprint_signature_matches_the_guarded_field_list() -> None:
     """`_cart_fingerprint` 新增參數卻沒更新本檔清單 → 守衛會失效，故一併鎖住。"""
     source = _SERVICE.read_text()
     signature = source.split("def _cart_fingerprint(", 1)[1].split(") -> str:", 1)[0]
-    params = {line.split(":")[0].strip() for line in signature.splitlines() if ":" in line}
+    params = {
+        line.split(":")[0].strip()
+        for line in signature.splitlines()
+        if ":" in line and line.strip() != "*,"
+    }
     assert params == set(_FINGERPRINT_KWARGS), (
         "_cart_fingerprint 的參數與守衛清單不一致；新增指紋欄位時，"
         "請同步更新 _FINGERPRINT_KWARGS 並補齊所有呼叫點"

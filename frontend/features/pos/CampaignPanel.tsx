@@ -30,6 +30,8 @@ export function CampaignPanel({
   if (applied.length === 0 && disabled.length === 0) return null;
 
   function confirm(campaignId: number) {
+    // 購物車鎖住（已送簽署、付款處理中）時不能再改：改了 POS 金額就和客人簽的內容對不上。
+    if (locked) return;
     onDisable(campaignId, reason.trim() || null);
     setAsking(null);
     setReason("");
@@ -58,7 +60,8 @@ export function CampaignPanel({
                 這筆不套用
               </button>
             </div>
-            {asking === c.campaign_id && (
+            {/* 鎖住時收起確認框（Codex 審查：打開後才鎖住，確認鈕與 Enter 仍會生效）。 */}
+            {asking === c.campaign_id && !locked && (
               <div className="pos-campaigns-ask">
                 <label className="field">
                   <span className="field-label">原因（可不填）</span>
