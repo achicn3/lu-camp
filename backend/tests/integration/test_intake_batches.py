@@ -365,3 +365,66 @@ async def test_required_fields_cannot_be_cleared(
         f"{PATH}/{batch['id']}/lines/{line['id']}", json={field: None}, headers=auth
     )
     assert resp.status_code == 422, resp.text
+
+
+async def test_ready_and_cancel_are_idempotent(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """連按兩次不報錯（現場手滑很常見）。"""
+    _store_id, contact_id, auth = await _store(db_session)
+    batch = await _ready_batch(client, contact_id, auth)
+    again = await client.post(f"{PATH}/{batch['id']}/ready", headers=auth)
+    assert again.status_code == 200 and again.json()["status"] == "AWAITING_CONFIRM"
+    for _ in range(2):
+        resp = await client.post(
+            f"{PATH}/{batch['id']}/cancel", json={"reason": "放棄"}, headers=auth
+        )
+        assert resp.status_code == 200 and resp.json()["status"] == "CANCELLED"
+    # 取消後不能再送去叫號
+    assert (await client.post(f"{PATH}/{batch['id']}/ready", headers=auth)).status_code == 409
+
+
+async def test_disposition_needs_the_batch_to_be_ready(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, contact_id, auth = await _store(db_session)
+    batch = await _batch(client, contact_id, auth)
+    line = (await client.post(f"{PATH}/{batch['id']}/lines", json=_line(), headers=auth)).json()
+    resp = await client.patch(
+        f"{PATH}/{batch['id']}/lines/{line['id']}/disposition",
+        json={"disposition": "ACCEPTED"},
+        headers=auth,
+    )
+    assert resp.status_code == 409, resp.text
+
+
+async def test_missing_line_and_foreign_category(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, contact_id, auth = await _store(db_session)
+    batch = await _batch(client, contact_id, auth)
+    missing = await client.patch(
+        f"{PATH}/{batch['id']}/lines/999999", json={"deal_cost": "1"}, headers=auth
+    )
+    assert missing.status_code == 404, missing.text
+    foreign = await client.post(
+        f"{PATH}/{batch['id']}/lines", json=_line(category_id=999_999), headers=auth
+    )
+    assert foreign.status_code == 422, foreign.text
+
+
+async def test_qty_cannot_drop_below_accepted(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, contact_id, auth = await _store(db_session)
+    batch = await _ready_batch(client, contact_id, auth)
+    line_id = batch["lines"][0]["id"]
+    await client.patch(
+        f"{PATH}/{batch['id']}/lines/{line_id}/disposition",
+        json={"disposition": "ACCEPTED", "accepted_qty": 3},
+        headers=auth,
+    )
+    resp = await client.patch(
+        f"{PATH}/{batch['id']}/lines/{line_id}", json={"qty": 2}, headers=auth
+    )
+    assert resp.status_code == 422, resp.text
