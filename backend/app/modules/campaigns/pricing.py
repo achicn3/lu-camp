@@ -30,6 +30,7 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
+from itertools import islice
 
 from app.core.money import discounted_price
 from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
@@ -488,7 +489,7 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
     group_no = 0
     for campaign in bundles:
         assert campaign.bundle_price is not None
-        # 每格的候選（由貴到便宜，依第 2 步後的價格）；已被佔用的件在取用時略過。
+        # 每格的候選（由貴到便宜，依第 2 步後的價格）；已被佔用的件在配對時略過。
         candidates = [
             sorted(
                 (u for u in units if not u.claimed and _slot_matches(campaign, slot, u.item)),
@@ -496,15 +497,13 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
             )
             for slot in campaign.bundle_slots
         ]
-        cursors = [0] * len(candidates)
+        starts = [0] * len(candidates)
         while True:
-            picked = _pick_bundle(campaign, candidates, cursors)
+            picked = _pick_bundle(campaign, candidates, starts)
             if picked is None:
                 break
             if sum((u.price for u in picked), Decimal(0)) <= campaign.bundle_price:
-                for u in picked:
-                    u.claimed = False  # 不划算：放回去，這個活動不再成組
-                break
+                break  # 不划算：這個活動不再成組
             list_prices = [u.list_price for u in picked]
             shares = _allocate(
                 sum(list_prices, Decimal(0)) - campaign.bundle_price,
@@ -512,6 +511,7 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
                 [p - _MIN_UNIT_PRICE for p in list_prices],
             )
             for u, share in zip(picked, shares, strict=True):
+                u.claimed = True
                 u.price = u.list_price - share
                 u.allocations = [(campaign.id, share)] if share > 0 else []
                 u.bundle = (group_no, campaign.id)
@@ -519,22 +519,36 @@ def _apply_bundles(units: list[_Unit], bundles: Sequence[PromoCampaign]) -> None
 
 
 def _pick_bundle(
-    campaign: PromoCampaign, candidates: list[list[_Unit]], cursors: list[int]
+    campaign: PromoCampaign, candidates: list[list[_Unit]], starts: list[int]
 ) -> list[_Unit] | None:
-    """依格子順序各取所需件數（先標成已佔用，避免同一件填兩格）；湊不齊回 None 並放回。"""
-    picked: list[_Unit] = []
-    for index, slot in enumerate(campaign.bundle_slots):
-        taken = 0
-        while taken < slot.qty and cursors[index] < len(candidates[index]):
-            u = candidates[index][cursors[index]]
-            cursors[index] += 1
-            if u.claimed:
+    """為一組的每個位置配一件（二分圖配對＋擴增路徑）；湊不齊回 None。
+
+    格子的範圍可以重疊（第 1 格收 A 或 B、第 2 格只收 A）：先配候選最少的格子，
+    配不到時讓已配的位置改用別的件（擴增路徑），不會因為先把 A 塞進第 1 格就湊不出來
+    （Codex 審查）。每個位置都從最貴的候選試起，保留「挑最貴」的偏好。
+    """
+    for index, pool in enumerate(candidates):  # 前面已被別組佔走的件跳過（指標只往後走）
+        while starts[index] < len(pool) and pool[starts[index]].claimed:
+            starts[index] += 1
+    positions = [i for i, slot in enumerate(campaign.bundle_slots) for _ in range(slot.qty)]
+    positions.sort(key=lambda i: len(candidates[i]) - starts[i])
+    owner: dict[int, int] = {}  # id(件) → 位置
+    assigned: list[_Unit | None] = [None] * len(positions)
+
+    def assign(position: int, seen: set[int]) -> bool:
+        slot = positions[position]
+        for u in islice(candidates[slot], starts[slot], None):
+            if u.claimed or id(u) in seen:
                 continue
-            u.claimed = True
-            picked.append(u)
-            taken += 1
-        if taken < slot.qty:
-            for u in picked:
-                u.claimed = False
+            seen.add(id(u))
+            holder = owner.get(id(u))
+            if holder is None or assign(holder, seen):
+                owner[id(u)] = position
+                assigned[position] = u
+                return True
+        return False
+
+    for position in range(len(positions)):
+        if not assign(position, set()):
             return None
-    return picked
+    return [u for u in assigned if u is not None]

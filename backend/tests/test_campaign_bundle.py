@@ -179,3 +179,31 @@ def test_bundle_only_lines_are_not_offered_free_item_choice() -> None:
     """只有組合價在進行：這些行不該出現「改送這件」（那是買 N 送 M 的功能）。"""
     result = price_cart([line(6000, tent(1)), line(2000, chair(2))], [bundle(5, 7000, *TENT_CHAIR)])
     assert [r.buy_n_get_m_eligible for r in result] == [False, False]
+
+
+def test_overlapping_slots_find_a_valid_assignment() -> None:
+    """第 1 格收 A 或 B、第 2 格只收 A：A 要留給第 2 格，B 放第 1 格才湊得出（Codex 審查）。"""
+    a = PromoItem(kind=CampaignItemKind.OWNED_SERIALIZED, product_model_id=1, serialized_item_id=1)
+    b = PromoItem(kind=CampaignItemKind.OWNED_SERIALIZED, product_model_id=2, serialized_item_id=2)
+    offer = PromoCampaign(
+        id=5,
+        name="重疊格",
+        discount_pct=None,
+        stackable=False,
+        item_kinds=KINDS,
+        kind=CampaignKind.BUNDLE,
+        bundle_price=Decimal(150),
+        bundle_slots=(
+            BundleSlot(
+                qty=1,
+                includes=(
+                    (CampaignTargetType.PRODUCT_MODEL, 1),
+                    (CampaignTargetType.PRODUCT_MODEL, 2),
+                ),
+            ),
+            BundleSlot(qty=1, includes=((CampaignTargetType.PRODUCT_MODEL, 1),)),
+        ),
+    )
+    result = price_cart([line(200, a), line(100, b)], [offer])
+    assert sum(r.line_total for r in result) == Decimal(150)
+    assert all(r.bundle_groups for r in result)

@@ -24,14 +24,19 @@ def test_touching_bundled_units_requires_the_whole_group() -> None:
             bundles_to_return(requested, previous, QTY, [GROUP])
 
 
-def test_whole_group_is_returned() -> None:
-    assert bundles_to_return({TENT: 1, GAS: 2}, {}, QTY, [GROUP]) == [7]
+def test_whole_group_returns_every_remaining_unit_of_its_lines() -> None:
+    """退價按行平均：組內的行要整行退回（含組外的那罐），否則留下的那罐等於拿到折扣（Codex 審查）。"""
     assert bundles_to_return({TENT: 1, GAS: 3}, {}, QTY, [GROUP]) == [7]
+    with pytest.raises(ReturnLineInvalid, match="整組"):
+        bundles_to_return({TENT: 1, GAS: 2}, {}, QTY, [GROUP])
 
 
-def test_two_groups_sharing_a_line_need_their_combined_units() -> None:
+def test_unbundled_unit_returned_earlier_is_not_required_again() -> None:
+    assert bundles_to_return({TENT: 1, GAS: 2}, {GAS: 1}, QTY, [GROUP]) == [7]
+
+
+def test_groups_sharing_a_line_are_returned_together() -> None:
     other = BundleGroupMembers(group_id=8, members=((CHAIR, 1), (GAS, 1)))
-    qty = {TENT: 1, GAS: 3, CHAIR: 1}
     with pytest.raises(ReturnLineInvalid):
-        bundles_to_return({TENT: 1, CHAIR: 1, GAS: 2}, {}, qty, [GROUP, other])
-    assert bundles_to_return({TENT: 1, CHAIR: 1, GAS: 3}, {}, qty, [GROUP, other]) == [7, 8]
+        bundles_to_return({TENT: 1, GAS: 3}, {}, QTY, [GROUP, other])
+    assert bundles_to_return({TENT: 1, CHAIR: 1, GAS: 3}, {}, QTY, [GROUP, other]) == [7, 8]

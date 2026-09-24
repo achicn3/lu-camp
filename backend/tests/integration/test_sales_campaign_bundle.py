@@ -210,10 +210,13 @@ async def test_unbundled_units_of_a_line_can_be_returned_alone(
     sale = await SalesService(db_session).create_sale(
         ctx["store_id"], ctx["clerk_id"], lines=_lines(tent, ctx, 3)
     )
-    _tent_line, gas_line = await _line_ids(db_session, sale.id)
-    await _return(db_session, ctx, sale.id, [(gas_line, 1)], "bd-loose")
+    tent_line, gas_line = await _line_ids(db_session, sale.id)
+    loose = await _return(db_session, ctx, sale.id, [(gas_line, 1)], "bd-loose")
     with pytest.raises(ReturnLineInvalid, match="整組"):
         await _return(db_session, ctx, sale.id, [(gas_line, 1)], "bd-loose-2")
+    rest = await _return(db_session, ctx, sale.id, [(tent_line, 1), (gas_line, 2)], "bd-rest")
+    # 全部退完：兩次退款加起來剛好是整筆實付，不多不少
+    assert loose.refund_amount + rest.refund_amount == sale.total
 
 
 async def test_campaign_report_counts_bundles_sold_net_of_returns(
