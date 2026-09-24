@@ -2904,6 +2904,17 @@
             ],
             "title": "Menu Item Id"
           },
+          "promo_free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Free"
+          },
           "qty": {
             "default": 1,
             "minimum": 1.0,
@@ -10904,6 +10915,17 @@
             ],
             "title": "Menu Item Id"
           },
+          "promo_free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Free"
+          },
           "qty": {
             "default": 1,
             "minimum": 1.0,
@@ -11118,6 +11140,11 @@
       "SaleQuoteLineRead": {
         "description": "試算單行輸出：折後實際成交＋折讓留痕。",
         "properties": {
+          "buy_n_get_m_units": {
+            "default": 0,
+            "title": "Buy N Get M Units",
+            "type": "integer"
+          },
           "campaigns": {
             "default": [],
             "items": {
@@ -13513,6 +13540,17 @@
               }
             ],
             "title": "Menu Item Id"
+          },
+          "promo_free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Free"
           },
           "qty": {
             "title": "Qty",

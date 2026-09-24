@@ -38,6 +38,8 @@ class SaleLineInput:
     line_kind: SaleLineKind = SaleLineKind.NORMAL
     gift_reason_id: int | None = None
     gift_note: str | None = None
+    # 買 N 送 M：店員指定「送這件」（docs/40 P3b、裁示 4）；成組時優先當送的那件。
+    promo_free: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,4 +103,3 @@ class CampaignOverrideInput:
 
     campaign_id: int
     reason: str | None = None
-

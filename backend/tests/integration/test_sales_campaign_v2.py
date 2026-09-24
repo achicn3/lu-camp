@@ -8,15 +8,17 @@
 """
 
 from collections.abc import AsyncGenerator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import count
 
 import httpx
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
@@ -618,3 +620,74 @@ async def test_buy_n_get_m_with_a_zero_share_line_still_checks_out(
 
     assert quote.total == sale.total == Decimal(1000)
     assert await _allocations(db_session, sale.id) == {items[0].id: [(campaign, Decimal(10))]}
+
+
+async def test_clerk_chosen_free_item_at_checkout_is_audited(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """店員指定送 600 那件（裁示 4）：報價與結帳同價、寫稽核（裁示 8：不需核准）。"""
+    campaign = await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600", "400")]
+    lines = [_line(items[0]), replace(_line(items[1]), promo_free=True), _line(items[2])]
+    service = SalesService(db_session)
+
+    quote = await service.quote_sale(ctx["store_id"], lines=lines)
+    sale = await service.create_sale(ctx["store_id"], ctx["clerk_id"], lines=lines)
+
+    assert quote.total == sale.total == Decimal(1400)
+    assert [ql.free_units for ql in quote.lines] == [0, 1, 0]
+    assert [ql.buy_n_get_m_units for ql in quote.lines] == [1, 1, 1]
+    audits = (
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "SALE_BNGM_FREE_ITEM_CHOSEN",
+                AuditLog.entity_id == str(sale.id),
+            )
+        )
+    ).all()
+    assert len(audits) == 1
+    assert audits[0].after == {"campaign_id": campaign, "line_index": 1}
+
+
+async def test_choice_that_does_not_take_effect_is_not_audited(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600")]
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"],
+        ctx["clerk_id"],
+        lines=[_line(items[0]), replace(_line(items[1]), promo_free=True)],
+    )
+    assert sale.total == Decimal(1600)
+    count = await db_session.scalar(
+        select(func.count())
+        .select_from(AuditLog)
+        .where(AuditLog.action == "SALE_BNGM_FREE_ITEM_CHOSEN", AuditLog.entity_id == str(sale.id))
+    )
+    assert count == 0
+
+
+async def test_quote_api_accepts_promo_free_and_reports_groups(
+    ctx: dict[str, int], db_session: AsyncSession, client: httpx.AsyncClient
+) -> None:
+    await _bngm(db_session, ctx, 2, 1)
+    items = [await _item(db_session, ctx["store_id"], p) for p in ("1000", "600", "400")]
+    token = encode_access_token(user_id=ctx["clerk_id"], role="CLERK", store_id=ctx["store_id"])
+
+    resp = await client.post(
+        "/api/v1/sales/quote",
+        json={
+            "lines": [
+                {"line_type": "SERIALIZED", "item_code": items[0].item_code},
+                {"line_type": "SERIALIZED", "item_code": items[1].item_code, "promo_free": True},
+                {"line_type": "SERIALIZED", "item_code": items[2].item_code},
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == "1400"
+    assert [ln["free_units"] for ln in body["lines"]] == [0, 1, 0]
+    assert [ln["buy_n_get_m_units"] for ln in body["lines"]] == [1, 1, 1]

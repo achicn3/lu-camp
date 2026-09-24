@@ -162,6 +162,8 @@ class CartLine:
     unit_price: Decimal
     """原含稅單價。"""
     qty: int
+    free_requested: bool = False
+    """店員指定「送這件」（裁示 4）：成組時優先當送的那件，取代組內預設送的最便宜那件。"""
 
 
 @dataclass(frozen=True)
@@ -175,6 +177,10 @@ class LinePrice:
     """本行的活動折讓由哪些活動貢獻：(campaign_id, 本行合計)，依套用順序。"""
     free_units: int = 0
     """本行有幾件是買 N 送 M 裡「送的那件」（顯示用；金額已分攤到整組）。"""
+    free_campaign_id: int | None = None
+    """送的那件屬於哪個買 N 送 M 活動（沒有送的件為 None）。"""
+    buy_n_get_m_units: int = 0
+    """本行有幾件成組參加了買 N 送 M（含送的件）。"""
 
     @property
     def list_total(self) -> Decimal:
@@ -202,9 +208,12 @@ class LinePrice:
         return max(self.allocations, key=lambda a: a[1])[0]
 
 
-@dataclass
+@dataclass(eq=False)
 class _Unit:
-    """展開成單件的狀態（買 N 送 M 以件為單位分組）。"""
+    """展開成單件的狀態（買 N 送 M 以件為單位分組）。
+
+    比對一律用身分（eq=False）：同一行的各件內容相同，用值比對會換錯件。
+    """
 
     line: int
     item: PromoItem
@@ -213,8 +222,9 @@ class _Unit:
     allocations: list[tuple[int, Decimal]]
     non_stackable: bool
     """第 2 步用的是不可疊加活動。"""
+    free_requested: bool = False
     claimed: bool = False
-    free: bool = False
+    free_campaign: int | None = None
 
 
 def _allocate(total: Decimal, weights: Sequence[Decimal], caps: Sequence[Decimal]) -> list[Decimal]:
@@ -268,13 +278,15 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
     eligible.sort(
         key=lambda u: -(u.list_price if use_list else u.price)
     )  # 穩定排序：同價依購物車序
-    grouped = eligible[: len(eligible) // size * size]
-    if not grouped:
+    count = len(eligible) // size * size
+    if count == 0:
         return
-    # (件, 折讓, 是否為送的那件)：每組最後 M 件（最便宜的）是送的。
+    # 每組前 N 件付錢、後 M 件（最便宜的）送；再依店員的指定調換送的那件。
+    groups = [eligible[start : start + size] for start in range(0, count, size)]
+    _apply_free_requests(groups, eligible[count:], campaign.buy_qty)
+    # (件, 折讓, 是否為送的那件)
     plans: list[tuple[_Unit, Decimal, bool]] = []
-    for start in range(0, len(grouped), size):
-        group = grouped[start : start + size]
+    for group in groups:
         shares = _group_prices(group, campaign, use_list_price=use_list)
         if shares is None:
             continue
@@ -296,7 +308,31 @@ def _apply_buy_n_get_m(units: list[_Unit], campaign: PromoCampaign) -> None:
         if share > 0:  # 分到 0 元不是折讓（sale_line_campaigns 也要求 > 0），但仍算在這組裡
             u.allocations.append((campaign.id, share))
         u.claimed = True
-        u.free = free
+        u.free_campaign = campaign.id if free else None
+
+
+def _apply_free_requests(groups: list[list[_Unit]], leftover: list[_Unit], buy_qty: int) -> None:
+    """店員指定送的件：在組內就跟該組預設送的那件對調；沒成組的就換掉最後一組送的那件。
+
+    送的位置有限（每組 M 件）：指定超過的依排序（貴的先）取前面的，其餘不生效。
+    """
+    for unit in [u for group in groups for u in group[:buy_qty] if u.free_requested] + [
+        u for u in leftover if u.free_requested
+    ]:
+        home = next((g for g in groups if unit in g[:buy_qty]), None)
+        for group in [home] if home is not None else reversed(groups):
+            slot = next(
+                (i for i in range(buy_qty, len(group)) if not group[i].free_requested), None
+            )
+            if slot is None:
+                continue
+            displaced = group[slot]
+            if home is not None:
+                group[group.index(unit)] = displaced
+            else:
+                leftover[leftover.index(unit)] = displaced
+            group[slot] = unit
+            break
 
 
 def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) -> list[LinePrice]:
@@ -337,6 +373,7 @@ def price_cart(lines: Sequence[CartLine], campaigns: Sequence[PromoCampaign]) ->
                 single.unit_price,
                 list(single.allocations),
                 non_stackable,
+                cart_line.free_requested,
             )
             for _ in range(cart_line.qty)
         )
@@ -367,5 +404,7 @@ def _line_price(cart_line: CartLine, mine: Sequence[_Unit]) -> LinePrice:
         cart_line.qty,
         sum((u.price for u in mine), Decimal(0)),
         tuple(totals.items()),
-        sum(1 for u in mine if u.free),
+        sum(1 for u in mine if u.free_campaign is not None),
+        next((u.free_campaign for u in mine if u.free_campaign is not None), None),
+        sum(1 for u in mine if u.claimed),
     )

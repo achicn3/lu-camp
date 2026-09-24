@@ -27,6 +27,8 @@ export interface CartLine {
   lineKind?: "NORMAL" | "GIFT";
   giftReasonId?: number;
   giftNote?: string;
+  /** 買 N 送 M：店員指定「送這件」（docs/40 P3b）。後端決定是否生效。 */
+  promoFree?: boolean;
   /**
    * 商品備註（掃碼時由庫存帶入，唯讀）。行內顯示，並在按下結帳時彙整成提醒對話框，
    * 避免「缺充電線」這種事到交貨才發現。與 giftNote（贈品原因備註）是不同東西。
@@ -146,7 +148,14 @@ export function toSaleLines(
     line_kind: l.lineKind ?? "NORMAL",
     gift_reason_id: l.giftReasonId ?? null,
     gift_note: l.giftNote ?? null,
+    // 後加欄位：沒勾就不送，購物車快照與冪等指紋維持舊形狀。
+    ...(l.promoFree ? { promo_free: true } : {}),
   }));
+}
+
+/** 切換某一列的「送這件」指定（買 N 送 M）。 */
+export function togglePromoFree(lines: CartLine[], key: string): CartLine[] {
+  return lines.map((line) => (line.key === key ? { ...line, promoFree: !line.promoFree } : line));
 }
 
 /**
@@ -206,6 +215,7 @@ export function markAsGift(
       lineKind: "GIFT",
       giftReasonId: gift.reasonId,
       giftNote: gift.note,
+      promoFree: undefined, // 贈品不參加活動，指定送這件沒有意義
     };
   });
 }

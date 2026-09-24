@@ -32,6 +32,7 @@ import {
   removeLine,
   setQty,
   toSaleLines,
+  togglePromoFree,
   unmarkGift,
 } from "@/features/pos/cart";
 import { withFreshNotes } from "@/features/pos/restoreNotes";
@@ -1212,6 +1213,7 @@ export default function PosPage() {
               lineKind: gift ? "GIFT" : "NORMAL",
               giftReasonId: line.gift_reason_id ?? undefined,
               giftNote: line.gift_note ?? undefined,
+              promoFree: line.promo_free ? true : undefined,
             };
         });
         const withNotes = await withFreshNotes(restoredLines);
@@ -2469,6 +2471,29 @@ export default function PosPage() {
                               （金額已分攤到同組）
                             </span>
                           )}
+                          {line.promoFree && ql != null && ql.free_units === 0 && (
+                            <span className="row-sub">
+                              指定送這件沒有生效（這件沒湊成一組，或不在買幾送幾活動內）
+                            </span>
+                          )}
+                          {/* 買 N 送 M：店員可改送這件（裁示 4）；金額由後端重算。放在品項格內，
+                              不擠進右側操作欄（多一顆鈕會讓整欄換行、表格被壓扁）。 */}
+                          {!isGift(line) &&
+                            (line.promoFree ||
+                              (ql != null && ql.buy_n_get_m_units > ql.free_units)) && (
+                              <button
+                                type="button"
+                                className="pos-promo-free-toggle"
+                                aria-label={`${line.promoFree ? "取消送這件" : "改送這件"} ${line.description}`}
+                                disabled={cartMutationLocked}
+                                onClick={() => {
+                                  markCartEdited();
+                                  setLines(togglePromoFree(lines, line.key));
+                                }}
+                              >
+                                {line.promoFree ? "取消送這件" : "改送這件"}
+                              </button>
+                            )}
                         </td>
                         <td>
                           {originalUnit !== null ? (
@@ -2557,7 +2582,7 @@ export default function PosPage() {
                               </button>
                             </>
                           )}
-                          <button
+<button
                             type="button"
                             className="btn-ghost"
                             aria-label={`移除 ${line.description}`}

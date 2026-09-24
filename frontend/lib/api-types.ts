@@ -4473,6 +4473,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Promo Free */
+            promo_free?: boolean | null;
             /**
              * Qty
              * @default 1
@@ -7548,6 +7550,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Promo Free */
+            promo_free?: boolean | null;
             /**
              * Qty
              * @default 1
@@ -7645,6 +7649,11 @@ export interface components {
          * @description 試算單行輸出：折後實際成交＋折讓留痕。
          */
         SaleQuoteLineRead: {
+            /**
+             * Buy N Get M Units
+             * @default 0
+             */
+            buy_n_get_m_units: number;
             /**
              * Campaigns
              * @default []
@@ -8428,6 +8437,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Promo Free */
+            promo_free?: boolean | null;
             /** Qty */
             qty: number;
         };

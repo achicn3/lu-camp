@@ -1,5 +1,6 @@
 // 門市活動 v2 P3 煙霧（docs/40）：在畫面上建立「買二送一、只限某品牌」並啟用 →
-// POS 掃三件（1000／600／400）→ 應付 1,600、400 那件標「這件是送的」→ 結帳完成。
+// POS 掃三件（1000／600／400）→ 應付 1,600、400 那件標「這件是送的」→
+// 店員「改送這件」600 那件（P3b）→ 應付 1,400、600 那件標送的 → 結帳完成。
 // 需 backend + frontend 已起、已 seed dev-manager。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/campaigns-bngm-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -128,6 +129,15 @@ try {
   ok("1000 那件分攤後 800、列出活動名", firstRow.includes("800") && firstRow.includes(CAMPAIGN), firstRow.replace(/\s+/g, " "));
   await page.screenshot({ path: join(SHOTS, "03-pos-cart.png"), fullPage: true });
 
+  await page.getByRole("button", { name: `改送這件 ${names[1]}` }).click();
+  await page.waitForFunction(() => document.querySelector(".pos-total strong")?.textContent?.includes("1,400"));
+  ok("改送 600 那件：應付 1,400", true);
+  const chosenRow = await page.locator(".pos-cart tbody tr", { hasText: names[1] }).innerText();
+  ok("600 那件改標「這件是送的」、可取消", chosenRow.includes("這件是送的") && chosenRow.includes("取消送這件"), chosenRow.replace(/\s+/g, " "));
+  const cupRow = await page.locator(".pos-cart tbody tr", { hasText: names[2] }).innerText();
+  ok("400 那件不再是送的", !cupRow.includes("這件是送的"), cupRow.replace(/\s+/g, " "));
+  await page.screenshot({ path: join(SHOTS, "03b-pos-chosen.png"), fullPage: true });
+
   await page.waitForFunction(() => {
     const b = [...document.querySelectorAll("button")].find((x) => x.textContent?.trim() === "結帳");
     return b && !b.disabled;
@@ -135,7 +145,7 @@ try {
   await page.getByRole("button", { name: "結帳" }).click();
   await page.waitForSelector("text=已完成");
   const completeText = await page.locator(".pos-complete").innerText();
-  ok("結帳完成（1,600）", /1,?600/.test(completeText), completeText.replace(/\s+/g, " ").slice(0, 120));
+  ok("結帳完成（1,400）", /1,?400/.test(completeText), completeText.replace(/\s+/g, " ").slice(0, 120));
   await page.screenshot({ path: join(SHOTS, "04-complete.png"), fullPage: true });
 
   ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));

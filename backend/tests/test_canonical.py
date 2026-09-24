@@ -56,3 +56,14 @@ def test_sale_fingerprint_normalizes_decimal_exponent_and_unicode() -> None:
     )
 
     assert decomposed == composed
+
+
+def test_sale_fingerprint_ignores_unset_promo_free_for_legacy_replays() -> None:
+    """「送這件」是後加的行欄位：沒勾時指紋必須與加欄位前完全相同（部署前送出的重送才認得）。"""
+    line = SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="A-1")
+    assert _cart_fingerprint([line], None) == _cart_fingerprint(
+        [SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="A-1", promo_free=False)],
+        None,
+    )
+    chosen = SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="A-1", promo_free=True)
+    assert _cart_fingerprint([chosen], None) != _cart_fingerprint([line], None)

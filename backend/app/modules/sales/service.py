@@ -252,6 +252,7 @@ class _AppliedDiscount:
     # 本行折讓由哪些活動貢獻：(campaign_id, 本行合計)；加總＝discount_amount（docs/40）。
     allocations: tuple[tuple[int, Decimal], ...] = ()
     free_units: int = 0  # 本行有幾件是買 N 送 M「送的那件」（顯示用）
+    buy_n_get_m_units: int = 0  # 本行有幾件成組參加買 N 送 M
 
     @staticmethod
     def full_price(unit_price: Decimal, qty: int) -> "_AppliedDiscount":
@@ -283,6 +284,7 @@ def _campaign_discount(priced: LinePrice, original_unit: Decimal, qty: int) -> _
         priced.primary_campaign_id,
         priced.allocations,
         priced.free_units,
+        priced.buy_n_get_m_units,
     )
 
 
@@ -394,6 +396,8 @@ class QuoteLine:
     """本行套到的活動與各自的折讓（加總＝discount_amount）。"""
     free_units: int = 0
     """本行有幾件是買 N 送 M「送的那件」（顯示用；金額已按比例分攤到整組）。"""
+    buy_n_get_m_units: int = 0
+    """本行有幾件成組參加了買 N 送 M（>free_units 時可「改送這件」）。"""
 
 
 @dataclass(frozen=True)
@@ -607,6 +611,8 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
     }
     if line.bulk_basket_id is not None:
         fields["bulk_basket_id"] = line.bulk_basket_id
+    if line.promo_free:  # 後加欄位（docs/40 P3b）：沒勾就不放，舊請求的指紋不變
+        fields["promo_free"] = True
     return fields
 
 
@@ -1192,6 +1198,7 @@ class SalesService:
         await self._record_campaign_overrides(store_id, sale.id, clerk_user_id, disabled)
         # 整車先定價（買 N 送 M 跨行），再逐行扣庫存、落明細；與報價同一支函式、同一份結果。
         priced_lines = await self._price_cart(store_id, lines, promos)
+        await self._record_free_item_choices(store_id, sale.id, clerk_user_id, lines, priced_lines)
 
         # 餐飲小計（**含外帶**）：購物金折抵上限與會員點數都要扣掉它。
         # 判斷依 line_type == MENU，與內用/外帶無關——寫成「內用」會誤導。
@@ -3190,6 +3197,7 @@ class SalesService:
             net_amount=disc.line_total,
             campaigns=_line_campaigns(promos, disc),
             free_units=disc.free_units,
+            buy_n_get_m_units=disc.buy_n_get_m_units,
         )
 
     @staticmethod
@@ -3217,6 +3225,7 @@ class SalesService:
     async def _cart_line(self, store_id: int, line: SaleLineInput) -> CartLine:
         """一行的定價輸入。贈品、餐飲、寄售散裝不參加活動（item=None）。"""
         skip = CartLine(item=None, unit_price=Decimal(0), qty=line.qty)
+        chosen = line.promo_free
         if line.line_kind is SaleLineKind.GIFT or line.qty <= 0:
             return skip
         if line.line_type == SaleLineType.SERIALIZED:
@@ -3225,27 +3234,36 @@ class SalesService:
             item = await self._inventory.get_serialized_by_code(store_id, line.item_code)
             if item is None:
                 return skip
-            return CartLine(_serialized_promo_item(item), item.listed_price, 1)  # 序號品一件一行
+            return CartLine(  # 序號品一件一行
+                _serialized_promo_item(item), item.listed_price, 1, free_requested=chosen
+            )
         if line.line_type == SaleLineType.CATALOG:
             if line.catalog_product_id is None:
                 return skip
             product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
             if product is None:
                 return skip
-            return CartLine(_catalog_promo_item(product), product.unit_price, line.qty)
+            return CartLine(
+                _catalog_promo_item(product), product.unit_price, line.qty, free_requested=chosen
+            )
         if line.line_type == SaleLineType.MENU:
             return skip
         if line.bulk_basket_id is not None:
             view = await self._baskets.get(store_id, line.bulk_basket_id)
             if view is None:
                 return skip
-            return CartLine(_basket_promo_item(view.basket), view.basket.unit_price, line.qty)
+            return CartLine(
+                _basket_promo_item(view.basket),
+                view.basket.unit_price,
+                line.qty,
+                free_requested=chosen,
+            )
         if line.bulk_lot_id is None:
             return skip
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             return skip
-        return CartLine(_bulk_promo_item(lot), lot.unit_price, line.qty)
+        return CartLine(_bulk_promo_item(lot), lot.unit_price, line.qty, free_requested=chosen)
 
     async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:
         """贈品的前置驗證：必須帶原因、原因必須屬本店且啟用。
@@ -3560,6 +3578,29 @@ class SalesService:
                 entity_id=str(sale_id),
                 before=None,
                 after={"campaign_id": campaign.id, "has_reason": clean is not None},
+            )
+
+    async def _record_free_item_choices(
+        self,
+        store_id: int,
+        sale_id: int,
+        actor_user_id: int,
+        lines: Sequence[SaleLineInput],
+        priced_lines: Sequence[LinePrice],
+    ) -> None:
+        """店員指定「送這件」且真的生效的，寫稽核（裁示 4、8：不需核准）。沒生效的不記。"""
+        for index, (line, priced) in enumerate(zip(lines, priced_lines, strict=True)):
+            if not line.promo_free or priced.free_campaign_id is None:
+                continue
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="SALE_BNGM_FREE_ITEM_CHOSEN",
+                entity_type="sale",
+                entity_id=str(sale_id),
+                before=None,
+                after={"campaign_id": priced.free_campaign_id, "line_index": index},
             )
 
     async def _add_priced_line(self, sale_line: SaleLine, disc: _AppliedDiscount) -> SaleLine:

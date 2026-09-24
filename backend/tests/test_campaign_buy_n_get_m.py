@@ -247,3 +247,64 @@ def test_zero_priced_items_do_not_break_the_cart() -> None:
     assert zeros[0].allocations == ()
     mixed = price_cart([line(0, item(1)), line(0, item(2)), line(500, item(3))], [bngm(9, 2, 1)])
     assert [r.line_total for r in mixed] == [Decimal(0), Decimal(0), Decimal(500)]
+
+
+# ── P3b：店員改指定送哪件（裁示 4）────────────────────────────────
+
+
+def chosen(price: int, it: PromoItem | None, qty: int = 1) -> CartLine:
+    return CartLine(item=it, unit_price=Decimal(price), qty=qty, free_requested=True)
+
+
+def test_clerk_can_choose_which_item_is_free() -> None:
+    """買二送一 1000／600／400，指定送 600：送 600，按比例分攤（300／180／120）。"""
+    result = price_cart(
+        [line(1000, item(1)), chosen(600, item(2)), line(400, item(3))], [bngm(9, 2, 1)]
+    )
+    assert [r.line_total for r in result] == [Decimal(700), Decimal(420), Decimal(280)]
+    assert [r.free_units for r in result] == [0, 1, 0]
+    assert result[1].free_campaign_id == 9
+
+
+def test_choosing_a_leftover_item_swaps_it_into_the_last_group() -> None:
+    """4 件買二送一：預設 500/400/300 成組送 300、200 落單；指定送 200 → 200 進組、300 改原價。"""
+    result = price_cart(
+        [line(500, item(1)), line(400, item(2)), line(300, item(3)), chosen(200, item(4))],
+        [bngm(9, 2, 1)],
+    )
+    assert [r.free_units for r in result] == [0, 0, 0, 1]
+    assert result[2].line_total == Decimal(300)
+    assert result[2].allocations == ()
+    assert sum(r.line_total for r in result) == Decimal(1200)
+
+
+def test_choosing_more_items_than_free_slots_keeps_the_first_ones() -> None:
+    result = price_cart(
+        [chosen(1000, item(1)), chosen(600, item(2)), line(400, item(3))], [bngm(9, 2, 1)]
+    )
+    assert [r.free_units for r in result] == [1, 0, 0]
+    assert sum(r.line_total for r in result) == Decimal(1000)
+
+
+def test_choosing_an_item_outside_the_campaign_does_nothing() -> None:
+    consigned = item(4, CampaignItemKind.CONSIGNMENT_SERIALIZED)
+    result = price_cart(
+        [line(1000, item(1)), line(600, item(2)), line(400, item(3)), chosen(900, consigned)],
+        [bngm(9, 2, 1)],
+    )
+    assert [r.free_units for r in result] == [0, 0, 1, 0]
+    assert result[3].line_total == Decimal(900)
+
+
+def test_default_free_line_reports_its_campaign() -> None:
+    result = price_cart(
+        [line(1000, item(1)), line(600, item(2)), line(400, item(3))], [bngm(9, 2, 1)]
+    )
+    assert [r.free_campaign_id for r in result] == [None, None, 9]
+
+
+def test_choosing_one_line_of_several_units_frees_only_as_many_as_slots() -> None:
+    """同一行 3 件都想送，但買二送一 3 件只有 1 個送的位置。"""
+    [result] = price_cart([chosen(100, CANISTER, qty=3)], [bngm(9, 2, 1)])
+    assert result.free_units == 1
+    assert result.line_total == Decimal(200)

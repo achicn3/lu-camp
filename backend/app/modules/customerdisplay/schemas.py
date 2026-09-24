@@ -109,6 +109,9 @@ class CartLineRequest(BaseModel):
     line_kind: SaleLineKind = SaleLineKind.NORMAL
     gift_reason_id: int | None = Field(default=None, ge=1)
     gift_note: str | None = Field(default=None, max_length=200)
+    # 買 N 送 M：店員指定「送這件」（docs/40 P3b）；沒成組或不適用時不生效。
+    # 可空＝沒指定（生成的前端型別才維持選填，舊的購物車快照不必補這欄）。
+    promo_free: bool | None = None
 
     @model_validator(mode="after")
     def _matching_reference(self) -> "CartLineRequest":
@@ -140,6 +143,7 @@ class CartLineRequest(BaseModel):
             line_kind=self.line_kind,
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
+            promo_free=bool(self.promo_free),
         )
 
 
@@ -306,6 +310,7 @@ class StaffCartLineRead(BaseModel):
     line_kind: SaleLineKind
     gift_reason_id: int | None = None
     gift_note: str | None = None
+    promo_free: bool | None = None
 
 
 class StaffCartAdjustmentRead(BaseModel):

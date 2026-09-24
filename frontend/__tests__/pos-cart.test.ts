@@ -8,6 +8,7 @@ import {
   removeLine,
   setQty,
   toSaleLines,
+  togglePromoFree,
 } from "@/features/pos/cart";
 
 const serialized = (code: string, price: number): CartLine => ({
@@ -71,5 +72,15 @@ describe("cart 純邏輯", () => {
       bulk_lot_id: 7,
       qty: 1,
     });
+  });
+
+  it("「送這件」只在勾選時送出 promo_free（沒勾時 payload 與舊版相同）", () => {
+    const lines = [serialized("C1", 1800), serialized("C2", 600)];
+    expect("promo_free" in toSaleLines(lines)[0]).toBe(false);
+    const chosen = togglePromoFree(lines, "S:C2");
+    expect(chosen[1].promoFree).toBe(true);
+    expect(toSaleLines(chosen)[1]).toMatchObject({ item_code: "C2", promo_free: true });
+    expect("promo_free" in toSaleLines(chosen)[0]).toBe(false);
+    expect(togglePromoFree(chosen, "S:C2")[1].promoFree).toBe(false);
   });
 });

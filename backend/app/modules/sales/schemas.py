@@ -52,6 +52,9 @@ class SaleLineCreateRequest(BaseModel):
     line_kind: SaleLineKind = SaleLineKind.NORMAL
     gift_reason_id: int | None = Field(default=None, ge=1)
     gift_note: str | None = Field(default=None, max_length=200)
+    # 買 N 送 M：店員指定「送這件」（docs/40 P3b）；沒成組或不適用時不生效。
+    # 可空＝沒指定（生成的前端型別才維持選填，舊的購物車快照不必補這欄）。
+    promo_free: bool | None = None
 
     @model_validator(mode="after")
     def _check_shape(self) -> "SaleLineCreateRequest":
@@ -110,6 +113,7 @@ class SaleLineCreateRequest(BaseModel):
             line_kind=self.line_kind,
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
+            promo_free=bool(self.promo_free),
         )
 
 
@@ -414,6 +418,8 @@ class SaleQuoteLineRead(BaseModel):
     # 買 N 送 M：本行有幾件是「送的那件」（顯示用；金額已按比例分攤到整組，docs/40 P3）。
     # 分攤不整除時 unit_price 是平均單價，小計以 line_total／net_amount 為準。
     free_units: int = 0
+    # 本行有幾件成組參加了買 N 送 M（>free_units 時 POS 提供「改送這件」）。
+    buy_n_get_m_units: int = 0
 
 
 class SaleQuoteResponse(BaseModel):

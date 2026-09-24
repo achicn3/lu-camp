@@ -4409,6 +4409,22 @@ a.btn-ghost {
   font-size: var(--text-sm);
   color: var(--accent);
 }
+/* 買 N 送 M：品項格內的「改送這件／取消送這件」小連結（docs/40 P3b）。 */
+.pos-promo-free-toggle {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.pos-promo-free-toggle:disabled {
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
 /* 買 N 送 M：標出送的那件（docs/40 P3）。 */
 .pos-line-free {
   display: block;
