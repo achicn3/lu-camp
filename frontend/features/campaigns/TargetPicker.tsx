@@ -142,6 +142,9 @@ export function TargetPicker({
       ({ data } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
         params: { path: { item_code: code } },
       }));
+    } catch {
+      if (mounted.current) setError("查詢商品失敗，請再按一次「加入這件」");
+      return;
     } finally {
       if (mounted.current) {
         setLookingUp(false);

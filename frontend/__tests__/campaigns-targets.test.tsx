@@ -302,5 +302,27 @@ describe("活動範圍與疊加", () => {
     releaseCode();
     await within(scope).findByText("展示帳篷（ITM-9）");
   });
+
+  it("條碼查詢連線失敗時講清楚、可以再試（Codex 審查）", async () => {
+    stub();
+    const original = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/serialized-items/by-code/")) throw new TypeError("network down");
+        return original(input);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    const scope = screen.getByRole("group", { name: "指定商品（選填）" });
+    await user.selectOptions(within(scope).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(scope).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(scope).getByRole("button", { name: "加入這件" }));
+    expect((await within(scope).findByRole("alert")).textContent).toContain("查詢商品失敗");
+    expect((within(scope).getByRole("button", { name: "加入這件" }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
