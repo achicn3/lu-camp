@@ -69,10 +69,10 @@ try {
     campaigns.push(c);
     return c;
   };
-  const spCamp = await make(`SP 八折 ${RUN}`, 20, true, [
+  await make(`SP 八折 ${RUN}`, 20, true, [
     { mode: "INCLUDE", target_type: "BRAND", target_id: sp.id },
   ]);
-  const coCamp = await make(`Coleman 九折 ${RUN}`, 10, false, [
+  await make(`Coleman 九折 ${RUN}`, 10, false, [
     { mode: "INCLUDE", target_type: "BRAND", target_id: co.id },
   ]);
   const extra = await make(`全館加碼九五折 ${RUN}`, 5, true, []);
