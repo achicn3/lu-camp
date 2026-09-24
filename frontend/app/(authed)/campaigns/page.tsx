@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
 import {
-  discountDisplay,
+  offerDisplay,
   scopeSummary,
   statusLabel,
   targetSummary,
@@ -19,6 +19,13 @@ import { formatTaipeiDateTime, taipeiDateTimeLocalToUtc } from "@/lib/datetime";
 
 type CampaignRead = components["schemas"]["CampaignRead"];
 type CampaignStatus = components["schemas"]["CampaignStatus"];
+type CampaignKind = components["schemas"]["CampaignKind"];
+
+const KIND_OPTIONS: { value: CampaignKind; label: string }[] = [
+  { value: "PERCENT_OFF", label: "打折" },
+  { value: "FIXED_PRICE", label: "指定特價" },
+  { value: "AMOUNT_OFF", label: "每件折金額" },
+];
 
 const PAGE_SIZE = 20;
 
@@ -34,7 +41,9 @@ function extractDetail(error: unknown): string | null {
 
 function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState("");
+  const [kind, setKind] = useState<CampaignKind>("PERCENT_OFF");
   const [discountPct, setDiscountPct] = useState("");
+  const [moneyValue, setMoneyValue] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [appliesOwnedSerialized, setAppliesOwnedSerialized] = useState(true);
@@ -50,9 +59,22 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
 
   const create = useMutation({
     mutationFn: async () => {
-      const pct = parseInt(discountPct, 10);
-      if (isNaN(pct) || pct < 1 || pct > 99) {
-        throw new Error("折扣 % 須為 1-99 的整數");
+      // 活動類型（docs/40 P2）：打折填折扣 %；特價、折金額填含稅整數元。只送那一種的數值。
+      let offer: { kind: CampaignKind; discount_pct?: number; fixed_price?: string; amount_off?: string };
+      if (kind === "PERCENT_OFF") {
+        const pct = parseInt(discountPct, 10);
+        if (isNaN(pct) || pct < 1 || pct > 99) {
+          throw new Error("折扣 % 須為 1-99 的整數");
+        }
+        offer = { kind, discount_pct: pct };
+      } else {
+        if (!/^[1-9]\d*$/.test(moneyValue.trim())) {
+          throw new Error(kind === "FIXED_PRICE" ? "特價須為大於 0 的整數元" : "折金額須為大於 0 的整數元");
+        }
+        offer =
+          kind === "FIXED_PRICE"
+            ? { kind, fixed_price: moneyValue.trim() }
+            : { kind, amount_off: moneyValue.trim() };
       }
       if (!name.trim()) {
         throw new Error("請輸入活動名稱");
@@ -63,7 +85,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       const { data, error } = await api.POST("/api/v1/campaigns", {
         body: {
           name: name.trim(),
-          discount_pct: pct,
+          ...offer,
           starts_at: taipeiDateTimeLocalToUtc(startsAt),
           ends_at: taipeiDateTimeLocalToUtc(endsAt),
           applies_owned_serialized: appliesOwnedSerialized,
@@ -85,6 +107,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setFormError(null);
       setName("");
       setDiscountPct("");
+      setMoneyValue("");
+      setKind("PERCENT_OFF");
       setStartsAt("");
       setEndsAt("");
       setAppliesOwnedSerialized(true);
@@ -123,18 +147,48 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
 
-        <label className="field">
-          <span className="field-label">折扣 %（1-99）</span>
-          <input
-            type="number"
-            min={1}
-            max={99}
-            value={discountPct}
-            onChange={(e) => setDiscountPct(e.target.value)}
-            placeholder="10 = 打九折"
-            required
-          />
-        </label>
+        <fieldset className="campaign-kind">
+          <legend className="field-label">優惠方式</legend>
+          {KIND_OPTIONS.map((o) => (
+            <label key={o.value} className="campaign-checkbox">
+              <input
+                type="radio"
+                name="campaign-kind"
+                checked={kind === o.value}
+                onChange={() => setKind(o.value)}
+              />
+              {o.label}
+            </label>
+          ))}
+        </fieldset>
+
+        {kind === "PERCENT_OFF" ? (
+          <label className="field">
+            <span className="field-label">折扣 %（1-99）</span>
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={discountPct}
+              onChange={(e) => setDiscountPct(e.target.value)}
+              placeholder="10 = 打九折"
+              required
+            />
+          </label>
+        ) : (
+          <label className="field">
+            <span className="field-label">
+              {kind === "FIXED_PRICE" ? "特價（含稅，元）" : "每件折多少（含稅，元）"}
+            </span>
+            <input
+              inputMode="numeric"
+              value={moneyValue}
+              onChange={(e) => setMoneyValue(e.target.value)}
+              placeholder={kind === "FIXED_PRICE" ? "例如 690" : "例如 100"}
+              required
+            />
+          </label>
+        )}
 
         <label className="field">
           <span className="field-label">開始時間</span>
@@ -430,7 +484,7 @@ export default function CampaignsPage() {
             <thead>
               <tr>
                 <th>名稱</th>
-                <th>折扣</th>
+                <th>優惠</th>
                 <th>開始</th>
                 <th>結束</th>
                 <th>狀態</th>
@@ -443,7 +497,7 @@ export default function CampaignsPage() {
                 <tr key={c.id}>
                   <td>{c.name}</td>
                   <td>
-                    {discountDisplay(c.discount_pct)}
+                    {offerDisplay(c)}
                     {c.stackable && <span className="row-sub">可疊加</span>}
                   </td>
                   <td>{formatTaipeiDateTime(c.starts_at)}</td>

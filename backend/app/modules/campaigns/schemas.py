@@ -1,12 +1,21 @@
 """campaigns API schema（docs/21）。折扣 1-99；金額不在此（活動只存折扣率）。"""
 
 from datetime import datetime
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer, model_validator
 
+from app.core.money import format_ntd
 from app.core.time import AwareDateTime
-from app.shared.enums import CampaignStatus, CampaignTargetMode, CampaignTargetType
+from app.shared.enums import CampaignKind, CampaignStatus, CampaignTargetMode, CampaignTargetType
+
+# 含稅整數元（特價、折金額）：輸入必須 > 0、無小數；輸出為字串（§6 前端傳輸一律字串）。
+NTDPositive = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=0)]
+NTDAmountOpt = Annotated[
+    Decimal | None,
+    PlainSerializer(lambda d: None if d is None else format_ntd(d), return_type=str | None),
+]
 
 # 一個活動最多掛幾條範圍條件（包含＋排除）；再多就該用分類或品牌。
 CAMPAIGN_TARGETS_MAX = 200
@@ -32,7 +41,12 @@ class CampaignCreateRequest(BaseModel):
     """
 
     name: Annotated[str, Field(min_length=1, max_length=100)]
-    discount_pct: Annotated[int, Field(ge=1, le=99)]
+    # 活動類型（docs/40 P2）：打折填 discount_pct、指定特價填 fixed_price、每件折金額填 amount_off，
+    # 只能填對應的那一個。沒帶 kind＝打折（舊客戶端相容）。
+    kind: CampaignKind = CampaignKind.PERCENT_OFF
+    discount_pct: Annotated[int, Field(ge=1, le=99)] | None = None
+    fixed_price: NTDPositive | None = None
+    amount_off: NTDPositive | None = None
     starts_at: AwareDateTime
     ends_at: AwareDateTime
     applies_owned_serialized: bool = True
@@ -44,12 +58,28 @@ class CampaignCreateRequest(BaseModel):
     # 範圍條件；沒有任何「包含」＝上面勾的種類全部適用。
     targets: Annotated[list[CampaignTargetInput], Field(max_length=CAMPAIGN_TARGETS_MAX)] = []
 
+    @model_validator(mode="after")
+    def _kind_matches_value(self) -> Self:
+        values = {
+            CampaignKind.PERCENT_OFF: self.discount_pct,
+            CampaignKind.FIXED_PRICE: self.fixed_price,
+            CampaignKind.AMOUNT_OFF: self.amount_off,
+        }
+        if values[self.kind] is None:
+            raise ValueError("請填這種活動的數值（折扣／特價／折金額）")
+        if any(v is not None for k, v in values.items() if k != self.kind):
+            raise ValueError("只能填這種活動的數值，其他類型的欄位請留空")
+        return self
+
 
 class CampaignRead(BaseModel):
     id: int
     store_id: int
     name: str
-    discount_pct: int
+    kind: CampaignKind
+    discount_pct: int | None
+    fixed_price: NTDAmountOpt = None
+    amount_off: NTDAmountOpt = None
     applies_owned_serialized: bool
     applies_owned_bulk: bool
     applies_catalog: bool

@@ -4424,3 +4424,14 @@ a.btn-ghost {
   color: var(--accent);
   font-size: 0.9em;
 }
+
+/* 門市活動優惠方式（docs/40 P2）。 */
+.campaign-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  border: none;
+  padding: 0;
+  margin: 0;
+}

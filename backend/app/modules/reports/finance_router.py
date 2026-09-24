@@ -19,6 +19,7 @@ from app.modules.campaigns.schemas import CampaignTargetRead
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
     CampaignPerformanceReport,
+    CampaignPerformanceRow,
     ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
@@ -32,7 +33,7 @@ from app.modules.reports.schemas import (
     TrendsReport,
 )
 from app.modules.reports.service import ReportsService
-from app.shared.enums import CampaignTargetMode
+from app.shared.enums import CampaignKind, CampaignTargetMode
 from app.shared.exceptions import DomainError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -840,6 +841,15 @@ async def gifts(
     return export_response(exp, fmt)
 
 
+def _campaign_offer_text(row: CampaignPerformanceRow) -> str:
+    """「打 9 折」「特價 690」「每件折 100」（docs/40 P2）。"""
+    if row.kind == CampaignKind.FIXED_PRICE and row.fixed_price is not None:
+        return f"特價 {format_ntd(row.fixed_price)}"
+    if row.kind == CampaignKind.AMOUNT_OFF and row.amount_off is not None:
+        return f"每件折 {format_ntd(row.amount_off)}"
+    return f"折扣 {row.discount_pct}%"
+
+
 def _campaign_scope_text(targets: list[CampaignTargetRead]) -> str:
     """「只限：A、B；排除：C」；沒指定回空字串（與管理頁同一種寫法）。"""
     includes = [t.label for t in targets if t.mode == CampaignTargetMode.INCLUDE]
@@ -877,7 +887,7 @@ async def campaign_performance(
         headers=[
             "活動",
             "狀態",
-            "折扣%",
+            "優惠",
             "開始",
             "結束",
             "活動折讓總額",
@@ -894,7 +904,7 @@ async def campaign_performance(
             [
                 r.name,
                 r.status.value,
-                str(r.discount_pct),
+                _campaign_offer_text(r),
                 store_datetime_iso(r.starts_at),
                 store_datetime_iso(r.ends_at),
                 format_ntd(r.campaign_discount_total),

@@ -7,6 +7,7 @@ v2（docs/40，2026-09-23）：同店可多個 ACTIVE；stackable 決定能否�
 """
 
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     text,
@@ -22,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
-from app.shared.enums import CampaignStatus, CampaignTargetMode, CampaignTargetType
+from app.shared.enums import CampaignKind, CampaignStatus, CampaignTargetMode, CampaignTargetType
 
 
 def _enum_col(enum_type: type) -> Enum:
@@ -34,8 +36,16 @@ class Campaign(Base, TimestampMixin):
 
     __tablename__ = "campaigns"
     __table_args__ = (
+        # 類型與數值一致（docs/40 P2）：打折只填 discount_pct，特價只填 fixed_price，
+        # 折金額只填 amount_off。
         CheckConstraint(
-            "discount_pct >= 1 AND discount_pct <= 99", name="ck_campaigns_discount_pct"
+            "(kind = 'PERCENT_OFF' AND discount_pct BETWEEN 1 AND 99"
+            " AND fixed_price IS NULL AND amount_off IS NULL)"
+            " OR (kind = 'FIXED_PRICE' AND fixed_price > 0"
+            " AND discount_pct IS NULL AND amount_off IS NULL)"
+            " OR (kind = 'AMOUNT_OFF' AND amount_off > 0"
+            " AND discount_pct IS NULL AND fixed_price IS NULL)",
+            name="ck_campaigns_kind_value",
         ),
         CheckConstraint("ends_at > starts_at", name="ck_campaigns_window"),
     )
@@ -43,7 +53,16 @@ class Campaign(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
-    discount_pct: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[CampaignKind] = mapped_column(
+        _enum_col(CampaignKind),
+        default=CampaignKind.PERCENT_OFF,
+        server_default=CampaignKind.PERCENT_OFF.value,
+    )
+    # 打折（kind=PERCENT_OFF）才有；特價／折金額為 None。
+    discount_pct: Mapped[int | None] = mapped_column(Integer)
+    # 指定特價／每件折金額（含稅整數元）；只有對應類型才有值。
+    fixed_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    amount_off: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     applies_owned_serialized: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true")
     )

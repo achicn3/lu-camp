@@ -33,6 +33,7 @@ from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
+    CampaignKind,
     CampaignTargetMode,
     CampaignTargetType,
     Grade,
@@ -430,3 +431,34 @@ async def test_campaign_report_shows_stackable_scope_and_not_applied_count(
     assert [(t.mode, t.label) for t in row.targets] == [("INCLUDE", "Snow Peak")]
     assert row.not_applied_count == 1
     assert row.transaction_count == 0  # 被取消了，這筆不算它的成效
+
+
+async def test_fixed_price_and_amount_off_at_checkout(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """P2：特價與折金額實際結帳；和九折同時進行時取最划算的。"""
+    now = datetime.now(UTC)
+    svc = CampaignService(db_session)
+    fixed = await svc.create_campaign(
+        ctx["store_id"],
+        name="特價 690",
+        discount_pct=None,
+        kind=CampaignKind.FIXED_PRICE,
+        fixed_price=Decimal(690),
+        starts_at=now - timedelta(days=1),
+        ends_at=now + timedelta(days=1),
+        applies_owned_serialized=True,
+        applies_owned_bulk=True,
+        applies_catalog=False,
+        applies_consignment=False,
+        created_by=ctx["clerk_id"],
+    )
+    await svc.activate(ctx["store_id"], fixed.id, actor_user_id=ctx["clerk_id"])
+    await _campaign(db_session, ctx, 10, name="全館九折")
+    item = await _item(db_session, ctx["store_id"], "1000")
+
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"], ctx["clerk_id"], lines=[_line(item)]
+    )
+    assert sale.total == Decimal(690)
+    assert (await _allocations(db_session, sale.id))[item.id] == [(fixed.id, Decimal(310))]

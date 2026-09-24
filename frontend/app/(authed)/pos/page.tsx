@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 
-import { discountDisplay, targetSummary } from "@/features/campaigns/campaigns";
+import { offerDisplay, targetSummary } from "@/features/campaigns/campaigns";
 import { MemberPanel } from "@/features/pos/MemberPanel";
 import {
   PosCustomerDisplay,
@@ -700,7 +700,7 @@ function ActiveCampaignBanner() {
     <div className="pos-campaign-banner" role="status">
       {active.map((c) => (
         <span key={c.id} className="pos-campaign-tag">
-          活動進行中：{c.name}（{discountDisplay(c.discount_pct)}／折扣 {c.discount_pct}%
+          活動進行中：{c.name}（{offerDisplay(c)}
           {targetSummary(c.targets) ? `；${targetSummary(c.targets)}` : ""}）
         </span>
       ))}

@@ -155,3 +155,72 @@ async def test_missing_target_is_rejected(
         headers=_auth(mgr),
     )
     assert resp.status_code == 422, resp.text
+
+
+# ── P2：指定特價、每件折金額 ────────────────────────────────────────
+
+
+async def test_create_fixed_price_and_amount_off_campaigns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    fixed = await client.post(
+        PATH,
+        json={
+            "name": "營燈特價",
+            "kind": "FIXED_PRICE",
+            "fixed_price": "690",
+            "starts_at": "2026-06-01T00:00:00Z",
+            "ends_at": "2026-07-01T00:00:00Z",
+        },
+        headers=_auth(mgr),
+    )
+    assert fixed.status_code == 201, fixed.text
+    body = fixed.json()
+    assert (body["kind"], body["fixed_price"], body["discount_pct"]) == ("FIXED_PRICE", "690", None)
+
+    off = await client.post(
+        PATH,
+        json={
+            "name": "每件折 100",
+            "kind": "AMOUNT_OFF",
+            "amount_off": "100",
+            "starts_at": "2026-06-01T00:00:00Z",
+            "ends_at": "2026-07-01T00:00:00Z",
+        },
+        headers=_auth(mgr),
+    )
+    assert off.status_code == 201, off.text
+    assert (off.json()["kind"], off.json()["amount_off"]) == ("AMOUNT_OFF", "100")
+
+
+async def test_old_clients_still_create_percent_campaigns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    resp = await client.post(PATH, json=_payload(), headers=_auth(mgr))
+    assert resp.status_code == 201
+    assert resp.json()["kind"] == "PERCENT_OFF"
+    assert resp.json()["discount_pct"] == 10
+
+
+async def test_kind_and_value_must_match(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    bad: list[dict[str, str | int]] = [
+        {"kind": "FIXED_PRICE"},  # 沒給特價
+        {"kind": "FIXED_PRICE", "fixed_price": "0"},
+        {"kind": "AMOUNT_OFF", "amount_off": "-5"},
+        {"kind": "PERCENT_OFF"},  # 沒給折扣
+        {"kind": "PERCENT_OFF", "discount_pct": 10, "fixed_price": "500"},  # 多給別種的值
+    ]
+    for extra in bad:
+        payload: dict[str, str | int] = {
+            "name": "錯的",
+            "starts_at": "2026-06-01T00:00:00Z",
+            "ends_at": "2026-07-01T00:00:00Z",
+            **extra,
+        }
+        resp = await client.post(PATH, json=payload, headers=_auth(mgr))
+        assert resp.status_code == 422, (extra, resp.text)

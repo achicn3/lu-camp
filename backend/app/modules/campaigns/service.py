@@ -6,6 +6,7 @@
 """
 
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.service import InventoryService
 from app.shared.enums import (
     CampaignItemKind,
+    CampaignKind,
     CampaignStatus,
     CampaignTargetMode,
     CampaignTargetType,
@@ -29,6 +31,32 @@ from app.shared.exceptions import (
     InvalidCampaignTarget,
     InvalidDiscountPct,
 )
+
+
+def _validate_kind_value(
+    kind: CampaignKind,
+    discount_pct: int | None,
+    fixed_price: Decimal | None,
+    amount_off: Decimal | None,
+) -> None:
+    """類型與數值必須一致：只填那一種的數值（DB CHECK 也守著，這裡給看得懂的訊息）。"""
+    values: dict[CampaignKind, object] = {
+        CampaignKind.PERCENT_OFF: discount_pct,
+        CampaignKind.FIXED_PRICE: fixed_price,
+        CampaignKind.AMOUNT_OFF: amount_off,
+    }
+    if values[kind] is None or any(v is not None for k, v in values.items() if k != kind):
+        raise InvalidDiscountPct("活動類型與數值不一致：只能填這種活動的折扣、特價或折金額")
+    if kind == CampaignKind.PERCENT_OFF:
+        assert discount_pct is not None
+        if not DISCOUNT_PCT_MIN <= discount_pct <= DISCOUNT_PCT_MAX:
+            raise InvalidDiscountPct(
+                f"折扣百分比須介於 {DISCOUNT_PCT_MIN}-{DISCOUNT_PCT_MAX}，收到 {discount_pct}"
+            )
+    else:
+        money = fixed_price if kind == CampaignKind.FIXED_PRICE else amount_off
+        if money is None or money <= 0:
+            raise InvalidDiscountPct("特價與折金額必須大於 0")
 
 
 def _item_kinds(campaign: Campaign) -> frozenset[CampaignItemKind]:
@@ -46,7 +74,10 @@ _READ_COLUMNS = (
     "id",
     "store_id",
     "name",
+    "kind",
     "discount_pct",
+    "fixed_price",
+    "amount_off",
     "applies_owned_serialized",
     "applies_owned_bulk",
     "applies_catalog",
@@ -73,7 +104,7 @@ class CampaignService:
         store_id: int,
         *,
         name: str,
-        discount_pct: int,
+        discount_pct: int | None,
         starts_at: datetime,
         ends_at: datetime,
         applies_owned_serialized: bool,
@@ -83,6 +114,9 @@ class CampaignService:
         created_by: int,
         stackable: bool = False,
         targets: list[CampaignTargetInput] | None = None,
+        kind: CampaignKind = CampaignKind.PERCENT_OFF,
+        fixed_price: Decimal | None = None,
+        amount_off: Decimal | None = None,
     ) -> Campaign:
         """建立活動（DRAFT）。驗證折扣 1-99、區間 ends>starts、名稱非空、範圍屬本店；寫稽核。
 
@@ -90,16 +124,16 @@ class CampaignService:
         """
         if not name.strip():
             raise CampaignConflict("活動名稱不可為空")
-        if not DISCOUNT_PCT_MIN <= discount_pct <= DISCOUNT_PCT_MAX:
-            raise InvalidDiscountPct(
-                f"折扣百分比須介於 {DISCOUNT_PCT_MIN}-{DISCOUNT_PCT_MAX}，收到 {discount_pct}"
-            )
+        _validate_kind_value(kind, discount_pct, fixed_price, amount_off)
         if ends_at <= starts_at:
             raise CampaignConflict("活動結束時間必須晚於開始時間")
         campaign = Campaign(
             store_id=store_id,
             name=name.strip(),
+            kind=kind,
             discount_pct=discount_pct,
+            fixed_price=fixed_price,
+            amount_off=amount_off,
             starts_at=starts_at,
             ends_at=ends_at,
             applies_owned_serialized=applies_owned_serialized,
@@ -204,6 +238,9 @@ class CampaignService:
                 name=c.name,
                 discount_pct=c.discount_pct,
                 stackable=c.stackable,
+                kind=c.kind,
+                fixed_price=c.fixed_price,
+                amount_off=c.amount_off,
                 item_kinds=_item_kinds(c),
                 includes=tuple(
                     (t.target_type, t.target_id)
@@ -290,7 +327,10 @@ class CampaignService:
         after: dict[str, object] = {
             "status": campaign.status.value,
             "name": campaign.name,
+            "kind": campaign.kind.value,
             "discount_pct": campaign.discount_pct,
+            "fixed_price": None if campaign.fixed_price is None else str(campaign.fixed_price),
+            "amount_off": None if campaign.amount_off is None else str(campaign.amount_off),
         }
         await write_audit_log(
             self._session,

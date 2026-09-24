@@ -324,5 +324,33 @@ describe("活動範圍與疊加", () => {
     expect((await within(scope).findByRole("alert")).textContent).toContain("查詢商品失敗");
     expect((within(scope).getByRole("button", { name: "加入這件" }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("可以建立指定特價的活動（docs/40 P2）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "營燈特價");
+    await user.click(screen.getByLabelText("指定特價"));
+    await user.type(screen.getByLabelText("特價（含稅，元）"), "690");
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({ kind: "FIXED_PRICE", fixed_price: "690" });
+    expect(posted && "discount_pct" in posted).toBe(false);
+  });
+
+  it("清單以白話顯示特價與折金額", async () => {
+    stub([
+      { ...TARGETED, id: 21, name: "營燈特價", kind: "FIXED_PRICE", discount_pct: null, fixed_price: "690", amount_off: null },
+      { ...TARGETED, id: 22, name: "每件折百", kind: "AMOUNT_OFF", discount_pct: null, fixed_price: null, amount_off: "100" },
+    ]);
+    renderPage();
+    const fixedRow = (await screen.findByText("營燈特價")).closest("tr") as HTMLElement;
+    expect(fixedRow.textContent).toContain("特價 $690");
+    const offRow = screen.getByText("每件折百").closest("tr") as HTMLElement;
+    expect(offRow.textContent).toContain("每件折 $100");
+  });
 });
 

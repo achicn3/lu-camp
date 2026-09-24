@@ -15,7 +15,7 @@ from app.modules.campaigns.pricing import (
     campaign_applies,
     price_unit,
 )
-from app.shared.enums import CampaignItemKind, CampaignTargetType
+from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
 
 ALL_KINDS = frozenset(
     {CampaignItemKind.OWNED_SERIALIZED, CampaignItemKind.OWNED_BULK, CampaignItemKind.CATALOG}
@@ -186,3 +186,71 @@ def test_campaigns_that_do_not_apply_are_ignored() -> None:
     other_brand = campaign(1, 50, includes=((CampaignTargetType.BRAND, 999),))
     result = price_unit(Decimal(1000), TENT, [other_brand, campaign(2, 10)])
     assert result.allocations == ((2, Decimal(100)),)
+
+
+# ── P2：指定特價、每件折金額（docs/40 §2）─────────────────────────────
+
+
+def fixed(cid: int, price: int, *, stackable: bool = False) -> PromoCampaign:
+    return PromoCampaign(
+        id=cid,
+        name=f"特價{cid}",
+        discount_pct=None,
+        stackable=stackable,
+        item_kinds=ALL_KINDS,
+        kind=CampaignKind.FIXED_PRICE,
+        fixed_price=Decimal(price),
+    )
+
+
+def amount_off(cid: int, amount: int, *, stackable: bool = False) -> PromoCampaign:
+    return PromoCampaign(
+        id=cid,
+        name=f"折{amount}",
+        discount_pct=None,
+        stackable=stackable,
+        item_kinds=ALL_KINDS,
+        kind=CampaignKind.AMOUNT_OFF,
+        amount_off=Decimal(amount),
+    )
+
+
+def test_fixed_price_sets_the_price() -> None:
+    result = price_unit(Decimal(1000), TENT, [fixed(1, 690)])
+    assert result.unit_price == Decimal(690)
+    assert result.allocations == ((1, Decimal(310)),)
+
+
+def test_fixed_price_above_the_original_price_does_nothing() -> None:
+    result = price_unit(Decimal(500), TENT, [fixed(1, 690)])
+    assert result.unit_price == Decimal(500)
+    assert result.allocations == ()
+
+
+def test_amount_off_subtracts_per_item_and_never_below_one_dollar() -> None:
+    assert price_unit(Decimal(1000), TENT, [amount_off(1, 100)]).unit_price == Decimal(900)
+    tiny = price_unit(Decimal(80), TENT, [amount_off(1, 100)])
+    assert tiny.unit_price == Decimal(1)
+    assert tiny.allocations == ((1, Decimal(79)),)
+
+
+def test_best_deal_across_kinds() -> None:
+    """九折（900）vs 特價 850 vs 折 120（880）：取特價 850。"""
+    result = price_unit(Decimal(1000), TENT, [campaign(1, 10), fixed(2, 850), amount_off(3, 120)])
+    assert result.unit_price == Decimal(850)
+    assert result.allocations == ((2, Decimal(150)),)
+
+
+def test_stacking_mixed_kinds_in_id_order() -> None:
+    """可疊加依 id：九折（1000→900）再折 100（→800）再特價 850（取較低者，維持 800）。"""
+    result = price_unit(
+        Decimal(1000),
+        TENT,
+        [
+            campaign(1, 10, stackable=True),
+            amount_off(2, 100, stackable=True),
+            fixed(3, 850, stackable=True),
+        ],
+    )
+    assert result.unit_price == Decimal(800)
+    assert result.allocations == ((1, Decimal(100)), (2, Decimal(100)))

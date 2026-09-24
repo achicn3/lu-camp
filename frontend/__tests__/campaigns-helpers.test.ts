@@ -4,8 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   discountDisplay,
   scopeSummary,
-  statusLabel,
-} from "@/features/campaigns/campaigns";
+  statusLabel, offerDisplay } from "@/features/campaigns/campaigns";
 
 describe("discountDisplay", () => {
   it("converts discount_pct=10 to 9 折", () => {
@@ -78,5 +77,13 @@ describe("scopeSummary", () => {
       applies_consignment: false,
     });
     expect(result).toBe("-");
+  });
+});
+
+describe("offerDisplay（docs/40 P2）", () => {
+  it("打折、指定特價、每件折金額各有說法", () => {
+    expect(offerDisplay({ kind: "PERCENT_OFF", discount_pct: 10, fixed_price: null, amount_off: null })).toBe("9 折");
+    expect(offerDisplay({ kind: "FIXED_PRICE", discount_pct: null, fixed_price: "690", amount_off: null })).toBe("特價 $690");
+    expect(offerDisplay({ kind: "AMOUNT_OFF", discount_pct: null, fixed_price: null, amount_off: "100" })).toBe("每件折 $100");
   });
 });

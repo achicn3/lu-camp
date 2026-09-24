@@ -6,7 +6,8 @@
 
 1. **適用**：品項種類要在活動的種類開關內（沿用 docs/21 的 applies_*）；有「包含」條件時
    至少符合一個；符合任何「排除」條件就不適用。餐飲不進來（呼叫端不會傳）。
-2. **候選**：每個「不可疊加」活動**單用**各算一個價；「可疊加」的活動**全部連乘**算一個價。
+2. **候選**：每個「不可疊加」活動**單用**各算一個價；「可疊加」的活動**全部依序套用**算一個價
+   （打折乘比例、折金額直接減、特價取較低者）。
    不可疊加＝不跟任何活動併用，所以它不會再疊別的，別的也不會疊上它。
 3. **挑最划算**：取單價最低的候選；同價時依序偏好 id 較小的不可疊加活動、最後才是疊加組合
    ——同一台購物車每次算出來都一樣，退貨與報表才對得起來。
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from app.core.money import discounted_price
-from app.shared.enums import CampaignItemKind, CampaignTargetType
+from app.shared.enums import CampaignItemKind, CampaignKind, CampaignTargetType
 
 _MIN_UNIT_PRICE = Decimal(1)
 
@@ -42,15 +43,18 @@ class PromoItem:
 
 @dataclass(frozen=True)
 class PromoCampaign:
-    """一個生效中的活動（P1 只有百分比折扣）。"""
+    """一個生效中的活動：打折（discount_pct）、指定特價（fixed_price）或每件折金額（amount_off）。"""
 
     id: int
     name: str
-    discount_pct: int
+    discount_pct: int | None
     stackable: bool
     item_kinds: frozenset[CampaignItemKind]
     includes: tuple[tuple[CampaignTargetType, int], ...] = ()
     excludes: tuple[tuple[CampaignTargetType, int], ...] = ()
+    kind: CampaignKind = CampaignKind.PERCENT_OFF
+    fixed_price: Decimal | None = None
+    amount_off: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -93,8 +97,18 @@ def campaign_applies(campaign: PromoCampaign, item: PromoItem) -> bool:
     return not any(_target_matches(t, item) for t in campaign.excludes)
 
 
-def _apply(price: Decimal, pct: int) -> Decimal:
-    return max(_MIN_UNIT_PRICE, Decimal(discounted_price(price, pct)))
+def _apply(price: Decimal, campaign: PromoCampaign) -> Decimal:
+    """套一個活動後的單價（不低於 1 元）。特價取「特價」與「目前價」較低者（docs/40 §5）。"""
+    if campaign.kind == CampaignKind.FIXED_PRICE:
+        assert campaign.fixed_price is not None
+        new_price = min(price, campaign.fixed_price)
+    elif campaign.kind == CampaignKind.AMOUNT_OFF:
+        assert campaign.amount_off is not None
+        new_price = price - campaign.amount_off
+    else:
+        assert campaign.discount_pct is not None
+        new_price = Decimal(discounted_price(price, campaign.discount_pct))
+    return max(_MIN_UNIT_PRICE, new_price)
 
 
 def _chain(unit_price: Decimal, campaigns: Sequence[PromoCampaign]) -> CampaignPrice:
@@ -102,7 +116,7 @@ def _chain(unit_price: Decimal, campaigns: Sequence[PromoCampaign]) -> CampaignP
     price = unit_price
     allocations: list[tuple[int, Decimal]] = []
     for c in campaigns:
-        new_price = _apply(price, c.discount_pct) if price > _MIN_UNIT_PRICE else price
+        new_price = _apply(price, c) if price > _MIN_UNIT_PRICE else price
         if new_price < price:
             allocations.append((c.id, price - new_price))
         price = new_price

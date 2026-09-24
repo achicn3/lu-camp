@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, PlainSerializer
 
 from app.core.money import format_ntd, format_rate
 from app.modules.campaigns.schemas import CampaignTargetRead
-from app.shared.enums import CampaignStatus
+from app.shared.enums import CampaignKind, CampaignStatus
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 # 比率（毛利率等）不是金額：小數、非整數元。與金額分開宣告，才不會被金額守衛誤收，
@@ -369,7 +369,11 @@ class CampaignPerformanceRow(BaseModel):
     campaign_id: int
     name: str
     status: CampaignStatus
-    discount_pct: int
+    discount_pct: int | None
+    # 活動類型與數值（docs/40 P2）：特價／折金額時 discount_pct 為 None。
+    kind: CampaignKind = CampaignKind.PERCENT_OFF
+    fixed_price: NTDAmountOpt = None
+    amount_off: NTDAmountOpt = None
     starts_at: datetime
     ends_at: datetime
     campaign_discount_total: NTDAmount

@@ -2,6 +2,7 @@
 // discount_pct is "percentage off" (e.g. 10 = 10% off = 9 折).
 
 import type { components } from "@/lib/api-types";
+import { formatNtd, parseNtd } from "@/lib/money";
 
 type CampaignStatus = components["schemas"]["CampaignStatus"];
 
@@ -51,5 +52,21 @@ export function targetSummary(
   if (includes.length > 0) parts.push(`只限：${includes.join("、")}`);
   if (excludes.length > 0) parts.push(`排除：${excludes.join("、")}`);
   return parts.join("；");
+}
+
+/** 活動優惠的白話說法：「9 折」「特價 $690」「每件折 $100」（docs/40 P2）。 */
+export function offerDisplay(c: {
+  kind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF";
+  discount_pct?: number | null;
+  fixed_price?: string | null;
+  amount_off?: string | null;
+}): string {
+  if (c.kind === "FIXED_PRICE" && c.fixed_price != null) {
+    return `特價 $${formatNtd(parseNtd(c.fixed_price) ?? 0)}`;
+  }
+  if (c.kind === "AMOUNT_OFF" && c.amount_off != null) {
+    return `每件折 $${formatNtd(parseNtd(c.amount_off) ?? 0)}`;
+  }
+  return c.discount_pct != null ? discountDisplay(c.discount_pct) : "-";
 }
 

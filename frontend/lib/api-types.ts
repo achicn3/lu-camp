@@ -4152,6 +4152,8 @@ export interface components {
          *     寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。
          */
         CampaignCreateRequest: {
+            /** Amount Off */
+            amount_off?: number | string | null;
             /**
              * Applies Catalog
              * @default false
@@ -4173,8 +4175,12 @@ export interface components {
              */
             applies_owned_serialized: boolean;
             /** Discount Pct */
-            discount_pct: number;
+            discount_pct?: number | null;
             ends_at: components["schemas"]["AwareDateTime"];
+            /** Fixed Price */
+            fixed_price?: number | string | null;
+            /** @default PERCENT_OFF */
+            kind: components["schemas"]["CampaignKind"];
             /** Name */
             name: string;
             /**
@@ -4189,6 +4195,12 @@ export interface components {
              */
             targets: components["schemas"]["CampaignTargetInput"][];
         };
+        /**
+         * CampaignKind
+         * @description 門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額。
+         * @enum {string}
+         */
+        CampaignKind: "PERCENT_OFF" | "FIXED_PRICE" | "AMOUNT_OFF";
         /**
          * CampaignPerformanceReport
          * @description 活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。
@@ -4214,23 +4226,29 @@ export interface components {
          *     gross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。
          */
         CampaignPerformanceRow: {
+            /** Amount Off */
+            amount_off?: string | null;
             /** Campaign Discount Total */
             campaign_discount_total: string;
             /** Campaign Id */
             campaign_id: number;
             /** Discount Pct */
-            discount_pct: number;
+            discount_pct: number | null;
             /**
              * Ends At
              * Format: date-time
              */
             ends_at: string;
+            /** Fixed Price */
+            fixed_price?: string | null;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
             gross_margin_rate: string | null;
             /** Gross Turnover */
             gross_turnover: string;
+            /** @default PERCENT_OFF */
+            kind: components["schemas"]["CampaignKind"];
             /** Name */
             name: string;
             /**
@@ -4261,6 +4279,8 @@ export interface components {
         };
         /** CampaignRead */
         CampaignRead: {
+            /** Amount Off */
+            amount_off?: string | null;
             /** Applies Catalog */
             applies_catalog: boolean;
             /** Applies Consignment */
@@ -4277,14 +4297,17 @@ export interface components {
             /** Created By */
             created_by: number;
             /** Discount Pct */
-            discount_pct: number;
+            discount_pct: number | null;
             /**
              * Ends At
              * Format: date-time
              */
             ends_at: string;
+            /** Fixed Price */
+            fixed_price?: string | null;
             /** Id */
             id: number;
+            kind: components["schemas"]["CampaignKind"];
             /** Name */
             name: string;
             /** Stackable */

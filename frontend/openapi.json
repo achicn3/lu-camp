@@ -2039,6 +2039,22 @@
       "CampaignCreateRequest": {
         "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。\n\n寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。",
         "properties": {
+          "amount_off": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,13}0*$)\\d{0,12}\\.\\d{0,0}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Off"
+          },
           "applies_catalog": {
             "default": false,
             "title": "Applies Catalog",
@@ -2060,13 +2076,40 @@
             "type": "boolean"
           },
           "discount_pct": {
-            "maximum": 99.0,
-            "minimum": 1.0,
-            "title": "Discount Pct",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Pct"
           },
           "ends_at": {
             "$ref": "#/components/schemas/AwareDateTime"
+          },
+          "fixed_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,13}0*$)\\d{0,12}\\.\\d{0,0}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Price"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CampaignKind",
+            "default": "PERCENT_OFF"
           },
           "name": {
             "maxLength": 100,
@@ -2094,12 +2137,21 @@
         },
         "required": [
           "name",
-          "discount_pct",
           "starts_at",
           "ends_at"
         ],
         "title": "CampaignCreateRequest",
         "type": "object"
+      },
+      "CampaignKind": {
+        "description": "門市活動類型（docs/40 §2）。P1 只有打折；P2 加指定特價與每件折金額。",
+        "enum": [
+          "PERCENT_OFF",
+          "FIXED_PRICE",
+          "AMOUNT_OFF"
+        ],
+        "title": "CampaignKind",
+        "type": "string"
       },
       "CampaignPerformanceReport": {
         "description": "活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。",
@@ -2132,6 +2184,17 @@
       "CampaignPerformanceRow": {
         "description": "單檔活動成效（docs/21 C4、docs/40）。\n\n營運指標**只算套到此活動的明細**（sale_line_campaigns；扣掉已退數量、寄售只認有效抽成），\n疊加時一行會同時計入它參與的每個活動；transaction_count 為含任一此活動明細的交易數。\ncampaign_discount_total 為此活動實際發出的折讓（疊加時各記各的、不重複）。\ngross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。",
         "properties": {
+          "amount_off": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Off"
+          },
           "campaign_discount_total": {
             "title": "Campaign Discount Total",
             "type": "string"
@@ -2141,13 +2204,31 @@
             "type": "integer"
           },
           "discount_pct": {
-            "title": "Discount Pct",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Pct"
           },
           "ends_at": {
             "format": "date-time",
             "title": "Ends At",
             "type": "string"
+          },
+          "fixed_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Price"
           },
           "gross_margin": {
             "title": "Gross Margin",
@@ -2167,6 +2248,10 @@
           "gross_turnover": {
             "title": "Gross Turnover",
             "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CampaignKind",
+            "default": "PERCENT_OFF"
           },
           "name": {
             "title": "Name",
@@ -2226,6 +2311,17 @@
       },
       "CampaignRead": {
         "properties": {
+          "amount_off": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Off"
+          },
           "applies_catalog": {
             "title": "Applies Catalog",
             "type": "boolean"
@@ -2252,17 +2348,38 @@
             "type": "integer"
           },
           "discount_pct": {
-            "title": "Discount Pct",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Pct"
           },
           "ends_at": {
             "format": "date-time",
             "title": "Ends At",
             "type": "string"
           },
+          "fixed_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Price"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CampaignKind"
           },
           "name": {
             "title": "Name",
@@ -2301,6 +2418,7 @@
           "id",
           "store_id",
           "name",
+          "kind",
           "discount_pct",
           "applies_owned_serialized",
           "applies_owned_bulk",

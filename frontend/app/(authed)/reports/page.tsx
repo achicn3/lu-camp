@@ -20,7 +20,7 @@ import {
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
-import { targetSummary } from "@/features/campaigns/campaigns";
+import { offerDisplay, targetSummary } from "@/features/campaigns/campaigns";
 import { labelFor } from "@/features/shared/labels";
 import { InfoTip } from "@/features/shared/InfoTip";
 import { api } from "@/lib/api";
@@ -1972,7 +1972,7 @@ function CampaignPerformancePanel() {
             <tr>
               <th>活動</th>
               <th>狀態</th>
-              <th>折扣</th>
+              <th>優惠</th>
               <th>期間</th>
               <th>活動折讓</th>
               <th>營業額</th>
@@ -1994,7 +1994,7 @@ function CampaignPerformancePanel() {
                   )}
                 </td>
                 <td>{labelFor(CAMPAIGN_STATUS_LABELS, row.status)}</td>
-                <td>{row.discount_pct}%</td>
+                <td>{offerDisplay(row)}</td>
                 <td>
                   {fmtDate(row.starts_at)} ~ {fmtDate(row.ends_at)}
                 </td>
