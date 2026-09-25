@@ -1,6 +1,6 @@
 // 排隊收購 I4 煙霧（docs/42 §7、§8）：付款後的一批（買斷折疊椅 ×2＋散裝營釘 ×10）→ 排隊收購頁進「待整理上架」
 // → 清單看到這一批 → 整理上架頁：缺分類標紅、整批套用分類、第一件補品牌 → 營釘先不勾、上架 2 件並印 2 張標籤
-// → 部分上架、清單顯示進度 → 營釘改每件售價再上架 → 全部上架；上架後 POS 找得到可賣。
+// → 部分上架、清單顯示進度 → 營釘少 2 件記差異 → 改每件售價再上架 → 全部上架；上架後 POS 找得到可賣。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-listing-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -145,7 +145,7 @@ try {
   // 同款但第 2 張賣便宜一點
   await cards.first().locator(".intake-list-unit").nth(1).getByLabel(/售價/).fill("450");
   // 營釘先不上
-  const pegCard = cards.filter({ hasText: "散裝 ×10" });
+  const pegCard = cards.filter({ hasText: "散裝 ×" });
   await pegCard.getByRole("checkbox").uncheck();
   await page.screenshot({ path: join(SHOTS, "03-filled.png"), fullPage: true });
 
@@ -163,6 +163,18 @@ try {
   const partial = await api(mgr, "GET", `/api/v1/intake-batches/${batch.id}`);
   ok("批次變「部分上架」", partial.json.status === "PARTIALLY_LISTED", partial.json.status);
   await page.screenshot({ path: join(SHOTS, "04-partial.png"), fullPage: true });
+
+  // 營釘點清只剩 8 件：記差異
+  await pegCard.getByRole("button", { name: "少了／壞了" }).click();
+  await pegCard.getByLabel("少了幾件").fill("2");
+  await pegCard.getByRole("button", { name: "找不到" }).click();
+  await page.screenshot({ path: join(SHOTS, "04b-discrepancy-form.png"), fullPage: true });
+  await pegCard.getByRole("button", { name: /確定/ }).click();
+  await page.getByText("營釘 少 2 件：找不到").waitFor({ timeout: 8000 });
+  ok("記差異後營釘剩 8 件、差異紀錄列出來", (await pegCard.innerText()).includes("散裝 ×8"));
+  const lotAfter = await api(mgr, "GET", `/api/v1/intake-batches/${batch.id}/items`);
+  const pegs = lotAfter.json.find((i) => i.kind === "BULK_LOT");
+  ok("每件成本不變（仍 $5）", pegs.qty === 8 && pegs.acquisition_cost === "5", JSON.stringify({ qty: pegs.qty, cost: pegs.acquisition_cost }));
 
   // 營釘改每件 25 再上架
   await pegCard.getByLabel(/售價/).fill("25");

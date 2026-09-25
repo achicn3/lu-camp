@@ -7146,6 +7146,87 @@
         "title": "IntakeCancelRequest",
         "type": "object"
       },
+      "IntakeDiscrepancyRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "item_id",
+          "name",
+          "qty",
+          "reason",
+          "created_at"
+        ],
+        "title": "IntakeDiscrepancyRead",
+        "type": "object"
+      },
+      "IntakeDiscrepancyRequest": {
+        "description": "上架時發現少件或壞到不能賣。二手商品一件一件記（qty 固定 1）；散裝記少了幾件。",
+        "properties": {
+          "id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "SERIALIZED",
+              "BULK_LOT"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "qty": {
+            "default": 1,
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "reason"
+        ],
+        "title": "IntakeDiscrepancyRequest",
+        "type": "object"
+      },
       "IntakeDisposition": {
         "description": "叫號確認時每一列的處置（docs/42 §5）。",
         "enum": [
@@ -22762,6 +22843,114 @@
           }
         ],
         "summary": "Cancel Intake Batch",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/discrepancies": {
+      "get": {
+        "description": "這一批上架時記過的差異。",
+        "operationId": "listIntakeDiscrepancies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntakeDiscrepancyRead"
+                  },
+                  "title": "Response Listintakediscrepancies",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Intake Discrepancies",
+        "tags": [
+          "intake"
+        ]
+      },
+      "post": {
+        "description": "上架時發現少件或壞到不能賣：記差異，那幾件報廢出庫（成交件數與成本不改）。",
+        "operationId": "reportIntakeDiscrepancy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeDiscrepancyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeDiscrepancyRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report Intake Discrepancy",
         "tags": [
           "intake"
         ]

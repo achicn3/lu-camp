@@ -18,6 +18,8 @@ from app.modules.intake.schemas import (
     IntakeBatchCreateRequest,
     IntakeBatchRead,
     IntakeCancelRequest,
+    IntakeDiscrepancyRead,
+    IntakeDiscrepancyRequest,
     IntakeDispositionRequest,
     IntakeItemRead,
     IntakeLineCreateRequest,
@@ -37,6 +39,7 @@ from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
     IdempotencyKeyConflict,
+    InsufficientStock,
     IntakeBatchNotFound,
     IntakeConflict,
     InvalidIntakeLine,
@@ -79,6 +82,7 @@ _STATUS: dict[type[DomainError], int] = {
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     OwnershipValidationError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    InsufficientStock: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -308,3 +312,39 @@ async def list_intake_batch_items(
             user.store_id, batch_id, payload, actor_user_id=user.id
         )
     return result
+
+
+@router.post(
+    "/{batch_id}/discrepancies",
+    response_model=IntakeDiscrepancyRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="reportIntakeDiscrepancy",
+)
+async def report_intake_discrepancy(
+    batch_id: int, payload: IntakeDiscrepancyRequest, session: SessionDep, user: AuthDep
+) -> IntakeDiscrepancyRead:
+    """上架時發現少件或壞到不能賣：記差異，那幾件報廢出庫（成交件數與成本不改）。"""
+    service = IntakeService(session)
+    async with _write(session):
+        row = await service.report_discrepancy(
+            user.store_id, batch_id, payload, actor_user_id=user.id
+        )
+        row_id = row.id
+    records = await service.discrepancies(user.store_id, batch_id)
+    return next(record for record in records if record.id == row_id)
+
+
+@router.get(
+    "/{batch_id}/discrepancies",
+    response_model=list[IntakeDiscrepancyRead],
+    operation_id="listIntakeDiscrepancies",
+)
+async def list_intake_discrepancies(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> list[IntakeDiscrepancyRead]:
+    """這一批上架時記過的差異。"""
+    try:
+        return await IntakeService(session).discrepancies(user.store_id, batch_id)
+    except DomainError as exc:
+        code = _STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=code, detail=str(exc)) from exc

@@ -15,6 +15,7 @@ import {
   missingOf,
   printListedLabels,
 } from "@/features/intake/listing";
+import { DiscrepancyAction } from "@/features/intake/DiscrepancyAction";
 import { useIntakeReceiptPrint } from "@/features/intake/receipt";
 import { StatusBadge } from "@/features/intake/StatusBadge";
 import { api } from "@/lib/api";
@@ -64,7 +65,11 @@ function GroupCard({
   onChangeAll,
   onChangeOne,
   onCategoryCreated,
+  onDiscrepancy,
+  batchId,
 }: {
+  batchId: number;
+  onDiscrepancy: () => void;
   items: Item[];
   draftOf: (item: Item) => Draft;
   checked: (item: Item) => boolean;
@@ -148,6 +153,7 @@ function GroupCard({
         ) : (
           <span className="form-success">資料齊了</span>
         )}
+        {!multi && <DiscrepancyAction batchId={batchId} item={first} onDone={onDiscrepancy} />}
       </div>
       {multi && (
         <p className="hint">品牌、型號、分類、品名填一次，這 {items.length} 件都會套用；成色與售價可以每件不同。</p>
@@ -256,6 +262,9 @@ function GroupCard({
               {gradeField(item)}
               {priceField(item)}
               {noteField(item, "intake-list-unit-note")}
+              <div className="intake-list-unit-action">
+                <DiscrepancyAction batchId={batchId} item={item} onDone={onDiscrepancy} />
+              </div>
             </div>
           ))}
         </div>
@@ -297,6 +306,15 @@ export default function IntakeListingPage() {
       if (!data) throw new Error(detail(apiErr) ?? "讀取商品失敗");
       return data;
     },
+  });
+  const discrepancies = useQuery({
+    queryKey: ["intake-discrepancies", batchId],
+    queryFn: async () =>
+      (
+        await api.GET("/api/v1/intake-batches/{batch_id}/discrepancies", {
+          params: { path: { batch_id: batchId } },
+        })
+      ).data ?? [],
   });
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
@@ -360,6 +378,7 @@ export default function IntakeListingPage() {
     void queryClient.invalidateQueries({ queryKey: ["intake-items", batchId] });
     void queryClient.invalidateQueries({ queryKey: ["intake-batch", batchId] });
     void queryClient.invalidateQueries({ queryKey: ["intake-awaiting-listing"] });
+    void queryClient.invalidateQueries({ queryKey: ["intake-discrepancies", batchId] });
   }
 
   async function send(edits: Edit[], publish: boolean) {
@@ -558,6 +577,8 @@ export default function IntakeListingPage() {
               onChangeAll={(change) => patchMany(group, change)}
               onChangeOne={(item, change) => patchMany([item], change)}
               onCategoryCreated={() => void categoriesQuery.refetch()}
+              batchId={batchId}
+              onDiscrepancy={refresh}
             />
           ))}
         </>
@@ -607,6 +628,21 @@ export default function IntakeListingPage() {
           </button>
         )}
       </div>
+
+      {(discrepancies.data ?? []).length > 0 && (
+        <div className="card">
+          <h2>差異紀錄</h2>
+          <p className="hint">整理時發現少了或壞了、已經報廢的件；成本與客人簽的件數不變。</p>
+          <ul className="intake-discrepancy-list">
+            {(discrepancies.data ?? []).map((d) => (
+              <li key={d.id}>
+                {d.name} 少 {d.qty} 件：{d.reason}
+                <span className="hint">（{formatTaipeiDateTime(d.created_at, { omitYear: true })}）</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {listed.length > 0 && (
         <div className="card">

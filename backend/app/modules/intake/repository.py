@@ -5,7 +5,12 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.intake.models import IntakeBatch, IntakeBatchAcquisition, IntakeLine
+from app.modules.intake.models import (
+    IntakeBatch,
+    IntakeBatchAcquisition,
+    IntakeDiscrepancy,
+    IntakeLine,
+)
 from app.shared.enums import IntakeBatchStatus
 
 
@@ -22,7 +27,9 @@ class IntakeRepository:
         )
         return (current or 0) + 1
 
-    def add(self, row: IntakeBatch | IntakeLine | IntakeBatchAcquisition) -> None:
+    def add(
+        self, row: IntakeBatch | IntakeLine | IntakeBatchAcquisition | IntakeDiscrepancy
+    ) -> None:
         self._session.add(row)
 
     async def get_batch(
@@ -75,6 +82,28 @@ class IntakeRepository:
     async def delete_line(self, line: IntakeLine) -> None:
         await self._session.delete(line)
         await self._session.flush()
+
+    async def discrepancies_for(self, store_id: int, batch_id: int) -> list[IntakeDiscrepancy]:
+        stmt = (
+            select(IntakeDiscrepancy)
+            .where(IntakeDiscrepancy.store_id == store_id, IntakeDiscrepancy.batch_id == batch_id)
+            .order_by(IntakeDiscrepancy.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def bulk_shortages(self, store_id: int, lot_ids: list[int]) -> dict[int, int]:
+        """散裝各堆記過的短少件數加總（算「上架了幾件」用：總件數扣掉短少）。"""
+        if not lot_ids:
+            return {}
+        rows = await self._session.execute(
+            select(IntakeDiscrepancy.bulk_lot_id, func.sum(IntakeDiscrepancy.qty))
+            .where(
+                IntakeDiscrepancy.store_id == store_id,
+                IntakeDiscrepancy.bulk_lot_id.in_(lot_ids),
+            )
+            .group_by(IntakeDiscrepancy.bulk_lot_id)
+        )
+        return {int(lot_id): int(total) for lot_id, total in rows if lot_id is not None}
 
     async def acquisition_ids_for(
         self, store_id: int, batch_ids: list[int]

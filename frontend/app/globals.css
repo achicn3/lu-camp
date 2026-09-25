@@ -4984,3 +4984,40 @@ a.btn-ghost {
     grid-column: 1 / -1;
   }
 }
+/* 上架差異（少了／壞了） */
+.intake-discrepancy-btn {
+  margin-left: auto;
+}
+.intake-discrepancy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+}
+.intake-list-unit-action {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+.intake-discrepancy-list {
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+.intake-discrepancy input {
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-md);
+}
+.intake-discrepancy input[aria-label="少了幾件"] {
+  width: 5rem;
+}
+.intake-discrepancy input[aria-label="差異原因"] {
+  flex: 1 1 12rem;
+}

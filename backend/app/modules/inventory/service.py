@@ -1187,6 +1187,73 @@ class InventoryService:
         )
         return lot, publish
 
+    async def write_off_pending_serialized(
+        self, store_id: int, item_id: int, *, ref_id: int, actor_user_id: int
+    ) -> SerializedItem | None:
+        """待整理的序號品少了或壞了（上架差異）：報廢出庫。成本不動。找不到→None。"""
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
+        if item is None:
+            return None
+        if item.status is not SerializedItemStatus.PENDING_LISTING:
+            raise InvalidStateTransition(f"「{item.name}」不在待整理，不能記差異")
+        item.status = SerializedItemStatus.WRITTEN_OFF
+        await self.record_stock_out(
+            store_id,
+            ItemKind.SERIALIZED,
+            qty=1,
+            reason=StockReason.WRITE_OFF,
+            ref_type="intake_discrepancy",
+            ref_id=ref_id,
+            serialized_item_id=item.id,
+        )
+        await self._audit_pending(
+            store_id,
+            actor_user_id,
+            "serialized_item",
+            item_id,
+            {"status": SerializedItemStatus.PENDING_LISTING.value},
+            {"status": SerializedItemStatus.WRITTEN_OFF.value, "discrepancy_id": ref_id},
+            publish=False,
+        )
+        return item
+
+    async def short_pending_bulk_lot(
+        self, store_id: int, lot_id: int, *, qty: int, ref_id: int, actor_user_id: int
+    ) -> BulkLot | None:
+        """待整理的散裝少了幾件（上架差異）：剩餘件數扣掉、報廢出庫；全少了就整堆報廢。
+
+        總件數與成本不改——每件成本照收購時的「成本 ÷ 總件數」，少掉的就是損失。
+        """
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
+        if lot is None:
+            return None
+        if lot.status is not BulkLotStatus.PENDING_LISTING:
+            raise InvalidStateTransition(f"「{lot.name}」不在待整理，不能記差異")
+        if qty < 1 or qty > lot.remaining_qty:
+            raise InsufficientStock(
+                f"「{lot.name}」目前只有 {lot.remaining_qty} 件，少的件數不能超過"
+            )
+        before: dict[str, object] = {"remaining_qty": lot.remaining_qty, "status": lot.status.value}
+        lot.remaining_qty -= qty
+        if lot.remaining_qty == 0:
+            lot.status = BulkLotStatus.WRITTEN_OFF
+        await self.record_stock_out(
+            store_id,
+            ItemKind.BULK_LOT,
+            qty=qty,
+            reason=StockReason.WRITE_OFF,
+            ref_type="intake_discrepancy",
+            ref_id=ref_id,
+            bulk_lot_id=lot.id,
+        )
+        after: dict[str, object] = {
+            "remaining_qty": lot.remaining_qty,
+            "status": lot.status.value,
+            "discrepancy_id": ref_id,
+        }
+        await self._audit_pending(store_id, actor_user_id, "bulk_lot", lot_id, before, after, False)
+        return lot
+
     @staticmethod
     def _apply_pending_changes(
         item: SerializedItem | BulkLot, changes: dict[str, Any], *, price_field: str

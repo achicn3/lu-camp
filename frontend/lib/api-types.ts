@@ -1887,6 +1887,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/{batch_id}/discrepancies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Intake Discrepancies
+         * @description 這一批上架時記過的差異。
+         */
+        get: operations["listIntakeDiscrepancies"];
+        put?: never;
+        /**
+         * Report Intake Discrepancy
+         * @description 上架時發現少件或壞到不能賣：記差異，那幾件報廢出庫（成交件數與成本不改）。
+         */
+        post: operations["reportIntakeDiscrepancy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}/items": {
         parameters: {
             query?: never;
@@ -6394,6 +6418,45 @@ export interface components {
         IntakeBatchStatus: "PENDING_ESTIMATE" | "ESTIMATING" | "AWAITING_CONFIRM" | "SIGNED" | "PAID" | "PARTIALLY_LISTED" | "LISTED" | "CANCELLED";
         /** IntakeCancelRequest */
         IntakeCancelRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /** IntakeDiscrepancyRead */
+        IntakeDiscrepancyRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Item Id */
+            item_id: number;
+            kind: components["schemas"]["ItemKind"];
+            /** Name */
+            name: string;
+            /** Qty */
+            qty: number;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * IntakeDiscrepancyRequest
+         * @description 上架時發現少件或壞到不能賣。二手商品一件一件記（qty 固定 1）；散裝記少了幾件。
+         */
+        IntakeDiscrepancyRequest: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "SERIALIZED" | "BULK_LOT";
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
             /** Reason */
             reason: string;
         };
@@ -13242,6 +13305,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listIntakeDiscrepancies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeDiscrepancyRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reportIntakeDiscrepancy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeDiscrepancyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeDiscrepancyRead"];
                 };
             };
             /** @description Validation Error */

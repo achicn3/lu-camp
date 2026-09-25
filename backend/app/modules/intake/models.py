@@ -141,3 +141,33 @@ class IntakeBatchAcquisition(Base, TimestampMixin):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("intake_batches.id"), index=True)
     acquisition_id: Mapped[int] = mapped_column(ForeignKey("acquisitions.id"))
+
+
+class IntakeDiscrepancy(Base, TimestampMixin):
+    """上架時的差異（docs/42 §8）：少件或壞到不能賣，那幾件出庫報廢。
+
+    成交件數與成本不改（客人簽過）；品名存當下快照，之後改品名也看得出當時記的是哪件。
+    序號品或散裝擇一。
+    """
+
+    __tablename__ = "intake_discrepancies"
+    __table_args__ = (
+        CheckConstraint("qty >= 1", name="ck_intake_discrepancies_qty_pos"),
+        CheckConstraint(
+            "(serialized_item_id IS NULL) <> (bulk_lot_id IS NULL)",
+            name="ck_intake_discrepancies_one_item",
+        ),
+        CheckConstraint(
+            "serialized_item_id IS NULL OR qty = 1", name="ck_intake_discrepancies_serialized_one"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("intake_batches.id"), index=True)
+    serialized_item_id: Mapped[int | None] = mapped_column(ForeignKey("serialized_items.id"))
+    bulk_lot_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_lots.id"))
+    name: Mapped[str] = mapped_column(String(150))
+    qty: Mapped[int] = mapped_column()
+    reason: Mapped[str] = mapped_column(String(200))
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))

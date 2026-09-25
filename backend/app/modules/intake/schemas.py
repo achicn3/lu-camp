@@ -170,6 +170,25 @@ class IntakeListingRequest(BaseModel):
     publish: bool = False
 
 
+class IntakeDiscrepancyRequest(BaseModel):
+    """上架時發現少件或壞到不能賣。二手商品一件一件記（qty 固定 1）；散裝記少了幾件。"""
+
+    kind: Literal[ItemKind.SERIALIZED, ItemKind.BULK_LOT]
+    id: Annotated[int, Field(gt=0)]
+    qty: Annotated[int, Field(ge=1, le=999)] = 1
+    reason: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class IntakeDiscrepancyRead(BaseModel):
+    id: int
+    kind: ItemKind
+    item_id: int
+    name: str
+    qty: int
+    reason: str
+    created_at: datetime
+
+
 class IntakeListingResult(BaseModel):
     batch_status: IntakeBatchStatus
     listed: list[IntakeItemRead]

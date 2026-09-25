@@ -16,11 +16,18 @@ from app.core.time import store_date, utc_now
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn, AcquisitionLotIn
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.contacts.service import ContactService
-from app.modules.intake.models import IntakeBatch, IntakeBatchAcquisition, IntakeLine
+from app.modules.intake.models import (
+    IntakeBatch,
+    IntakeBatchAcquisition,
+    IntakeDiscrepancy,
+    IntakeLine,
+)
 from app.modules.intake.repository import IntakeRepository
 from app.modules.intake.schemas import (
     IntakeAwaitingListingRead,
     IntakeBatchRead,
+    IntakeDiscrepancyRead,
+    IntakeDiscrepancyRequest,
     IntakeDispositionRequest,
     IntakeItemEdit,
     IntakeItemRead,
@@ -545,10 +552,12 @@ class IntakeService:
         batch_of = {acq: bid for bid, ids in acquisitions.items() for acq in ids}
         pending: dict[int, int] = {}
         listed: dict[int, int] = {}
-        for item in await self._inventory_items(store_id, list(batch_of)):
+        inventory_items = await self._inventory_items(store_id, list(batch_of))
+        shortages = await self._shortages(store_id, inventory_items)
+        for item in inventory_items:
             batch_id = batch_of[item.acquisition_id or 0]
             counts = pending if self._is_pending(item) else listed
-            counts[batch_id] = counts.get(batch_id, 0) + self._pieces(item)
+            counts[batch_id] = counts.get(batch_id, 0) + self._pieces(item, shortages)
         names = await self._contacts.names_for(store_id, list({b.contact_id for b in batches}))
         today = store_date(utc_now())
         rows = [
@@ -575,8 +584,9 @@ class IntakeService:
         line_nos = self._line_numbers(await self._repo.lines_for(store_id, [batch.id]), everything)
         items = [item for item in everything if item.status not in _GONE_STATUSES]
         names = await self._reference_names(store_id, items)
+        shortages = await self._shortages(store_id, items)
         return [
-            self._item_read(item, names).model_copy(
+            self._item_read(item, names, shortages).model_copy(
                 update={"line_no": line_nos.get((self._kind(item), item.id))}
             )
             for item in items
@@ -654,16 +664,85 @@ class IntakeService:
                 )
             if result is not None and result[1]:
                 listed.append(result[0])
+        await self._refresh_listing_status(store_id, batch)
+        names = await self._reference_names(store_id, listed)
+        shortages = await self._shortages(store_id, listed)
+        return IntakeListingResult(
+            batch_status=batch.status,
+            listed=[self._item_read(item, names, shortages) for item in listed],
+        )
+
+    async def report_discrepancy(
+        self,
+        store_id: int,
+        batch_id: int,
+        request: IntakeDiscrepancyRequest,
+        *,
+        actor_user_id: int,
+    ) -> IntakeDiscrepancy:
+        """上架時發現少件或壞到不能賣：記差異、那幾件報廢出庫。成交件數與成本不改。"""
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        owned = {
+            (self._kind(item), item.id): item for item in await self._batch_items(store_id, batch)
+        }
+        item = owned.get((request.kind, request.id))
+        if item is None:
+            raise IntakeConflict(f"商品 {request.id} 不是這一批的")
+        if isinstance(item, SerializedItem) and request.qty != 1:
+            raise InvalidIntakeLine("二手商品一件一件記，少幾件就記幾次")
+        row = IntakeDiscrepancy(
+            store_id=store_id,
+            batch_id=batch.id,
+            serialized_item_id=item.id if isinstance(item, SerializedItem) else None,
+            bulk_lot_id=item.id if isinstance(item, BulkLot) else None,
+            name=item.name,
+            qty=request.qty,
+            reason=request.reason.strip(),
+            created_by_user_id=actor_user_id,
+        )
+        self._repo.add(row)
+        await self._session.flush()
+        inventory = InventoryService(self._session)
+        if isinstance(item, SerializedItem):
+            await inventory.write_off_pending_serialized(
+                store_id, item.id, ref_id=row.id, actor_user_id=actor_user_id
+            )
+        else:
+            await inventory.short_pending_bulk_lot(
+                store_id, item.id, qty=request.qty, ref_id=row.id, actor_user_id=actor_user_id
+            )
+        await self._refresh_listing_status(store_id, batch)
+        return row
+
+    async def discrepancies(self, store_id: int, batch_id: int) -> list[IntakeDiscrepancyRead]:
+        batch = await self._batch(store_id, batch_id)
+        return [
+            IntakeDiscrepancyRead(
+                id=row.id,
+                kind=ItemKind.SERIALIZED if row.serialized_item_id else ItemKind.BULK_LOT,
+                item_id=row.serialized_item_id or row.bulk_lot_id or 0,
+                name=row.name,
+                qty=row.qty,
+                reason=row.reason,
+                created_at=row.created_at,
+            )
+            for row in await self._repo.discrepancies_for(store_id, batch.id)
+        ]
+
+    async def _refresh_listing_status(self, store_id: int, batch: IntakeBatch) -> None:
+        """沒有待整理的了且有上架過 → 全部上架；有上架過但還有待整理 → 部分上架。"""
         remaining = await self._batch_items(store_id, batch)
         if remaining and not any(self._is_pending(item) for item in remaining):
             batch.status = IntakeBatchStatus.LISTED
         elif any(not self._is_pending(item) for item in remaining):
             batch.status = IntakeBatchStatus.PARTIALLY_LISTED
         await self._session.flush()
-        names = await self._reference_names(store_id, listed)
-        return IntakeListingResult(
-            batch_status=batch.status, listed=[self._item_read(item, names) for item in listed]
-        )
+
+    async def _shortages(
+        self, store_id: int, items: list[SerializedItem | BulkLot]
+    ) -> dict[int, int]:
+        lot_ids = [item.id for item in items if isinstance(item, BulkLot)]
+        return await self._repo.bulk_shortages(store_id, lot_ids)
 
     async def _reference_names(
         self, store_id: int, items: list[SerializedItem | BulkLot]
@@ -724,9 +803,14 @@ class IntakeService:
     def _kind(item: SerializedItem | BulkLot) -> ItemKind:
         return ItemKind.SERIALIZED if isinstance(item, SerializedItem) else ItemKind.BULK_LOT
 
-    @staticmethod
-    def _pieces(item: SerializedItem | BulkLot) -> int:
-        return 1 if isinstance(item, SerializedItem) else item.total_qty
+    @classmethod
+    def _pieces(cls, item: SerializedItem | BulkLot, shortages: dict[int, int]) -> int:
+        """件數：序號品 1；散裝待整理算現有的、已上架算總件數扣掉記過的短少（賣掉的不扣）。"""
+        if isinstance(item, SerializedItem):
+            return 1
+        if cls._is_pending(item):
+            return item.remaining_qty
+        return item.total_qty - shortages.get(item.id, 0)
 
     @staticmethod
     def _changes(edit: IntakeItemEdit) -> dict[str, object]:
@@ -741,7 +825,12 @@ class IntakeService:
         return changes
 
     @classmethod
-    def _item_read(cls, item: SerializedItem | BulkLot, names: _ReferenceNames) -> IntakeItemRead:
+    def _item_read(
+        cls,
+        item: SerializedItem | BulkLot,
+        names: _ReferenceNames,
+        shortages: dict[int, int] | None = None,
+    ) -> IntakeItemRead:
         pending = cls._is_pending(item)
         missing: list[str] = []
         if pending and item.category_id is None:
@@ -790,7 +879,7 @@ class IntakeService:
             category_id=item.category_id,
             category_name=names.categories.get(item.category_id) if item.category_id else None,
             listed_price=item.unit_price,
-            qty=item.total_qty,
+            qty=cls._pieces(item, shortages or {}),
             acquisition_cost=per_piece,
             retail_price=item.retail_price,
             note=item.note,

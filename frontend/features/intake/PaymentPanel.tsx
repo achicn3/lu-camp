@@ -145,12 +145,18 @@ export function PaymentPanel({
       <div className="card intake-pay" aria-label="付款結果">
         <h2>已付款</h2>
         <p>
-          付給客人 <strong className="money">${formatNtd(payable)}</strong>
-          ，收下的商品已經放進「待整理」，等空檔補資料、貼標籤再上架。
+          付給客人 <strong className="money">${formatNtd(payable)}</strong>，
+          {batch.status === "LISTED"
+            ? "收下的商品都已經上架了。"
+            : batch.status === "PARTIALLY_LISTED"
+              ? "部分商品已經上架，剩下的還在「待整理」，等空檔補資料、貼標籤再上架。"
+              : "收下的商品已經放進「待整理」，等空檔補資料、貼標籤再上架。"}
         </p>
-        <Link href={`/acquisition/intake/${batch.id}/listing`} className="btn-secondary">
-          開始整理上架
-        </Link>
+        {batch.status !== "LISTED" && (
+          <Link href={`/acquisition/intake/${batch.id}/listing`} className="btn-secondary">
+            {batch.status === "PARTIALLY_LISTED" ? "繼續整理上架" : "開始整理上架"}
+          </Link>
+        )}
         {batch.acquisition_ids.length > 0 && (
           <p className="hint">
             已成立收購單 {batch.acquisition_ids.map((id) => `#${id}`).join("、")}；要作廢請到{" "}
