@@ -6218,6 +6218,8 @@ export interface components {
             lines: components["schemas"]["IntakeLineRead"][];
             /** Note */
             note?: string | null;
+            /** Slip Code */
+            slip_code: string;
             status: components["schemas"]["IntakeBatchStatus"];
             /**
              * Ticket Date

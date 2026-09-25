@@ -23,6 +23,7 @@ from agent.interfaces import (
     CallTicketPayload,
     DeviceKind,
     DeviceStatus,
+    IntakeSlipPayload,
     InvoicePayload,
     KitchenTicketPayload,
     SalePayload,
@@ -85,6 +86,7 @@ class FakeReceiptPrinter:
         self.raw_prints: list[bytes] = []
         self.acquisitions: list[tuple[AcquisitionReceiptPayload, StoreHeader]] = []
         self.kitchen_tickets: list[KitchenTicketPayload] = []
+        self.intake_slips: list[IntakeSlipPayload] = []
         self.call_tickets: list[CallTicketPayload] = []
 
     def _guard(self) -> None:
@@ -128,6 +130,10 @@ class FakeReceiptPrinter:
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
         self._guard()
         self.kitchen_tickets.append(ticket)
+
+    def print_intake_slip(self, slip: IntakeSlipPayload) -> None:
+        self._guard()
+        self.intake_slips.append(slip)
 
 
 class FakeCashDrawer:

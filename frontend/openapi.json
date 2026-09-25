@@ -6987,6 +6987,10 @@
             ],
             "title": "Note"
           },
+          "slip_code": {
+            "title": "Slip Code",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/IntakeBatchStatus"
           },
@@ -7009,6 +7013,7 @@
           "ticket_date",
           "ticket_no",
           "ticket_label",
+          "slip_code",
           "contact_id",
           "contact_name",
           "declared_item_count",

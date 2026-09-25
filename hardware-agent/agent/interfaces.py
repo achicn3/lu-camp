@@ -178,6 +178,25 @@ class CallTicketPayload(BaseModel):
     created_at: datetime
 
 
+class IntakeSlipPayload(BaseModel):
+    """收購佇列收件單（docs/42 裁示 3）：收據機印相同的兩份——客人聯給客人、商品聯放在那批商品上。
+
+    同一批只有一個號碼、一個條碼；不帶店家抬頭與金額（這時還沒估價）。
+    `label`（A001）走三倍字，只作用於單位元組模式 → 限 ASCII；`slip_code` 印成 Code39 條碼，
+    之後掃它直接打開那一批 → 限 Code39 能編的大寫英數與 `-`。
+    """
+
+    store_id: int
+    batch_id: int = Field(gt=0)
+    label: str = Field(min_length=1, max_length=10, pattern=r"^[\x20-\x7E]+$")
+    slip_code: str = Field(min_length=1, max_length=20, pattern=r"^[0-9A-Z-]+$")
+    seller_name: str = Field(min_length=1, max_length=60)
+    declared_item_count: int = Field(ge=1)
+    created_at: datetime
+    # 報到時印兩份；補印可只印一份（例如商品聯掉了）。
+    copies: int = Field(default=2, ge=1, le=3)
+
+
 class KitchenTicketPayload(BaseModel):
     """出餐單列印輸入（docs/35）：結帳後給吧台/廚房核對出餐用的內部作業單。
 
@@ -372,6 +391,10 @@ class ReceiptPrinter(Protocol):
 
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
         """列印出餐單（docs/35：放大的桌號＋餐飲品項；無抬頭、無金額）。"""
+        ...
+
+    def print_intake_slip(self, slip: IntakeSlipPayload) -> None:
+        """列印收購佇列收件單（docs/42：號碼＋賣方＋件數＋條碼；客人聯與商品聯）。"""
         ...
 
 

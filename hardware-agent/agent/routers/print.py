@@ -19,6 +19,7 @@ from agent.deps import DevicesDep, OkResponse, ok_response
 from agent.interfaces import (
     AcquisitionReceiptPayload,
     CallTicketPayload,
+    IntakeSlipPayload,
     InvoicePayload,
     KitchenTicketPayload,
     RawPrintPayload,
@@ -88,6 +89,16 @@ async def print_call_ticket(ticket: CallTicketPayload, devices: DevicesDep) -> O
     比照出餐單**不取店家抬頭**：客人就站在店裡，不該因後端 stores 取不到就印不出號碼。
     """
     await anyio.to_thread.run_sync(devices.receipt_printer.print_call_ticket, ticket)
+    return ok_response(devices, "receipt")
+
+
+@router.post("/intake-slip", response_model=OkResponse, operation_id="printIntakeSlip")
+async def print_intake_slip(slip: IntakeSlipPayload, devices: DevicesDep) -> OkResponse:
+    """列印收購佇列收件單（docs/42）：收據機印兩份（客人聯＋商品聯），補印可只印一份。
+
+    **一律走收據機**（同號碼牌理由：發票機只收證明聯、字型 ROM 也不同）；不取店家抬頭。
+    """
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_intake_slip, slip)
     return ok_response(devices, "receipt")
 
 

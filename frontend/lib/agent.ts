@@ -144,6 +144,32 @@ export async function printCallTicket(t: {
   });
 }
 
+/**
+ * 列印收購佇列收件單（docs/42 裁示 3）：收據機印兩份相同的單（客人聯＋商品聯）；補印可只印一份。
+ * 走收據機（代理端 `/print/intake-slip` 決定），不帶金額。
+ */
+export async function printIntakeSlip(slip: {
+  storeId: number;
+  batchId: number;
+  label: string;
+  slipCode: string;
+  sellerName: string;
+  declaredItemCount: number;
+  createdAt: string;
+  copies?: number;
+}): Promise<void> {
+  await postAgent("/print/intake-slip", {
+    store_id: slip.storeId,
+    batch_id: slip.batchId,
+    label: slip.label,
+    slip_code: slip.slipCode,
+    seller_name: slip.sellerName,
+    declared_item_count: slip.declaredItemCount,
+    created_at: slip.createdAt,
+    copies: slip.copies ?? 2,
+  });
+}
+
 export async function printKitchenTicket(
   sale: SaleRead,
   serviceMode: "DINE_IN" | "TAKEOUT",

@@ -95,6 +95,7 @@ async def test_create_batch_gets_daily_a_number(
     assert first["status"] == "PENDING_ESTIMATE"
     assert first["declared_item_count"] == 3
     assert first["contact_name"] == "王小明"
+    assert first["slip_code"] == f"IN{first['id']:06d}"  # 收件單條碼：永久唯一
 
 
 async def test_numbering_restarts_each_taipei_day(db_session: AsyncSession) -> None:

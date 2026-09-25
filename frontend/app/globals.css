@@ -4511,3 +4511,115 @@ a.btn-ghost {
   padding: 0;
   margin: 0;
 }
+
+/* ── 收購佇列（docs/42）──────────────────────────────────────────── */
+.intake-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+/* 佇列與估價表格要看得到整列：卡片不限寬，表格放進可橫向捲動的框（手機不撐破整頁）。 */
+.intake-page .card {
+  max-width: none;
+}
+.intake-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+.intake-queue th,
+.intake-lines th,
+.intake-queue td,
+.intake-lines td {
+  white-space: nowrap;
+}
+.intake-queue td.intake-wrap,
+.intake-lines td.intake-wrap {
+  white-space: normal;
+  min-width: 8rem;
+}
+.intake-checkin {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.intake-checkin-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.intake-queue-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.intake-queue,
+.intake-lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+.intake-queue th,
+.intake-queue td,
+.intake-lines th,
+.intake-lines td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.intake-ticket {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--accent);
+}
+.intake-ticket-big {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.intake-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+}
+.intake-line-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.intake-line-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+.intake-field-wide {
+  grid-column: span 2;
+}
+.intake-custom-discount {
+  width: 6rem;
+}
+.intake-print,
+.intake-line-actions,
+.intake-row-actions,
+.intake-footer,
+.intake-cancel,
+.intake-disposition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.intake-line-actions {
+  justify-content: flex-end;
+}
+.intake-inline-field input {
+  width: 3.5rem;
+  margin: 0 var(--sp-1);
+}
+@media (max-width: 640px) {
+  .intake-field-wide {
+    grid-column: auto;
+  }
+}

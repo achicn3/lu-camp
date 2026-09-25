@@ -28,6 +28,7 @@ from app.shared.exceptions import IntakeBatchNotFound, IntakeConflict, InvalidIn
 _ALLOCATION_RETRIES = 3
 _UNIQUE_VIOLATION_SQLSTATE = "23505"
 TICKET_PREFIX = "A"  # 收購用 A 字首，與餐飲叫號分開（裁示 2）
+SLIP_CODE_PREFIX = "IN"  # 收件單條碼字首
 
 # 還沒簽署以前，估價列都能改（叫號議價時店員可改成交價，裁示 5）。
 _EDITABLE = frozenset(
@@ -51,6 +52,11 @@ OPEN_STATUSES = [
 
 def ticket_label(ticket_no: int) -> str:
     return f"{TICKET_PREFIX}{ticket_no:03d}"
+
+
+def slip_code(batch_id: int) -> str:
+    """收件單條碼：批次 id 永久唯一（當日號碼每天重編，不能拿來當條碼）。Code39 可編的字元。"""
+    return f"{SLIP_CODE_PREFIX}{batch_id:06d}"
 
 
 def _is_unique_violation(exc: IntegrityError) -> bool:
@@ -253,6 +259,7 @@ class IntakeService:
             ticket_date=batch.ticket_date,
             ticket_no=batch.ticket_no,
             ticket_label=ticket_label(batch.ticket_no),
+            slip_code=slip_code(batch.id),
             contact_id=batch.contact_id,
             contact_name=contact_name,
             declared_item_count=batch.declared_item_count,

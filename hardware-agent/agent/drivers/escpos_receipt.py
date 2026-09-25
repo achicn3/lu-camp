@@ -26,6 +26,7 @@ from agent.escpos_printer import ESC, FS, GS, SupportsWrite
 from agent.interfaces import (
     AcquisitionReceiptPayload,
     CallTicketPayload,
+    IntakeSlipPayload,
     InvoicePayload,
     KitchenTicketPayload,
     SaleLinePayload,
@@ -362,6 +363,50 @@ class EscposReceiptPrinter:
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT
         out += _CUT
+        self._writer.write(bytes(out))
+
+    def print_intake_slip(self, slip: IntakeSlipPayload) -> None:
+        """列印收購佇列收件單（docs/42 裁示 3）：相同的兩份，各自切紙——客人聯、商品聯。
+
+        **無店家抬頭、無金額**（這時還沒估價）。號碼三倍字（ASCII）、賣方雙倍字；
+        條碼（Code39）下方印出內容，掃不到時可以手打。
+        """
+        emit = self._emit
+        captions = ["客人聯", "商品聯", "補印"]
+        local_created_at = (
+            slip.created_at.replace(tzinfo=UTC)
+            if slip.created_at.tzinfo is None
+            else slip.created_at
+        ).astimezone(_STORE_TZ)
+        out = bytearray()
+        for copy in range(slip.copies):
+            out += _INIT
+            out += _SET_PRINT_AREA
+            out += _ENTER_CHINESE
+            out += _ALIGN_CENTER
+            out += _DOUBLE_ON + emit("收購收件單") + _DOUBLE_OFF
+            # 補印只印一份時標「補印」，免得多出第二張「客人聯」。
+            out += emit(f"（{'補印' if slip.copies == 1 else captions[copy]}）")
+            out += emit("")
+            out += _EXIT_CHINESE
+            out += _TRIPLE_ON + emit(slip.label) + _TRIPLE_OFF
+            out += _ENTER_CHINESE
+            out += emit("")
+            out += _DOUBLE_ON + emit(slip.seller_name) + _DOUBLE_OFF
+            out += emit(f"實收 {slip.declared_item_count} 件")
+            out += emit(f"報到 {local_created_at.strftime('%m-%d %H:%M')}")
+            out += _ALIGN_LEFT
+            out += emit(_SEP)
+            out += _ALIGN_CENTER
+            out += raster_command(code39_rows(slip.slip_code))
+            out += _EXIT_CHINESE
+            out += emit(slip.slip_code)
+            out += _ENTER_CHINESE
+            out += emit("估價完成後會叫號，請留意櫃檯")
+            out += _ALIGN_LEFT
+            out += _EXIT_CHINESE
+            out += _FEED_BEFORE_CUT
+            out += _CUT
         self._writer.write(bytes(out))
 
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
