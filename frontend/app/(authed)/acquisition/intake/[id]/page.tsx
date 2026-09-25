@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useRef, useState } from "react";
 
 import { GRADE_LABEL } from "@/features/acquisition/labels";
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
@@ -268,7 +268,7 @@ function IntakeBatchContent() {
     return (
       <section className="intake-page">
         <p role="alert" className="form-error">找不到這一批，或讀取失敗。</p>
-        <Link href="/acquisition/intake">回收購佇列</Link>
+        <Link href="/acquisition/intake">回排隊清單</Link>
       </section>
     );
   }
@@ -290,7 +290,7 @@ function IntakeBatchContent() {
           <span className="intake-ticket-big">{batch.ticket_label}</span> {batch.contact_name}
         </h1>
         <Link href="/acquisition/intake" className="btn-ghost">
-          回收購佇列
+          回排隊清單
         </Link>
       </div>
       <div className="card intake-summary">
@@ -333,7 +333,7 @@ function IntakeBatchContent() {
         </button>
         <button
           type="button"
-          className="btn-ghost"
+          className="btn-secondary"
           disabled={reprint.isPending}
           onClick={() => reprint.mutate({ batch, copies: 1 })}
         >
@@ -389,7 +389,8 @@ function IntakeBatchContent() {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={line.id}>
+                  <Fragment key={line.id}>
+                  <tr className={confirming ? "intake-has-disposition" : undefined}>
                     <td>{line.line_no}</td>
                     <td className="intake-wrap">
                       {line.short_name}
@@ -407,9 +408,6 @@ function IntakeBatchContent() {
                     </td>
                     <td>{line.grade ? GRADE_LABEL[line.grade] : "—"}</td>
                     <td>
-                      {confirming ? (
-                        <DispositionControls batch={batch} line={line} onSaved={refresh} />
-                      ) : null}
                       {editable && (
                         <div className="intake-row-actions">
                           <button type="button" className="btn-ghost" onClick={() => setEditing(line.id)}>
@@ -429,6 +427,16 @@ function IntakeBatchContent() {
                       )}
                     </td>
                   </tr>
+                  {/* 叫號處置自成一列：放在最後一欄會把按鈕擠成直排。 */}
+                  {confirming && (
+                    <tr className="intake-disposition-row">
+                      <td />
+                      <td colSpan={9}>
+                        <DispositionControls batch={batch} line={line} onSaved={refresh} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ),
               )}
             </tbody>

@@ -95,14 +95,14 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
       const { data, error } = await api.GET("/api/v1/intake-batches", {
         params: { query: { include_closed: includeClosed } },
       });
-      if (!data) throw new Error(detail(error) ?? "讀取佇列失敗");
+      if (!data) throw new Error(detail(error) ?? "讀取排隊清單失敗");
       return data;
     },
     refetchInterval: 15_000, // 兩台平板同時收件時，彼此的新批次要看得到
   });
 
-  if (batches.isError) return <p role="alert" className="form-error">佇列讀取失敗，請重新整理。</p>;
-  if (!batches.data) return <p className="hint">讀取佇列中…</p>;
+  if (batches.isError) return <p role="alert" className="form-error">排隊清單讀取失敗，請重新整理。</p>;
+  if (!batches.data) return <p className="hint">讀取排隊清單中…</p>;
   if (batches.data.length === 0) return <p className="hint">目前沒有排隊中的客人。</p>;
 
   return (
@@ -124,17 +124,17 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
         {batches.data.map((b) => (
           <tr key={b.id}>
             <td className="intake-ticket">{b.ticket_label}</td>
-            <td className="intake-wrap">{b.contact_name}</td>
-            <td>{b.declared_item_count} 件</td>
-            <td>
+            <td className="intake-wrap" data-label="賣方">{b.contact_name}</td>
+            <td data-label="實收">{b.declared_item_count} 件</td>
+            <td data-label="已估">
               {b.line_count} 項・{b.item_count} 件
               {b.item_count !== b.declared_item_count && b.line_count > 0 && (
                 <span className="row-sub">與實收件數不同</span>
               )}
             </td>
-            <td className="money">${formatNtd(parseNtd(b.deal_total) ?? 0)}</td>
-            <td>{STATUS_LABEL[b.status]}</td>
-            <td>{formatTaipeiDateTime(b.created_at)}</td>
+            <td className="money" data-label="估價收購總額">${formatNtd(parseNtd(b.deal_total) ?? 0)}</td>
+            <td data-label="狀態">{STATUS_LABEL[b.status]}</td>
+            <td data-label="報到時間">{formatTaipeiDateTime(b.created_at)}</td>
             <td>
               <Link href={`/acquisition/intake/${b.id}`} className="btn-secondary">
                 {b.status === "AWAITING_CONFIRM" ? "叫號確認" : "估價"}
@@ -156,7 +156,7 @@ export default function IntakeQueuePage() {
   return (
     <section className="intake-page">
       <div className="pur-page-head">
-        <h1 className="page-title">收購佇列</h1>
+        <h1 className="page-title">排隊收購</h1>
         <Link href="/acquisition" className="btn-ghost">
           直接收購（原收購頁）
         </Link>

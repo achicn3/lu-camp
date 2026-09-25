@@ -52,7 +52,7 @@ try {
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ok"}' });
   });
   await page.goto(`${BASE}/acquisition/intake`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "收購佇列" }).waitFor();
+  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
 
   // ① 報到：新建賣方、點清 3 件
   await page.getByRole("button", { name: /建立新賣方/ }).click();
@@ -94,7 +94,7 @@ try {
   const listed = await form.getByLabel("預計售價／件").inputValue();
   const deal = await form.getByLabel("成交收購價／件").inputValue();
   ok("五折自動帶預計售價 500、建議收購價當成交價", listed === "500" && Number(deal) > 0, `${listed}／${deal}`);
-  ok("成色沒點時顯示依折數推斷", (await form.getByLabel("成色").innerText()).includes("依折數推斷"));
+  ok("成色沒點時顯示依折數推斷", (await form.getByLabel("成色").innerText()).includes("依折數："));
   await form.getByRole("button", { name: "存這一件" }).click();
   await page.getByRole("cell", { name: /黑色折疊椅/ }).waitFor();
 
@@ -125,11 +125,11 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-confirming.png"), fullPage: true });
 
   // 回佇列
-  await page.getByRole("link", { name: "回收購佇列" }).click();
-  await page.getByRole("heading", { name: "收購佇列" }).waitFor();
+  await page.getByRole("link", { name: "回排隊清單" }).click();
+  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
   const row = page.locator("tr", { hasText: SELLER });
   await row.waitFor();
-  ok("佇列列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
+  ok("排隊清單列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
   await page.screenshot({ path: join(SHOTS, "04-queue.png"), fullPage: true });
 
   // 代理連不上：照樣進估價頁，並提示補印（號碼已登記，不能因印表機卡住現場）
@@ -145,8 +145,8 @@ try {
   ok("代理連不上時仍進估價頁並提示補印", true);
   await page.screenshot({ path: join(SHOTS, "06-print-failed.png"), fullPage: true });
   agentDown = false;
-  await page.getByRole("link", { name: "回收購佇列" }).click();
-  await page.getByRole("heading", { name: "收購佇列" }).waitFor();
+  await page.getByRole("link", { name: "回排隊清單" }).click();
+  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });

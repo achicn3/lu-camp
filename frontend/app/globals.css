@@ -2168,7 +2168,9 @@ a.btn-ghost {
 /* 收購與商品編輯的下拉選單沿用表單欄位尺寸（同高、滿寬）。 */
 .acq-row-grid select,
 .acq-basket select,
-.inv-edit-dialog select {
+.inv-edit-dialog select,
+.intake-page .field select,
+.intake-disposition select {
   min-height: var(--tap-min);
   width: 100%;
   padding: 0 var(--sp-3);
@@ -2179,7 +2181,9 @@ a.btn-ghost {
 }
 .acq-row-grid select:focus,
 .acq-basket select:focus,
-.inv-edit-dialog select:focus {
+.inv-edit-dialog select:focus,
+.intake-page .field select:focus,
+.intake-disposition select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -4621,5 +4625,67 @@ a.btn-ghost {
 @media (max-width: 640px) {
   .intake-field-wide {
     grid-column: auto;
+  }
+}
+
+/* 排隊收購：處置下拉不必滿寬；件數小框；處置自成一列（不擠在最後一欄）。 */
+.intake-disposition select {
+  width: auto;
+  min-width: 9rem;
+}
+.intake-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.intake-inline-field input {
+  width: 4rem;
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-2);
+  font-size: var(--text-md);
+}
+.intake-lines tr.intake-disposition-row td {
+  border-bottom: 1px solid var(--border);
+  padding-top: 0;
+  background: var(--surface-soft, transparent);
+}
+.intake-lines tr.intake-has-disposition td {
+  border-bottom: none;
+}
+.intake-field-hint {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.intake-page .pur-page-head {
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+/* 手機：排隊清單每一列改成一張小卡（欄名放在值前面），不必橫向捲動。 */
+@media (max-width: 640px) {
+  .intake-queue thead {
+    display: none;
+  }
+  .intake-queue,
+  .intake-queue tbody,
+  .intake-queue tr,
+  .intake-queue td {
+    display: block;
+    width: 100%;
+  }
+  .intake-queue tr {
+    border-bottom: 1px solid var(--border);
+    padding: var(--sp-2) 0;
+  }
+  .intake-queue td {
+    border: none;
+    padding: 2px 0;
+    white-space: normal;
+  }
+  .intake-queue td[data-label]::before {
+    content: attr(data-label) "：";
+    color: var(--ink-soft);
+    font-size: var(--text-sm);
   }
 }

@@ -26,7 +26,7 @@ const PRIMARY_NAV: NavItem[] = [
   { href: "/cash", label: "現金對帳", ready: true },
   { href: "/contacts", label: "會員/賣方", ready: true },
   { href: "/acquisition", label: "收購", ready: true },
-  { href: "/acquisition/intake", label: "收購佇列", ready: true },
+  { href: "/acquisition/intake", label: "排隊收購", ready: true },
   { href: "/call-tickets", label: "叫號", ready: true },
 ];
 

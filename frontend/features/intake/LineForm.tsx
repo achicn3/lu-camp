@@ -165,21 +165,19 @@ export function LineForm({
           </label>
         ) : (
           <label className="field">
-            <span className="field-label">
-              成交收購價／件
-              {estimate.suggestedCost !== null && (
-                <span className="row-sub">建議 ${formatNtd(estimate.suggestedCost)}</span>
-              )}
-            </span>
+            <span className="field-label">成交收購價／件</span>
             <input aria-label="成交收購價／件" inputMode="numeric" value={dealCost}
               onChange={(e) => { setDealCost(e.target.value); setDealManual(true); }} />
+            {estimate.suggestedCost !== null && (
+              <span className="intake-field-hint">建議 ${formatNtd(estimate.suggestedCost)}</span>
+            )}
           </label>
         )}
         <label className="field">
           <span className="field-label">成色（選填）</span>
           <select aria-label="成色" value={grade} onChange={(e) => setGrade(e.target.value as Grade | "")}>
             <option value="">
-              {estimate.inferredGrade ? `依折數推斷：${GRADE_LABEL[estimate.inferredGrade]}` : "不點"}
+              {estimate.inferredGrade ? `依折數：${GRADE_LABEL[estimate.inferredGrade]}` : "不點"}
             </option>
             {SERIALIZED_GRADES.map((g) => (
               <option key={g} value={g}>{GRADE_LABEL[g]}</option>
