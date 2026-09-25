@@ -139,6 +139,8 @@ class AcquisitionItemOverview:
     used: bool = False
     partially_listed: bool = False
     """排隊收購的件有的上架了、有的還在待整理（這時不能整張作廢）。"""
+    pending_listing_count: int = 0
+    """還在待整理的件數（散裝算剩餘件數）。"""
 
 
 # 沒賣出、沒動用的狀態（作廢收購可以整批退場）：在庫／上架，以及排隊收購的待整理（docs/42）。
@@ -1747,7 +1749,7 @@ class InventoryService:
         }
 
     async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:
-        """在庫序號品（IN_STOCK，全部；庫存價值/庫齡報表唯讀用）。"""
+        """在庫序號品（IN_STOCK＋待整理，全部；庫存價值/庫齡報表唯讀用，呼叫端依狀態分欄）。"""
         return await self._repo.serialized_for_valuation(store_id)
 
     async def bulk_for_valuation(self, store_id: int) -> list[BulkLot]:
@@ -1925,6 +1927,7 @@ class InventoryService:
             ov.used = ov.used or bool(row.used)
             pending, in_stock = getattr(row, "pending", False), getattr(row, "in_stock", False)
             ov.partially_listed = ov.partially_listed or bool(pending and in_stock)
+            ov.pending_listing_count += int(getattr(row, "pending_count", 0) or 0)
         return overviews
 
     async def is_partially_listed(self, store_id: int, acquisition_id: int) -> bool:

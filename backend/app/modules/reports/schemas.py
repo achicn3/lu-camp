@@ -263,7 +263,12 @@ class InventoryValueReport(BaseModel):
     owned_bulk_remaining_qty: int
     owned_bulk_cost: NTDAmount
     owned_bulk_retail: NTDAmount
-    # 自有在庫成本/售價總計
+    # 待整理（排隊收購已付款、還沒上架；docs/42 I5）：自有的件數（散裝算剩餘件數）、成本、預計售價。
+    # 錢已付，成本不能從庫存價值消失——併入下面的自有總計與庫齡。
+    pending_listing_count: int = 0
+    pending_listing_cost: NTDAmount = Decimal(0)
+    pending_listing_retail: NTDAmount = Decimal(0)
+    # 自有在庫成本/售價總計（含待整理）
     total_owned_cost_value: NTDAmount
     total_owned_retail_value: NTDAmount
     # 寄售在庫（另列，非自有資產；售價總額）

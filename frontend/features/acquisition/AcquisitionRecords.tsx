@@ -230,7 +230,14 @@ export function AcquisitionRecords() {
                   <td>{formatTaipeiDateTime(row.created_at)}</td>
                   <td>{row.seller_name || "—"}</td>
                   <td>{ACQ_TYPE_LABEL[row.type]}</td>
-                  <td>{itemsText(row)}</td>
+                  <td>
+                    {itemsText(row)}
+                    {row.pending_listing_count > 0 && (
+                      <span className="row-sub acq-records-pending">
+                        還有 {row.pending_listing_count} 件待整理（還沒上架）
+                      </span>
+                    )}
+                  </td>
                   <td className="money">{payoutText(row)}</td>
                   <td>{row.clerk_name ?? "—"}</td>
                   <td>

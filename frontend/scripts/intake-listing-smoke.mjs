@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+import { openReport } from "./_reports.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -175,6 +176,22 @@ try {
   const lotAfter = await api(mgr, "GET", `/api/v1/intake-batches/${batch.id}/items`);
   const pegs = lotAfter.json.find((i) => i.kind === "BULK_LOT");
   ok("每件成本不變（仍 $5）", pegs.qty === 8 && pegs.acquisition_cost === "5", JSON.stringify({ qty: pegs.qty, cost: pegs.acquisition_cost }));
+
+  // I5：收購紀錄看得到還有幾件待整理；庫存價值有「待整理」一列
+  await page.goto(`${BASE}/acquisition/records`, { waitUntil: "networkidle" });
+  const recordRow = page.locator("tr", { hasText: "營釘" }).first();
+  await recordRow.waitFor();
+  ok("收購紀錄：營釘那張寫「還有 8 件待整理」", (await recordRow.innerText()).includes("還有 8 件待整理"), (await recordRow.innerText()).replace(/\s+/g, " "));
+  await page.screenshot({ path: join(SHOTS, "04c-records.png"), fullPage: true });
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await openReport(page, "庫存價值");
+  const pendingRow = page.locator("tr", { hasText: "待整理（已付款、還沒上架）" });
+  await pendingRow.waitFor();
+  const pendingCost = (await pendingRow.locator("td").nth(2).innerText()).replace(/[^\d]/g, "");
+  ok("庫存價值有「待整理」一列、成本不是 0", Number(pendingCost) > 0, (await pendingRow.innerText()).replace(/\s+/g, " "));
+  await page.screenshot({ path: join(SHOTS, "04d-inventory-value.png"), fullPage: true });
+  await page.goto(`${BASE}/acquisition/intake/${batch.id}/listing`, { waitUntil: "networkidle" });
+  await pegCard.waitFor();
 
   // 營釘改每件 25 再上架
   await pegCard.getByLabel(/售價/).fill("25");

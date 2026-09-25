@@ -317,7 +317,7 @@ async def inventory_value(
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("自有在庫成本", format_ntd(report.total_owned_cost_value)),
+        ("自有在庫成本(含待整理)", format_ntd(report.total_owned_cost_value)),
         ("自有在庫售價", format_ntd(report.total_owned_retail_value)),
         ("寄售在庫售價(非自有資產)", format_ntd(report.consignment_inventory_gross)),
         # 收貨會帶入進價（docs/32），所以這裡不再固定 N/A：真的沒有已知成本才顯示 N/A。
@@ -349,6 +349,12 @@ async def inventory_value(
                 str(report.owned_bulk_remaining_qty),
                 format_ntd(report.owned_bulk_cost),
                 format_ntd(report.owned_bulk_retail),
+            ],
+            [
+                "待整理(已付款未上架)",
+                str(report.pending_listing_count),
+                format_ntd(report.pending_listing_cost),
+                format_ntd(report.pending_listing_retail),
             ],
             [
                 "寄售序號",

@@ -280,6 +280,11 @@
           "payout_method": {
             "$ref": "#/components/schemas/PayoutMethod"
           },
+          "pending_listing_count": {
+            "default": 0,
+            "title": "Pending Listing Count",
+            "type": "integer"
+          },
           "seller_name": {
             "title": "Seller Name",
             "type": "string"
@@ -8351,6 +8356,21 @@
           },
           "owned_serialized_retail": {
             "title": "Owned Serialized Retail",
+            "type": "string"
+          },
+          "pending_listing_cost": {
+            "default": "0",
+            "title": "Pending Listing Cost",
+            "type": "string"
+          },
+          "pending_listing_count": {
+            "default": 0,
+            "title": "Pending Listing Count",
+            "type": "integer"
+          },
+          "pending_listing_retail": {
+            "default": "0",
+            "title": "Pending Listing Retail",
             "type": "string"
           },
           "store_id": {

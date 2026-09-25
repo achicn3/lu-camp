@@ -328,3 +328,25 @@ async def test_items_know_which_estimate_line_they_came_from(
         ("帳篷", 3),
         ("營釘", 2),
     ]
+
+
+async def test_acquisition_records_show_how_many_are_still_waiting(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收購紀錄清單看得到上架進度：每張收購單還有幾件待整理（docs/42 I5）。"""
+    ctx = await _ctx(db_session, client)
+    batch = await _paid_batch(client, ctx)
+    category_id = await _category(db_session, ctx)
+    chair = (await _items(client, ctx, batch["id"]))[0]
+    await _listing(
+        client,
+        ctx,
+        batch["id"],
+        [{"kind": "SERIALIZED", "id": chair["id"], "category_id": category_id}],
+        publish=True,
+    )
+    rows = (await client.get("/api/v1/acquisitions", headers=ctx.auth)).json()["items"]
+    waiting = {r["id"]: r["pending_listing_count"] for r in rows}
+    buyout_id, bulk_id = sorted(batch["acquisition_ids"])
+    assert waiting[buyout_id] == 1  # 2 張椅子上架了 1 張
+    assert waiting[bulk_id] == 10

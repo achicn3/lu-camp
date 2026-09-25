@@ -575,11 +575,11 @@ function InsightsPanel() {
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.owned_serialized}</span>
-              <span className="rpt-insight-cap">在庫自有序號品</span>
+              <span className="rpt-insight-cap">在庫自有二手商品</span>
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.consignment_serialized}</span>
-              <span className="rpt-insight-cap">在庫寄售序號品</span>
+              <span className="rpt-insight-cap">在庫寄售二手商品</span>
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.bulk_on_sale}</span>
@@ -1296,16 +1296,22 @@ function InventoryValuePanel() {
           </thead>
           <tbody>
             <tr>
-              <td>序號品</td>
+              <td>二手商品（上架中）</td>
               <td className="money">{report.owned_serialized_count}</td>
               <td><MoneyText value={report.owned_serialized_cost} /></td>
               <td><MoneyText value={report.owned_serialized_retail} /></td>
             </tr>
             <tr>
-              <td>散裝</td>
+              <td>散裝（上架中）</td>
               <td className="money">{report.owned_bulk_remaining_qty}</td>
               <td><MoneyText value={report.owned_bulk_cost} /></td>
               <td><MoneyText value={report.owned_bulk_retail} /></td>
+            </tr>
+            <tr>
+              <td>待整理（已付款、還沒上架）</td>
+              <td className="money">{report.pending_listing_count}</td>
+              <td><MoneyText value={report.pending_listing_cost} /></td>
+              <td><MoneyText value={report.pending_listing_retail} /></td>
             </tr>
           </tbody>
         </table>
@@ -1338,7 +1344,7 @@ function InventoryValuePanel() {
       <h3>寄售在庫</h3>
       <dl className="rpt-summary">
         <div className="rpt-stat">
-          <dt>序號品</dt>
+          <dt>二手商品</dt>
           <dd className="money">{report.consignment_serialized_count} 件</dd>
         </div>
         <div className="rpt-stat">

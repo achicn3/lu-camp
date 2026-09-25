@@ -537,24 +537,26 @@ class InventoryRepository:
         return list((await self._session.scalars(stmt)).all())
 
     async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:
-        """在庫序號品（IN_STOCK，全部、不分頁；庫存價值/庫齡報表用）。"""
+        """在庫序號品（IN_STOCK＋待整理，全部、不分頁；庫存價值/庫齡報表用）。"""
         stmt = (
             select(SerializedItem)
             .where(
                 SerializedItem.store_id == store_id,
-                SerializedItem.status == SerializedItemStatus.IN_STOCK,
+                SerializedItem.status.in_(
+                    [SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING]
+                ),
             )
             .order_by(SerializedItem.id)
         )
         return list((await self._session.scalars(stmt)).all())
 
     async def bulk_for_valuation(self, store_id: int) -> list[BulkLot]:
-        """在售且有餘量的散裝堆（ON_SALE 且 remaining_qty>0，全部；庫存價值/庫齡報表用）。"""
+        """在售或待整理、且有餘量的散裝堆（全部；庫存價值/庫齡報表用）。"""
         stmt = (
             select(BulkLot)
             .where(
                 BulkLot.store_id == store_id,
-                BulkLot.status == BulkLotStatus.ON_SALE,
+                BulkLot.status.in_([BulkLotStatus.ON_SALE, BulkLotStatus.PENDING_LISTING]),
                 BulkLot.remaining_qty > 0,
             )
             .order_by(BulkLot.id)
@@ -708,6 +710,9 @@ class InventoryRepository:
                 func.bool_or(SerializedItem.status == SerializedItemStatus.IN_STOCK).label(
                     "in_stock"
                 ),
+                func.count()
+                .filter(SerializedItem.status == SerializedItemStatus.PENDING_LISTING)
+                .label("pending_count"),
             )
             .where(
                 SerializedItem.store_id == store_id,
@@ -737,6 +742,12 @@ class InventoryRepository:
                         ),
                     )
                 ).label("used"),
+                func.coalesce(
+                    func.sum(BulkLot.remaining_qty).filter(
+                        BulkLot.status == BulkLotStatus.PENDING_LISTING
+                    ),
+                    0,
+                ).label("pending_count"),
             )
             .where(BulkLot.store_id == store_id, BulkLot.acquisition_id.in_(acquisition_ids))
             .group_by(BulkLot.acquisition_id)

@@ -319,3 +319,44 @@ async def test_inventory_value_manager_only_and_csv(
     assert csv_resp.status_code == 200
     text = csv_resp.content.decode("utf-8-sig")
     assert "自有序號" in text and "成本價值" in text
+
+
+async def test_pending_listing_is_shown_and_counted_in_owned_value(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """排隊收購付款後的「待整理」：錢已付、還沒上架——成本不能從庫存價值消失（docs/42 I5）。
+
+    另列一欄看得出有多少還沒上架；併入自有在庫總計與庫齡（Σ 桶 = 總成本照舊成立）。
+    """
+    mgr, store_id, _clerk = await _seed(db_session)
+    await _add_serialized(
+        db_session, store_id, ownership=OwnershipType.OWNED, cost="300", price="500"
+    )
+    await _add_serialized(
+        db_session,
+        store_id,
+        ownership=OwnershipType.OWNED,
+        cost="250",
+        price="480",
+        status=SerializedItemStatus.PENDING_LISTING,
+    )
+    # 散裝待整理：總 10、記過短少剩 8 → 成本 round(50×8/10)=40、預計售價 20×8
+    await _add_bulk(
+        db_session,
+        store_id,
+        cost="50",
+        total=10,
+        remaining=8,
+        unit_price="20",
+        status=BulkLotStatus.PENDING_LISTING,
+    )
+    body = await _report(client, mgr)
+    assert body["owned_serialized_count"] == 1  # 在庫（可賣）的照舊只算上架的
+    assert body["pending_listing_count"] == 1 + 8
+    assert body["pending_listing_cost"] == "290"
+    assert body["pending_listing_retail"] == "640"
+    assert body["total_owned_cost_value"] == "590"
+    assert body["total_owned_retail_value"] == "1140"
+    aging = body["owned_cost_aging"]
+    assert isinstance(aging, dict)
+    assert sum(Decimal(v) for v in aging.values()) == Decimal(590)

@@ -238,6 +238,7 @@ class AcquisitionService:
                     payout_credit_cash_equivalent=acq.payout_credit_cash_equivalent,
                     voided_at=acq.voided_at,
                     void_block=void_block(acq, overview),
+                    pending_listing_count=overview.pending_listing_count if overview else 0,
                 )
             )
         return AcquisitionListRead(total=total, items=items)

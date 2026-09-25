@@ -3829,6 +3829,11 @@ export interface components {
             /** Payout Credit Cash Equivalent */
             payout_credit_cash_equivalent: string | null;
             payout_method: components["schemas"]["PayoutMethod"];
+            /**
+             * Pending Listing Count
+             * @default 0
+             */
+            pending_listing_count: number;
             /** Seller Name */
             seller_name: string;
             /** Total Cash Paid */
@@ -6786,6 +6791,21 @@ export interface components {
             owned_serialized_count: number;
             /** Owned Serialized Retail */
             owned_serialized_retail: string;
+            /**
+             * Pending Listing Cost
+             * @default 0
+             */
+            pending_listing_cost: string;
+            /**
+             * Pending Listing Count
+             * @default 0
+             */
+            pending_listing_count: number;
+            /**
+             * Pending Listing Retail
+             * @default 0
+             */
+            pending_listing_retail: string;
             /** Store Id */
             store_id: number;
             /** Total Owned Cost Value */

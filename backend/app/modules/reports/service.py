@@ -77,10 +77,12 @@ from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.service import UserService
 from app.shared.enums import (
+    BulkLotStatus,
     CampaignStatus,
     EInvoiceIssueChannel,
     InvoiceStatus,
     OwnershipType,
+    SerializedItemStatus,
     ServiceMode,
     UploadStatus,
 )
@@ -274,6 +276,9 @@ class ReportsService:
         consign_ser_count = 0
         consign_gross = Decimal(0)
         aging = OrderedDict((k, Decimal(0)) for k in INVENTORY_BUCKET_KEYS)
+        pending_count = 0
+        pending_cost = Decimal(0)
+        pending_retail = Decimal(0)
 
         for item in await self._inventory.serialized_for_valuation(store_id):
             if item.ownership_type == OwnershipType.CONSIGNMENT:
@@ -281,9 +286,14 @@ class ReportsService:
                 consign_gross += item.listed_price
                 continue
             cost = item.acquisition_cost or Decimal(0)
-            owned_ser_count += 1
-            owned_ser_cost += cost
-            owned_ser_retail += item.listed_price
+            if item.status is SerializedItemStatus.PENDING_LISTING:
+                pending_count += 1
+                pending_cost += cost
+                pending_retail += item.listed_price
+            else:
+                owned_ser_count += 1
+                owned_ser_cost += cost
+                owned_ser_retail += item.listed_price
             aging[_age_bucket(now, item.intake_date)] += cost
 
         owned_bulk_qty = 0
@@ -304,9 +314,14 @@ class ReportsService:
                 if lot.total_qty > 0
                 else Decimal(0)
             )
-            owned_bulk_qty += remaining
-            owned_bulk_cost += cost
-            owned_bulk_retail += retail
+            if lot.status is BulkLotStatus.PENDING_LISTING:
+                pending_count += remaining
+                pending_cost += cost
+                pending_retail += retail
+            else:
+                owned_bulk_qty += remaining
+                owned_bulk_cost += cost
+                owned_bulk_retail += retail
             aging[_age_bucket(now, lot.intake_date)] += cost
 
         catalog_qty = 0
@@ -329,8 +344,8 @@ class ReportsService:
         # 而一般商品沒有入庫時間、進不了庫齡桶；併進總成本卻不進庫齡與總售價，兩個並列的
         # 總計就變成不同範圍，管理者反而無法判讀。一般商品的成本以 catalog_cost_value
         # 單獨呈現（含未知件數）。
-        total_owned_cost = owned_ser_cost + owned_bulk_cost
-        total_owned_retail = owned_ser_retail + owned_bulk_retail
+        total_owned_cost = owned_ser_cost + owned_bulk_cost + pending_cost
+        total_owned_retail = owned_ser_retail + owned_bulk_retail + pending_retail
         return InventoryValueReport(
             generated_at=now,
             store_id=store_id,
@@ -338,6 +353,9 @@ class ReportsService:
             owned_serialized_cost=owned_ser_cost,
             owned_serialized_retail=owned_ser_retail,
             owned_bulk_remaining_qty=owned_bulk_qty,
+            pending_listing_count=pending_count,
+            pending_listing_cost=pending_cost,
+            pending_listing_retail=pending_retail,
             owned_bulk_cost=owned_bulk_cost,
             owned_bulk_retail=owned_bulk_retail,
             total_owned_cost_value=total_owned_cost,

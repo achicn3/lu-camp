@@ -5026,3 +5026,6 @@ a.btn-ghost {
 .intake-discrepancy input[aria-label="差異原因"] {
   flex: 1 1 12rem;
 }
+.acq-records-pending {
+  color: #7a4800;
+}

@@ -294,6 +294,8 @@ class AcquisitionListItem(BaseModel):
     voided_at: datetime | None
     # None ＝ 現在可以作廢（作廢鈕仍限管理者，端點是最終權威）。
     void_block: AcquisitionVoidBlock | None
+    # 排隊收購付款後還沒上架的件數（散裝算剩餘件數）；0＝都上架了或不是排隊收購。
+    pending_listing_count: int = 0
 
 
 class AcquisitionListRead(BaseModel):
