@@ -54,40 +54,92 @@ function createBrand(name: string): Promise<ComboOption> {
   });
 }
 
-function ItemCard({
-  item,
-  draft,
+/** 同一列估價的件＝同款：品牌／型號／分類／品名填一次套用全部，成色與售價逐件（可能不同價）。 */
+function GroupCard({
+  items,
+  draftOf,
   checked,
   categories,
   onCheck,
-  onChange,
+  onChangeAll,
+  onChangeOne,
   onCategoryCreated,
 }: {
-  item: Item;
-  draft: Draft;
-  checked: boolean;
+  items: Item[];
+  draftOf: (item: Item) => Draft;
+  checked: (item: Item) => boolean;
   categories: ComboOption[];
-  onCheck: (checked: boolean) => void;
-  onChange: (patch: Partial<Draft>) => void;
+  onCheck: (items: Item[], value: boolean) => void;
+  onChangeAll: (patch: Partial<Draft>) => void;
+  onChangeOne: (item: Item, patch: Partial<Draft>) => void;
   onCategoryCreated: () => void;
 }) {
-  const serialized = item.kind === "SERIALIZED";
-  const missing = missingOf(draft);
+  const first = items[0];
+  const shared = draftOf(first);
+  const serialized = first.kind === "SERIALIZED";
+  const multi = items.length > 1;
+  const allChecked = items.every(checked);
+  const missing = missingOf(shared);
+  const code = multi ? `第 ${first.line_no ?? "?"} 列` : first.code;
+
+  const gradeField = (item: Item) => (
+    <label className="field">
+      <span className="field-label">成色</span>
+      <select
+        aria-label={`${item.code} 成色`}
+        value={draftOf(item).grade}
+        onChange={(e) => onChangeOne(item, { grade: e.target.value as Grade })}
+      >
+        {SERIALIZED_GRADES.map((g) => (
+          <option key={g} value={g}>
+            {GRADE_LABEL[g]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const priceField = (item: Item) => (
+    <label className="field">
+      <span className="field-label">{serialized ? "售價" : "每件售價"}</span>
+      <input
+        aria-label={`${item.code} 售價`}
+        inputMode="numeric"
+        value={draftOf(item).price}
+        onChange={(e) => onChangeOne(item, { price: e.target.value })}
+      />
+    </label>
+  );
+  const noteField = (item: Item, className: string) => (
+    <label className={`field ${className}`}>
+      <span className="field-label">備註（選填）</span>
+      <input
+        aria-label={`${item.code} 備註`}
+        value={draftOf(item).note}
+        maxLength={500}
+        onChange={(e) => onChangeOne(item, { note: e.target.value })}
+      />
+    </label>
+  );
+
   return (
-    <div className={`card intake-list-item${checked ? " is-checked" : ""}`}>
+    <div className={`card intake-list-item${items.some(checked) ? " is-checked" : ""}`}>
       <div className="intake-list-item-head">
         <label className="campaign-checkbox">
           <input
             type="checkbox"
-            aria-label={`勾選 ${item.code}`}
-            checked={checked}
-            onChange={(e) => onCheck(e.target.checked)}
+            aria-label={`勾選 ${code}`}
+            checked={allChecked}
+            onChange={(e) => onCheck(items, e.target.checked)}
           />
-          <strong>{serialized ? "二手商品" : `散裝 ×${item.qty}`}</strong>
-          <span className="hint">{item.code}</span>
+          <strong>
+            {serialized ? `二手商品${multi ? ` ×${items.length}（同款）` : ""}` : `散裝 ×${first.qty}`}
+          </strong>
+          {!multi && <span className="hint">{first.code}</span>}
         </label>
         <span className="hint">
-          {item.consignment ? "寄售" : `成本 ${money(item.acquisition_cost)}${serialized ? "" : "／件"}`}
+          {first.consignment
+            ? "寄售"
+            : `成本 ${money(first.acquisition_cost)}${serialized ? (multi ? "／件" : "") : "／件"}`}
         </span>
         {missing.includes("分類") ? (
           <span className="intake-over">缺分類（上架必填）</span>
@@ -97,15 +149,18 @@ function ItemCard({
           <span className="form-success">資料齊了</span>
         )}
       </div>
-      <div className={`intake-list-grid${serialized ? "" : " is-bulk"}`}>
+      {multi && (
+        <p className="hint">品牌、型號、分類、品名填一次，這 {items.length} 件都會套用；成色與售價可以每件不同。</p>
+      )}
+      <div className={`intake-list-grid${serialized ? "" : " is-bulk"}${multi ? " is-group" : ""}`}>
         {!serialized && (
           <label className="field intake-list-name">
             <span className="field-label">品名</span>
             <input
-              aria-label={`${item.code} 品名`}
-              value={draft.name}
+              aria-label={`${first.code} 品名`}
+              value={shared.name}
               maxLength={150}
-              onChange={(e) => onChange({ name: e.target.value })}
+              onChange={(e) => onChangeAll({ name: e.target.value })}
             />
           </label>
         )}
@@ -114,10 +169,10 @@ function ItemCard({
           search={searchBrands}
           create={createBrand}
           placeholder="選擇或新增品牌"
-          selectedId={draft.brandId}
-          selectedName={draft.brandName}
+          selectedId={shared.brandId}
+          selectedName={shared.brandName}
           onChange={(o) =>
-            onChange({ brandId: o?.id ?? null, brandName: o?.name ?? null, modelId: null, modelName: null })
+            onChangeAll({ brandId: o?.id ?? null, brandName: o?.name ?? null, modelId: null, modelName: null })
           }
         />
         {serialized && (
@@ -126,26 +181,26 @@ function ItemCard({
             search={(q) =>
               api
                 .GET("/api/v1/product-models", {
-                  params: { query: { q, brand_id: draft.brandId ?? undefined } },
+                  params: { query: { q, brand_id: shared.brandId ?? undefined } },
                 })
                 .then(({ data }) => (data ?? []).map((m) => ({ id: m.id, name: m.name })))
             }
             create={(name) => {
-              if (draft.brandId === null) return Promise.reject(new Error("請先選擇品牌"));
+              if (shared.brandId === null) return Promise.reject(new Error("請先選擇品牌"));
               return api
-                .POST("/api/v1/product-models", { body: { brand_id: draft.brandId, name } })
+                .POST("/api/v1/product-models", { body: { brand_id: shared.brandId, name } })
                 .then(({ data, error }) => {
                   if (!data) throw new Error(detail(error) ?? "建立型號失敗");
                   return { id: data.id, name: data.name };
                 });
             }}
-            placeholder={draft.brandId === null ? "先選品牌" : "選擇或新增型號"}
-            disabled={draft.brandId === null}
-            selectedId={draft.modelId}
-            selectedName={draft.modelName}
+            placeholder={shared.brandId === null ? "先選品牌" : "選擇或新增型號"}
+            disabled={shared.brandId === null}
+            selectedId={shared.modelId}
+            selectedName={shared.modelName}
             // 同收購頁：選了型號，品名就用型號（要改再展開品名）。
             onChange={(o) =>
-              onChange({
+              onChangeAll({
                 modelId: o?.id ?? null,
                 modelName: o?.name ?? null,
                 ...(o ? { name: o.name } : {}),
@@ -166,56 +221,45 @@ function ItemCard({
             })
           }
           placeholder="選擇或新增分類"
-          selectedId={draft.categoryId}
-          selectedName={draft.categoryName}
-          onChange={(o) => onChange({ categoryId: o?.id ?? null, categoryName: o?.name ?? null })}
+          selectedId={shared.categoryId}
+          selectedName={shared.categoryName}
+          onChange={(o) => onChangeAll({ categoryId: o?.id ?? null, categoryName: o?.name ?? null })}
         />
-        {serialized && (
-          <label className="field">
-            <span className="field-label">成色</span>
-            <select
-              aria-label={`${item.code} 成色`}
-              value={draft.grade}
-              onChange={(e) => onChange({ grade: e.target.value as Grade })}
-            >
-              {SERIALIZED_GRADES.map((g) => (
-                <option key={g} value={g}>
-                  {GRADE_LABEL[g]}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label className="field">
-          <span className="field-label">{serialized ? "售價" : "每件售價"}</span>
-          <input
-            aria-label={`${item.code} 售價`}
-            inputMode="numeric"
-            value={draft.price}
-            onChange={(e) => onChange({ price: e.target.value })}
-          />
-        </label>
+        {!multi && serialized && gradeField(first)}
+        {!multi && priceField(first)}
         {serialized && (
           <details className="acq-name-detail intake-list-name">
-            <summary>品名：{draft.name || "選型號自動帶入，或展開填寫"}</summary>
+            <summary>品名：{shared.name || "選型號自動帶入，或展開填寫"}</summary>
             <input
-              aria-label={`${item.code} 品名`}
-              value={draft.name}
+              aria-label={`${code} 品名`}
+              value={shared.name}
               maxLength={150}
-              onChange={(e) => onChange({ name: e.target.value })}
+              onChange={(e) => onChangeAll({ name: e.target.value })}
             />
           </details>
         )}
-        <label className="field intake-list-note">
-          <span className="field-label">備註（選填）</span>
-          <input
-            aria-label={`${item.code} 備註`}
-            value={draft.note}
-            maxLength={500}
-            onChange={(e) => onChange({ note: e.target.value })}
-          />
-        </label>
+        {!multi && noteField(first, "intake-list-note")}
       </div>
+      {multi && (
+        <div className="intake-list-units">
+          {items.map((item, index) => (
+            <div key={keyOf(item)} className="intake-list-unit">
+              <label className="campaign-checkbox">
+                <input
+                  type="checkbox"
+                  aria-label={`勾選 ${item.code}`}
+                  checked={checked(item)}
+                  onChange={(e) => onCheck([item], e.target.checked)}
+                />
+                第 {index + 1} 件 <span className="hint">{item.code}</span>
+              </label>
+              {gradeField(item)}
+              {priceField(item)}
+              {noteField(item, "intake-list-unit-note")}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -277,9 +321,23 @@ export default function IntakeListingPage() {
     .map((key) => pending.find((i) => keyOf(i) === key))
     .filter((i): i is Item => i !== undefined);
   const selected = pendingInOrder.filter((i) => checked[keyOf(i)]);
+  // 同一列估價的件合成一組（散裝本來就一列一堆）；組的位置照組內第一件。
+  const groups: Item[][] = [];
+  for (const item of pendingInOrder) {
+    const group =
+      item.kind === "SERIALIZED" && item.line_no != null
+        ? groups.find((g) => g[0].kind === "SERIALIZED" && g[0].line_no === item.line_no)
+        : undefined;
+    if (group) group.push(item);
+    else groups.push([item]);
+  }
 
-  function patch(item: Item, change: Partial<Draft>) {
-    setDrafts((prev) => ({ ...prev, [keyOf(item)]: { ...draftOf(item), ...change } }));
+  function patchMany(targets: Item[], change: Partial<Draft>) {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const item of targets) next[keyOf(item)] = { ...(next[keyOf(item)] ?? draftFrom(item)), ...change };
+      return next;
+    });
   }
 
   function applyToSelected() {
@@ -484,15 +542,21 @@ export default function IntakeListingPage() {
             </button>
           </div>
 
-          {pendingInOrder.map((item) => (
-            <ItemCard
-              key={keyOf(item)}
-              item={item}
-              draft={draftOf(item)}
-              checked={checked[keyOf(item)] ?? false}
+          {groups.map((group) => (
+            <GroupCard
+              key={keyOf(group[0])}
+              items={group}
+              draftOf={draftOf}
+              checked={(item) => checked[keyOf(item)] ?? false}
               categories={categories}
-              onCheck={(value) => setChecked((prev) => ({ ...prev, [keyOf(item)]: value }))}
-              onChange={(change) => patch(item, change)}
+              onCheck={(targets, value) =>
+                setChecked((prev) => ({
+                  ...prev,
+                  ...Object.fromEntries(targets.map((t) => [keyOf(t), value])),
+                }))
+              }
+              onChangeAll={(change) => patchMany(group, change)}
+              onChangeOne={(item, change) => patchMany([item], change)}
               onCategoryCreated={() => void categoriesQuery.refetch()}
             />
           ))}

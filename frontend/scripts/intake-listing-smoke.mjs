@@ -120,7 +120,13 @@ try {
   await page.getByRole("heading", { name: /整理上架/ }).waitFor();
   const cards = page.locator(".intake-list-item");
   await cards.first().waitFor();
-  ok("三張卡片（2 件序號品＋1 堆散裝）、都缺分類", (await cards.count()) === 3 && (await page.getByText("缺分類（上架必填）").count()) === 3);
+  ok(
+    "同一列的 2 張椅子合成一張「同款」卡＋散裝一張，都缺分類",
+    (await cards.count()) === 2 &&
+      (await cards.first().innerText()).includes("二手商品 ×2（同款）") &&
+      (await cards.first().locator(".intake-list-unit").count()) === 2 &&
+      (await page.getByText("缺分類（上架必填）").count()) === 2,
+  );
   ok("成本顯示、不能改", (await cards.first().innerText()).includes("成本 $250"));
   await page.screenshot({ path: join(SHOTS, "02-listing-start.png"), fullPage: true });
 
@@ -135,7 +141,9 @@ try {
     "選型號後品名自動變成型號（同收購頁）",
     (await cards.first().locator("summary").innerText()).includes(`品名：${MODEL}`),
   );
-  ok("卡片寫「二手商品」不寫序號品", (await page.getByText("二手商品").count()) === 2 && (await page.getByText("序號品").count()) === 0);
+  ok("卡片寫「二手商品」不寫序號品", (await page.getByText("序號品").count()) === 0);
+  // 同款但第 2 張賣便宜一點
+  await cards.first().locator(".intake-list-unit").nth(1).getByLabel(/售價/).fill("450");
   // 營釘先不上
   const pegCard = cards.filter({ hasText: "散裝 ×10" });
   await pegCard.getByRole("checkbox").uncheck();
@@ -144,10 +152,10 @@ try {
   await page.getByRole("button", { name: "上架勾選的 2 件並印標籤" }).click();
   await page.getByText(/已上架 2 件，2 張標籤已送出列印/).waitFor({ timeout: 10000 });
   ok(
-    "印 2 張標籤：售價 500、補了品牌型號的那件印品牌、品名＝型號",
+    "品牌型號只填一次、兩張標籤都印品牌與型號品名；售價各自 500／450",
     labels.length === 2 &&
-      labels.every((l) => l.price === 500) &&
-      labels.filter((l) => l.brand === BRAND && l.name === MODEL).length === 1,
+      labels.every((l) => l.brand === BRAND && l.name === MODEL) &&
+      labels.map((l) => l.price).sort().join() === "450,500",
     JSON.stringify(labels.map((l) => ({ code: l.code, brand: l.brand, price: l.price }))),
   );
   await page.locator("h2", { hasText: "已上架" }).waitFor();

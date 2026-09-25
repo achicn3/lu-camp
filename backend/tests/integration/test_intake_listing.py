@@ -311,3 +311,20 @@ async def test_partly_listed_acquisition_cannot_be_voided(
         f"/api/v1/acquisitions/{buyout_id}/void", json={"reason": "反悔"}, headers=ctx.auth
     )
     assert resp.status_code == 409 and "上架" in resp.text
+
+
+async def test_items_know_which_estimate_line_they_came_from(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同一列估的多件是同款：畫面據此合成一張卡，品牌型號只填一次（店主 2026-09-26）。"""
+    ctx = await _ctx(db_session, client)
+    tent = _line(short_name="帳篷", qty=1, deal_cost="800", expected_listed_price="1600")
+    batch = await _confirmed_batch(client, ctx, [_line(qty=2), BULK, tent], [2, 10, 1])
+    await _pay(client, ctx, batch["id"])
+    items = await _items(client, ctx, batch["id"])
+    assert [(i["name"], i["line_no"]) for i in items] == [
+        ("黑色折疊椅", 1),
+        ("黑色折疊椅", 1),
+        ("帳篷", 3),
+        ("營釘", 2),
+    ]

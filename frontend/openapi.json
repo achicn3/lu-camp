@@ -7379,6 +7379,17 @@
           "kind": {
             "$ref": "#/components/schemas/ItemKind"
           },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
           "listed": {
             "title": "Listed",
             "type": "boolean"

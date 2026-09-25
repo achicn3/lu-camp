@@ -4943,3 +4943,44 @@ a.btn-ghost {
   align-items: center;
   gap: var(--sp-2);
 }
+/* 同款多件：共用欄位一列，每件一行 成色／售價／備註 */
+.intake-list-grid.is-group {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.intake-list-grid.is-group .intake-list-name {
+  grid-column: span 1;
+}
+.intake-list-units {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-top: 1px dashed var(--border);
+  padding-top: var(--sp-2);
+}
+.intake-list-unit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr)) minmax(0, 2fr);
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+}
+.intake-list-unit .campaign-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
+@media (max-width: 760px) {
+  .intake-list-grid.is-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .intake-list-grid.is-group .intake-list-name {
+    grid-column: 1 / -1;
+  }
+  .intake-list-unit {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .intake-list-unit .campaign-checkbox,
+  .intake-list-unit .intake-list-unit-note {
+    grid-column: 1 / -1;
+  }
+}

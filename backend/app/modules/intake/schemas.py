@@ -127,6 +127,8 @@ class IntakeItemRead(BaseModel):
     id: int
     code: str
     name: str
+    line_no: int | None = None
+    """來自估價的第幾列：同一列的多件是同款，畫面合成一張卡（品牌型號只填一次）。"""
     consignment: bool
     grade: Grade | None = None
     brand_id: int | None = None

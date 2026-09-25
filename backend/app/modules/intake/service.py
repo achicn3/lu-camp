@@ -571,9 +571,51 @@ class IntakeService:
     async def items(self, store_id: int, batch_id: int) -> list[IntakeItemRead]:
         """這一批付款時建好的商品（作廢掉的不列）：先序號品、再散裝，各依建立順序。"""
         batch = await self._batch(store_id, batch_id)
-        items = await self._batch_items(store_id, batch)
+        everything = await self._batch_items(store_id, batch, include_gone=True)
+        line_nos = self._line_numbers(await self._repo.lines_for(store_id, [batch.id]), everything)
+        items = [item for item in everything if item.status not in _GONE_STATUSES]
         names = await self._reference_names(store_id, items)
-        return [self._item_read(item, names) for item in items]
+        return [
+            self._item_read(item, names).model_copy(
+                update={"line_no": line_nos.get((self._kind(item), item.id))}
+            )
+            for item in items
+        ]
+
+    @classmethod
+    def _line_numbers(
+        cls, lines: list[IntakeLine], items: list[SerializedItem | BulkLot]
+    ) -> dict[tuple[ItemKind, int], int]:
+        """每件來自估價第幾列。沒存關聯，但付款時是照列的順序一件件建的（`_acquisition_requests`）：
+        買斷品、寄售品各依列序逐件、散裝一列一堆，且同一張收購的 id 依建立順序遞增——
+        照同樣順序對回去。
+        """
+        accepted = [line for line in lines if cls._accepted(line)]
+
+        def units(kind: AcquisitionType) -> list[int]:
+            return [
+                line.line_no
+                for line in accepted
+                if line.acquisition_type is kind
+                for _ in range(line.accepted_qty)
+            ]
+
+        queues = {
+            OwnershipType.OWNED: iter(units(AcquisitionType.BUYOUT)),
+            OwnershipType.CONSIGNMENT: iter(units(AcquisitionType.CONSIGNMENT)),
+        }
+        bulk_lines = iter(
+            line.line_no for line in accepted if line.acquisition_type is AcquisitionType.BULK_LOT
+        )
+        result: dict[tuple[ItemKind, int], int] = {}
+        for item in items:  # 已依 id 排序（序號品在前、散裝在後）
+            if isinstance(item, SerializedItem):
+                line_no = next(queues[item.ownership_type], None)
+            else:
+                line_no = next(bulk_lines, None)
+            if line_no is not None:
+                result[(cls._kind(item), item.id)] = line_no
+        return result
 
     async def list_items(
         self, store_id: int, batch_id: int, request: IntakeListingRequest, *, actor_user_id: int
@@ -643,17 +685,17 @@ class IntakeService:
         return names
 
     async def _batch_items(
-        self, store_id: int, batch: IntakeBatch
+        self, store_id: int, batch: IntakeBatch, *, include_gone: bool = False
     ) -> list[SerializedItem | BulkLot]:
         if batch.status not in _PAID_STATUSES:
             raise IntakeConflict("付款後才有待整理的商品")
         acquisition_ids = (await self._repo.acquisition_ids_for(store_id, [batch.id])).get(
             batch.id, []
         )
-        return await self._inventory_items(store_id, acquisition_ids)
+        return await self._inventory_items(store_id, acquisition_ids, include_gone=include_gone)
 
     async def _inventory_items(
-        self, store_id: int, acquisition_ids: list[int]
+        self, store_id: int, acquisition_ids: list[int], *, include_gone: bool = False
     ) -> list[SerializedItem | BulkLot]:
         """收購下的商品，作廢退場（WRITTEN_OFF）的不算。"""
         inventory = InventoryService(self._session)
@@ -667,6 +709,8 @@ class IntakeService:
             *sorted(serialized, key=lambda item: item.id),
             *sorted(lots, key=lambda lot: lot.id),
         ]
+        if include_gone:
+            return items
         return [item for item in items if item.status not in _GONE_STATUSES]
 
     @staticmethod

@@ -6466,6 +6466,8 @@ export interface components {
             /** Id */
             id: number;
             kind: components["schemas"]["ItemKind"];
+            /** Line No */
+            line_no?: number | null;
             /** Listed */
             listed: boolean;
             /** Listed Price */
