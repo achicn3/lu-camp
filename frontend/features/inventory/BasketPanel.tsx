@@ -16,6 +16,7 @@ import { formatNtd, parseNtd } from "@/lib/money";
 type BulkBasket = components["schemas"]["BulkBasketRead"];
 
 const STATUS_LABEL: Record<components["schemas"]["BulkLotStatus"], string> = {
+  PENDING_LISTING: "待整理",
   ON_SALE: "販售中",
   SOLD_OUT: "售完",
   WRITTEN_OFF: "收購已作廢",

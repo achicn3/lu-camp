@@ -77,6 +77,7 @@ def _line(**overrides: object) -> dict[str, object]:
         "expected_listed_price": "500",
         "suggested_cost": "256",
         "deal_cost": "250",
+        "grade": "B",
     }
     base.update(overrides)
     return base

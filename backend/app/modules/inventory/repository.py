@@ -697,7 +697,9 @@ class InventoryRepository:
                 func.bool_or(
                     and_(
                         SerializedItem.ownership_type == OwnershipType.OWNED,
-                        SerializedItem.status != SerializedItemStatus.IN_STOCK,
+                        SerializedItem.status.not_in(
+                            [SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING]
+                        ),
                     )
                 ).label("used"),
             )
@@ -722,7 +724,9 @@ class InventoryRepository:
                     and_(
                         BulkLot.consignor_id.is_(None),
                         or_(
-                            BulkLot.status != BulkLotStatus.ON_SALE,
+                            BulkLot.status.not_in(
+                                [BulkLotStatus.ON_SALE, BulkLotStatus.PENDING_LISTING]
+                            ),
                             BulkLot.remaining_qty != BulkLot.total_qty,
                         ),
                     )
@@ -1002,7 +1006,11 @@ class InventoryRepository:
         new_remaining = BulkLot.remaining_qty - qty
         stmt = (
             update(BulkLot)
-            .where(BulkLot.id == lot_id, BulkLot.remaining_qty >= qty)
+            .where(
+                BulkLot.id == lot_id,
+                BulkLot.remaining_qty >= qty,
+                BulkLot.status == BulkLotStatus.ON_SALE,  # 待整理/已下架不可賣
+            )
             .values(
                 remaining_qty=new_remaining,
                 status=case(
@@ -1031,13 +1039,13 @@ class InventoryRepository:
         return result.rowcount == 1
 
     async def write_off_bulk_lot(self, lot_id: int) -> bool:
-        """作廢收購時退場散裝批：原子地僅當「ON_SALE 且全未售（remaining = total）」才轉
+        """作廢收購時退場散裝批：原子地僅當「上架或待整理、且全未售（remaining = total）」才轉
         WRITTEN_OFF、remaining 歸 0。已部分/全部售出（或已下架）→ 不動作回 False（擋作廢）。"""
         stmt = (
             update(BulkLot)
             .where(
                 BulkLot.id == lot_id,
-                BulkLot.status == BulkLotStatus.ON_SALE,
+                BulkLot.status.in_([BulkLotStatus.ON_SALE, BulkLotStatus.PENDING_LISTING]),
                 BulkLot.remaining_qty == BulkLot.total_qty,
             )
             .values(status=BulkLotStatus.WRITTEN_OFF, remaining_qty=0)

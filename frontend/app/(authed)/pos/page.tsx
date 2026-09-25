@@ -175,6 +175,8 @@ function ScanBar({
       );
       if (serialized.response.status === 200 && serialized.data) {
         const item = serialized.data;
+        if (item.status === "PENDING_LISTING")
+          throw new Error(`${item.item_code} 還在待整理，上架後才能賣`);
         if (item.status !== "IN_STOCK")
           throw new Error(`${item.item_code} 非在庫（不可售）`);
         const price = parseNtd(item.listed_price) ?? 0;

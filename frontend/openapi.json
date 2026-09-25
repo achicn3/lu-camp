@@ -1887,8 +1887,9 @@
         "type": "object"
       },
       "BulkLotStatus": {
-        "description": "散裝批狀態。",
+        "description": "散裝批狀態。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。",
         "enum": [
+          "PENDING_LISTING",
           "ON_SALE",
           "SOLD_OUT",
           "WRITTEN_OFF"
@@ -6925,6 +6926,14 @@
             "title": "Accepted Total",
             "type": "string"
           },
+          "acquisition_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Acquisition Ids",
+            "type": "array"
+          },
           "cancel_reason": {
             "anyOf": [
               {
@@ -6986,6 +6995,29 @@
               }
             ],
             "title": "Note"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
           },
           "slip_code": {
             "title": "Slip Code",
@@ -7630,6 +7662,49 @@
           "returned_to_customer"
         ],
         "title": "IntakeLineRead",
+        "type": "object"
+      },
+      "IntakePayRequest": {
+        "description": "付款方式：現金或購物金。有簽署時以客人在顧客螢幕選的為準，這個值不採用。",
+        "properties": {
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod",
+            "default": "CASH"
+          }
+        },
+        "title": "IntakePayRequest",
+        "type": "object"
+      },
+      "IntakeSignatureRead": {
+        "properties": {
+          "signature_task_id": {
+            "title": "Signature Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "signature_task_id"
+        ],
+        "title": "IntakeSignatureRead",
+        "type": "object"
+      },
+      "IntakeSignatureRequest": {
+        "description": "送客人簽署：推到哪一台顧客螢幕（多櫃檯時指定；單櫃檯可省略）。",
+        "properties": {
+          "terminal_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Id"
+          }
+        },
+        "title": "IntakeSignatureRequest",
         "type": "object"
       },
       "InventoryCountRead": {
@@ -13408,8 +13483,9 @@
         "type": "object"
       },
       "SerializedItemStatus": {
-        "description": "序號品狀態機。",
+        "description": "序號品狀態機。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。",
         "enum": [
+          "PENDING_LISTING",
           "IN_STOCK",
           "SOLD",
           "RETURNED_TO_CONSIGNOR",
@@ -22410,6 +22486,64 @@
         ]
       }
     },
+    "/api/v1/intake-batches/{batch_id}/pay": {
+      "post": {
+        "description": "付款：成立收購、商品建成「待整理」；已付款再按回原結果（不重複付錢）。",
+        "operationId": "payIntakeBatch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakePayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Pay Intake Batch",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
     "/api/v1/intake-batches/{batch_id}/ready": {
       "post": {
         "description": "估完 → 待確認（等叫號議價）。",
@@ -22453,6 +22587,64 @@
           }
         ],
         "summary": "Mark Intake Ready",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/signature": {
+      "post": {
+        "description": "整批要付錢的商品送到顧客螢幕給客人簽一次切結（寄售不在內）。",
+        "operationId": "requestIntakeSignature",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeSignatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSignatureRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Intake Signature",
         "tags": [
           "intake"
         ]

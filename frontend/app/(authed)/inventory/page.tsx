@@ -96,13 +96,14 @@ function useSerializedFilterOptions(brandId: number | "") {
 
 // 下拉選項（openapi-typescript 只生成型別、不生成 runtime 陣列；以生成型別標註保元素合法）。
 const SERIALIZED_STATUSES: SerializedStatus[] = [
+  "PENDING_LISTING",
   "IN_STOCK",
   "SOLD",
   "RETURNED_TO_CONSIGNOR",
   "WRITTEN_OFF",
 ];
 const OWNERSHIPS: Ownership[] = ["OWNED", "CONSIGNMENT"];
-const BULK_STATUSES: BulkStatus[] = ["ON_SALE", "SOLD_OUT", "WRITTEN_OFF"];
+const BULK_STATUSES: BulkStatus[] = ["PENDING_LISTING", "ON_SALE", "SOLD_OUT", "WRITTEN_OFF"];
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "serialized", label: "序號品" },

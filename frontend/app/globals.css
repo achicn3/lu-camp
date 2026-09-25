@@ -4839,3 +4839,41 @@ a.btn-ghost {
 .intake-queue-actions a {
   white-space: nowrap;
 }
+
+/* 排隊收購 I3：簽名與付款（docs/42 §6） */
+.intake-disposition-lock {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.intake-disposition-lock:disabled {
+  opacity: 0.6;
+}
+.intake-pay {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.intake-pay h2 {
+  margin: 0;
+}
+.intake-sign {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.intake-payout-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+}
+.intake-pay-button {
+  font-size: var(--text-lg);
+  padding: var(--sp-2) var(--sp-4);
+}

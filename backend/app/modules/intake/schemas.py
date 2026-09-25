@@ -7,7 +7,13 @@ from typing import Annotated
 from pydantic import BaseModel, Field, PlainSerializer
 
 from app.core.money import format_ntd
-from app.shared.enums import AcquisitionType, Grade, IntakeBatchStatus, IntakeDisposition
+from app.shared.enums import (
+    AcquisitionType,
+    Grade,
+    IntakeBatchStatus,
+    IntakeDisposition,
+    PayoutMethod,
+)
 
 NTDInput = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=0)]
 NTDOut = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
@@ -60,6 +66,22 @@ class IntakeDispositionRequest(BaseModel):
     returned_to_customer: bool = False
 
 
+class IntakeSignatureRequest(BaseModel):
+    """送客人簽署：推到哪一台顧客螢幕（多櫃檯時指定；單櫃檯可省略）。"""
+
+    terminal_id: Annotated[int, Field(ge=1)] | None = None
+
+
+class IntakeSignatureRead(BaseModel):
+    signature_task_id: int
+
+
+class IntakePayRequest(BaseModel):
+    """付款方式：現金或購物金。有簽署時以客人在顧客螢幕選的為準，這個值不採用。"""
+
+    payout_method: PayoutMethod = PayoutMethod.CASH
+
+
 class IntakeCancelRequest(BaseModel):
     reason: Annotated[str, Field(min_length=1, max_length=200)]
 
@@ -110,4 +132,9 @@ class IntakeBatchRead(BaseModel):
     accepted_item_count: int
     accepted_total: NTDOut
     """叫號確認後、接受的件數與收購總額。"""
+    signature_task_id: int | None = None
+    """送出的簽署（整批一份）；沒送過為 None。"""
+    paid_at: datetime | None = None
+    acquisition_ids: list[int] = []
+    """付款時依類型成立的收購。"""
     lines: list[IntakeLineRead]

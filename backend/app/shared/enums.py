@@ -54,8 +54,9 @@ class OwnershipType(StrEnum):
 
 
 class SerializedItemStatus(StrEnum):
-    """序號品狀態機。"""
+    """序號品狀態機。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。"""
 
+    PENDING_LISTING = "PENDING_LISTING"
     IN_STOCK = "IN_STOCK"
     SOLD = "SOLD"
     RETURNED_TO_CONSIGNOR = "RETURNED_TO_CONSIGNOR"
@@ -63,8 +64,9 @@ class SerializedItemStatus(StrEnum):
 
 
 class BulkLotStatus(StrEnum):
-    """散裝批狀態。"""
+    """散裝批狀態。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。"""
 
+    PENDING_LISTING = "PENDING_LISTING"
     ON_SALE = "ON_SALE"
     SOLD_OUT = "SOLD_OUT"
     WRITTEN_OFF = "WRITTEN_OFF"

@@ -42,12 +42,14 @@ from app.modules.user.service import UserService
 from app.shared.enums import (
     AcquisitionType,
     AcquisitionVoidBlock,
+    BulkLotStatus,
     CashMovementType,
     ContactRole,
     Grade,
     ItemKind,
     OwnershipType,
     PayoutMethod,
+    SerializedItemStatus,
     StockReason,
     StoreCreditEntryType,
     StoreCreditSourceType,
@@ -519,8 +521,15 @@ class AcquisitionService:
         data: AcquisitionCreate,
         *,
         idempotency_key: str,
+        pending_listing: bool = False,
+        batch_affidavit: "SignatureTask | None" = None,
     ) -> AcquisitionResult:
         """建立收購單並完成入庫/付現。
+
+        排隊收購（docs/42，店主 2026-09-25 選「付款當下建庫存」）另帶兩個參數：
+        `pending_listing`＝商品建成「待整理」（POS 賣不到，空檔再整理上架）；
+        `batch_affidavit`＝整批已由排隊收購驗過的已簽切結（身分、內容由呼叫端比對並負責單次
+        使用）——本收購不再各自綁定切結，但撥款仍須與客人所選一致、購物金以簽署凍結的溢價入帳。
 
         **service 邊界原子性（Codex 第六輪）**：主體包在 savepoint 內，任何例外
         （含未來新增的失敗模式：溢價政策、帳本漂移…）都自動回滾本操作的全部
@@ -559,7 +568,12 @@ class AcquisitionService:
         try:
             async with self._session.begin_nested():
                 return await self._create_acquisition_impl(
-                    store_id, clerk_user_id, data, idempotency_key
+                    store_id,
+                    clerk_user_id,
+                    data,
+                    idempotency_key,
+                    pending_listing=pending_listing,
+                    batch_affidavit=batch_affidavit,
                 )
         except IntegrityError as exc:
             # 並發首寫競態（前置重放時尚無既有列，兩請求同時插入 → 輸家撞單次使用唯一約束）：
@@ -587,7 +601,12 @@ class AcquisitionService:
         clerk_user_id: int,
         data: AcquisitionCreate,
         idempotency_key: str,
+        *,
+        pending_listing: bool = False,
+        batch_affidavit: "SignatureTask | None" = None,
     ) -> AcquisitionResult:
+        if batch_affidavit is not None and data.signature_task_id is not None:
+            raise SignatureContentMismatch("整批切結與單張切結不可同時帶")
         contact = await self._contacts.get_contact(store_id, data.contact_id)
         if contact is None:
             raise ContactNotFound(f"找不到 contact {data.contact_id}")
@@ -622,7 +641,7 @@ class AcquisitionService:
 
         # D2 政策（docs/23）：店家開啟 require_acquisition_affidavit 後，付現/購物金收購必須
         # 綁定已簽手持切結；未帶即擋（防「跳過簽署直接完成」的漏證據路徑，Codex K4 第四輪）。
-        if pays_out and data.signature_task_id is None:
+        if pays_out and data.signature_task_id is None and batch_affidavit is None:
             require = (
                 await self._settings.get_effective_settings(store_id)
             ).require_acquisition_affidavit
@@ -682,6 +701,17 @@ class AcquisitionService:
                         "已簽切結缺少購物金溢價快照，不可入帳，請重新推送簽署"
                     )
 
+        if batch_affidavit is not None and pays_out:
+            # 整批切結：身分與內容已由排隊收購比對；這裡仍守「撥款＝客人所選」與凍結溢價。
+            if batch_affidavit.chosen_payout != payout_method:
+                raise InvalidPayoutSplit("收購撥款與客人簽署時所選的不一致")
+            if payout_method == PayoutMethod.STORE_CREDIT:
+                signed_premium_rate = self._signed_premium_rate(batch_affidavit.content)
+                if signed_premium_rate is None:
+                    raise SignatureContentMismatch(
+                        "已簽切結缺少購物金溢價快照，不可入帳，請重新推送簽署"
+                    )
+
         # 撥款預檢（Codex 第五輪 high）：在**任何寫入之前**完成全部驗證——
         # 直呼 service 又不回滾的呼叫者也不可能留下半套（入庫了卻沒撥款）。
         # 純輸入驗證先於開帳等狀態檢查：無對價的請求不論開帳與否一律 422。
@@ -730,7 +760,11 @@ class AcquisitionService:
 
         if data.type == AcquisitionType.BULK_LOT:
             lot_code, total_cash, basket_code = await self._create_bulk_lot(
-                store_id, acquisition.id, data, actor_user_id=clerk_user_id
+                store_id,
+                acquisition.id,
+                data,
+                actor_user_id=clerk_user_id,
+                pending_listing=pending_listing,
             )
             item_codes: list[str] = []
         else:
@@ -740,6 +774,7 @@ class AcquisitionService:
                 acquisition.id,
                 data,
                 default_commission_pct=default_commission_pct,
+                pending_listing=pending_listing,
             )
             lot_code = None
             basket_code = None
@@ -928,6 +963,7 @@ class AcquisitionService:
         data: AcquisitionCreate,
         *,
         default_commission_pct: int | None,
+        pending_listing: bool = False,
     ) -> tuple[list[str], Decimal]:
         assert data.items is not None  # schema 已驗證
         item_codes: list[str] = []
@@ -972,6 +1008,11 @@ class AcquisitionService:
                 note=item.note,
                 retail_price=item.retail_price,
                 resale_discount_pct=item.resale_discount_pct,
+                status=(
+                    SerializedItemStatus.PENDING_LISTING
+                    if pending_listing
+                    else SerializedItemStatus.IN_STOCK
+                ),
             )
             await self._inventory.record_stock_in(
                 store_id,
@@ -986,7 +1027,13 @@ class AcquisitionService:
         return item_codes, total_cash
 
     async def _create_bulk_lot(
-        self, store_id: int, acquisition_id: int, data: AcquisitionCreate, *, actor_user_id: int
+        self,
+        store_id: int,
+        acquisition_id: int,
+        data: AcquisitionCreate,
+        *,
+        actor_user_id: int,
+        pending_listing: bool = False,
     ) -> tuple[str, Decimal, str | None]:
         """建立散裝來源；選了販售籃就掛進去（ADR-025）。回 (lot_code, 應付, basket_code)。"""
         lot = data.lot
@@ -1013,6 +1060,7 @@ class AcquisitionService:
             category_id=lot.category_id,
             note=lot.note,
             retail_price=lot.retail_price,
+            status=BulkLotStatus.PENDING_LISTING if pending_listing else BulkLotStatus.ON_SALE,
         )
         await self._inventory.record_stock_in(
             store_id,

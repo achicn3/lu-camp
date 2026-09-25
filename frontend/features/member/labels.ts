@@ -28,6 +28,7 @@ export const SETTLEMENT_STATUS_LABELS: Record<string, string> = {
 // 商品狀態。**序號品與散裝批的狀態值不同**，但同一個欄位會出現兩種來源
 // （寄售分頁列序號品，帶來的商品分頁兩者都有），所以合成一張表。
 export const ITEM_STATUS_LABELS: Record<string, string> = {
+  PENDING_LISTING: "待整理",
   IN_STOCK: "在庫",
   SOLD: "已售出",
   RETURNED_TO_CONSIGNOR: "已退回寄售人",

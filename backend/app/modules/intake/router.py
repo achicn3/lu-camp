@@ -21,19 +21,50 @@ from app.modules.intake.schemas import (
     IntakeLineCreateRequest,
     IntakeLineFields,
     IntakeLineRead,
+    IntakePayRequest,
+    IntakeSignatureRead,
+    IntakeSignatureRequest,
 )
 from app.modules.intake.service import IntakeService
-from app.shared.exceptions import IntakeBatchNotFound, IntakeConflict, InvalidIntakeLine
+from app.shared.exceptions import (
+    AcquisitionRequiresNationalId,
+    ContactNotFound,
+    DomainError,
+    IdempotencyKeyConflict,
+    IntakeBatchNotFound,
+    IntakeConflict,
+    InvalidIntakeLine,
+    InvalidPayoutSplit,
+    NoOpenCashSession,
+    SignatureContentMismatch,
+    SignatureTaskConflict,
+    SignatureTaskNotFound,
+    SignatureTaskNotPending,
+    StoreCreditConflict,
+    StoreCreditMemberRequired,
+)
 
 router = APIRouter(prefix="/intake-batches", tags=["intake"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 AuthDep = Annotated[CurrentUser, Depends(get_current_user)]
 
-_STATUS = {
+_STATUS: dict[type[DomainError], int] = {
     IntakeBatchNotFound: status.HTTP_404_NOT_FOUND,
     IntakeConflict: status.HTTP_409_CONFLICT,
     InvalidIntakeLine: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 付款沿用收購流程（docs/42 §6）：沒開帳、簽署狀態不對 → 409；撥款/身分資料不合 → 422
+    ContactNotFound: status.HTTP_404_NOT_FOUND,
+    NoOpenCashSession: status.HTTP_409_CONFLICT,
+    SignatureContentMismatch: status.HTTP_409_CONFLICT,
+    SignatureTaskNotFound: status.HTTP_409_CONFLICT,
+    SignatureTaskNotPending: status.HTTP_409_CONFLICT,
+    SignatureTaskConflict: status.HTTP_409_CONFLICT,
+    IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
+    StoreCreditConflict: status.HTTP_409_CONFLICT,
+    InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    AcquisitionRequiresNationalId: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -42,9 +73,10 @@ async def _write(session: AsyncSession) -> AsyncIterator[None]:
     """寫入端點：領域錯誤轉 HTTP 並回滾；成功才 commit（get_session 不自動 commit）。"""
     try:
         yield
-    except (IntakeBatchNotFound, IntakeConflict, InvalidIntakeLine) as exc:
+    except DomainError as exc:
         await session.rollback()
-        raise HTTPException(status_code=_STATUS[type(exc)], detail=str(exc)) from exc
+        code = _STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
     await session.commit()
 
 
@@ -176,5 +208,35 @@ async def cancel_intake_batch(
     async with _write(session):
         await IntakeService(session).cancel(
             user.store_id, batch_id, reason=payload.reason, actor_user_id=user.id
+        )
+    return await _read_batch(session, user.store_id, batch_id)
+
+
+@router.post(
+    "/{batch_id}/signature",
+    response_model=IntakeSignatureRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="requestIntakeSignature",
+)
+async def request_intake_signature(
+    batch_id: int, payload: IntakeSignatureRequest, session: SessionDep, user: AuthDep
+) -> IntakeSignatureRead:
+    """整批要付錢的商品送到顧客螢幕給客人簽一次切結（寄售不在內）。"""
+    async with _write(session):
+        task = await IntakeService(session).request_signature(
+            user.store_id, batch_id, terminal_id=payload.terminal_id, actor_user_id=user.id
+        )
+        task_id = task.id
+    return IntakeSignatureRead(signature_task_id=task_id)
+
+
+@router.post("/{batch_id}/pay", response_model=IntakeBatchRead, operation_id="payIntakeBatch")
+async def pay_intake_batch(
+    batch_id: int, payload: IntakePayRequest, session: SessionDep, user: AuthDep
+) -> IntakeBatchRead:
+    """付款：成立收購、商品建成「待整理」；已付款再按回原結果（不重複付錢）。"""
+    async with _write(session):
+        await IntakeService(session).pay(
+            user.store_id, batch_id, payout_method=payload.payout_method, actor_user_id=user.id
         )
     return await _read_batch(session, user.store_id, batch_id)

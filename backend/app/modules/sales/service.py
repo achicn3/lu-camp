@@ -85,6 +85,7 @@ from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     AdjustmentScope,
+    BulkLotStatus,
     CampaignItemKind,
     CartSessionStatus,
     CashMovementType,
@@ -101,6 +102,7 @@ from app.shared.enums import (
     SaleLineKind,
     SaleLineType,
     SaleStatus,
+    SerializedItemStatus,
     ServiceMode,
     StockReason,
     StoreCreditSourceType,
@@ -625,6 +627,15 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
         fields["promo_free"] = True
     return fields
 
+
+
+_PENDING_LISTING = frozenset({SerializedItemStatus.PENDING_LISTING, BulkLotStatus.PENDING_LISTING})
+
+
+def _ensure_listed(name: str, status: SerializedItemStatus | BulkLotStatus) -> None:
+    """排隊收購付款後的「待整理」商品還沒補齊資料、貼標，不可結帳（docs/42 §7）。"""
+    if status in _PENDING_LISTING:
+        raise SaleLineInvalid(f"「{name}」還在待整理，上架後才能賣")
 
 class SalesService:
     @staticmethod
@@ -3119,6 +3130,7 @@ class SalesService:
             item = await self._inventory.get_serialized_by_code(store_id, line.item_code)
             if item is None:
                 raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
+            _ensure_listed(item.name, item.status)
             is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
             if gift is not None and is_consignment:
                 raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
@@ -3174,6 +3186,7 @@ class SalesService:
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
+        _ensure_listed(lot.name, lot.status)
         if gift is not None and lot.consignor_id is not None:
             raise SaleLineInvalid("寄售散裝批不可作為贈品（分潤依售價計）")
         if discountable_out is not None:
@@ -3530,6 +3543,7 @@ class SalesService:
         item = await self._inventory.get_serialized_by_code(store_id, line.item_code)
         if item is None:
             raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
+        _ensure_listed(item.name, item.status)
         is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
         if discountable_out is not None:
             discountable_out.append(gift is None and not is_consignment)
@@ -3820,6 +3834,7 @@ class SalesService:
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
+        _ensure_listed(lot.name, lot.status)
         if discountable_out is not None:
             discountable_out.append(gift is None and lot.consignor_id is None)
         if gift is not None and lot.consignor_id is not None:

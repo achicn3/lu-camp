@@ -1931,6 +1931,26 @@ export interface paths {
         patch: operations["setIntakeDisposition"];
         trace?: never;
     };
+    "/api/v1/intake-batches/{batch_id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay Intake Batch
+         * @description 付款：成立收購、商品建成「待整理」；已付款再按回原結果（不重複付錢）。
+         */
+        post: operations["payIntakeBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}/ready": {
         parameters: {
             query?: never;
@@ -1945,6 +1965,26 @@ export interface paths {
          * @description 估完 → 待確認（等叫號議價）。
          */
         post: operations["markIntakeReady"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Intake Signature
+         * @description 整批要付錢的商品送到顧客螢幕給客人簽一次切結（寄售不在內）。
+         */
+        post: operations["requestIntakeSignature"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4230,10 +4270,10 @@ export interface components {
         };
         /**
          * BulkLotStatus
-         * @description 散裝批狀態。
+         * @description 散裝批狀態。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。
          * @enum {string}
          */
-        BulkLotStatus: "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
+        BulkLotStatus: "PENDING_LISTING" | "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
         /**
          * BundleSlotInput
          * @description 組合包的一個格子：符合任一範圍的商品要湊 qty 件。
@@ -6193,6 +6233,11 @@ export interface components {
             accepted_item_count: number;
             /** Accepted Total */
             accepted_total: string;
+            /**
+             * Acquisition Ids
+             * @default []
+             */
+            acquisition_ids: number[];
             /** Cancel Reason */
             cancel_reason?: string | null;
             /** Contact Id */
@@ -6218,6 +6263,10 @@ export interface components {
             lines: components["schemas"]["IntakeLineRead"][];
             /** Note */
             note?: string | null;
+            /** Paid At */
+            paid_at?: string | null;
+            /** Signature Task Id */
+            signature_task_id?: number | null;
             /** Slip Code */
             slip_code: string;
             status: components["schemas"]["IntakeBatchStatus"];
@@ -6364,6 +6413,27 @@ export interface components {
             short_name: string;
             /** Suggested Cost */
             suggested_cost?: string | null;
+        };
+        /**
+         * IntakePayRequest
+         * @description 付款方式：現金或購物金。有簽署時以客人在顧客螢幕選的為準，這個值不採用。
+         */
+        IntakePayRequest: {
+            /** @default CASH */
+            payout_method: components["schemas"]["PayoutMethod"];
+        };
+        /** IntakeSignatureRead */
+        IntakeSignatureRead: {
+            /** Signature Task Id */
+            signature_task_id: number;
+        };
+        /**
+         * IntakeSignatureRequest
+         * @description 送客人簽署：推到哪一台顧客螢幕（多櫃檯時指定；單櫃檯可省略）。
+         */
+        IntakeSignatureRequest: {
+            /** Terminal Id */
+            terminal_id?: number | null;
         };
         /**
          * InventoryCountRead
@@ -8569,10 +8639,10 @@ export interface components {
         };
         /**
          * SerializedItemStatus
-         * @description 序號品狀態機。
+         * @description 序號品狀態機。PENDING_LISTING＝排隊收購已付款、還沒整理上架（docs/42；POS 賣不到）。
          * @enum {string}
          */
-        SerializedItemStatus: "IN_STOCK" | "SOLD" | "RETURNED_TO_CONSIGNOR" | "WRITTEN_OFF";
+        SerializedItemStatus: "PENDING_LISTING" | "IN_STOCK" | "SOLD" | "RETURNED_TO_CONSIGNOR" | "WRITTEN_OFF";
         /** SerializedItemUpdateRequest */
         SerializedItemUpdateRequest: {
             /** Brand Id */
@@ -13060,6 +13130,41 @@ export interface operations {
             };
         };
     };
+    payIntakeBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakePayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     markIntakeReady: {
         parameters: {
             query?: never;
@@ -13078,6 +13183,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    requestIntakeSignature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeSignatureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSignatureRead"];
                 };
             };
             /** @description Validation Error */

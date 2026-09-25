@@ -158,6 +158,8 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "收購佇列-估價列（列數/件數）",
         "SELECT count(*)::text || '/' || COALESCE(SUM(qty),0)::text FROM intake_lines",
     ),
+    # 付款後批次對到哪幾筆收購；弄丟就查不到「這張號碼牌付了哪幾張收購單」。
+    ("收購佇列-已付款對應收購數", "SELECT count(*) FROM intake_batch_acquisitions"),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),

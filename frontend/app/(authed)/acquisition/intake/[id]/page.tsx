@@ -1,7 +1,7 @@
 "use client";
 // /acquisition/intake/[id] 一批收件的估價與叫號確認（docs/42 §4、§5）。
 // 估價隨時存檔、可中途離開再回來；估完送去叫號；叫號時逐列標處置（可部分接受）。
-// 簽署與付款在下一期（I3）。
+// 客人同意後送顧客螢幕簽一次、付款；付款就成立收購、商品進「待整理」（I3）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -11,6 +11,7 @@ import { GRADE_LABEL } from "@/features/acquisition/labels";
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
 import { pctToDiscount, pricingRates } from "@/features/intake/estimate";
 import { DISPOSITION_LABEL } from "@/features/intake/labels";
+import { PaymentPanel, useSignatureLock } from "@/features/intake/PaymentPanel";
 import { IntakeSteps, NEXT_STEP, StatusBadge } from "@/features/intake/StatusBadge";
 import { printSlip } from "@/features/intake/print";
 import { api } from "@/lib/api";
@@ -25,6 +26,7 @@ type Disposition = components["schemas"]["IntakeDisposition"];
 const TYPE_LABEL = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝" } as const;
 const EDITABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING_CONFIRM"]);
 const DELETABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING"]);
+const PAID_STATUSES = new Set(["PAID", "PARTIALLY_LISTED", "LISTED"]);
 
 function detail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -155,6 +157,13 @@ function IntakeBatchContent() {
     queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
   });
   const rates = pricingRates(settings.data);
+  const drawer = useQuery({
+    queryKey: ["cash-session", "current"],
+    queryFn: async () => {
+      const { data, response } = await api.GET("/api/v1/cash-sessions/current");
+      return response.status === 200 ? (data ?? null) : null;
+    },
+  });
   const defaultCommission = settings.data?.default_commission_pct ?? null;
 
   const batchQuery = useQuery({
@@ -276,6 +285,8 @@ function IntakeBatchContent() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const signature = useSignatureLock(batchQuery.data);
+
   if (batchQuery.isError) {
     return (
       <section className="intake-page">
@@ -346,7 +357,7 @@ function IntakeBatchContent() {
           <strong className="intake-payout-amount">{money(batch.accepted_total)}</strong>
           <span>
             收 {batch.accepted_item_count} 件（共 {batch.item_count} 件）
-            {consignmentAccepted > 0 ? `・另有寄售 ${consignmentAccepted} 件，賣出後才分帳、現在不付錢` : ""}
+            {consignmentAccepted > 0 ? `・其中寄售 ${consignmentAccepted} 件，賣出後才分帳、現在不付錢` : ""}
           </span>
           <span className="hint">
             只算已選「接受」的商品；還沒談定的不算進去。原本估價 {money(batch.deal_total)}。
@@ -468,7 +479,10 @@ function IntakeBatchContent() {
                     <tr className="intake-disposition-row">
                       <td />
                       <td colSpan={9}>
-                        <DispositionControls batch={batch} line={line} onSaved={refresh} />
+                        {/* 送簽後鎖住：改了就和客人簽的不一樣（要改先撤回簽名）。 */}
+                        <fieldset className="intake-disposition-lock" disabled={signature.locked}>
+                          <DispositionControls batch={batch} line={line} onSaved={refresh} />
+                        </fieldset>
                       </td>
                     </tr>
                   )}
@@ -501,6 +515,20 @@ function IntakeBatchContent() {
         </div>
       )}
 
+      {((batch.status === "AWAITING_CONFIRM" && !editMode) || PAID_STATUSES.has(batch.status)) && (
+        <PaymentPanel
+          batch={batch}
+          signature={signature}
+          requireSignature={settings.data?.require_acquisition_affidavit ?? false}
+          drawerOpen={drawer.data != null}
+          onChanged={() => {
+            refresh();
+            void queryClient.invalidateQueries({ queryKey: ["signing-task"] });
+            void queryClient.invalidateQueries({ queryKey: ["cash-session"] });
+          }}
+        />
+      )}
+
       <div className="intake-footer">
         {batch.status === "ESTIMATING" && (
           <button type="button" className="btn-primary" disabled={markReady.isPending} onClick={() => markReady.mutate()}>
@@ -512,10 +540,7 @@ function IntakeBatchContent() {
             回到叫號確認
           </Link>
         )}
-        {batch.status === "AWAITING_CONFIRM" && !editMode && (
-          <p className="hint">客人確認後的簽署與付款，下一期開放；目前先逐列記錄處置。</p>
-        )}
-        {editable && !askCancel && (
+        {editable && !askCancel && !signature.locked && (
           <button type="button" className="btn-ghost" onClick={() => setAskCancel(true)}>
             取消整批
           </button>

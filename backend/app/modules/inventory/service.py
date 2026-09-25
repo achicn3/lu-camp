@@ -138,6 +138,14 @@ class AcquisitionItemOverview:
     names: list[str] = field(default_factory=list)
     used: bool = False
 
+
+# 沒賣出、沒動用的狀態（作廢收購可以整批退場）：在庫／上架，以及排隊收購的待整理（docs/42）。
+UNSOLD_SERIALIZED_STATUSES = frozenset(
+    {SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING}
+)
+UNSOLD_BULK_STATUSES = frozenset({BulkLotStatus.ON_SALE, BulkLotStatus.PENDING_LISTING})
+
+
 class InventoryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -265,7 +273,11 @@ class InventoryService:
         note: str | None = None,
         retail_price: Decimal | None = None,
         resale_discount_pct: int | None = None,
+        status: SerializedItemStatus = SerializedItemStatus.IN_STOCK,
     ) -> SerializedItem:
+        """建序號品。`status` 只接受在庫或待整理（排隊收購付款時建、之後整理上架，docs/42）。"""
+        if status not in UNSOLD_SERIALIZED_STATUSES:
+            raise OwnershipValidationError("新建序號品只能是在庫或待整理")
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
         if ownership_type == OwnershipType.OWNED:
@@ -298,6 +310,7 @@ class InventoryService:
             note=note,
             retail_price=retail_price,
             resale_discount_pct=resale_discount_pct,
+            status=status,
         )
         return await self._repo.add_serialized(item)
 
@@ -1727,11 +1740,11 @@ class InventoryService:
         以無分頁讀層涵蓋整批（不可漏看 201+ 件之後的頁，Codex 高風險）。
         """
         items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
-        if any(it.status != SerializedItemStatus.IN_STOCK for it in items):
+        if any(it.status not in UNSOLD_SERIALIZED_STATUSES for it in items):
             return True
         lots = await self._repo.list_owned_bulk_lots_for_void(store_id, acquisition_id)
         return any(
-            lot.status != BulkLotStatus.ON_SALE or lot.remaining_qty != lot.total_qty
+            lot.status not in UNSOLD_BULK_STATUSES or lot.remaining_qty != lot.total_qty
             for lot in lots
         )
 
@@ -1744,9 +1757,15 @@ class InventoryService:
         """
         items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
         for it in items:
+            # 待整理（排隊收購已付款、還沒上架）也是沒賣出的件，一樣可退場。
+            from_status = (
+                it.status
+                if it.status in UNSOLD_SERIALIZED_STATUSES
+                else SerializedItemStatus.IN_STOCK
+            )
             ok = await self._repo.transition_serialized_status(
                 it.id,
-                SerializedItemStatus.IN_STOCK,
+                from_status,
                 SerializedItemStatus.WRITTEN_OFF,
                 set_sold_date=False,
             )
@@ -1796,7 +1815,11 @@ class InventoryService:
         category_id: int | None = None,
         note: str | None = None,
         retail_price: Decimal | None = None,
+        status: BulkLotStatus = BulkLotStatus.ON_SALE,
     ) -> BulkLot:
+        """建散裝批。`status` 只接受上架或待整理（排隊收購付款時建、之後整理上架，docs/42）。"""
+        if status not in UNSOLD_BULK_STATUSES:
+            raise OwnershipValidationError("新建散裝批只能是上架或待整理")
         if grade != Grade.E:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
         if total_qty <= 0:
@@ -1821,6 +1844,7 @@ class InventoryService:
             category_id=category_id,
             note=note,
             retail_price=retail_price,
+            status=status,
         )
         return await self._repo.add_bulk_lot(lot)
 

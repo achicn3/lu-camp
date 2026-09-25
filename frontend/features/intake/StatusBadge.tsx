@@ -20,7 +20,8 @@ const STEPS: { key: string; label: string; statuses: Status[] }[] = [
 export const NEXT_STEP: Record<Status, string> = {
   PENDING_ESTIMATE: "在下方「新增一件商品」逐件估價。",
   ESTIMATING: "繼續新增商品；全部估完按最下面的「估完，送去叫號」。",
-  AWAITING_CONFIRM: "叫號請客人過來，逐列選「接受／客人不售／店家不收」並按儲存；簽署與付款下一期開放。",
+  AWAITING_CONFIRM:
+    "叫號請客人過來，逐列選「接受／客人不售／店家不收」並按儲存；都選好後送顧客螢幕給客人簽名，再按付款。",
   SIGNED: "客人已簽署，等待付款。",
   PAID: "已付款，等空檔整理上架。",
   PARTIALLY_LISTED: "部分已上架，剩下的等空檔整理。",

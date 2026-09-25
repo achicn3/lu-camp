@@ -27,12 +27,14 @@ export function sellThroughPct(totalQty: number, remainingQty: number): number {
 
 // Record<列舉, Badge>：列舉變動時 TS 會在編譯期強制補齊（不漏狀態）。
 const SERIALIZED_STATUS: Record<SerializedStatus, Badge> = {
+  PENDING_LISTING: { label: "待整理", tone: "neutral" },
   IN_STOCK: { label: "在庫", tone: "ok" },
   SOLD: { label: "已售出", tone: "muted" },
   RETURNED_TO_CONSIGNOR: { label: "已退寄售人", tone: "neutral" },
   WRITTEN_OFF: { label: "已報廢", tone: "warn" },
 };
 const BULK_STATUS: Record<BulkStatus, Badge> = {
+  PENDING_LISTING: { label: "待整理", tone: "neutral" },
   ON_SALE: { label: "販售中", tone: "ok" },
   SOLD_OUT: { label: "售罄", tone: "muted" },
   WRITTEN_OFF: { label: "已報廢", tone: "warn" },

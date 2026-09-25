@@ -5,7 +5,7 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.intake.models import IntakeBatch, IntakeLine
+from app.modules.intake.models import IntakeBatch, IntakeBatchAcquisition, IntakeLine
 from app.shared.enums import IntakeBatchStatus
 
 
@@ -22,7 +22,7 @@ class IntakeRepository:
         )
         return (current or 0) + 1
 
-    def add(self, row: IntakeBatch | IntakeLine) -> None:
+    def add(self, row: IntakeBatch | IntakeLine | IntakeBatchAcquisition) -> None:
         self._session.add(row)
 
     async def get_batch(
@@ -75,3 +75,22 @@ class IntakeRepository:
     async def delete_line(self, line: IntakeLine) -> None:
         await self._session.delete(line)
         await self._session.flush()
+
+    async def acquisition_ids_for(
+        self, store_id: int, batch_ids: list[int]
+    ) -> dict[int, list[int]]:
+        """每批付款時成立的收購 id（依成立順序）。"""
+        if not batch_ids:
+            return {}
+        rows = await self._session.execute(
+            select(IntakeBatchAcquisition.batch_id, IntakeBatchAcquisition.acquisition_id)
+            .where(
+                IntakeBatchAcquisition.store_id == store_id,
+                IntakeBatchAcquisition.batch_id.in_(batch_ids),
+            )
+            .order_by(IntakeBatchAcquisition.id)
+        )
+        out: dict[int, list[int]] = {}
+        for batch_id, acquisition_id in rows:
+            out.setdefault(batch_id, []).append(acquisition_id)
+        return out

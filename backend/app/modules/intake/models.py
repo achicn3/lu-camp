@@ -64,6 +64,10 @@ class IntakeBatch(Base, TimestampMixin):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     cancel_reason: Mapped[str | None] = mapped_column(String(200))
+    # I3：送客人簽署的切結（整批一份；付款時比對內容、單次使用）與付款紀錄。
+    signature_task_id: Mapped[int | None] = mapped_column(ForeignKey("signature_tasks.id"))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 
 class IntakeLine(Base, TimestampMixin):
@@ -123,3 +127,17 @@ class IntakeLine(Base, TimestampMixin):
     returned_to_customer: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
+
+
+class IntakeBatchAcquisition(Base, TimestampMixin):
+    """付款時依類型成立的收購（買斷／寄售／散裝各一或多筆），掛回原批次。"""
+
+    __tablename__ = "intake_batch_acquisitions"
+    __table_args__ = (
+        UniqueConstraint("acquisition_id", name="uq_intake_batch_acquisitions_acquisition"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("intake_batches.id"), index=True)
+    acquisition_id: Mapped[int] = mapped_column(ForeignKey("acquisitions.id"))
