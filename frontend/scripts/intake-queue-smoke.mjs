@@ -95,7 +95,7 @@ try {
   const deal = await form.getByLabel("成交收購價／件").inputValue();
   ok("五折自動帶預計售價 500、建議收購價當成交價", listed === "500" && Number(deal) > 0, `${listed}／${deal}`);
   ok("成色沒點時顯示依折數推斷", (await form.getByLabel("成色").innerText()).includes("依折數："));
-  await form.getByRole("button", { name: "存這一件" }).click();
+  await form.getByRole("button", { name: "＋ 加入這一件" }).click();
   await page.getByRole("cell", { name: /黑色折疊椅/ }).waitFor();
 
   // ② 第二列：露營桌、原價 3000、六折 → 紅字
@@ -105,10 +105,10 @@ try {
   await form2.getByRole("button", { name: "6折", exact: true }).click();
   ok("六折出現新品紅字提醒", (await form2.locator(".acq-near-new").count()) === 1);
   await page.screenshot({ path: join(SHOTS, "02-estimating.png"), fullPage: true });
-  await form2.getByRole("button", { name: "存這一件" }).click();
+  await form2.getByRole("button", { name: "＋ 加入這一件" }).click();
   await page.getByRole("cell", { name: /露營桌/ }).waitFor();
   const summary = await page.locator(".intake-summary").innerText();
-  ok("已估 2 項 3 件、狀態估價中", summary.includes("已估 2 項 3 件") && summary.includes("估價中"), summary.replace(/\n/g, " "));
+  ok("已估 2 項 3 件、狀態估價中", summary.includes("已估 2 項 3 件") && summary.includes("估價中") && (await page.locator(".intake-status-estimating").count()) === 1, summary.replace(/\n/g, " "));
 
   // ③ 估完送叫號 → 逐列處置
   await page.getByRole("button", { name: "估完，送去叫號" }).click();
@@ -130,6 +130,7 @@ try {
   const row = page.locator("tr", { hasText: SELLER });
   await row.waitFor();
   ok("排隊清單列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
+  ok("狀態用顏色標示（待確認＝橘色標籤）", (await row.locator(".intake-status-awaiting_confirm").count()) === 1);
   await page.screenshot({ path: join(SHOTS, "04-queue.png"), fullPage: true });
 
   // 代理連不上：照樣進估價頁，並提示補印（號碼已登記，不能因印表機卡住現場）

@@ -10,7 +10,8 @@ import { Fragment, Suspense, useEffect, useRef, useState } from "react";
 import { GRADE_LABEL } from "@/features/acquisition/labels";
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
 import { pctToDiscount, pricingRates } from "@/features/intake/estimate";
-import { DISPOSITION_LABEL, STATUS_LABEL } from "@/features/intake/labels";
+import { DISPOSITION_LABEL } from "@/features/intake/labels";
+import { IntakeSteps, NEXT_STEP, StatusBadge } from "@/features/intake/StatusBadge";
 import { printSlip } from "@/features/intake/print";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -293,9 +294,13 @@ function IntakeBatchContent() {
           回排隊清單
         </Link>
       </div>
+      <IntakeSteps status={batch.status} />
+      <p className="intake-next" role="status">
+        下一步：{NEXT_STEP[batch.status]}
+      </p>
       <div className="card intake-summary">
         <span>
-          狀態：<strong>{STATUS_LABEL[batch.status]}</strong>
+          狀態：<StatusBadge status={batch.status} />
         </span>
         <span>報到 {formatTaipeiDateTime(batch.created_at)}</span>
         <span>
@@ -354,7 +359,7 @@ function IntakeBatchContent() {
       <div className="card">
         <h2>估價明細</h2>
         {batch.lines.length === 0 ? (
-          <p className="hint">還沒有估價，從下面新增第一件。</p>
+          <p className="hint">還沒有估價：請在下方「新增一件商品」填好後按「＋ 加入這一件」。</p>
         ) : (
           <div className="intake-table-scroll">
           <table className="intake-lines">
@@ -447,12 +452,16 @@ function IntakeBatchContent() {
 
       {editable && batch.status !== "AWAITING_CONFIRM" && (
         <div className="card">
-          <h2>新增一件</h2>
+          <h2>新增一件商品</h2>
+          <p className="hint">
+            填簡稱、原價、點折數（收購價會自動帶出，可改），按「＋ 加入這一件」就會出現在上面的估價明細；
+            可以一直加，全部估完再按最下面的「估完，送去叫號」。
+          </p>
           <LineForm
             key={formKey}
             rates={rates}
             defaultCommissionPct={defaultCommission}
-            submitLabel="存這一件"
+            submitLabel="＋ 加入這一件"
             busy={addLine.isPending}
             onSubmit={(fields) => addLine.mutate(fields)}
           />

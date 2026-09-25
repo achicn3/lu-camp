@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { SellerSection } from "@/features/acquisition/SellerSection";
-import { STATUS_LABEL } from "@/features/intake/labels";
+import { StatusBadge } from "@/features/intake/StatusBadge";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -133,7 +133,9 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
               )}
             </td>
             <td className="money" data-label="估價收購總額">${formatNtd(parseNtd(b.deal_total) ?? 0)}</td>
-            <td data-label="狀態">{STATUS_LABEL[b.status]}</td>
+            <td data-label="狀態">
+              <StatusBadge status={b.status} />
+            </td>
             <td data-label="報到時間">{formatTaipeiDateTime(b.created_at)}</td>
             <td>
               <Link href={`/acquisition/intake/${b.id}`} className="btn-secondary">

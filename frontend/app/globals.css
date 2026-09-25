@@ -4689,3 +4689,79 @@ a.btn-ghost {
     font-size: var(--text-sm);
   }
 }
+
+/* 排隊收購狀態顏色：灰＝待估價、藍＝估價中、橘＝待確認（要叫號）、紫＝已簽署、綠＝已付款、青＝上架、紅＝取消。 */
+.intake-status {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.6;
+}
+.intake-status-pending_estimate {
+  color: var(--ink-soft);
+  background: rgba(35, 41, 31, 0.08);
+}
+.intake-status-estimating {
+  color: var(--info);
+  background: rgba(44, 110, 143, 0.12);
+}
+.intake-status-awaiting_confirm {
+  color: #9a5b00;
+  background: rgba(230, 140, 20, 0.18);
+}
+.intake-status-signed {
+  color: #6a3d9a;
+  background: rgba(106, 61, 154, 0.12);
+}
+.intake-status-paid {
+  color: var(--success);
+  background: rgba(46, 125, 79, 0.12);
+}
+.intake-status-partially_listed,
+.intake-status-listed {
+  color: #17706e;
+  background: rgba(23, 112, 110, 0.12);
+}
+.intake-status-cancelled {
+  color: var(--danger);
+  background: rgba(178, 58, 46, 0.1);
+}
+/* 流程進度：報到 → 估價 → 叫號確認 → 簽署付款 → 整理上架 */
+.intake-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+.intake-steps li {
+  counter-increment: step;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  background: var(--surface);
+}
+.intake-steps li::before {
+  content: counter(step) ". ";
+}
+.intake-steps li.done {
+  color: var(--success);
+  border-color: rgba(46, 125, 79, 0.4);
+}
+.intake-steps li.current {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.intake-next {
+  margin: 0;
+  font-weight: 600;
+}
