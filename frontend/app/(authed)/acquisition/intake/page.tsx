@@ -187,7 +187,7 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
             <td data-label="狀態">
               <StatusBadge status={b.status} />
             </td>
-            <td data-label="報到時間">{formatTaipeiDateTime(b.created_at)}</td>
+            <td data-label="報到時間">{formatTaipeiDateTime(b.created_at, { omitYear: true })}</td>
             <td>
               <QueueActions batch={b} />
             </td>

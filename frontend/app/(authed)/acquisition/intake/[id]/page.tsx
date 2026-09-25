@@ -322,7 +322,7 @@ function IntakeBatchContent() {
         <span>
           狀態：<StatusBadge status={batch.status} />
         </span>
-        <span>報到 {formatTaipeiDateTime(batch.created_at)}</span>
+        <span>報到 {formatTaipeiDateTime(batch.created_at, { omitYear: true })}</span>
         <span>
           實收 {batch.declared_item_count} 件・已估 {batch.item_count} 件
         </span>

@@ -33,12 +33,16 @@ function asValidDate(value: DateTimeValue): Date | null {
 
 export function formatTaipeiDateTime(
   value: DateTimeValue,
-  options: { includeSeconds?: boolean } = {},
+  options: { includeSeconds?: boolean; omitYear?: boolean } = {},
 ): string {
   const date = asValidDate(value);
   if (!date) return "—";
   const parts = formatterParts(date);
-  const base = `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
+  // omitYear：當天／近幾天的清單（例如排隊收購的報到時間）不必顯示西元年。
+  const day = options.omitYear
+    ? `${parts.month}/${parts.day}`
+    : `${parts.year}/${parts.month}/${parts.day}`;
+  const base = `${day} ${parts.hour}:${parts.minute}`;
   return options.includeSeconds ? `${base}:${parts.second}` : base;
 }
 

@@ -138,6 +138,11 @@ try {
     (await row.getByRole("link", { name: "叫號", exact: true }).count()) === 1 &&
       (await row.getByRole("link", { name: "編輯", exact: true }).count()) === 1,
   );
+  const callBox = await row.getByRole("link", { name: "叫號", exact: true }).boundingBox();
+  const editBox = await row.getByRole("link", { name: "編輯", exact: true }).boundingBox();
+  ok("「叫號」「編輯」在同一列", callBox !== null && editBox !== null && Math.abs(callBox.y - editBox.y) < 2);
+  const timeText = await row.locator('td[data-label="報到時間"]').innerText();
+  ok("報到時間不顯示西元年", /^\d{2}\/\d{2} \d{2}:\d{2}$/.test(timeText.trim()), timeText);
   await row.getByRole("link", { name: "編輯", exact: true }).click();
   await page.getByRole("heading", { name: "新增一件商品" }).waitFor();
   ok(

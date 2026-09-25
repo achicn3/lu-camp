@@ -58,4 +58,8 @@ describe("Taipei datetime-local input", () => {
     expect(() => taipeiDateTimeLocalToUtc("2026-02-30T10:00")).toThrow();
     expect(() => taipeiDateTimeLocalToUtc("hello")).toThrow();
   });
+
+  it("可以不顯示西元年（排隊收購報到時間）", () => {
+    expect(formatTaipeiDateTime("2026-09-25T03:01:00Z", { omitYear: true })).toBe("09/25 11:01");
+  });
 });

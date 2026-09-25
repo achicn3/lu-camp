@@ -4830,8 +4830,12 @@ a.btn-ghost {
   background: var(--surface);
 }
 
+/* 「叫號」「編輯」排在同一列（店主回饋）：不換行，按鈕字也不拆字。 */
 .intake-queue-actions {
   display: flex;
   gap: var(--sp-2);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+.intake-queue-actions a {
+  white-space: nowrap;
 }
