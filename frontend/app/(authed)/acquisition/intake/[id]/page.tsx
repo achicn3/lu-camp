@@ -288,7 +288,10 @@ function IntakeBatchContent() {
   if (!batch) return <p className="hint">讀取中…</p>;
 
   const editable = EDITABLE.has(batch.status);
-  const confirming = batch.status === "AWAITING_CONFIRM" || batch.status === "CANCELLED";
+  // 估完（待確認）時從清單按「編輯」進來＝編輯模式：回到新增／編輯商品，暫時收起叫號處置。
+  const editMode = batch.status === "AWAITING_CONFIRM" && searchParams.get("mode") === "edit";
+  const confirming =
+    (batch.status === "AWAITING_CONFIRM" && !editMode) || batch.status === "CANCELLED";
   // 估價中還沒估完是正常的：只提示還差幾件；估完（或估多了）才用紅字請店員再點一次。
   const missingItems = batch.declared_item_count - batch.item_count;
   const stillEstimating = batch.status === "PENDING_ESTIMATE" || batch.status === "ESTIMATING";
@@ -310,7 +313,10 @@ function IntakeBatchContent() {
       </div>
       <IntakeSteps status={batch.status} />
       <p className="intake-next" role="status">
-        下一步：{NEXT_STEP[batch.status]}
+        下一步：
+        {editMode
+          ? "改好商品後按「回到叫號確認」。估完的商品不能刪除，客人不要的請在叫號時選「客人不售／店家不收」。"
+          : NEXT_STEP[batch.status]}
       </p>
       <div className="card intake-summary">
         <span>
@@ -334,7 +340,7 @@ function IntakeBatchContent() {
           {batch.item_count} 件）。
         </p>
       )}
-      {batch.status === "AWAITING_CONFIRM" && (
+      {batch.status === "AWAITING_CONFIRM" && !editMode && (
         <div className="card intake-payout" aria-label="要付給客人">
           <span className="intake-payout-label">要付給客人</span>
           <strong className="intake-payout-amount">{money(batch.accepted_total)}</strong>
@@ -441,7 +447,7 @@ function IntakeBatchContent() {
                       {editable && (
                         <div className="intake-row-actions">
                           <button type="button" className="btn-ghost" onClick={() => setEditing(line.id)}>
-                            改
+                            編輯
                           </button>
                           {DELETABLE.has(batch.status) && (
                             <button
@@ -475,12 +481,14 @@ function IntakeBatchContent() {
         )}
       </div>
 
-      {editable && batch.status !== "AWAITING_CONFIRM" && (
+      {editable && (batch.status !== "AWAITING_CONFIRM" || editMode) && (
         <div className="card">
           <h2>新增一件商品</h2>
           <p className="hint">
             填簡稱、原價、點折數（收購價會自動帶出，可改），按「＋ 加入這一件」就會出現在上面的估價明細；
-            可以一直加，全部估完再按最下面的「估完，送去叫號」。
+            {editMode
+              ? "改好後按最下面的「回到叫號確認」。"
+              : "可以一直加，全部估完再按最下面的「估完，送去叫號」。"}
           </p>
           <LineForm
             key={formKey}
@@ -499,7 +507,12 @@ function IntakeBatchContent() {
             估完，送去叫號
           </button>
         )}
-        {batch.status === "AWAITING_CONFIRM" && (
+        {editMode && (
+          <Link href={`/acquisition/intake/${batch.id}`} className="btn-primary">
+            回到叫號確認
+          </Link>
+        )}
+        {batch.status === "AWAITING_CONFIRM" && !editMode && (
           <p className="hint">客人確認後的簽署與付款，下一期開放；目前先逐列記錄處置。</p>
         )}
         {editable && !askCancel && (

@@ -4829,3 +4829,9 @@ a.btn-ghost {
   font-size: var(--text-md);
   background: var(--surface);
 }
+
+.intake-queue-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}

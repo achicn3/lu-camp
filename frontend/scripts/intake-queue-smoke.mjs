@@ -133,6 +133,25 @@ try {
   await row.waitFor();
   ok("排隊清單列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
   ok("狀態用顏色標示（待確認＝橘色標籤）", (await row.locator(".intake-status-awaiting_confirm").count()) === 1);
+  ok(
+    "估完的批次給「叫號」＋「編輯」兩個按鈕",
+    (await row.getByRole("link", { name: "叫號", exact: true }).count()) === 1 &&
+      (await row.getByRole("link", { name: "編輯", exact: true }).count()) === 1,
+  );
+  await row.getByRole("link", { name: "編輯", exact: true }).click();
+  await page.getByRole("heading", { name: "新增一件商品" }).waitFor();
+  ok(
+    "編輯模式：回到新增／編輯商品，收起叫號處置與要付金額",
+    (await page.locator(".intake-disposition").count()) === 0 &&
+      (await page.getByLabel("要付給客人").count()) === 0 &&
+      (await page.getByRole("button", { name: "編輯", exact: true }).count()) === 2,
+  );
+  await page.screenshot({ path: join(SHOTS, "03b-edit-mode.png"), fullPage: true });
+  await page.getByRole("link", { name: "回到叫號確認" }).click();
+  await page.getByLabel("要付給客人").waitFor();
+  await page.getByRole("link", { name: "回排隊清單" }).click();
+  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
+  await row.waitFor();
   ok("已估只講件數＋進度條", (await row.innerText()).includes("3／3 件") && (await row.getByRole("progressbar").count()) === 1);
   await page.screenshot({ path: join(SHOTS, "04-queue.png"), fullPage: true });
 
@@ -152,6 +171,7 @@ try {
   await page.getByRole("link", { name: "回排隊清單" }).click();
   await page.getByRole("heading", { name: "排隊收購" }).waitFor();
   const pendingRow = page.locator("tr", { hasText: `${SELLER}-2` });
+  ok("還沒估的批次只給「估價」按鈕", (await pendingRow.getByRole("link").allInnerTexts()).join() === "估價");
   ok("還沒估的批次在清單上明講「還差 1 件沒估」", (await pendingRow.locator(".intake-missing").innerText()).includes("還差 1 件沒估"));
 
   await page.setViewportSize({ width: 390, height: 844 });

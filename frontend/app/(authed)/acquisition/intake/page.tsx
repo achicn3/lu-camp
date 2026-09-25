@@ -89,6 +89,30 @@ function CheckIn({ onCreated }: { onCreated: (batch: Batch) => Promise<void> }) 
   );
 }
 
+/** 依狀態給按鈕：沒估完只給「估價／繼續估價」；估完給「叫號」＋「編輯」（店主回饋）。 */
+function QueueActions({ batch }: { batch: Batch }) {
+  const href = `/acquisition/intake/${batch.id}`;
+  if (batch.status === "AWAITING_CONFIRM") {
+    return (
+      <div className="intake-queue-actions">
+        <Link href={href} className="btn-primary">
+          叫號
+        </Link>
+        <Link href={`${href}?mode=edit`} className="btn-secondary">
+          編輯
+        </Link>
+      </div>
+    );
+  }
+  const label =
+    batch.status === "PENDING_ESTIMATE" ? "估價" : batch.status === "ESTIMATING" ? "繼續估價" : "查看";
+  return (
+    <Link href={href} className="btn-secondary">
+      {label}
+    </Link>
+  );
+}
+
 const ESTIMATING_STATUSES = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING_CONFIRM"]);
 
 /** 已估幾件／實收幾件＋進度條；還沒估齊用橘色明講還差幾件（只看件數，不看幾項）。 */
@@ -165,9 +189,7 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
             </td>
             <td data-label="報到時間">{formatTaipeiDateTime(b.created_at)}</td>
             <td>
-              <Link href={`/acquisition/intake/${b.id}`} className="btn-secondary">
-                {b.status === "AWAITING_CONFIRM" ? "叫號確認" : "估價"}
-              </Link>
+              <QueueActions batch={b} />
             </td>
           </tr>
         ))}
