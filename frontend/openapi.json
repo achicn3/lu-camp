@@ -7675,6 +7675,103 @@
         "title": "IntakePayRequest",
         "type": "object"
       },
+      "IntakeReceiptItem": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "amount"
+        ],
+        "title": "IntakeReceiptItem",
+        "type": "object"
+      },
+      "IntakeReceiptRead": {
+        "description": "整批的收購明細（含簽名）：印給客人的存證聯，內容就是客人在顧客螢幕上簽的那份。\n\n一批可能成立好幾張收購單（買斷／散裝／寄售各一），`reference` 把單號都列出來；\n`acquisition_id` 給還不認得 `reference` 的舊版硬體代理印單號用。購物金兩欄是整批加總\n撥入額與最後一筆撥入後的帳本餘額（交易當下的事實，不是列印當下另查的餘額）。",
+        "properties": {
+          "acquisition_id": {
+            "title": "Acquisition Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntakeReceiptItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "seller_name": {
+            "title": "Seller Name",
+            "type": "string"
+          },
+          "signature_task_id": {
+            "title": "Signature Task Id",
+            "type": "integer"
+          },
+          "signed_at": {
+            "format": "date-time",
+            "title": "Signed At",
+            "type": "string"
+          },
+          "store_credit_balance_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Balance After"
+          },
+          "store_credit_granted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Granted"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store_id",
+          "acquisition_id",
+          "reference",
+          "seller_name",
+          "items",
+          "total",
+          "payout_method",
+          "signed_at",
+          "signature_task_id"
+        ],
+        "title": "IntakeReceiptRead",
+        "type": "object"
+      },
       "IntakeSignatureRead": {
         "properties": {
           "signature_task_id": {
@@ -22587,6 +22684,54 @@
           }
         ],
         "summary": "Mark Intake Ready",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/receipt": {
+      "get": {
+        "description": "整批的收購明細（含簽名）列印內容：客人簽的品項金額、撥款、簽名任務與購物金事實。",
+        "operationId": "getIntakeReceipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeReceiptRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Intake Receipt",
         "tags": [
           "intake"
         ]

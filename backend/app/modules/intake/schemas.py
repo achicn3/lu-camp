@@ -76,6 +76,32 @@ class IntakeSignatureRead(BaseModel):
     signature_task_id: int
 
 
+class IntakeReceiptItem(BaseModel):
+    name: str
+    amount: str
+
+
+class IntakeReceiptRead(BaseModel):
+    """整批的收購明細（含簽名）：印給客人的存證聯，內容就是客人在顧客螢幕上簽的那份。
+
+    一批可能成立好幾張收購單（買斷／散裝／寄售各一），`reference` 把單號都列出來；
+    `acquisition_id` 給還不認得 `reference` 的舊版硬體代理印單號用。購物金兩欄是整批加總
+    撥入額與最後一筆撥入後的帳本餘額（交易當下的事實，不是列印當下另查的餘額）。
+    """
+
+    store_id: int
+    acquisition_id: int
+    reference: str
+    seller_name: str
+    items: list[IntakeReceiptItem]
+    total: str
+    payout_method: PayoutMethod
+    signed_at: datetime
+    signature_task_id: int
+    store_credit_granted: NTDOutOpt = None
+    store_credit_balance_after: NTDOutOpt = None
+
+
 class IntakePayRequest(BaseModel):
     """付款方式：現金或購物金。有簽署時以客人在顧客螢幕選的為準，這個值不採用。"""
 

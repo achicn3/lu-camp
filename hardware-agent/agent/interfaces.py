@@ -136,6 +136,9 @@ class AcquisitionReceiptPayload(BaseModel):
     # 不可默默印出 200。
     store_credit_granted: str | None = None
     store_credit_balance_after: str | None = None
+    # 排隊收購（docs/42）一批成立好幾張收購單：有值就印這行（列出全部單號）取代「收購單號 #id」。
+    # 選填——舊版前端不帶照舊；舊版代理收到會忽略、只印 acquisition_id。
+    reference: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
     def _credit_facts_match_payout(self) -> AcquisitionReceiptPayload:

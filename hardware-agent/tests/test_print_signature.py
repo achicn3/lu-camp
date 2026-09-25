@@ -149,6 +149,16 @@ def test_acquisition_receipt_layout() -> None:
     assert _big5("購物金餘額") not in data
 
 
+def test_acquisition_receipt_reference_replaces_single_number() -> None:
+    """排隊收購一批會成立好幾張收購單：有 reference 就印它（列出全部單號），不只印第一張。"""
+    buf = FakePrinter()
+    receipt = _acq_receipt(reference="排隊收購 A032，收購單 #43、#45")
+    EscposReceiptPrinter(buf).print_acquisition(receipt, _HEADER)
+    data = bytes(buf.buffer)
+    assert _big5("排隊收購 A032，收購單 #43、#45") in data
+    assert _big5("收購單號 #77") not in data
+
+
 def test_acquisition_receipt_cash_payout_omits_credit_lines() -> None:
     buf = FakePrinter()
     receipt = _acq_receipt(

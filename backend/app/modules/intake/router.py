@@ -22,6 +22,7 @@ from app.modules.intake.schemas import (
     IntakeLineFields,
     IntakeLineRead,
     IntakePayRequest,
+    IntakeReceiptRead,
     IntakeSignatureRead,
     IntakeSignatureRequest,
 )
@@ -240,3 +241,17 @@ async def pay_intake_batch(
             user.store_id, batch_id, payout_method=payload.payout_method, actor_user_id=user.id
         )
     return await _read_batch(session, user.store_id, batch_id)
+
+
+@router.get(
+    "/{batch_id}/receipt", response_model=IntakeReceiptRead, operation_id="getIntakeReceipt"
+)
+async def get_intake_receipt(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> IntakeReceiptRead:
+    """整批的收購明細（含簽名）列印內容：客人簽的品項金額、撥款、簽名任務與購物金事實。"""
+    try:
+        return await IntakeService(session).receipt(user.store_id, batch_id)
+    except DomainError as exc:
+        code = _STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=code, detail=str(exc)) from exc

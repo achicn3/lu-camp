@@ -8,8 +8,9 @@ import { useState } from "react";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { openCashDrawer } from "@/lib/agent";
+import { openCashDrawer, printAcquisitionReceipt } from "@/lib/agent";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { fetchSignaturePngBase64 } from "@/lib/signature";
 
 type Batch = components["schemas"]["IntakeBatchRead"];
 type Payout = components["schemas"]["PayoutMethod"];
@@ -111,6 +112,32 @@ export function PaymentPanel({
     onError: (e: Error) => setError(e.message),
   });
 
+  // 收購明細（含簽名）：整批一張，內容就是客人在顧客螢幕上簽的那份（後端組好）。
+  const [receiptNote, setReceiptNote] = useState<string | null>(null);
+  const printReceipt = useMutation({
+    mutationFn: async () => {
+      const { data, error: apiErr } = await api.GET("/api/v1/intake-batches/{batch_id}/receipt", {
+        params: { path: { batch_id: batch.id } },
+      });
+      if (!data) throw new Error(detail(apiErr) ?? "讀不到收購明細");
+      await printAcquisitionReceipt({
+        storeId: data.store_id,
+        acquisitionId: data.acquisition_id,
+        reference: data.reference,
+        sellerName: data.seller_name,
+        items: data.items,
+        total: data.total,
+        payoutMethod: data.payout_method,
+        createdAt: data.signed_at,
+        signaturePngBase64: await fetchSignaturePngBase64(data.signature_task_id),
+        storeCreditGranted: data.store_credit_granted ?? undefined,
+        storeCreditBalanceAfter: data.store_credit_balance_after ?? undefined,
+      });
+    },
+    onSuccess: () => setReceiptNote("收購明細已送出列印，請交給客人。"),
+    onError: (e: Error) => setReceiptNote(`收購明細沒有印出來：${e.message}`),
+  });
+
   const pay = useMutation({
     mutationFn: async () => {
       const method: Payout = signed && signedPayout ? signedPayout : payout;
@@ -155,6 +182,25 @@ export function PaymentPanel({
           <p className="form-success" role="status">
             {notice}
           </p>
+        )}
+        {batch.signature_task_id !== null ? (
+          <div className="intake-sign">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={printReceipt.isPending}
+              onClick={() => printReceipt.mutate()}
+            >
+              {printReceipt.isPending ? "列印中…" : "列印收購明細（含簽名）"}
+            </button>
+            {receiptNote !== null && (
+              <span role="status" className={printReceipt.isError ? "form-error" : "hint"}>
+                {receiptNote}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="hint">這一批付款時沒有請客人簽名，所以沒有收購明細（含簽名）可以印。</p>
         )}
       </div>
     );

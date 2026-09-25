@@ -295,7 +295,7 @@ class EscposReceiptPrinter:
         out += _ENTER_CHINESE
         out += _header_block(header, emit)
         out += _ALIGN_CENTER + emit("收購憑證聯") + _ALIGN_LEFT
-        out += emit(f"收購單號 #{receipt.acquisition_id}")
+        out += emit(receipt.reference or f"收購單號 #{receipt.acquisition_id}")
         # 憑證時間以**店面時區**呈現（Codex K6 第四輪）：後端 signed_at 為 UTC，直接 strftime
         # 會差八小時、可能跨日，毀損證據時點。naive 值視為 UTC。
         local_dt = (

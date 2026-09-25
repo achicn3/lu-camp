@@ -1971,6 +1971,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/{batch_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Intake Receipt
+         * @description 整批的收購明細（含簽名）列印內容：客人簽的品項金額、撥款、簽名任務與購物金事實。
+         */
+        get: operations["getIntakeReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}/signature": {
         parameters: {
             query?: never;
@@ -6421,6 +6441,47 @@ export interface components {
         IntakePayRequest: {
             /** @default CASH */
             payout_method: components["schemas"]["PayoutMethod"];
+        };
+        /** IntakeReceiptItem */
+        IntakeReceiptItem: {
+            /** Amount */
+            amount: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * IntakeReceiptRead
+         * @description 整批的收購明細（含簽名）：印給客人的存證聯，內容就是客人在顧客螢幕上簽的那份。
+         *
+         *     一批可能成立好幾張收購單（買斷／散裝／寄售各一），`reference` 把單號都列出來；
+         *     `acquisition_id` 給還不認得 `reference` 的舊版硬體代理印單號用。購物金兩欄是整批加總
+         *     撥入額與最後一筆撥入後的帳本餘額（交易當下的事實，不是列印當下另查的餘額）。
+         */
+        IntakeReceiptRead: {
+            /** Acquisition Id */
+            acquisition_id: number;
+            /** Items */
+            items: components["schemas"]["IntakeReceiptItem"][];
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Reference */
+            reference: string;
+            /** Seller Name */
+            seller_name: string;
+            /** Signature Task Id */
+            signature_task_id: number;
+            /**
+             * Signed At
+             * Format: date-time
+             */
+            signed_at: string;
+            /** Store Credit Balance After */
+            store_credit_balance_after?: string | null;
+            /** Store Credit Granted */
+            store_credit_granted?: string | null;
+            /** Store Id */
+            store_id: number;
+            /** Total */
+            total: string;
         };
         /** IntakeSignatureRead */
         IntakeSignatureRead: {
@@ -13183,6 +13244,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getIntakeReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeReceiptRead"];
                 };
             };
             /** @description Validation Error */

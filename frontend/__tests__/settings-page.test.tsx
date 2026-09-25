@@ -41,6 +41,7 @@ const SETTINGS = {
   dine_in_tables: ["A1", "A2"],
   print_kitchen_ticket: true,
   auto_print_acquisition_labels: true,
+  require_acquisition_affidavit: false,
 };
 
 const SUGGESTION = {
@@ -328,6 +329,28 @@ describe("/settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(JSON.parse(bodies[0])).toEqual({ auto_print_acquisition_labels: false });
+  });
+
+  it("可打開「收購一定要客人簽名」，只送這一欄", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json({ ...SETTINGS, require_acquisition_affidavit: true });
+      }
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    const toggle = (await screen.findByLabelText(/一定要客人在顧客螢幕簽名/)) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(JSON.parse(bodies[0])).toEqual({ require_acquisition_affidavit: true });
   });
 
   it("月固定現金支出儲存後保留成功提示，重新抓取後顯示新金額", async () => {

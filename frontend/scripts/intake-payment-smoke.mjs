@@ -1,6 +1,7 @@
 // 排隊收購 I3 煙霧（docs/42 §6）：叫號確認（買斷 2＋散裝 10＋寄售 1）→ 送顧客螢幕 → 處置鎖住 →
 // 客人在顧客螢幕看到品項金額（寄售不在內）、選現金、簽名 → 店員按付款 → 開錢櫃、已付款待整理、
-// 成立三張收購（買斷／寄售／散裝）且商品都是「待整理」。
+// 成立三張收購（買斷／寄售／散裝）且商品都是「待整理」→ 列印整批收購明細（含簽名）。
+// 另驗設定頁「收購一定要簽名」開關：打開後叫號確認頁不再出現「不簽名直接付款」（結束時還原）。
 // 需 backend + frontend 已起、已 seed（dev-manager、dev-kiosk）。執行：node scripts/intake-payment-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -18,6 +19,7 @@ const RUN = String(Date.now()).slice(-6);
 const SELLER = `付款賣家-${RUN}`;
 const CHAIR = `黑色折疊椅${RUN}`;
 const INSTALLATION = crypto.randomUUID();
+let originalRequire = null;
 mkdirSync(SHOTS, { recursive: true });
 
 let checks = 0;
@@ -137,7 +139,23 @@ try {
   await page.fill('input[name="password"]', "dev-test-123456");
   await page.click('button:has-text("登入")');
   await page.waitForURL(`${BASE}/`);
+  const before = await api(mgr, "GET", "/api/v1/settings");
+  originalRequire = before.json.require_acquisition_affidavit;
+  await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+  const toggle = page.locator('input[name="require_acquisition_affidavit"]');
+  await toggle.check();
+  await toggle.evaluate((el) => el.closest("form").requestSubmit());
+  await page.getByText("設定已儲存").waitFor();
+  const after0 = await api(mgr, "GET", "/api/v1/settings");
+  ok("設定頁可打開「收購一定要簽名」", after0.json.require_acquisition_affidavit === true);
+  await page.screenshot({ path: join(SHOTS, "00-settings.png"), fullPage: true });
+
   let drawerOpened = 0;
+  const receiptPrints = [];
+  await page.route("**/print/acquisition", (route) => {
+    receiptPrints.push(route.request().postDataJSON());
+    return route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ok"}' });
+  });
   await page.route("**/drawer/open", (route) => {
     drawerOpened += 1;
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ok"}' });
@@ -147,6 +165,11 @@ try {
   await panel.waitFor();
   const payout = await page.getByLabel("要付給客人").innerText();
   ok("要付給客人 $550（買斷 500＋散裝 50）", payout.includes("$550"), payout.replace(/\n/g, " "));
+  ok(
+    "規定要簽名時沒有「不簽名直接付款」、也沒有付款鈕",
+    (await panel.getByText("不簽名直接付款").count()) === 0 &&
+      (await panel.getByRole("button", { name: /^付款/ }).count()) === 0,
+  );
   await page.screenshot({ path: join(SHOTS, "01-confirm.png"), fullPage: true });
 
   await panel.getByRole("button", { name: "送到顧客螢幕給客人簽名" }).click();
@@ -182,6 +205,22 @@ try {
   ok("狀態：已付款待整理", (await page.locator(".intake-summary").innerText()).includes("已付款待整理"));
   await page.screenshot({ path: join(SHOTS, "05-paid.png"), fullPage: true });
 
+  await result.getByRole("button", { name: "列印收購明細（含簽名）" }).click();
+  await result.getByText("收購明細已送出列印").waitFor({ timeout: 8000 });
+  const printed = receiptPrints[0];
+  ok(
+    "收購明細：整批品項、總額 550、現金、列出全部收購單號、附簽名",
+    receiptPrints.length === 1 &&
+      printed.items.length === 3 &&
+      printed.items[2].name === "營釘 ×10" &&
+      printed.total === "550" &&
+      printed.payout_method === "CASH" &&
+      /排隊收購 A\d{3}，收購單 #\d+、#\d+、#\d+/.test(printed.reference) &&
+      printed.signature_png_base64.length > 100,
+    JSON.stringify({ ...printed, signature_png_base64: "…" }),
+  );
+  await page.screenshot({ path: join(SHOTS, "06-receipt-printed.png"), fullPage: true });
+
   const after = await api(mgr, "GET", `/api/v1/intake-batches/${batchId}`);
   ok("成立三張收購（買斷／寄售／散裝）", after.json.acquisition_ids.length === 3, JSON.stringify(after.json.acquisition_ids));
   const pending = await api(mgr, "GET", `/api/v1/serialized-items?status=PENDING_LISTING&q=${encodeURIComponent(CHAIR)}&limit=200`);
@@ -198,5 +237,10 @@ try {
   console.log(String(error));
   process.exitCode = 1;
 } finally {
+  if (typeof originalRequire === "boolean") {
+    await api(await apiLogin("dev-manager"), "PATCH", "/api/v1/settings", {
+      require_acquisition_affidavit: originalRequire,
+    });
+  }
   await browser.close();
 }

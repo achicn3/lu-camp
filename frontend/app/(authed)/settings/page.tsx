@@ -75,6 +75,7 @@ function GeneralSettingsCard({
     const einvoiceEnabled = form.get("einvoice_enabled") === "on";
     const allowClerkManageCategories = form.get("allow_clerk_manage_categories") === "on";
     const autoPrintAcquisitionLabels = form.get("auto_print_acquisition_labels") === "on";
+    const requireAcquisitionAffidavit = form.get("require_acquisition_affidavit") === "on";
     const taxRateRaw = String(form.get("tax_rate") ?? "");
     const commissionRaw = String(form.get("default_commission_pct") ?? "");
     const marginRaw = String(form.get("default_margin_pct") ?? "");
@@ -133,6 +134,8 @@ function GeneralSettingsCard({
       body.allow_clerk_manage_categories = allowClerkManageCategories;
     if (autoPrintAcquisitionLabels !== settings.auto_print_acquisition_labels)
       body.auto_print_acquisition_labels = autoPrintAcquisitionLabels;
+    if (requireAcquisitionAffidavit !== settings.require_acquisition_affidavit)
+      body.require_acquisition_affidavit = requireAcquisitionAffidavit;
     // 以數值比較（非字串）：後端預設可能回 "0.05"，前端顯示 5% 會重組成 "0.0500"，
     // 字串不等但數值相同 → 否則會誤判為變更、送出空操作 PATCH 並產生假稽核紀錄。
     if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
@@ -248,6 +251,16 @@ function GeneralSettingsCard({
           defaultChecked={settings.auto_print_acquisition_labels}
         />
         <span>收購送出後自動印標籤（櫃台沒接標籤機時可關掉）</span>
+      </label>
+      <label className="field field-toggle">
+        <input
+          type="checkbox"
+          name="require_acquisition_affidavit"
+          defaultChecked={settings.require_acquisition_affidavit}
+        />
+        <span>
+          收購付錢前一定要客人在顧客螢幕簽名（收購頁與排隊收購都適用；關掉時可以不簽直接付款）
+        </span>
       </label>
       <label className="field field-toggle">
         <input

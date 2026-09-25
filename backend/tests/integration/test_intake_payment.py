@@ -409,6 +409,60 @@ async def test_changes_after_signing_require_signing_again(
     assert resp.status_code == 409 and "重新簽署" in resp.text
 
 
+# ── 收購明細（含簽名）：整批一張，內容＝客人簽的 ─────────────────────
+
+
+async def test_receipt_prints_what_the_customer_signed_for_the_whole_batch(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    bulk = _line(
+        short_name="營釘",
+        qty=10,
+        acquisition_type="BULK_LOT",
+        deal_cost="5",
+        expected_listed_price="20",
+        grade=None,
+    )
+    batch = await _confirmed_batch(client, ctx, [_line(qty=2), bulk], [2, 10])
+    task_id = await _sign(db_session, ctx, client, batch["id"])
+    paid = (await _pay(client, ctx, batch["id"])).json()
+
+    resp = await client.get(f"{PATH}/{batch['id']}/receipt", headers=ctx.auth)
+    assert resp.status_code == 200, resp.text
+    receipt = resp.json()
+    assert receipt["items"] == [
+        {"name": "黑色折疊椅", "amount": "250"},
+        {"name": "黑色折疊椅", "amount": "250"},
+        {"name": "營釘 ×10", "amount": "50"},
+    ]
+    assert receipt["total"] == "550"
+    assert receipt["payout_method"] == "STORE_CREDIT"
+    assert receipt["signature_task_id"] == task_id
+    assert receipt["acquisition_id"] in paid["acquisition_ids"]
+    assert paid["ticket_label"] in receipt["reference"]
+    assert all(f"#{n}" in receipt["reference"] for n in paid["acquisition_ids"])
+    contact = await db_session.get(Contact, ctx.contact_id)
+    assert contact is not None
+    # 兩筆收購各撥一次購物金：印的是加總，餘額是最後一筆撥入後的帳本餘額
+    assert Decimal(receipt["store_credit_granted"]) >= Decimal(550)
+    assert Decimal(receipt["store_credit_balance_after"]) == Decimal(
+        receipt["store_credit_granted"]
+    )
+
+
+async def test_receipt_needs_payment_and_a_signature(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    batch = await _confirmed_batch(client, ctx, [_line(qty=1)], [1])
+    resp = await client.get(f"{PATH}/{batch['id']}/receipt", headers=ctx.auth)
+    assert resp.status_code == 409 and "付款" in resp.text
+    await _pay(client, ctx, batch["id"])  # 本店沒規定要簽：不簽直接付現
+    resp = await client.get(f"{PATH}/{batch['id']}/receipt", headers=ctx.auth)
+    assert resp.status_code == 409 and "簽名" in resp.text
+
+
 # ── 待整理商品不能賣；作廢收購一併取消 ──────────────────────────────
 
 

@@ -22,11 +22,14 @@ from app.modules.intake.schemas import (
     IntakeDispositionRequest,
     IntakeLineFields,
     IntakeLineRead,
+    IntakeReceiptItem,
+    IntakeReceiptRead,
 )
 from app.modules.inventory.service import InventoryService
 from app.modules.signing.models import SignatureTask
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
+from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     AcquisitionType,
     BulkAcquisitionBasis,
@@ -35,6 +38,8 @@ from app.shared.enums import (
     PayoutMethod,
     SignatureTaskKind,
     SignatureTaskStatus,
+    StoreCreditEntryType,
+    StoreCreditSourceType,
 )
 from app.shared.exceptions import IntakeBatchNotFound, IntakeConflict, InvalidIntakeLine
 
@@ -76,6 +81,10 @@ def slip_code(batch_id: int) -> str:
 def _is_unique_violation(exc: IntegrityError) -> bool:
     return getattr(exc.orig, "sqlstate", None) == _UNIQUE_VIOLATION_SQLSTATE
 
+
+_PAID_STATUSES = frozenset(
+    {IntakeBatchStatus.PAID, IntakeBatchStatus.PARTIALLY_LISTED, IntakeBatchStatus.LISTED}
+)
 
 # 送簽後被撤回、逾時或失敗：這份簽名作廢，付款當作沒簽（本店要求簽署時由收購流程擋下）。
 _SIGNATURE_GONE = frozenset(
@@ -493,6 +502,79 @@ class IntakeService:
         return requests
 
     # ── 查詢 ──────────────────────────────────────────────────────────
+
+    async def receipt(self, store_id: int, batch_id: int) -> IntakeReceiptRead:
+        """整批的收購明細（含簽名）。付款後、且付款時有客人簽名才印得出來。"""
+        batch = await self._batch(store_id, batch_id)
+        if batch.status not in _PAID_STATUSES:
+            raise IntakeConflict("付款後才能印收購明細")
+        task = (
+            await SigningService(self._session).get_task(store_id, batch.signature_task_id)
+            if batch.signature_task_id is not None
+            else None
+        )
+        if (
+            task is None
+            or task.status is not SignatureTaskStatus.CONSUMED
+            or task.signed_at is None
+            or task.chosen_payout is None
+        ):
+            raise IntakeConflict("這一批付款時沒有請客人簽名，沒有收購明細（含簽名）可印")
+        acquisition_ids = sorted(
+            (await self._repo.acquisition_ids_for(store_id, [batch.id])).get(batch.id, [])
+        )
+        acquisitions = AcquisitionService(self._session)
+        for acquisition_id in acquisition_ids:
+            found = await acquisitions.receipt_for_reprint(store_id, acquisition_id)
+            if found is not None and found.voided_at is not None:
+                raise IntakeConflict(f"收購單 #{acquisition_id} 已作廢，不印收購明細")
+        granted, balance_after = await self._credit_facts(store_id, acquisition_ids)
+        content = task.content
+        raw_items = content.get("items")
+        items = [
+            IntakeReceiptItem(name=str(item.get("name", "")), amount=str(item.get("amount", "")))
+            for item in (raw_items if isinstance(raw_items, list) else [])
+            if isinstance(item, dict)
+        ]
+        numbers = "、".join(f"#{n}" for n in acquisition_ids)
+        return IntakeReceiptRead(
+            store_id=store_id,
+            acquisition_id=acquisition_ids[0],
+            reference=f"排隊收購 {ticket_label(batch.ticket_no)}，收購單 {numbers}",
+            seller_name=str(content.get("seller_name", "")),
+            items=items,
+            total=str(content.get("total", "")),
+            payout_method=task.chosen_payout,
+            signed_at=task.signed_at,
+            signature_task_id=task.id,
+            store_credit_granted=granted,
+            store_credit_balance_after=balance_after,
+        )
+
+    async def _credit_facts(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> tuple[Decimal | None, Decimal | None]:
+        """整批撥入的購物金加總，與最後一筆撥入後的帳本餘額；沒撥購物金回 (None, None)。"""
+        storecredit = StoreCreditService(self._session)
+        entries = [
+            entry
+            for acquisition_id in acquisition_ids
+            if (
+                entry := await storecredit.find_entry_by_source(
+                    store_id,
+                    StoreCreditSourceType.ACQUISITION,
+                    acquisition_id,
+                    StoreCreditEntryType.CREDIT,
+                )
+            )
+            is not None
+        ]
+        if not entries:
+            return None, None
+        latest = max(entries, key=lambda entry: entry.id)
+        return sum((Decimal(e.signed_amount) for e in entries), Decimal(0)), Decimal(
+            latest.balance_after
+        )
 
     async def get_batch(self, store_id: int, batch_id: int) -> IntakeBatch:
         return await self._batch(store_id, batch_id)
