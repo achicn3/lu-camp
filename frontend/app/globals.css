@@ -4959,7 +4959,7 @@ a.btn-ghost {
 }
 .intake-list-unit {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr)) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr)) minmax(0, 2fr) auto;
   gap: var(--sp-2) var(--sp-3);
   align-items: end;
 }
@@ -4980,7 +4980,8 @@ a.btn-ghost {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .intake-list-unit .campaign-checkbox,
-  .intake-list-unit .intake-list-unit-note {
+  .intake-list-unit .intake-list-unit-note,
+  .intake-list-unit .intake-list-unit-action {
     grid-column: 1 / -1;
   }
 }
@@ -4999,9 +5000,13 @@ a.btn-ghost {
   width: 100%;
 }
 .intake-list-unit-action {
-  grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
+  align-self: end;
+}
+/* 表單打開時才佔整列，平常跟那一件在同一行。 */
+.intake-list-unit-action:has(.intake-discrepancy) {
+  grid-column: 1 / -1;
 }
 .intake-discrepancy-list {
   margin: 0;
