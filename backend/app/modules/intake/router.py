@@ -14,13 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
 from app.modules.intake.schemas import (
+    IntakeAwaitingListingRead,
     IntakeBatchCreateRequest,
     IntakeBatchRead,
     IntakeCancelRequest,
     IntakeDispositionRequest,
+    IntakeItemRead,
     IntakeLineCreateRequest,
     IntakeLineFields,
     IntakeLineRead,
+    IntakeListingRequest,
+    IntakeListingResult,
     IntakePayRequest,
     IntakeReceiptRead,
     IntakeSignatureRead,
@@ -30,13 +34,17 @@ from app.modules.intake.service import IntakeService
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
+    CrossStoreReference,
     DomainError,
     IdempotencyKeyConflict,
     IntakeBatchNotFound,
     IntakeConflict,
     InvalidIntakeLine,
     InvalidPayoutSplit,
+    InvalidStateTransition,
     NoOpenCashSession,
+    OwnershipValidationError,
+    SaleLineInvalid,
     SignatureContentMismatch,
     SignatureTaskConflict,
     SignatureTaskNotFound,
@@ -66,6 +74,11 @@ _STATUS: dict[type[DomainError], int] = {
     InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     AcquisitionRequiresNationalId: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 上架（I4）：已不在待整理 → 409；品牌型號分類不屬本店、資料不合法 → 422
+    InvalidStateTransition: status.HTTP_409_CONFLICT,
+    CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    OwnershipValidationError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -125,6 +138,18 @@ async def list_intake_batches(
         user.store_id, include_closed=include_closed, limit=limit, offset=offset
     )
     return await service.to_reads(user.store_id, batches)
+
+
+@router.get(
+    "/awaiting-listing",
+    response_model=list[IntakeAwaitingListingRead],
+    operation_id="listIntakeAwaitingListing",
+)
+async def list_intake_awaiting_listing(
+    session: SessionDep, user: AuthDep
+) -> list[IntakeAwaitingListingRead]:
+    """待整理清單：已付款、還有件沒上架的批次，放最久的排前面。"""
+    return await IntakeService(session).awaiting_listing(user.store_id)
 
 
 @router.get("/{batch_id}", response_model=IntakeBatchRead, operation_id="getIntakeBatch")
@@ -255,3 +280,31 @@ async def get_intake_receipt(
     except DomainError as exc:
         code = _STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
         raise HTTPException(status_code=code, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{batch_id}/items", response_model=list[IntakeItemRead], operation_id="listIntakeItems"
+)
+async def list_intake_items(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> list[IntakeItemRead]:
+    """這一批付款時建好的商品（待整理與已上架）。"""
+    try:
+        return await IntakeService(session).items(user.store_id, batch_id)
+    except DomainError as exc:
+        code = _STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{batch_id}/listing", response_model=IntakeListingResult, operation_id="listIntakeBatchItems"
+)
+async def list_intake_batch_items(
+    batch_id: int, payload: IntakeListingRequest, session: SessionDep, user: AuthDep
+) -> IntakeListingResult:
+    """補待整理商品的資料；`publish` 同時上架（回這次上架的件，前端印標籤）。"""
+    async with _write(session):
+        result = await IntakeService(session).list_items(
+            user.store_id, batch_id, payload, actor_user_id=user.id
+        )
+    return result

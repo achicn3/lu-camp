@@ -4877,3 +4877,69 @@ a.btn-ghost {
   font-size: var(--text-lg);
   padding: var(--sp-2) var(--sp-4);
 }
+
+/* 排隊收購 I4：待整理上架（docs/42 §7、§8） */
+.intake-scan {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+.intake-bulk-apply {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.intake-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-left: 4px solid transparent;
+}
+.intake-list-item.is-checked {
+  border-left-color: var(--accent);
+}
+.intake-list-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+/* 固定五欄不留空洞：二手商品第一列 品牌／型號／分類／成色／售價，第二列 品名＋備註；
+   散裝第一列 品名（兩欄）／品牌／分類／每件售價，第二列備註整列。 */
+.intake-list-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+}
+.intake-list-grid .intake-list-name {
+  grid-column: span 3;
+}
+.intake-list-grid .intake-list-note {
+  grid-column: span 2;
+}
+.intake-list-grid.is-bulk .intake-list-name {
+  grid-column: span 2;
+}
+.intake-list-grid.is-bulk .intake-list-note {
+  grid-column: 1 / -1;
+}
+@media (max-width: 760px) {
+  .intake-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .intake-list-grid .intake-list-name,
+  .intake-list-grid .intake-list-note,
+  .intake-list-grid.is-bulk .intake-list-name {
+    grid-column: 1 / -1;
+  }
+}
+.intake-list-item-head .campaign-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}

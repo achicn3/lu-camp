@@ -104,6 +104,18 @@ function QueueActions({ batch }: { batch: Batch }) {
       </div>
     );
   }
+  if (batch.status === "PAID" || batch.status === "PARTIALLY_LISTED") {
+    return (
+      <div className="intake-queue-actions">
+        <Link href={`${href}/listing`} className="btn-primary">
+          整理上架
+        </Link>
+        <Link href={href} className="btn-secondary">
+          查看
+        </Link>
+      </div>
+    );
+  }
   const label =
     batch.status === "PENDING_ESTIMATE" ? "估價" : batch.status === "ESTIMATING" ? "繼續估價" : "查看";
   return (
@@ -208,9 +220,14 @@ export default function IntakeQueuePage() {
     <section className="intake-page">
       <div className="pur-page-head">
         <h1 className="page-title">排隊收購</h1>
-        <Link href="/acquisition" className="btn-ghost">
-          直接收購（原收購頁）
-        </Link>
+        <div className="intake-queue-actions">
+          <Link href="/acquisition/intake/listing" className="btn-secondary">
+            待整理上架
+          </Link>
+          <Link href="/acquisition" className="btn-ghost">
+            直接收購（原收購頁）
+          </Link>
+        </div>
       </div>
       <CheckIn
         onCreated={async (batch) => {

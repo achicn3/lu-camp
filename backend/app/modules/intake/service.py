@@ -4,13 +4,14 @@
 後端只驗金額合法與欄位一致，不重算建議價——成交價本來就可由店員改（裁示 5）。
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import format_ntd
+from app.core.money import format_ntd, round_ntd
 from app.core.time import store_date, utc_now
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn, AcquisitionLotIn
 from app.modules.acquisition.service import AcquisitionService
@@ -18,13 +19,19 @@ from app.modules.contacts.service import ContactService
 from app.modules.intake.models import IntakeBatch, IntakeBatchAcquisition, IntakeLine
 from app.modules.intake.repository import IntakeRepository
 from app.modules.intake.schemas import (
+    IntakeAwaitingListingRead,
     IntakeBatchRead,
     IntakeDispositionRequest,
+    IntakeItemEdit,
+    IntakeItemRead,
     IntakeLineFields,
     IntakeLineRead,
+    IntakeListingRequest,
+    IntakeListingResult,
     IntakeReceiptItem,
     IntakeReceiptRead,
 )
+from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.signing.models import SignatureTask
 from app.modules.signing.schemas import SignatureTaskCreate
@@ -33,9 +40,13 @@ from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     AcquisitionType,
     BulkAcquisitionBasis,
+    BulkLotStatus,
     IntakeBatchStatus,
     IntakeDisposition,
+    ItemKind,
+    OwnershipType,
     PayoutMethod,
+    SerializedItemStatus,
     SignatureTaskKind,
     SignatureTaskStatus,
     StoreCreditEntryType,
@@ -82,6 +93,12 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
     return getattr(exc.orig, "sqlstate", None) == _UNIQUE_VIOLATION_SQLSTATE
 
 
+# 待整理清單一次最多列幾批、一批最多幾件（一批報到上限 999 件）。
+_LISTING_BATCH_CAP = 200
+_LISTING_ITEM_CAP = 1000
+# 作廢收購退場的件不在上架畫面出現。
+_GONE_STATUSES = frozenset({SerializedItemStatus.WRITTEN_OFF, BulkLotStatus.WRITTEN_OFF})
+
 _PAID_STATUSES = frozenset(
     {IntakeBatchStatus.PAID, IntakeBatchStatus.PARTIALLY_LISTED, IntakeBatchStatus.LISTED}
 )
@@ -90,6 +107,13 @@ _PAID_STATUSES = frozenset(
 _SIGNATURE_GONE = frozenset(
     {SignatureTaskStatus.VOIDED, SignatureTaskStatus.EXPIRED, SignatureTaskStatus.FAILED}
 )
+
+
+@dataclass
+class _ReferenceNames:
+    brands: dict[int, str] = field(default_factory=dict)
+    models: dict[int, str] = field(default_factory=dict)
+    categories: dict[int, str] = field(default_factory=dict)
 
 
 class IntakeService:
@@ -502,6 +526,233 @@ class IntakeService:
         return requests
 
     # ── 查詢 ──────────────────────────────────────────────────────────
+
+    # ── 待整理上架（I4）──────────────────────────────────────────────
+
+    async def awaiting_listing(self, store_id: int) -> list[IntakeAwaitingListingRead]:
+        """還有件沒上架的批次，放最久的排前面（付款日）。收購全作廢、沒東西可上的不列。"""
+        batches = [
+            batch
+            for batch in await self._repo.list_batches(
+                store_id,
+                [IntakeBatchStatus.PAID, IntakeBatchStatus.PARTIALLY_LISTED],
+                limit=_LISTING_BATCH_CAP,
+                offset=0,
+            )
+            if batch.paid_at is not None
+        ]
+        acquisitions = await self._repo.acquisition_ids_for(store_id, [b.id for b in batches])
+        batch_of = {acq: bid for bid, ids in acquisitions.items() for acq in ids}
+        pending: dict[int, int] = {}
+        listed: dict[int, int] = {}
+        for item in await self._inventory_items(store_id, list(batch_of)):
+            batch_id = batch_of[item.acquisition_id or 0]
+            counts = pending if self._is_pending(item) else listed
+            counts[batch_id] = counts.get(batch_id, 0) + self._pieces(item)
+        names = await self._contacts.names_for(store_id, list({b.contact_id for b in batches}))
+        today = store_date(utc_now())
+        rows = [
+            IntakeAwaitingListingRead(
+                id=batch.id,
+                ticket_label=ticket_label(batch.ticket_no),
+                slip_code=slip_code(batch.id),
+                contact_name=names.get(batch.contact_id, ""),
+                status=batch.status,
+                paid_at=batch.paid_at,
+                days_waiting=(today - store_date(batch.paid_at)).days,
+                pending_count=pending.get(batch.id, 0),
+                listed_count=listed.get(batch.id, 0),
+            )
+            for batch in batches
+            if batch.paid_at is not None and pending.get(batch.id, 0) > 0
+        ]
+        return sorted(rows, key=lambda row: (row.paid_at, row.id))
+
+    async def items(self, store_id: int, batch_id: int) -> list[IntakeItemRead]:
+        """這一批付款時建好的商品（作廢掉的不列）：先序號品、再散裝，各依建立順序。"""
+        batch = await self._batch(store_id, batch_id)
+        items = await self._batch_items(store_id, batch)
+        names = await self._reference_names(store_id, items)
+        return [self._item_read(item, names) for item in items]
+
+    async def list_items(
+        self, store_id: int, batch_id: int, request: IntakeListingRequest, *, actor_user_id: int
+    ) -> IntakeListingResult:
+        """補資料（可同時上架）。整批一個交易；鎖批次，兩人同時操作不會重複上架。"""
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        owned = {
+            (self._kind(item), item.id): item for item in await self._batch_items(store_id, batch)
+        }
+        inventory = InventoryService(self._session)
+        listed: list[SerializedItem | BulkLot] = []
+        for edit in request.items:
+            item = owned.get((edit.kind, edit.id))
+            if item is None:
+                raise IntakeConflict(f"商品 {edit.id} 不是這一批的，不能在這裡上架")
+            changes = self._changes(edit)
+            if request.publish and self._is_pending(item):
+                if changes.get("category_id", item.category_id) is None:
+                    raise InvalidIntakeLine(f"「{item.name}」上架前要選分類")
+            result: tuple[SerializedItem | BulkLot, bool] | None
+            if isinstance(item, SerializedItem):
+                result = await inventory.prepare_pending_serialized(
+                    store_id,
+                    item.id,
+                    changes=changes,
+                    publish=request.publish,
+                    actor_user_id=actor_user_id,
+                )
+            else:
+                result = await inventory.prepare_pending_bulk_lot(
+                    store_id,
+                    item.id,
+                    changes=changes,
+                    publish=request.publish,
+                    actor_user_id=actor_user_id,
+                )
+            if result is not None and result[1]:
+                listed.append(result[0])
+        remaining = await self._batch_items(store_id, batch)
+        if remaining and not any(self._is_pending(item) for item in remaining):
+            batch.status = IntakeBatchStatus.LISTED
+        elif any(not self._is_pending(item) for item in remaining):
+            batch.status = IntakeBatchStatus.PARTIALLY_LISTED
+        await self._session.flush()
+        names = await self._reference_names(store_id, listed)
+        return IntakeListingResult(
+            batch_status=batch.status, listed=[self._item_read(item, names) for item in listed]
+        )
+
+    async def _reference_names(
+        self, store_id: int, items: list[SerializedItem | BulkLot]
+    ) -> _ReferenceNames:
+        """品牌／型號／分類的顯示名（一批只有少數幾個，逐一查、同 session 會快取）。"""
+        inventory = InventoryService(self._session)
+        names = _ReferenceNames()
+        for item in items:
+            if item.brand_id is not None and item.brand_id not in names.brands:
+                brand = await inventory.get_brand(store_id, item.brand_id)
+                names.brands[item.brand_id] = brand.name if brand else ""
+            if item.category_id is not None and item.category_id not in names.categories:
+                category = await inventory.get_category(store_id, item.category_id)
+                names.categories[item.category_id] = category.name if category else ""
+            model_id = item.product_model_id if isinstance(item, SerializedItem) else None
+            if model_id is not None and model_id not in names.models:
+                model = await inventory.get_product_model(store_id, model_id)
+                names.models[model_id] = model.name if model else ""
+        return names
+
+    async def _batch_items(
+        self, store_id: int, batch: IntakeBatch
+    ) -> list[SerializedItem | BulkLot]:
+        if batch.status not in _PAID_STATUSES:
+            raise IntakeConflict("付款後才有待整理的商品")
+        acquisition_ids = (await self._repo.acquisition_ids_for(store_id, [batch.id])).get(
+            batch.id, []
+        )
+        return await self._inventory_items(store_id, acquisition_ids)
+
+    async def _inventory_items(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> list[SerializedItem | BulkLot]:
+        """收購下的商品，作廢退場（WRITTEN_OFF）的不算。"""
+        inventory = InventoryService(self._session)
+        serialized = await inventory.list_serialized_by_acquisitions(
+            store_id, acquisition_ids, limit=_LISTING_ITEM_CAP
+        )
+        lots = await inventory.list_bulk_lots_by_acquisitions(
+            store_id, acquisition_ids, limit=_LISTING_ITEM_CAP
+        )
+        items: list[SerializedItem | BulkLot] = [
+            *sorted(serialized, key=lambda item: item.id),
+            *sorted(lots, key=lambda lot: lot.id),
+        ]
+        return [item for item in items if item.status not in _GONE_STATUSES]
+
+    @staticmethod
+    def _is_pending(item: SerializedItem | BulkLot) -> bool:
+        return item.status in (
+            SerializedItemStatus.PENDING_LISTING,
+            BulkLotStatus.PENDING_LISTING,
+        )
+
+    @staticmethod
+    def _kind(item: SerializedItem | BulkLot) -> ItemKind:
+        return ItemKind.SERIALIZED if isinstance(item, SerializedItem) else ItemKind.BULK_LOT
+
+    @staticmethod
+    def _pieces(item: SerializedItem | BulkLot) -> int:
+        return 1 if isinstance(item, SerializedItem) else item.total_qty
+
+    @staticmethod
+    def _changes(edit: IntakeItemEdit) -> dict[str, object]:
+        """只取有帶的欄位；必填欄位帶 null 視為沒改，品牌／型號／備註帶 null＝清掉。"""
+        clearable = {"brand_id", "product_model_id", "note"}
+        changes: dict[str, object] = {}
+        for name in edit.model_fields_set - {"kind", "id"}:
+            value = getattr(edit, name)
+            if value is None and name not in clearable:
+                continue
+            changes[name] = value
+        return changes
+
+    @classmethod
+    def _item_read(cls, item: SerializedItem | BulkLot, names: _ReferenceNames) -> IntakeItemRead:
+        pending = cls._is_pending(item)
+        missing: list[str] = []
+        if pending and item.category_id is None:
+            missing.append("分類")
+        if pending and item.brand_id is None:
+            missing.append("品牌")
+        if isinstance(item, SerializedItem):
+            consignment = item.ownership_type is OwnershipType.CONSIGNMENT
+            return IntakeItemRead(
+                kind=ItemKind.SERIALIZED,
+                id=item.id,
+                code=item.item_code,
+                name=item.name,
+                consignment=consignment,
+                grade=item.grade,
+                brand_id=item.brand_id,
+                brand_name=names.brands.get(item.brand_id) if item.brand_id else None,
+                product_model_id=item.product_model_id,
+                product_model_name=(
+                    names.models.get(item.product_model_id) if item.product_model_id else None
+                ),
+                category_id=item.category_id,
+                category_name=names.categories.get(item.category_id) if item.category_id else None,
+                listed_price=item.listed_price,
+                qty=1,
+                acquisition_cost=None if consignment else item.acquisition_cost,
+                retail_price=item.retail_price,
+                note=item.note,
+                listed=not pending,
+                missing=missing,
+            )
+        consignment = item.consignor_id is not None
+        per_piece = (
+            None
+            if consignment or item.acquisition_cost is None or item.total_qty <= 0
+            else Decimal(round_ntd(InventoryService.per_piece_cost(item)))
+        )
+        return IntakeItemRead(
+            kind=ItemKind.BULK_LOT,
+            id=item.id,
+            code=item.lot_code,
+            name=item.name,
+            consignment=consignment,
+            brand_id=item.brand_id,
+            brand_name=names.brands.get(item.brand_id) if item.brand_id else None,
+            category_id=item.category_id,
+            category_name=names.categories.get(item.category_id) if item.category_id else None,
+            listed_price=item.unit_price,
+            qty=item.total_qty,
+            acquisition_cost=per_piece,
+            retail_price=item.retail_price,
+            note=item.note,
+            listed=not pending,
+            missing=missing,
+        )
 
     async def receipt(self, store_id: int, batch_id: int) -> IntakeReceiptRead:
         """整批的收購明細（含簽名）。付款後、且付款時有客人簽名才印得出來。"""

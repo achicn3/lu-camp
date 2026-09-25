@@ -29,6 +29,7 @@ from app.shared.exceptions import (
     AcquisitionCreditSpent,
     AcquisitionHasSoldItems,
     AcquisitionNotFound,
+    AcquisitionPartiallyListed,
     AcquisitionRequiresNationalId,
     AcquisitionVoidUnsupported,
     BulkBasketConflict,
@@ -77,6 +78,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     # F6.5 作廢：已作廢/含已售/購物金已花 → 409（衝突狀態，不可作廢）
     AcquisitionAlreadyVoid: status.HTTP_409_CONFLICT,
     AcquisitionHasSoldItems: status.HTTP_409_CONFLICT,
+    AcquisitionPartiallyListed: status.HTTP_409_CONFLICT,
     AcquisitionCreditSpent: status.HTTP_409_CONFLICT,
     AcquisitionVoidUnsupported: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }

@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, PlainSerializer
 
@@ -12,6 +12,7 @@ from app.shared.enums import (
     Grade,
     IntakeBatchStatus,
     IntakeDisposition,
+    ItemKind,
     PayoutMethod,
 )
 
@@ -100,6 +101,77 @@ class IntakeReceiptRead(BaseModel):
     signature_task_id: int
     store_credit_granted: NTDOutOpt = None
     store_credit_balance_after: NTDOutOpt = None
+
+
+# ── 待整理上架（I4，docs/42 §7、§8）──────────────────────────────────
+
+
+class IntakeAwaitingListingRead(BaseModel):
+    """待整理清單的一批：放了幾天、還有幾件沒上架（件數＝序號品 1 件、散裝算整堆件數）。"""
+
+    id: int
+    ticket_label: str
+    slip_code: str
+    contact_name: str
+    status: IntakeBatchStatus
+    paid_at: datetime
+    days_waiting: int
+    pending_count: int
+    listed_count: int
+
+
+class IntakeItemRead(BaseModel):
+    """這一批付款時建好的一件商品（序號品）或一堆（散裝）。"""
+
+    kind: ItemKind
+    id: int
+    code: str
+    name: str
+    consignment: bool
+    grade: Grade | None = None
+    brand_id: int | None = None
+    brand_name: str | None = None
+    product_model_id: int | None = None
+    product_model_name: str | None = None
+    category_id: int | None = None
+    category_name: str | None = None
+    listed_price: NTDOut
+    """售價（散裝＝每件售價）。"""
+    qty: int
+    acquisition_cost: NTDOutOpt = None
+    """每件收購成本（客人簽過，不能改）；寄售為 None。"""
+    retail_price: NTDOutOpt = None
+    note: str | None = None
+    listed: bool
+    missing: list[str]
+    """上架前還缺的資料（顯示用；只有分類是上架必填）。"""
+
+
+class IntakeItemEdit(BaseModel):
+    """補資料：只帶要改的欄位；品牌／型號可帶 null 清掉。成本與件數不在這裡。"""
+
+    kind: Literal[ItemKind.SERIALIZED, ItemKind.BULK_LOT]
+    id: Annotated[int, Field(gt=0)]
+    name: Annotated[str, Field(min_length=1, max_length=150)] | None = None
+    grade: Grade | None = None
+    brand_id: int | None = None
+    product_model_id: int | None = None
+    category_id: int | None = None
+    listed_price: Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=0)] | None = None
+    note: Note | None = None
+
+
+class IntakeListingRequest(BaseModel):
+    """`publish`＝這些件同時上架（轉成可賣）；否則只存資料、留在待整理。"""
+
+    items: Annotated[list[IntakeItemEdit], Field(min_length=1, max_length=1000)]
+    publish: bool = False
+
+
+class IntakeListingResult(BaseModel):
+    batch_status: IntakeBatchStatus
+    listed: list[IntakeItemRead]
+    """這次才上架的件（前端拿去印標籤）；原本就上架的不列、不重印。"""
 
 
 class IntakePayRequest(BaseModel):

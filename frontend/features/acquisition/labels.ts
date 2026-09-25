@@ -37,6 +37,7 @@ export const VOID_BLOCK_LABEL: Record<VoidBlock, string> = {
   CONSIGNMENT: "寄售不能作廢，請走寄售退貨",
   ALREADY_VOIDED: "已作廢",
   HAS_SOLD_ITEMS: "已有商品賣出，不能作廢",
+  PARTIALLY_LISTED: "已上架一部分，不能整張作廢",
   CREDIT_SPENT: "購物金已被用掉，不能作廢",
   NO_OPEN_CASH_SESSION: "要退回現金，請先開帳",
 };

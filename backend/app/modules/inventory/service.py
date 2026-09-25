@@ -137,6 +137,8 @@ class AcquisitionItemOverview:
     count: int = 0
     names: list[str] = field(default_factory=list)
     used: bool = False
+    partially_listed: bool = False
+    """排隊收購的件有的上架了、有的還在待整理（這時不能整張作廢）。"""
 
 
 # 沒賣出、沒動用的狀態（作廢收購可以整批退場）：在庫／上架，以及排隊收購的待整理（docs/42）。
@@ -1112,6 +1114,130 @@ class InventoryService:
         )
         return lot
 
+    # ── 待整理上架（排隊收購 I4，docs/42 §8）──
+    # 付款時就建好的「待整理」件：上架前補資料、上架時轉成可賣。成本與件數客人簽過，不在這裡改。
+
+    async def prepare_pending_serialized(
+        self,
+        store_id: int,
+        item_id: int,
+        *,
+        changes: dict[str, Any],
+        publish: bool,
+        actor_user_id: int,
+    ) -> tuple[SerializedItem, bool] | None:
+        """補待整理序號品的資料（可同時上架）。回 (item, 這次有沒有上架)；找不到→None。
+
+        `changes` 只收 name／grade／brand_id／product_model_id／category_id／listed_price／note。
+        已經上架（在庫）的不再動、回 False——重按上架不會改價也不會重印；已作廢等其他狀態拒絕。
+        """
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
+        if item is None:
+            return None
+        if item.status is SerializedItemStatus.IN_STOCK:
+            return item, False
+        if item.status is not SerializedItemStatus.PENDING_LISTING:
+            raise InvalidStateTransition(f"「{item.name}」已經不在待整理（可能收購已作廢）")
+        if changes.get("grade") == Grade.E:
+            raise OwnershipValidationError("E 級為散裝批，不走序號單品")
+        await self._validate_item_references(
+            store_id,
+            brand_id=changes.get("brand_id", item.brand_id),
+            product_model_id=changes.get("product_model_id", item.product_model_id),
+            category_id=changes.get("category_id", item.category_id),
+        )
+        before, after = self._apply_pending_changes(item, changes, price_field="listed_price")
+        if publish:
+            before["status"], after["status"] = item.status.value, SerializedItemStatus.IN_STOCK
+            item.status = SerializedItemStatus.IN_STOCK
+        await self._audit_pending(
+            store_id, actor_user_id, "serialized_item", item_id, before, after, publish
+        )
+        return item, publish
+
+    async def prepare_pending_bulk_lot(
+        self,
+        store_id: int,
+        lot_id: int,
+        *,
+        changes: dict[str, Any],
+        publish: bool,
+        actor_user_id: int,
+    ) -> tuple[BulkLot, bool] | None:
+        """補待整理散裝批的資料（可同時上架）；規則同序號品。`listed_price` 即每件售價。"""
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
+        if lot is None:
+            return None
+        if lot.status is BulkLotStatus.ON_SALE:
+            return lot, False
+        if lot.status is not BulkLotStatus.PENDING_LISTING:
+            raise InvalidStateTransition(f"「{lot.name}」已經不在待整理（可能收購已作廢）")
+        await self._validate_item_references(
+            store_id,
+            brand_id=changes.get("brand_id", lot.brand_id),
+            category_id=changes.get("category_id", lot.category_id),
+        )
+        allowed = {k: v for k, v in changes.items() if k not in ("grade", "product_model_id")}
+        before, after = self._apply_pending_changes(lot, allowed, price_field="unit_price")
+        if publish:
+            before["status"], after["status"] = lot.status.value, BulkLotStatus.ON_SALE
+            lot.status = BulkLotStatus.ON_SALE
+        await self._audit_pending(
+            store_id, actor_user_id, "bulk_lot", lot_id, before, after, publish
+        )
+        return lot, publish
+
+    @staticmethod
+    def _apply_pending_changes(
+        item: SerializedItem | BulkLot, changes: dict[str, Any], *, price_field: str
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """套用待整理件的編輯，回 (before, after) 只含真的變了的欄位（稽核用）。"""
+        before: dict[str, object] = {}
+        after: dict[str, object] = {}
+        for key, value in changes.items():
+            field = price_field if key == "listed_price" else key
+            if field == "name":
+                value = (value or "").strip()
+                if not value:
+                    raise SaleLineInvalid("品名不可空白")
+            elif field == "note":
+                value = (value or "").strip() or None
+            elif field == price_field:
+                value = Decimal(round_ntd(value))
+                if value <= 0:
+                    raise SaleLineInvalid("售價要大於 0")
+            old = getattr(item, field)
+            if old == value:
+                continue
+            before[field] = str(old) if isinstance(old, Decimal) else old
+            after[field] = str(value) if isinstance(value, Decimal) else value
+            setattr(item, field, value)
+        return before, after
+
+    async def _audit_pending(
+        self,
+        store_id: int,
+        actor_user_id: int,
+        entity_type: str,
+        entity_id: int,
+        before: dict[str, object],
+        after: dict[str, object],
+        publish: bool,
+    ) -> None:
+        if not after:
+            return
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="LIST_PENDING_ITEM" if publish else "UPDATE_PENDING_ITEM",
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            before=before,
+            after=after,
+        )
+
     async def update_serialized_note(
         self, store_id: int, item_id: int, *, note: str | None, actor_user_id: int
     ) -> SerializedItem | None:
@@ -1730,7 +1856,18 @@ class InventoryService:
             ov.count += int(row.count or 0)
             ov.names.extend(row.names or [])
             ov.used = ov.used or bool(row.used)
+            pending, in_stock = getattr(row, "pending", False), getattr(row, "in_stock", False)
+            ov.partially_listed = ov.partially_listed or bool(pending and in_stock)
         return overviews
+
+    async def is_partially_listed(self, store_id: int, acquisition_id: int) -> bool:
+        """排隊收購的件是否已上架一部分（有待整理、也有在庫）——作廢前置擋下用（docs/42 §10-2）。"""
+        items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
+        statuses = {it.status for it in items}
+        return (
+            SerializedItemStatus.PENDING_LISTING in statuses
+            and SerializedItemStatus.IN_STOCK in statuses
+        )
 
     async def has_sold_items(self, store_id: int, acquisition_id: int) -> bool:
         """該收購入庫的庫存是否已有任一售出/動用（read-only，作廢前置擋下用，F6.5）。

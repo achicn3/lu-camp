@@ -702,6 +702,12 @@ class InventoryRepository:
                         ),
                     )
                 ).label("used"),
+                func.bool_or(SerializedItem.status == SerializedItemStatus.PENDING_LISTING).label(
+                    "pending"
+                ),
+                func.bool_or(SerializedItem.status == SerializedItemStatus.IN_STOCK).label(
+                    "in_stock"
+                ),
             )
             .where(
                 SerializedItem.store_id == store_id,

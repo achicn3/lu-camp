@@ -124,6 +124,7 @@ class AcquisitionVoidBlock(StrEnum):
     CONSIGNMENT = "CONSIGNMENT"  # 寄售走寄售退貨／結算反轉
     ALREADY_VOIDED = "ALREADY_VOIDED"
     HAS_SOLD_ITEMS = "HAS_SOLD_ITEMS"  # 已有商品賣出或動用
+    PARTIALLY_LISTED = "PARTIALLY_LISTED"  # 排隊收購的商品已上架一部分（docs/42 §10-2）
     CREDIT_SPENT = "CREDIT_SPENT"  # 撥的購物金已被用掉，沖回會變負
     NO_OPEN_CASH_SESSION = "NO_OPEN_CASH_SESSION"  # 付現的退款要進開帳中的抽屜
 

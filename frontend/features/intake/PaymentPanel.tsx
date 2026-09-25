@@ -6,11 +6,11 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
+import { useIntakeReceiptPrint } from "@/features/intake/receipt";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { openCashDrawer, printAcquisitionReceipt } from "@/lib/agent";
+import { openCashDrawer } from "@/lib/agent";
 import { formatNtd, parseNtd } from "@/lib/money";
-import { fetchSignaturePngBase64 } from "@/lib/signature";
 
 type Batch = components["schemas"]["IntakeBatchRead"];
 type Payout = components["schemas"]["PayoutMethod"];
@@ -112,31 +112,7 @@ export function PaymentPanel({
     onError: (e: Error) => setError(e.message),
   });
 
-  // 收購明細（含簽名）：整批一張，內容就是客人在顧客螢幕上簽的那份（後端組好）。
-  const [receiptNote, setReceiptNote] = useState<string | null>(null);
-  const printReceipt = useMutation({
-    mutationFn: async () => {
-      const { data, error: apiErr } = await api.GET("/api/v1/intake-batches/{batch_id}/receipt", {
-        params: { path: { batch_id: batch.id } },
-      });
-      if (!data) throw new Error(detail(apiErr) ?? "讀不到收購明細");
-      await printAcquisitionReceipt({
-        storeId: data.store_id,
-        acquisitionId: data.acquisition_id,
-        reference: data.reference,
-        sellerName: data.seller_name,
-        items: data.items,
-        total: data.total,
-        payoutMethod: data.payout_method,
-        createdAt: data.signed_at,
-        signaturePngBase64: await fetchSignaturePngBase64(data.signature_task_id),
-        storeCreditGranted: data.store_credit_granted ?? undefined,
-        storeCreditBalanceAfter: data.store_credit_balance_after ?? undefined,
-      });
-    },
-    onSuccess: () => setReceiptNote("收購明細已送出列印，請交給客人。"),
-    onError: (e: Error) => setReceiptNote(`收購明細沒有印出來：${e.message}`),
-  });
+  const { print: printReceipt, note: receiptNote } = useIntakeReceiptPrint(batch.id);
 
   const pay = useMutation({
     mutationFn: async () => {
@@ -172,6 +148,9 @@ export function PaymentPanel({
           付給客人 <strong className="money">${formatNtd(payable)}</strong>
           ，收下的商品已經放進「待整理」，等空檔補資料、貼標籤再上架。
         </p>
+        <Link href={`/acquisition/intake/${batch.id}/listing`} className="btn-secondary">
+          開始整理上架
+        </Link>
         {batch.acquisition_ids.length > 0 && (
           <p className="hint">
             已成立收購單 {batch.acquisition_ids.map((id) => `#${id}`).join("、")}；要作廢請到{" "}

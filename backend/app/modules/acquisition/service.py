@@ -35,7 +35,7 @@ from app.modules.acquisition.schemas import (
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.basket_service import BulkBasketService
-from app.modules.inventory.service import InventoryService
+from app.modules.inventory.service import AcquisitionItemOverview, InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
@@ -59,6 +59,7 @@ from app.shared.exceptions import (
     AcquisitionCreditSpent,
     AcquisitionHasSoldItems,
     AcquisitionNotFound,
+    AcquisitionPartiallyListed,
     AcquisitionRequiresNationalId,
     AcquisitionVoidUnsupported,
     ContactNotFound,
@@ -198,7 +199,10 @@ class AcquisitionService:
         )
         drawer_open = await self._cash.get_current_session(store_id) is not None
 
-        def void_block(acq: Acquisition, used: bool) -> AcquisitionVoidBlock | None:
+        def void_block(
+            acq: Acquisition, overview: AcquisitionItemOverview | None
+        ) -> AcquisitionVoidBlock | None:
+            used = overview.used if overview else False
             # 順序與 void_acquisition 的擋下順序一致，清單講的原因才會跟按下去時一樣。
             if acq.type == AcquisitionType.CONSIGNMENT:
                 return AcquisitionVoidBlock.CONSIGNMENT
@@ -206,6 +210,8 @@ class AcquisitionService:
                 return AcquisitionVoidBlock.ALREADY_VOIDED
             if used:
                 return AcquisitionVoidBlock.HAS_SOLD_ITEMS
+            if overview is not None and overview.partially_listed:
+                return AcquisitionVoidBlock.PARTIALLY_LISTED
             if (acq.payout_cash_amount or Decimal(0)) > 0 and not drawer_open:
                 return AcquisitionVoidBlock.NO_OPEN_CASH_SESSION
             credit = credits.get(acq.id)
@@ -231,7 +237,7 @@ class AcquisitionService:
                     payout_cash_amount=acq.payout_cash_amount,
                     payout_credit_cash_equivalent=acq.payout_credit_cash_equivalent,
                     voided_at=acq.voided_at,
-                    void_block=void_block(acq, overview.used if overview else False),
+                    void_block=void_block(acq, overview),
                 )
             )
         return AcquisitionListRead(total=total, items=items)
@@ -894,6 +900,10 @@ class AcquisitionService:
         # 讀層前置擋（清楚錯誤、早於任何寫入）：含已售庫存 → 不可作廢
         if await self._inventory.has_sold_items(store_id, acquisition_id):
             raise AcquisitionHasSoldItems(f"收購 {acquisition_id} 含已售出庫存，無法作廢")
+        if await self._inventory.is_partially_listed(store_id, acquisition_id):
+            raise AcquisitionPartiallyListed(
+                f"收購 {acquisition_id} 的商品已經上架一部分，不能整張作廢"
+            )
         cash_back = acquisition.payout_cash_amount or Decimal(0)
         credit_back = acquisition.payout_credit_cash_equivalent or Decimal(0)
         # 付現的退款須落當前開帳 session（現行紅字，不改歷史）；無開帳 → 擋

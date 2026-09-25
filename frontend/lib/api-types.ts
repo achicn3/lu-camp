@@ -1830,6 +1830,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/awaiting-listing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Intake Awaiting Listing
+         * @description 待整理清單：已付款、還有件沒上架的批次，放最久的排前面。
+         */
+        get: operations["listIntakeAwaitingListing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}": {
         parameters: {
             query?: never;
@@ -1861,6 +1881,26 @@ export interface paths {
          * @description 客人放棄整批（簽署以前）；列不刪，東西有沒有領回逐列記。
          */
         post: operations["cancelIntakeBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Intake Items
+         * @description 這一批付款時建好的商品（待整理與已上架）。
+         */
+        get: operations["listIntakeItems"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1929,6 +1969,26 @@ export interface paths {
          * @description 叫號時逐列處置（可部分接受）；沒成交的件是否已交還客人一起記。
          */
         patch: operations["setIntakeDisposition"];
+        trace?: never;
+    };
+    "/api/v1/intake-batches/{batch_id}/listing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Intake Batch Items
+         * @description 補待整理商品的資料；`publish` 同時上架（回這次上架的件，前端印標籤）。
+         */
+        post: operations["listIntakeBatchItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/intake-batches/{batch_id}/pay": {
@@ -3915,7 +3975,7 @@ export interface components {
          *     清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
          * @enum {string}
          */
-        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
+        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "PARTIALLY_LISTED" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
         /**
          * AcquisitionVoidRequest
          * @description 作廢收購（F6.5）：必填原因（稽核留痕）。
@@ -6236,6 +6296,32 @@ export interface components {
             owned_serialized: number;
         };
         /**
+         * IntakeAwaitingListingRead
+         * @description 待整理清單的一批：放了幾天、還有幾件沒上架（件數＝序號品 1 件、散裝算整堆件數）。
+         */
+        IntakeAwaitingListingRead: {
+            /** Contact Name */
+            contact_name: string;
+            /** Days Waiting */
+            days_waiting: number;
+            /** Id */
+            id: number;
+            /** Listed Count */
+            listed_count: number;
+            /**
+             * Paid At
+             * Format: date-time
+             */
+            paid_at: string;
+            /** Pending Count */
+            pending_count: number;
+            /** Slip Code */
+            slip_code: string;
+            status: components["schemas"]["IntakeBatchStatus"];
+            /** Ticket Label */
+            ticket_label: string;
+        };
+        /**
          * IntakeBatchCreateRequest
          * @description 報到收件：選好賣方、和客人一起點清件數。
          */
@@ -6330,6 +6416,74 @@ export interface components {
              * @default false
              */
             returned_to_customer: boolean;
+        };
+        /**
+         * IntakeItemEdit
+         * @description 補資料：只帶要改的欄位；品牌／型號可帶 null 清掉。成本與件數不在這裡。
+         */
+        IntakeItemEdit: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "SERIALIZED" | "BULK_LOT";
+            /** Listed Price */
+            listed_price?: number | string | null;
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+        };
+        /**
+         * IntakeItemRead
+         * @description 這一批付款時建好的一件商品（序號品）或一堆（散裝）。
+         */
+        IntakeItemRead: {
+            /** Acquisition Cost */
+            acquisition_cost?: string | null;
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Brand Name */
+            brand_name?: string | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Category Name */
+            category_name?: string | null;
+            /** Code */
+            code: string;
+            /** Consignment */
+            consignment: boolean;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["ItemKind"];
+            /** Listed */
+            listed: boolean;
+            /** Listed Price */
+            listed_price: string;
+            /** Missing */
+            missing: string[];
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Product Model Name */
+            product_model_name?: string | null;
+            /** Qty */
+            qty: number;
+            /** Retail Price */
+            retail_price?: string | null;
         };
         /** IntakeLineCreateRequest */
         IntakeLineCreateRequest: {
@@ -6433,6 +6587,25 @@ export interface components {
             short_name: string;
             /** Suggested Cost */
             suggested_cost?: string | null;
+        };
+        /**
+         * IntakeListingRequest
+         * @description `publish`＝這些件同時上架（轉成可賣）；否則只存資料、留在待整理。
+         */
+        IntakeListingRequest: {
+            /** Items */
+            items: components["schemas"]["IntakeItemEdit"][];
+            /**
+             * Publish
+             * @default false
+             */
+            publish: boolean;
+        };
+        /** IntakeListingResult */
+        IntakeListingResult: {
+            batch_status: components["schemas"]["IntakeBatchStatus"];
+            /** Listed */
+            listed: components["schemas"]["IntakeItemRead"][];
         };
         /**
          * IntakePayRequest
@@ -6757,6 +6930,12 @@ export interface components {
             /** Qty */
             qty: number;
         };
+        /**
+         * ItemKind
+         * @description 庫存品種類（stock_movement 用）。
+         * @enum {string}
+         */
+        ItemKind: "SERIALIZED" | "CATALOG" | "BULK_LOT";
         /**
          * ItemSourceRead
          * @description 庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。
@@ -12988,6 +13167,26 @@ export interface operations {
             };
         };
     };
+    listIntakeAwaitingListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeAwaitingListingRead"][];
+                };
+            };
+        };
+    };
     getIntakeBatch: {
         parameters: {
             query?: never;
@@ -13041,6 +13240,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listIntakeItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeItemRead"][];
                 };
             };
             /** @description Validation Error */
@@ -13178,6 +13408,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeLineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listIntakeBatchItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeListingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeListingResult"];
                 };
             };
             /** @description Validation Error */

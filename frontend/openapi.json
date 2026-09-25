@@ -831,6 +831,7 @@
           "CONSIGNMENT",
           "ALREADY_VOIDED",
           "HAS_SOLD_ITEMS",
+          "PARTIALLY_LISTED",
           "CREDIT_SPENT",
           "NO_OPEN_CASH_SESSION"
         ],
@@ -6882,6 +6883,60 @@
         "title": "InsightsTurnover",
         "type": "object"
       },
+      "IntakeAwaitingListingRead": {
+        "description": "待整理清單的一批：放了幾天、還有幾件沒上架（件數＝序號品 1 件、散裝算整堆件數）。",
+        "properties": {
+          "contact_name": {
+            "title": "Contact Name",
+            "type": "string"
+          },
+          "days_waiting": {
+            "title": "Days Waiting",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "listed_count": {
+            "title": "Listed Count",
+            "type": "integer"
+          },
+          "paid_at": {
+            "format": "date-time",
+            "title": "Paid At",
+            "type": "string"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "slip_code": {
+            "title": "Slip Code",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntakeBatchStatus"
+          },
+          "ticket_label": {
+            "title": "Ticket Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ticket_label",
+          "slip_code",
+          "contact_name",
+          "status",
+          "paid_at",
+          "days_waiting",
+          "pending_count",
+          "listed_count"
+        ],
+        "title": "IntakeAwaitingListingRead",
+        "type": "object"
+      },
       "IntakeBatchCreateRequest": {
         "description": "報到收件：選好賣方、和客人一起點清件數。",
         "properties": {
@@ -7131,6 +7186,279 @@
           "disposition"
         ],
         "title": "IntakeDispositionRequest",
+        "type": "object"
+      },
+      "IntakeItemEdit": {
+        "description": "補資料：只帶要改的欄位；品牌／型號可帶 null 清掉。成本與件數不在這裡。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "SERIALIZED",
+              "BULK_LOT"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "listed_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,13}0*$)\\d{0,12}\\.\\d{0,0}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listed Price"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "IntakeItemEdit",
+        "type": "object"
+      },
+      "IntakeItemRead": {
+        "description": "這一批付款時建好的一件商品（序號品）或一堆（散裝）。",
+        "properties": {
+          "acquisition_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Cost"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "category_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Name"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "consignment": {
+            "title": "Consignment",
+            "type": "boolean"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemKind"
+          },
+          "listed": {
+            "title": "Listed",
+            "type": "boolean"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          },
+          "product_model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Name"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "code",
+          "name",
+          "consignment",
+          "listed_price",
+          "qty",
+          "listed",
+          "missing"
+        ],
+        "title": "IntakeItemRead",
         "type": "object"
       },
       "IntakeLineCreateRequest": {
@@ -7662,6 +7990,50 @@
           "returned_to_customer"
         ],
         "title": "IntakeLineRead",
+        "type": "object"
+      },
+      "IntakeListingRequest": {
+        "description": "`publish`＝這些件同時上架（轉成可賣）；否則只存資料、留在待整理。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntakeItemEdit"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "publish": {
+            "default": false,
+            "title": "Publish",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "IntakeListingRequest",
+        "type": "object"
+      },
+      "IntakeListingResult": {
+        "properties": {
+          "batch_status": {
+            "$ref": "#/components/schemas/IntakeBatchStatus"
+          },
+          "listed": {
+            "items": {
+              "$ref": "#/components/schemas/IntakeItemRead"
+            },
+            "title": "Listed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_status",
+          "listed"
+        ],
+        "title": "IntakeListingResult",
         "type": "object"
       },
       "IntakePayRequest": {
@@ -8495,6 +8867,16 @@
         ],
         "title": "ItemHistoryEvent",
         "type": "object"
+      },
+      "ItemKind": {
+        "description": "庫存品種類（stock_movement 用）。",
+        "enum": [
+          "SERIALIZED",
+          "CATALOG",
+          "BULK_LOT"
+        ],
+        "title": "ItemKind",
+        "type": "string"
       },
       "ItemSourceRead": {
         "description": "庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。",
@@ -22238,6 +22620,37 @@
         ]
       }
     },
+    "/api/v1/intake-batches/awaiting-listing": {
+      "get": {
+        "description": "待整理清單：已付款、還有件沒上架的批次，放最久的排前面。",
+        "operationId": "listIntakeAwaitingListing",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntakeAwaitingListingRead"
+                  },
+                  "title": "Response Listintakeawaitinglisting",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Intake Awaiting Listing",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
     "/api/v1/intake-batches/{batch_id}": {
       "get": {
         "operationId": "getIntakeBatch",
@@ -22338,6 +22751,58 @@
           }
         ],
         "summary": "Cancel Intake Batch",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/items": {
+      "get": {
+        "description": "這一批付款時建好的商品（待整理與已上架）。",
+        "operationId": "listIntakeItems",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntakeItemRead"
+                  },
+                  "title": "Response Listintakeitems",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Intake Items",
         "tags": [
           "intake"
         ]
@@ -22578,6 +23043,64 @@
           }
         ],
         "summary": "Set Intake Disposition",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/listing": {
+      "post": {
+        "description": "補待整理商品的資料；`publish` 同時上架（回這次上架的件，前端印標籤）。",
+        "operationId": "listIntakeBatchItems",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeListingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeListingResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Intake Batch Items",
         "tags": [
           "intake"
         ]

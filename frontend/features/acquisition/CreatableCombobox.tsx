@@ -16,6 +16,7 @@ export function CreatableCombobox({
   placeholder,
   disabled = false,
   selectedId = null,
+  selectedName = null,
 }: {
   label: string;
   onChange: (option: ComboOption | null) => void;
@@ -25,12 +26,16 @@ export function CreatableCombobox({
   disabled?: boolean;
   /** 呼叫端持有的目前選定 id：外部清空（如改品牌連帶清型號）時，標籤必須跟著消失。 */
   selectedId?: number | null;
+  /** 已存過的選項名稱（例：待整理上架帶回之前選的品牌）；給了才顯示成已選標籤。 */
+  selectedName?: string | null;
 }) {
   const [text, setText] = useState("");
   // 已選項目單獨記錄：選定後改以「標籤」呈現，與「還在打字」外觀明確區隔。
   // 舊版只把名稱填回輸入框，導致「手打了字但沒選」與「已選定」畫面完全相同，
   // 且改字會靜默清掉已選 → 送出才發現品牌是空的。
-  const [selected, setSelected] = useState<ComboOption | null>(null);
+  const [selected, setSelected] = useState<ComboOption | null>(
+    selectedId !== null && selectedName ? { id: selectedId, name: selectedName } : null,
+  );
   const [open, setOpen] = useState(false);
   // 外部把選定值清掉時（例：改品牌 → 父層將 productModelId 設為 null 並停用型號欄），
   // 標籤必須同步消失，否則畫面顯示「✓ 已選型號」但送出的內容其實是空的（Codex P2）。
@@ -41,7 +46,11 @@ export function CreatableCombobox({
     // 只處理「變成 null」不夠：外部也可能換成**另一個** id（例如刪除前面的鑑價列後，
     // 倖存列重用了同一個元件實例）。此時本地標籤仍是舊選項的名稱，畫面顯示 A、送出卻是 B。
     // 本地只有目前 option 的名稱，無從得知新 id 的名稱 → 一律清掉，回到可重選狀態。
-    if (selected !== null && selectedId !== selected.id) {
+    if (selectedId !== null && selectedName) {
+      // 外部連名稱一起換（例：整批套用分類）→ 直接顯示新選項。
+      setSelected({ id: selectedId, name: selectedName });
+      setText("");
+    } else if (selected !== null && selectedId !== selected.id) {
       setSelected(null);
       setText("");
     }

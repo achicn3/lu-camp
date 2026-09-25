@@ -189,6 +189,10 @@ class AcquisitionHasSoldItems(DomainError):
     """收購含已售出的庫存（序號品非 IN_STOCK／散裝批已部分售出），不可作廢（F6.5）。"""
 
 
+class AcquisitionPartiallyListed(DomainError):
+    """排隊收購的商品已上架一部分（標籤已貼、在架上），不可整張作廢（docs/42 §10-2）。"""
+
+
 class AcquisitionCreditSpent(DomainError):
     """該收購入帳的購物金已被花用，沖回會使餘額為負——擋作廢轉人工更正（F6.5，永不負餘額）。"""
 
