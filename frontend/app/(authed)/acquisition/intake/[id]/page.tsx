@@ -98,14 +98,25 @@ function DispositionControls({
       {disposition === "ACCEPTED" && line.qty > 1 && (
         <label className="intake-inline-field">
           收
-          <input
+          <select
             aria-label={`第 ${line.line_no} 列接受件數`}
-            inputMode="numeric"
             value={accepted}
             onChange={(e) => setAccepted(e.target.value)}
-          />
+          >
+            {Array.from({ length: line.qty }, (_, i) => String(i + 1)).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
           ／{line.qty} 件
         </label>
+      )}
+      {disposition === "ACCEPTED" && line.acquisition_type !== "CONSIGNMENT" && line.deal_cost != null && (
+        <span className="intake-line-pay">
+          付 {money(line.deal_cost)} × {acceptedQty} 件＝
+          <strong>${formatNtd((parseNtd(line.deal_cost) ?? 0) * acceptedQty)}</strong>
+        </span>
       )}
       {leftover > 0 && disposition !== "PENDING" && (
         <label className="campaign-checkbox">
@@ -281,6 +292,9 @@ function IntakeBatchContent() {
   // 估價中還沒估完是正常的：只提示還差幾件；估完（或估多了）才用紅字請店員再點一次。
   const missingItems = batch.declared_item_count - batch.item_count;
   const stillEstimating = batch.status === "PENDING_ESTIMATE" || batch.status === "ESTIMATING";
+  const consignmentAccepted = batch.lines
+    .filter((l) => l.acquisition_type === "CONSIGNMENT" && l.disposition === "ACCEPTED")
+    .reduce((sum, l) => sum + l.accepted_qty, 0);
   const countMismatch =
     batch.line_count > 0 && missingItems !== 0 && (!stillEstimating || missingItems < 0);
 
@@ -304,23 +318,34 @@ function IntakeBatchContent() {
         </span>
         <span>報到 {formatTaipeiDateTime(batch.created_at)}</span>
         <span>
-          實收 {batch.declared_item_count} 件・已估 {batch.line_count} 項 {batch.item_count} 件
+          實收 {batch.declared_item_count} 件・已估 {batch.item_count} 件
         </span>
-        <span>
-          估價收購總額 <strong className="money">{money(batch.deal_total)}</strong>
-        </span>
-        {confirming && (
+        {!confirming && (
           <span>
-            接受 {batch.accepted_item_count} 件・收購 <strong className="money">{money(batch.accepted_total)}</strong>
+            估價收購總額 <strong className="money">{money(batch.deal_total)}</strong>
           </span>
         )}
         {batch.note && <span>備註：{batch.note}</span>}
         {batch.cancel_reason && <span>取消原因：{batch.cancel_reason}</span>}
       </div>
-      {stillEstimating && missingItems > 0 && batch.line_count > 0 && (
-        <p className="hint" role="status">
-          還有 {missingItems} 件沒估（報到時點清 {batch.declared_item_count} 件）。
+      {stillEstimating && missingItems > 0 && (
+        <p className="intake-callout-warn" role="status">
+          還有 <strong>{missingItems} 件</strong>沒估（報到時點清 {batch.declared_item_count} 件、已估{" "}
+          {batch.item_count} 件）。
         </p>
+      )}
+      {batch.status === "AWAITING_CONFIRM" && (
+        <div className="card intake-payout" aria-label="要付給客人">
+          <span className="intake-payout-label">要付給客人</span>
+          <strong className="intake-payout-amount">{money(batch.accepted_total)}</strong>
+          <span>
+            收 {batch.accepted_item_count} 件（共 {batch.item_count} 件）
+            {consignmentAccepted > 0 ? `・另有寄售 ${consignmentAccepted} 件，賣出後才分帳、現在不付錢` : ""}
+          </span>
+          <span className="hint">
+            只算已選「接受」的商品；還沒談定的不算進去。原本估價 {money(batch.deal_total)}。
+          </span>
+        </div>
       )}
       {countMismatch && (
         <p className="form-error" role="status">

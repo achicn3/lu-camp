@@ -8,6 +8,7 @@ import { type FormEvent, useState } from "react";
 
 import { SellerSection } from "@/features/acquisition/SellerSection";
 import { StatusBadge } from "@/features/intake/StatusBadge";
+import { estimateProgress } from "@/features/intake/progress";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -88,6 +89,35 @@ function CheckIn({ onCreated }: { onCreated: (batch: Batch) => Promise<void> }) 
   );
 }
 
+const ESTIMATING_STATUSES = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING_CONFIRM"]);
+
+/** 已估幾件／實收幾件＋進度條；還沒估齊用橘色明講還差幾件（只看件數，不看幾項）。 */
+function EstimateCell({ batch }: { batch: Batch }) {
+  const { pct, missing, over } = estimateProgress(batch.declared_item_count, batch.item_count);
+  const open = ESTIMATING_STATUSES.has(batch.status);
+  return (
+    <div className="intake-progress-cell">
+      <div className="intake-progress-line">
+        <div
+          className={`intake-progress${missing === 0 && over === 0 ? " is-done" : ""}`}
+          role="progressbar"
+          aria-label="已估件數"
+          aria-valuemin={0}
+          aria-valuemax={batch.declared_item_count}
+          aria-valuenow={batch.item_count}
+        >
+          <span style={{ width: `${pct}%` }} />
+        </div>
+        <span>
+          {batch.item_count}／{batch.declared_item_count} 件
+        </span>
+      </div>
+      {open && missing > 0 && <span className="intake-missing">還差 {missing} 件沒估</span>}
+      {open && over > 0 && <span className="intake-over">比實收多 {over} 件，請再點一次</span>}
+    </div>
+  );
+}
+
 function Queue({ includeClosed }: { includeClosed: boolean }) {
   const batches = useQuery({
     queryKey: ["intake-batches", includeClosed],
@@ -127,10 +157,7 @@ function Queue({ includeClosed }: { includeClosed: boolean }) {
             <td className="intake-wrap" data-label="賣方">{b.contact_name}</td>
             <td data-label="實收">{b.declared_item_count} 件</td>
             <td data-label="已估">
-              {b.line_count} 項・{b.item_count} 件
-              {b.item_count !== b.declared_item_count && b.line_count > 0 && (
-                <span className="row-sub">與實收件數不同</span>
-              )}
+              <EstimateCell batch={b} />
             </td>
             <td className="money" data-label="估價收購總額">${formatNtd(parseNtd(b.deal_total) ?? 0)}</td>
             <td data-label="狀態">

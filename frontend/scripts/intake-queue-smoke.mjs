@@ -65,6 +65,7 @@ try {
   await page.getByRole("button", { name: "報到，發號碼" }).click();
   await page.waitForURL(/\/acquisition\/intake\/\d+/);
   await page.getByText("收件單已送出列印（兩份）。").waitFor();
+  await page.waitForURL((url) => !url.search.includes("print="), { timeout: 5_000 }).catch(() => {});
   ok("印完把 ?print=new 拿掉（重新整理不會再印）", !page.url().includes("print="), page.url());
   const title = await page.locator("h1").innerText();
   ok("報到後直接進估價頁、有 A 編號", /A\d{3}/.test(title) && title.includes(SELLER), title);
@@ -108,20 +109,21 @@ try {
   await form2.getByRole("button", { name: "＋ 加入這一件" }).click();
   await page.getByRole("cell", { name: /露營桌/ }).waitFor();
   const summary = await page.locator(".intake-summary").innerText();
-  ok("已估 2 項 3 件、狀態估價中", summary.includes("已估 2 項 3 件") && summary.includes("估價中") && (await page.locator(".intake-status-estimating").count()) === 1, summary.replace(/\n/g, " "));
+  ok("已估 3 件（只講件數）、狀態估價中", summary.includes("已估 3 件") && !summary.includes("項") && summary.includes("估價中") && (await page.locator(".intake-status-estimating").count()) === 1, summary.replace(/\n/g, " "));
 
   // ③ 估完送叫號 → 逐列處置
   await page.getByRole("button", { name: "估完，送去叫號" }).click();
   await page.getByText("待確認（等叫號）").waitFor();
   await page.getByLabel("第 1 列處置").first().selectOption("ACCEPTED");
-  await page.getByLabel("第 1 列接受件數").fill("1");
+  await page.getByLabel("第 1 列接受件數").selectOption("1");
   await page.getByText("沒收的 1 件已交還客人").click();
   await page.locator(".intake-disposition").first().getByRole("button", { name: "儲存" }).click();
-  await page.getByText(/接受 1 件/).waitFor();
+  await page.getByText(/收 1 件（共 3 件）/).waitFor();
   await page.getByLabel("第 2 列處置").first().selectOption("ACCEPTED");
   await page.locator(".intake-disposition").nth(1).getByRole("button", { name: "儲存" }).click();
-  await page.getByText(/接受 2 件/).waitFor();
-  ok("部分接受後接受件數與收購總額更新", (await page.locator(".intake-summary").innerText()).includes("接受 2 件"));
+  await page.getByText(/收 2 件（共 3 件）/).waitFor();
+  const payout = await page.getByLabel("要付給客人").innerText();
+  ok("「要付給客人」大字顯示金額與收幾件", payout.includes("要付給客人") && /\$[\d,]+/.test(payout) && payout.includes("收 2 件（共 3 件）"), payout.replace(/\n/g, " "));
   await page.screenshot({ path: join(SHOTS, "03-confirming.png"), fullPage: true });
 
   // 回佇列
@@ -131,6 +133,7 @@ try {
   await row.waitFor();
   ok("排隊清單列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
   ok("狀態用顏色標示（待確認＝橘色標籤）", (await row.locator(".intake-status-awaiting_confirm").count()) === 1);
+  ok("已估只講件數＋進度條", (await row.innerText()).includes("3／3 件") && (await row.getByRole("progressbar").count()) === 1);
   await page.screenshot({ path: join(SHOTS, "04-queue.png"), fullPage: true });
 
   // 代理連不上：照樣進估價頁，並提示補印（號碼已登記，不能因印表機卡住現場）
@@ -148,6 +151,8 @@ try {
   agentDown = false;
   await page.getByRole("link", { name: "回排隊清單" }).click();
   await page.getByRole("heading", { name: "排隊收購" }).waitFor();
+  const pendingRow = page.locator("tr", { hasText: `${SELLER}-2` });
+  ok("還沒估的批次在清單上明講「還差 1 件沒估」", (await pendingRow.locator(".intake-missing").innerText()).includes("還差 1 件沒估"));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });

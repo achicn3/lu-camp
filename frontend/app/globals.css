@@ -4618,10 +4618,6 @@ a.btn-ghost {
 .intake-line-actions {
   justify-content: flex-end;
 }
-.intake-inline-field input {
-  width: 3.5rem;
-  margin: 0 var(--sp-1);
-}
 @media (max-width: 640px) {
   .intake-field-wide {
     grid-column: auto;
@@ -4637,14 +4633,6 @@ a.btn-ghost {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-}
-.intake-inline-field input {
-  width: 4rem;
-  min-height: var(--tap-min);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0 var(--sp-2);
-  font-size: var(--text-md);
 }
 .intake-lines tr.intake-disposition-row td {
   border-bottom: 1px solid var(--border);
@@ -4764,4 +4752,80 @@ a.btn-ghost {
 .intake-next {
   margin: 0;
   font-weight: 600;
+}
+
+/* 排隊收購：估價進度條、還差幾件、要付給客人（店主回饋 2026-09-25）。 */
+.intake-progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.intake-progress-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.intake-progress {
+  width: 72px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(35, 41, 31, 0.1);
+  overflow: hidden;
+}
+.intake-progress span {
+  display: block;
+  height: 100%;
+  background: #e68c14;
+}
+.intake-progress.is-done span {
+  background: var(--success);
+}
+.intake-missing {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(230, 140, 20, 0.18);
+  color: #7a4800;
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+.intake-over {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+.intake-callout-warn {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid rgba(230, 140, 20, 0.5);
+  background: rgba(230, 140, 20, 0.12);
+  color: #7a4800;
+  font-size: var(--text-md);
+}
+.intake-payout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  border: 2px solid var(--accent);
+}
+.intake-payout-label {
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.intake-payout-amount {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  color: var(--accent);
+}
+.intake-line-pay {
+  color: var(--ink);
+}
+.intake-inline-field select {
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-2);
+  font-size: var(--text-md);
+  background: var(--surface);
 }
