@@ -63,7 +63,9 @@ try {
   await page.getByLabel("實收件數").fill("3");
   await page.screenshot({ path: join(SHOTS, "01-checkin.png"), fullPage: true });
   await page.getByRole("button", { name: "報到，發號碼" }).click();
-  await page.waitForURL(/\/acquisition\/intake\/\d+$/);
+  await page.waitForURL(/\/acquisition\/intake\/\d+/);
+  await page.getByText("收件單已送出列印（兩份）。").waitFor();
+  ok("印完把 ?print=new 拿掉（重新整理不會再印）", !page.url().includes("print="), page.url());
   const title = await page.locator("h1").innerText();
   ok("報到後直接進估價頁、有 A 編號", /A\d{3}/.test(title) && title.includes(SELLER), title);
   const label = /A\d{3}/.exec(title)?.[0];
@@ -138,7 +140,7 @@ try {
   await page.getByLabel("身分證字號", { exact: true }).fill(validNationalId());
   await page.getByRole("button", { name: "建立並選取" }).click();
   await page.getByRole("button", { name: "報到，發號碼" }).click();
-  await page.waitForURL(/\/acquisition\/intake\/\d+\?print=failed$/);
+  await page.waitForURL(/\/acquisition\/intake\/\d+/);
   await page.getByText(/收件單沒有印出來/).waitFor();
   ok("代理連不上時仍進估價頁並提示補印", true);
   await page.screenshot({ path: join(SHOTS, "06-print-failed.png"), fullPage: true });

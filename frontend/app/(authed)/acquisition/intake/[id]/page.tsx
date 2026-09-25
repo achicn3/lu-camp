@@ -4,8 +4,8 @@
 // 簽署與付款在下一期（I3）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 import { GRADE_LABEL } from "@/features/acquisition/labels";
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
@@ -134,11 +134,9 @@ function IntakeBatchContent() {
   const [cancelReason, setCancelReason] = useState("");
   const [askCancel, setAskCancel] = useState(false);
   const searchParams = useSearchParams();
-  const [printNotice, setPrintNotice] = useState<string | null>(
-    searchParams.get("print") === "failed"
-      ? "收件單沒有印出來（請確認收據機有紙、代理有開），號碼已登記，可按「補印收件單」。"
-      : null,
-  );
+  const router = useRouter();
+  const [printNotice, setPrintNotice] = useState<string | null>(null);
+  const autoPrinted = useRef(false);
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -233,9 +231,20 @@ function IntakeBatchContent() {
     mutationFn: async ({ batch, copies }: { batch: Batch; copies: number }) => {
       await printSlip(batch, copies);
     },
-    onSuccess: () => setPrintNotice("收件單已送出列印。"),
-    onError: (e: Error) => setPrintNotice(`收件單列印失敗：${e.message}`),
+    onSuccess: (_data, { copies }) =>
+      setPrintNotice(copies === 2 ? "收件單已送出列印（兩份）。" : "收件單已送出列印。"),
+    onError: (e: Error) =>
+      setPrintNotice(`收件單沒有印出來：${e.message}。號碼已登記，可按「補印收件單」。`),
   });
+
+  // 剛報到（?print=new）：自動印兩份，只印一次；印完把參數拿掉，重新整理才不會再印。
+  const batchForPrint = batchQuery.data;
+  useEffect(() => {
+    if (searchParams.get("print") !== "new" || !batchForPrint || autoPrinted.current) return;
+    autoPrinted.current = true;
+    reprint.mutate({ batch: batchForPrint, copies: 2 });
+    router.replace(`/acquisition/intake/${batchForPrint.id}`);
+  }, [searchParams, batchForPrint, reprint, router]);
 
   const cancel = useMutation({
     mutationFn: async () => {

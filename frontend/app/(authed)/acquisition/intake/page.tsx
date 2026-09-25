@@ -8,7 +8,6 @@ import { type FormEvent, useState } from "react";
 
 import { SellerSection } from "@/features/acquisition/SellerSection";
 import { STATUS_LABEL } from "@/features/intake/labels";
-import { printSlip } from "@/features/intake/print";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -165,14 +164,8 @@ export default function IntakeQueuePage() {
       <CheckIn
         onCreated={async (batch) => {
           void queryClient.invalidateQueries({ queryKey: ["intake-batches"] });
-          // 收件單印兩份（客人聯＋商品聯）。印不出來不擋流程：號碼已登記，到估價頁補印。
-          let printFailed = false;
-          try {
-            await printSlip(batch);
-          } catch {
-            printFailed = true;
-          }
-          router.push(`/acquisition/intake/${batch.id}${printFailed ? "?print=failed" : ""}`);
+          // 收件單由估價頁送印（兩份）：先換頁、不等印表機——代理連不上時不能把店員卡在報到畫面。
+          router.push(`/acquisition/intake/${batch.id}?print=new`);
         }}
       />
       <div className="card">
