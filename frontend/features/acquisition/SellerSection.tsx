@@ -108,7 +108,7 @@ export function SellerSection({
               {seller.has_national_id ? "（已建檔）" : "（尚未建檔身分證）"}
             </span>
           </div>
-          <button type="button" className="btn-ghost" onClick={() => onSelect(null)}>
+          <button type="button" className="btn-ghost acq-seller-change" onClick={() => onSelect(null)}>
             更換
           </button>
         </div>

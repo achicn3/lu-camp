@@ -103,7 +103,7 @@ try {
   await page.waitForURL(`${BASE}/`);
 
   await page.goto(`${BASE}/acquisition`, { waitUntil: "networkidle" });
-  const firstCard = page.locator(".acq > .card").first();
+  const firstCard = page.locator(".acq .card").first();
   ok("頁面一打開就是收購表單（補印憑證聯不在最上面）", !(await firstCard.innerText()).includes("補印收購憑證聯"));
   await page.screenshot({ path: join(SHOTS, "01-top.png"), fullPage: false });
 

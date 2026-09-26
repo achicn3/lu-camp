@@ -5052,3 +5052,70 @@ a.btn-ghost {
   font-size: var(--text-md);
   font-weight: 600;
 }
+
+/* ── 收購頁兩欄（店主 2026-09-26）─────────────────────────────
+   窄螢幕：兩欄容器與鎖定用 fieldset 都 display:contents，所有區塊照原本順序排成一欄（order）。
+   寬螢幕：左邊商品、右邊固定面板（賣方／撥款／簽署／應付＋送出／完成結果），不用捲到底就能送出。 */
+.acq-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.acq-main,
+.acq-side {
+  display: contents;
+}
+.acq-o-lock { order: 0; }
+.acq-o-tabs { order: 1; }
+.acq-o-seller { order: 2; }
+.acq-o-items { order: 3; }
+.acq-o-extra { order: 4; }
+.acq-o-payout { order: 5; }
+.acq-o-sign { order: 6; }
+.acq-o-errors { order: 7; }
+.acq-o-summary { order: 8; }
+.acq-o-result { order: 9; }
+.acq-o-more { order: 10; }
+.acq-o-items {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (min-width: 1100px) {
+  .acq-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    align-items: start;
+    gap: var(--sp-5);
+  }
+  .acq-main,
+  .acq-side {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .acq-main .card,
+  .acq-main .acq-add-row {
+    max-width: 760px;
+  }
+  .acq-side {
+    position: sticky;
+    top: 72px;
+    max-height: calc(100vh - 88px);
+    overflow-y: auto;
+    padding-bottom: var(--sp-2);
+  }
+  .acq-side .card {
+    max-width: none;
+  }
+  /* 在右欄裡本來就一直看得到，不必再黏在畫面底部。 */
+  .acq-side .acq-summary-bar {
+    position: static;
+    box-shadow: var(--shadow);
+  }
+}
+.acq-seller-change {
+  white-space: nowrap;
+  flex-shrink: 0;
+}

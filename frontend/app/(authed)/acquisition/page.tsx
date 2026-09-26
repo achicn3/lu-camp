@@ -1496,16 +1496,20 @@ export default function AcquisitionPage() {
     <section className="acq">
       <h1 className="page-title">收購鑑價入庫</h1>
 
+      {/* 寬螢幕兩欄：左邊商品、右邊固定「賣方／撥款／簽署／應付＋送出」，不用捲到底就能送出（店主 2026-09-26）。
+          窄螢幕（平板直立、手機）兩欄拆開、照原本順序排成一欄（CSS order）。 */}
+      <div className="acq-layout">
+      <div className="acq-main">
       <fieldset
         className="acq-signature-lock"
         disabled={signTaskId !== null && !signTaskEnded}
       >
         {signTaskId !== null && !signTaskEnded && (
-          <p className="hint" aria-live="polite">
+          <p className="hint acq-o-lock" aria-live="polite">
             簽署任務進行中，鑑價內容已凍結；如需修改請先撤回簽署。
           </p>
         )}
-      <div className="acq-types" role="tablist">
+      <div className="acq-types acq-o-tabs" role="tablist">
         {(["BUYOUT", "CONSIGNMENT", "BULK_LOT"] as AcqType[]).map((t) => (
           <button
             key={t}
@@ -1524,8 +1528,7 @@ export default function AcquisitionPage() {
         ))}
       </div>
 
-      <SellerSection seller={seller} onSelect={setSeller} />
-
+      <div className="acq-o-items">
       {isBulk ? (
         <BulkLotForm
           key={formKey}
@@ -1585,12 +1588,13 @@ export default function AcquisitionPage() {
           </button>
         </div>
       )}
+      </div>
 
       {type === "BUYOUT" && extraLots.length === 0 && (
         // 沒有散裝時只留一顆小按鈕，不佔版面；按了才展開散裝區。
         <button
           type="button"
-          className="acq-add-row acq-add-row-minor"
+          className="acq-add-row acq-add-row-minor acq-o-extra"
           onClick={() => {
             setExtraLots([emptyLot()]);
             setExtraLotKeys([newIdempotencyKey()]);
@@ -1601,7 +1605,7 @@ export default function AcquisitionPage() {
       )}
 
       {type === "BUYOUT" && extraLots.length > 0 && (
-        <div className="card acq-extra-lots" aria-label="一起收的散裝">
+        <div className="card acq-extra-lots acq-o-extra" aria-label="一起收的散裝">
           <h2>同一位客人還有散裝？</h2>
           <p className="hint">
             一起收、客人只簽一次名、只付一次錢；送出後會分成買斷一張、散裝每堆一張（作廢與報表照單張算）。
@@ -1642,8 +1646,28 @@ export default function AcquisitionPage() {
         </div>
       )}
 
+      </fieldset>
+      {/* 少用的功能收在最下面，頁面一打開就是收購表單。 */}
+      <details className="acq-more acq-o-more">
+        <summary>更多操作：補印收購憑證聯、查看過去的收購</summary>
+        <ReprintAcquisitionReceipt />
+        {/* 作廢只剩收購紀錄一個入口（2026-09-23）：不必記單號，清單上直接按。 */}
+        <p className="acq-records-link">
+          查看過去的收購{isManager ? "或作廢" : ""}：<Link href="/acquisition/records">收購紀錄</Link>
+        </p>
+      </details>
+      </div>
+
+      <aside className="acq-side" aria-label="賣方與付款">
+      <fieldset
+        className="acq-signature-lock"
+        disabled={signTaskId !== null && !signTaskEnded}
+      >
+      <div className="acq-o-seller">
+        <SellerSection seller={seller} onSelect={setSeller} />
+      </div>
       {!isConsignment && (
-        <div className="card acq-payout">
+        <div className="card acq-payout acq-o-payout">
           <h2>撥款</h2>
           <div className="acq-payout-modes">
             {(["CASH", "STORE_CREDIT", "SPLIT"] as PayoutMethod[]).map((m) => (
@@ -1689,7 +1713,7 @@ export default function AcquisitionPage() {
 
       {/* 手持切結（docs/23 K4）：BUYOUT/BULK_LOT 可送至手持裝置請客人確認切結＋撥款＋簽名 */}
       {!isConsignment && (
-        <div className="card acq-sign">
+        <div className="card acq-sign acq-o-sign">
           <h2>手持簽署</h2>
           {signTaskId == null ? (
             <button
@@ -1750,7 +1774,7 @@ export default function AcquisitionPage() {
       )}
 
       {errors.length > 0 && (
-        <ul className="form-error acq-errors" role="alert">
+        <ul className="form-error acq-errors acq-o-errors" role="alert">
           {errors.map((e) => (
             <li key={e}>{e}</li>
           ))}
@@ -1758,14 +1782,14 @@ export default function AcquisitionPage() {
       )}
 
       {idemNotDurable && !recoveryNeeded && (
-        <p className="form-error acq-idem-warn" role="alert">
+        <p className="form-error acq-idem-warn acq-o-errors" role="alert">
           注意：本機瀏覽器儲存異常，未完成收購僅在本頁面有效、無法跨重新整理保護；送出後請勿
           重整頁面，若疑似未成功請於收購紀錄確認後再處理。
         </p>
       )}
 
       {recoveryNeeded && (
-        <div className="acq-pending-recovery" role="alert">
+        <div className="acq-pending-recovery acq-o-errors" role="alert">
           <p>
             偵測到一筆先前<strong>未確認的收購（可能已完成）</strong>——本機在送出後未收到成功
             回應（斷線／逾時／頁面重整）。請先至<strong>收購紀錄</strong>確認是否已建立：
@@ -1779,7 +1803,7 @@ export default function AcquisitionPage() {
       )}
 
       {/* 底部固定摘要：件數與應付一直看得到，送出不必捲到最底。 */}
-      <div className="card acq-summary-bar" role="region" aria-label="收購摘要">
+      <div className="card acq-summary-bar acq-o-summary" role="region" aria-label="收購摘要">
         <p>
           共 {itemCount} 件
           {!isConsignment && (
@@ -1799,7 +1823,7 @@ export default function AcquisitionPage() {
       </div>
 
       {result !== null && (
-        <div className="card form-success acq-result" ref={resultRef}>
+        <div className="card form-success acq-result acq-o-result" ref={resultRef}>
           <p>
             {result.extraLots.length > 0
               ? `收購完成：買斷 #${result.acquisitionId}、散裝 ${result.extraLots.map((l) => `#${l.acquisitionId}`).join("、")}。`
@@ -1890,16 +1914,9 @@ export default function AcquisitionPage() {
           }}
         />
       )}
+      </aside>
+      </div>
 
-      {/* 少用的功能收在最下面，頁面一打開就是收購表單。 */}
-      <details className="acq-more">
-        <summary>更多操作：補印收購憑證聯、查看過去的收購</summary>
-        <ReprintAcquisitionReceipt />
-        {/* 作廢只剩收購紀錄一個入口（2026-09-23）：不必記單號，清單上直接按。 */}
-        <p className="acq-records-link">
-          查看過去的收購{isManager ? "或作廢" : ""}：<Link href="/acquisition/records">收購紀錄</Link>
-        </p>
-      </details>
     </section>
   );
 }
