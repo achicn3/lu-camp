@@ -1572,7 +1572,7 @@ export default function AcquisitionPage() {
           ))}
           <button
             type="button"
-            className="btn-ghost"
+            className="acq-add-row"
             onClick={() =>
               // 已填品名的列收合成一行摘要：一次收多件時不必一路往下捲。空白列保持展開。
               setRows((p) => [
@@ -1590,7 +1590,7 @@ export default function AcquisitionPage() {
         // 沒有散裝時只留一顆小按鈕，不佔版面；按了才展開散裝區。
         <button
           type="button"
-          className="btn-ghost acq-extra-lots-open"
+          className="acq-add-row acq-add-row-minor"
           onClick={() => {
             setExtraLots([emptyLot()]);
             setExtraLotKeys([newIdempotencyKey()]);
@@ -1631,7 +1631,7 @@ export default function AcquisitionPage() {
           ))}
           <button
             type="button"
-            className="btn-ghost"
+            className="acq-add-row acq-add-row-minor"
             onClick={() => {
               setExtraLots((prev) => [...prev, emptyLot()]);
               setExtraLotKeys((prev) => [...prev, newIdempotencyKey()]);

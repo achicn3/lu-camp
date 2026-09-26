@@ -5029,6 +5029,26 @@ a.btn-ghost {
 .acq-records-pending {
   color: #7a4800;
 }
-.acq-extra-lots-open {
-  align-self: flex-start;
+/* 「新增一列」要一眼看得到：整列寬、虛線框、品牌色、字大一點（店主 2026-09-26）。 */
+.acq-add-row {
+  width: 100%;
+  max-width: 520px; /* 跟上方卡片（.card）同寬 */
+  min-height: var(--tap-min);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  cursor: pointer;
+}
+.acq-add-row:hover,
+.acq-add-row:focus-visible {
+  background: var(--green-soft, #e7efe6);
+}
+/* 散裝入口是次要動作：同樣看得到，但細一點、字小一點，不跟「新增一列」搶。 */
+.acq-add-row-minor {
+  border-width: 1px;
+  font-size: var(--text-md);
+  font-weight: 600;
 }
