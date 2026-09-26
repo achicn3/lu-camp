@@ -6,7 +6,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -173,6 +173,31 @@ class AcquisitionCreate(BaseModel):
         return self
 
 
+class AcquisitionCombinedFields(BaseModel):
+    """一次收購同時有買斷品與散裝（收購①）：買斷品逐件、散裝一堆一筆。"""
+
+    contact_id: int
+    note: str | None = None
+    items: list[AcquisitionItemIn] = Field(min_length=1, max_length=200)
+    lots: list[AcquisitionLotIn] = Field(min_length=1, max_length=20)
+
+
+class AcquisitionCombinedCreate(AcquisitionCombinedFields):
+    """送出時拆成買斷一張、每堆散裝各一張；只簽一次、只付一次。
+
+    撥款只收現金或購物金——混合撥款（SPLIT）要拆到好幾張單上，容易對不起來，這裡不提供。
+    """
+
+    payout_method: Literal[PayoutMethod.CASH, PayoutMethod.STORE_CREDIT] = PayoutMethod.CASH
+    signature_task_id: int | None = None
+
+
+class AcquisitionCombinedAffidavitRequest(AcquisitionCombinedFields):
+    """送顧客螢幕簽署：內容由後端依同一份資料產生（付款時再精確比對）。"""
+
+    terminal_id: int | None = None
+
+
 class AcquisitionResult(BaseModel):
     """收購成功結果：回傳可辨識的收購單號與待列印識別碼。"""
 
@@ -191,6 +216,19 @@ class AcquisitionResult(BaseModel):
     lot_code: str | None
     # 散裝入籃時的販售籃識別碼（標籤印這個）；未入籃為 None。
     basket_code: str | None = None
+
+
+class AcquisitionCombinedAffidavitRead(BaseModel):
+    """送出的簽署任務（輪詢狀態請用簽署任務端點）與客人會看到的內容。"""
+
+    id: int
+    content: dict[str, Any]
+
+
+class AcquisitionCombinedResult(BaseModel):
+    """依序：買斷一張、散裝每堆一張。"""
+
+    results: list[AcquisitionResult]
 
 
 class AcquisitionVoidRequest(BaseModel):

@@ -20,11 +20,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import MAX_NTD, round_ntd
+from app.core.money import MAX_NTD, format_ntd, round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
 from app.modules.acquisition.models import Acquisition
 from app.modules.acquisition.repository import AcquisitionListFilter, AcquisitionRepository
 from app.modules.acquisition.schemas import (
+    AcquisitionCombinedAffidavitRequest,
+    AcquisitionCombinedCreate,
+    AcquisitionCombinedFields,
     AcquisitionCreate,
     AcquisitionListItem,
     AcquisitionListRead,
@@ -50,6 +53,7 @@ from app.shared.enums import (
     OwnershipType,
     PayoutMethod,
     SerializedItemStatus,
+    SignatureTaskKind,
     StockReason,
     StoreCreditEntryType,
     StoreCreditSourceType,
@@ -601,6 +605,118 @@ class AcquisitionService:
             if replay is None:
                 raise IdempotencyKeyConflict("收購衝突，請重試") from exc
             return replay
+
+    # ── 收購①：一次收購同時有買斷品與散裝（店主 2026-09-26）──────────────────
+    # 拆成買斷一張、每堆散裝各一張（作廢／報表／憑證照單張規則），但只簽一次、只付一次。
+
+    @staticmethod
+    def combined_affidavit_content(data: AcquisitionCombinedFields) -> dict[str, object]:
+        """簽署內容：買斷品逐件、散裝一堆一行（名稱帶件數）。同排隊收購的格式。"""
+        items: list[dict[str, str]] = [
+            {"name": item.name, "amount": format_ntd(item.acquisition_cost or Decimal(0))}
+            for item in data.items
+        ]
+        items += [
+            {"name": f"{lot.name} ×{lot.total_qty}", "amount": format_ntd(lot.acquisition_cost)}
+            for lot in data.lots
+        ]
+        total = sum((item.acquisition_cost or Decimal(0) for item in data.items), Decimal(0))
+        total += sum((lot.acquisition_cost for lot in data.lots), Decimal(0))
+        return {"items": items, "total": format_ntd(total)}
+
+    async def request_combined_affidavit(
+        self, store_id: int, data: AcquisitionCombinedAffidavitRequest, *, actor_user_id: int
+    ) -> "SignatureTask":
+        """把整張（買斷＋散裝）送到顧客螢幕給客人簽一次。"""
+        from app.modules.signing.schemas import SignatureTaskCreate
+        from app.modules.signing.service import SigningService
+
+        return await SigningService(self._session).create_task(
+            store_id,
+            SignatureTaskCreate(
+                kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+                contact_id=data.contact_id,
+                content=self.combined_affidavit_content(data),
+                terminal_id=data.terminal_id,
+                ref_type="acquisition_combined",
+            ),
+            created_by=actor_user_id,
+        )
+
+    async def create_combined(
+        self,
+        store_id: int,
+        clerk_user_id: int,
+        data: AcquisitionCombinedCreate,
+        *,
+        idempotency_key: str,
+    ) -> list[AcquisitionResult]:
+        """買斷一張＋散裝每堆一張，同一交易成立；重送同一個鍵回原結果、不重複付錢。"""
+        requests = self._combined_requests(data)
+        keys = [f"{idempotency_key}#{n}" for n in range(len(requests))]
+        async with self._session.begin_nested():
+            replayed = await self.find_idempotent_replay(store_id, keys[0], requests[0])
+            affidavit: SignatureTask | None = None
+            if replayed is None and data.signature_task_id is not None:
+                affidavit = await self._verified_combined_affidavit(store_id, data)
+            results = [
+                await self.create_acquisition(
+                    store_id,
+                    clerk_user_id,
+                    request,
+                    idempotency_key=key,
+                    batch_affidavit=affidavit,
+                )
+                for request, key in zip(requests, keys, strict=True)
+            ]
+            if affidavit is not None:
+                from app.modules.signing.service import SigningService
+
+                await SigningService(self._session).consume_task(
+                    affidavit, reason_code="ACQUISITION_COMBINED", actor_user_id=clerk_user_id
+                )
+        return results
+
+    @staticmethod
+    def _combined_requests(data: AcquisitionCombinedCreate) -> list[AcquisitionCreate]:
+        common = {
+            "contact_id": data.contact_id,
+            "note": data.note,
+            "payout_method": PayoutMethod(data.payout_method),
+        }
+        return [
+            AcquisitionCreate(type=AcquisitionType.BUYOUT, items=data.items, **common),
+            *(
+                AcquisitionCreate(type=AcquisitionType.BULK_LOT, lot=lot, **common)
+                for lot in data.lots
+            ),
+        ]
+
+    async def _verified_combined_affidavit(
+        self, store_id: int, data: AcquisitionCombinedCreate
+    ) -> "SignatureTask":
+        """已簽切結必須就是這一張：品項金額精確相符、撥款＝客人所選、身分沒換（同單張規則）。"""
+        from app.modules.signing.service import SigningService
+
+        assert data.signature_task_id is not None
+        affidavit = await SigningService(self._session).get_signed_affidavit(
+            store_id, data.signature_task_id, contact_id=data.contact_id
+        )
+        if affidavit.chosen_payout is None:
+            raise SignatureContentMismatch("已簽切結缺少客人撥款選擇，請重新推送簽署")
+        if affidavit.chosen_payout != data.payout_method:
+            raise InvalidPayoutSplit("收購撥款與客人簽署時所選的不一致")
+        expected = self.combined_affidavit_content(data)
+        signed = {"items": affidavit.content.get("items"), "total": affidavit.content.get("total")}
+        if signed != expected:
+            raise SignatureContentMismatch("商品或金額在簽署後改過，請重新簽署")
+        contact = await self._contacts.get_contact_for_update(store_id, data.contact_id)
+        if contact is None:
+            raise ContactNotFound(f"找不到 contact {data.contact_id}")
+        signed_fp = affidavit.identity_fingerprint
+        if not signed_fp or signed_fp != contact.national_id_blind_index:
+            raise SignatureContentMismatch("收購對象身分（證號）與已簽切結不符，請重新推送簽署")
+        return affidavit
 
     async def _create_acquisition_impl(
         self,

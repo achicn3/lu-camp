@@ -32,6 +32,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/acquisitions/combined": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Combined Acquisition
+         * @description 買斷＋散裝一起收（收購①）：拆成買斷一張、散裝每堆一張，同一交易；必帶 Idempotency-Key。
+         */
+        post: operations["createCombinedAcquisition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/acquisitions/combined/affidavit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Combined Acquisition Affidavit
+         * @description 買斷＋散裝一起收：整張送顧客螢幕給客人簽一次（內容由後端產生）。
+         */
+        post: operations["requestCombinedAcquisitionAffidavit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/acquisitions/{acquisition_id}": {
         parameters: {
             query?: never;
@@ -3755,6 +3795,66 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AcquisitionCombinedAffidavitRead
+         * @description 送出的簽署任務（輪詢狀態請用簽署任務端點）與客人會看到的內容。
+         */
+        AcquisitionCombinedAffidavitRead: {
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: number;
+        };
+        /**
+         * AcquisitionCombinedAffidavitRequest
+         * @description 送顧客螢幕簽署：內容由後端依同一份資料產生（付款時再精確比對）。
+         */
+        AcquisitionCombinedAffidavitRequest: {
+            /** Contact Id */
+            contact_id: number;
+            /** Items */
+            items: components["schemas"]["AcquisitionItemIn"][];
+            /** Lots */
+            lots: components["schemas"]["AcquisitionLotIn"][];
+            /** Note */
+            note?: string | null;
+            /** Terminal Id */
+            terminal_id?: number | null;
+        };
+        /**
+         * AcquisitionCombinedCreate
+         * @description 送出時拆成買斷一張、每堆散裝各一張；只簽一次、只付一次。
+         *
+         *     撥款只收現金或購物金——混合撥款（SPLIT）要拆到好幾張單上，容易對不起來，這裡不提供。
+         */
+        AcquisitionCombinedCreate: {
+            /** Contact Id */
+            contact_id: number;
+            /** Items */
+            items: components["schemas"]["AcquisitionItemIn"][];
+            /** Lots */
+            lots: components["schemas"]["AcquisitionLotIn"][];
+            /** Note */
+            note?: string | null;
+            /**
+             * Payout Method
+             * @default CASH
+             * @enum {string}
+             */
+            payout_method: "CASH" | "STORE_CREDIT";
+            /** Signature Task Id */
+            signature_task_id?: number | null;
+        };
+        /**
+         * AcquisitionCombinedResult
+         * @description 依序：買斷一張、散裝每堆一張。
+         */
+        AcquisitionCombinedResult: {
+            /** Results */
+            results: components["schemas"]["AcquisitionResult"][];
+        };
         /**
          * AcquisitionCreate
          * @description 收購單輸入。BUYOUT/CONSIGNMENT 走 items；BULK_LOT 走 lot。
@@ -9780,6 +9880,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCombinedAcquisition: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionCombinedCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionCombinedResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    requestCombinedAcquisitionAffidavit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionCombinedAffidavitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionCombinedAffidavitRead"];
                 };
             };
             /** @description Validation Error */

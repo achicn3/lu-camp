@@ -8,6 +8,7 @@ import {
   lotErrors,
   payoutErrors,
   serializedRowErrors,
+  validateCombined,
   validateDraft,
 } from "@/features/acquisition/validation";
 
@@ -140,5 +141,31 @@ describe("validateDraft", () => {
   });
   it("bulk lot path validates lot not items", () => {
     expect(validateDraft({ ...base, type: "BULK_LOT" })).toEqual([]);
+  });
+});
+
+describe("validateCombined（收購①：買斷再加散裝）", () => {
+  const buyout: AcquisitionDraft = {
+    type: "BUYOUT",
+    contactId: 1,
+    items: [item()],
+    lot: lot(),
+    payoutMethod: "CASH",
+    payoutSplitCash: "",
+    sellerIsMember: false,
+  };
+
+  it("買斷與每堆散裝都驗，散裝錯誤標出第幾堆", () => {
+    expect(validateCombined(buyout, [lot(), lot({ name: "" })])).toEqual(["第 2 堆散裝：名稱必填"]);
+  });
+
+  it("不提供混合撥款", () => {
+    expect(validateCombined({ ...buyout, payoutMethod: "SPLIT", payoutSplitCash: "100" }, [lot()])).toContain(
+      "買斷加散裝一起收時，撥款只能全付現金或全給購物金",
+    );
+  });
+
+  it("都填好就沒有錯誤", () => {
+    expect(validateCombined(buyout, [lot()])).toEqual([]);
   });
 });

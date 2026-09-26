@@ -167,3 +167,18 @@ export function validateDraft(draft: AcquisitionDraft): string[] {
   }
   return errors;
 }
+
+/**
+ * 收購①：買斷再加散裝（送出時拆成買斷一張、每堆散裝各一張，客人只簽一次、只付一次）。
+ * 散裝錯誤標出第幾堆；混合撥款要拆到好幾張單上容易對不起來，不提供。
+ */
+export function validateCombined(draft: AcquisitionDraft, extraLots: LotDraft[]): string[] {
+  const errors = validateDraft(draft);
+  extraLots.forEach((extra, i) => {
+    errors.push(...lotErrors(extra).map((e) => e.replace(/^散裝：/, `第 ${i + 1} 堆散裝：`)));
+  });
+  if (draft.payoutMethod === "SPLIT") {
+    errors.push("買斷加散裝一起收時，撥款只能全付現金或全給購物金");
+  }
+  return errors;
+}

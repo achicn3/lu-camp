@@ -38,6 +38,7 @@ import {
   type AcquisitionDraft,
   type ItemDraft,
   type LotDraft,
+  validateCombined,
   validateDraft,
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
@@ -76,6 +77,13 @@ function detail(error: unknown): string | null {
     if (typeof d === "string") return d;
   }
   return null;
+}
+
+/** 金額字串加總；全部沒有值就回 null（例：沒撥購物金）。 */
+function sumNtd(values: (string | null | undefined)[]): string | null {
+  const present = values.filter((v): v is string => v != null);
+  if (present.length === 0) return null;
+  return String(present.reduce((sum, v) => sum + (parseNtd(v) ?? 0), 0));
 }
 
 function emptyItem(commissionPct = ""): Row {
@@ -954,6 +962,10 @@ export default function AcquisitionPage() {
   const [seller, setSeller] = useState<Contact | null>(null);
   const [rows, setRows] = useState<Row[]>([emptyItem()]);
   const [lot, setLot] = useState<LotDraft>(emptyLot());
+  // 收購①：買斷分頁再加的散裝（送出時拆成買斷一張、每堆散裝各一張；只簽一次、只付一次）。
+  const [extraLots, setExtraLots] = useState<LotDraft[]>([]);
+  // 每堆散裝一把穩定的 key：刪掉中間那堆時，後面的表單（含下拉選單內部狀態）不會錯位。
+  const [extraLotKeys, setExtraLotKeys] = useState<string[]>([]);
   const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("CASH");
   const [splitCash, setSplitCash] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
@@ -972,6 +984,8 @@ export default function AcquisitionPage() {
     creditGranted: string | null;
     /** 撥入後購物金總額（後端帳本分錄 balance_after；非購物金撥款為 null）。 */
     creditBalanceAfter: string | null;
+    /** 買斷再加散裝時一起成立的散裝單（每堆一張）。 */
+    extraLots: { acquisitionId: number; lot: string | null; basket: string | null; joinedBasket: boolean }[];
   } | null>(null);
   // 作廢剛建立的這筆（限管理者）：開啟確認對話框／顯示作廢結果。
   const [voidTarget, setVoidTarget] = useState<number | null>(null);
@@ -1056,6 +1070,7 @@ export default function AcquisitionPage() {
 
   const isConsignment = type === "CONSIGNMENT";
   const isBulk = type === "BULK_LOT";
+  const combined = type === "BUYOUT" && extraLots.length > 0;
   const sellerIsMember = seller?.roles.includes("MEMBER") ?? false;
   const premiumRate = settings.data?.premium_rate ?? "0";
   // 營業稅率取自 settings（§6 不得寫死）。未載入或值不可用時一律為 null、不做含稅換算——
@@ -1078,16 +1093,19 @@ export default function AcquisitionPage() {
   })();
   const drawerOpen = drawer.data != null;
 
+  const extraLotsPayable = combined
+    ? extraLots.reduce((sum, extra) => sum + (parseNtd(extra.acquisitionCost) ?? 0), 0)
+    : 0;
   const payable = isBulk
     ? parseNtd(lot.acquisitionCost) ?? 0
-    : rowsPayableTotal(rows, type);  // 每列＝每件收購價 × 件數（非買斷一律 1 件）
+    : rowsPayableTotal(rows, type) + extraLotsPayable;  // 每列＝每件收購價 × 件數（非買斷一律 1 件）
   // 摘要列的件數：同款多件只在買斷有意義（寄售一列就是一件）；散裝看這批件數。
   const itemCount = isBulk
     ? parseNtd(lot.totalQty) ?? 0
     : rows.reduce(
         (sum, row) => sum + (type === "BUYOUT" ? Math.max(1, parseNtd(row.qty) ?? 1) : 1),
         0,
-      );
+      ) + (combined ? extraLots.reduce((sum, extra) => sum + (parseNtd(extra.totalQty) ?? 0), 0) : 0);
   // 已簽切結 → 撥款以客人所選為準（D7），否則用店員選的（非手持流程）。
   const effectivePayout: PayoutMethod =
     signed && signedPayout ? signedPayout : payoutMethod;
@@ -1123,52 +1141,57 @@ export default function AcquisitionPage() {
   // localStorage 寫入失敗（配額/隱私）：本 session 仍以記憶體後備防重複，但無法跨重整保護。
   const [idemNotDurable, setIdemNotDurable] = useState(false);
   const recoveryNeeded = pendingKey != null && !sessionOwnsKey;
+  // 送出／送簽共用：散裝一堆、買斷品（同款多件展開成逐件）。
+  const ntd = (value: string) => String(parseNtd(value));
+  // 全新售價是選填：沒填就送 null，不要送 "null" 或 0——0 會被讀成「全新也不值錢」。
+  const optionalNtd = (value: string) => {
+    const parsed = parseNtd(value.trim());
+    return parsed === null ? null : String(parsed);
+  };
+  const lotBody = (l: LotDraft) => ({
+    name: l.name,
+    acquisition_cost: ntd(l.acquisitionCost),
+    acquisition_basis: l.acquisitionBasis,
+    total_qty: parseNtd(l.totalQty),
+    unit_price: ntd(l.unitPrice),
+    retail_price: optionalNtd(l.retailPrice),
+    brand_id: l.brandId,
+    category_id: l.categoryId,
+    label: l.label || null,
+    note: l.note.trim() || null,
+    // 販售籃（ADR-025）：沒選就不送，維持舊指紋與舊行為。
+    ...(l.basketMode === "JOIN" && l.basketId !== null ? { basket_id: l.basketId } : {}),
+    ...(l.basketMode === "NEW" ? { new_basket: true } : {}),
+  });
+  // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
+  // 後端收的是純品項陣列（與店員按三次「新增一列」完全等價），不需要知道件數。
+  const itemsBody = () =>
+    expandByQty(rows, type).map((r) => ({
+      name: r.name,
+      grade: r.grade,
+      listed_price: ntd(r.listedPrice),
+      retail_price: optionalNtd(r.retailPrice),
+      resale_discount_pct: discountPercent(r.discount ?? ""),
+      brand_id: r.brandId,
+      product_model_id: r.productModelId,
+      category_id: r.categoryId,
+      // 一列一則，展開後每件都帶同一則（2026-09-04 裁示）。空白送 null，
+      // 避免建出「有備註但內容是空白」的商品害 POS 跳空提醒。
+      note: r.note.trim() || null,
+      ...(type === "BUYOUT"
+        ? { acquisition_cost: ntd(r.acquisitionCost) }
+        : r.commissionPct === ""
+          ? {}
+          : { commission_pct: parseNtd(r.commissionPct) }),
+    }));
+
   const submit = useMutation({
     mutationFn: async () => {
-      const ntd = (s: string) => String(parseNtd(s));
-      // 全新售價是選填：沒填就送 null，不要送 "null" 或 0——0 會被讀成「全新也不值錢」。
-      const optionalNtd = (s: string) => {
-        const value = parseNtd(s.trim());
-        return value === null ? null : String(value);
-      };
       const body: Record<string, unknown> = { type, contact_id: seller?.id };
       if (isBulk) {
-        body.lot = {
-          name: lot.name,
-          acquisition_cost: ntd(lot.acquisitionCost),
-          acquisition_basis: lot.acquisitionBasis,
-          total_qty: parseNtd(lot.totalQty),
-          unit_price: ntd(lot.unitPrice),
-          retail_price: optionalNtd(lot.retailPrice),
-          brand_id: lot.brandId,
-          category_id: lot.categoryId,
-          label: lot.label || null,
-          note: lot.note.trim() || null,
-          // 販售籃（ADR-025）：沒選就不送，維持舊指紋與舊行為。
-          ...(lot.basketMode === "JOIN" && lot.basketId !== null ? { basket_id: lot.basketId } : {}),
-          ...(lot.basketMode === "NEW" ? { new_basket: true } : {}),
-        };
+        body.lot = lotBody(lot);
       } else {
-        // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
-        // 後端收的是純品項陣列（與店員按三次「新增一列」完全等價），不需要知道件數。
-        body.items = expandByQty(rows, type).map((r) => ({
-          name: r.name,
-          grade: r.grade,
-          listed_price: ntd(r.listedPrice),
-          retail_price: optionalNtd(r.retailPrice),
-          resale_discount_pct: discountPercent(r.discount ?? ""),
-          brand_id: r.brandId,
-          product_model_id: r.productModelId,
-          category_id: r.categoryId,
-          // 一列一則，展開後每件都帶同一則（2026-09-04 裁示）。空白送 null，
-          // 避免建出「有備註但內容是空白」的商品害 POS 跳空提醒。
-          note: r.note.trim() || null,
-          ...(type === "BUYOUT"
-            ? { acquisition_cost: ntd(r.acquisitionCost) }
-            : r.commissionPct === ""
-              ? {}
-              : { commission_pct: parseNtd(r.commissionPct) }),
-        }));
+        body.items = itemsBody();
       }
       if (!isConsignment) {
         body.payout_method = effectivePayout;
@@ -1180,10 +1203,25 @@ export default function AcquisitionPage() {
       const durable = savePendingAcqIdemKey(key);
       setSessionOwnsKey(true);
       setIdemNotDurable(!durable); // 未持久化：提示跨重整保護不保證（本 session 仍防重複）。
-      const { data, error, response } = await api.POST("/api/v1/acquisitions", {
-        body: body as never,
-        params: { header: { "Idempotency-Key": key } },
-      });
+      const { data, error, response } = combined
+        ? await api
+            .POST("/api/v1/acquisitions/combined", {
+              body: {
+                contact_id: seller?.id ?? 0,
+                items: body.items as never,
+                lots: extraLots.map(lotBody) as never,
+                payout_method: effectivePayout === "STORE_CREDIT" ? "STORE_CREDIT" : "CASH",
+                signature_task_id: signed && signTaskId != null ? signTaskId : null,
+              },
+              params: { header: { "Idempotency-Key": key } },
+            })
+            .then((res) => ({ ...res, data: res.data?.results }))
+        : await api
+            .POST("/api/v1/acquisitions", {
+              body: body as never,
+              params: { header: { "Idempotency-Key": key } },
+            })
+            .then((res) => ({ ...res, data: res.data ? [res.data] : undefined }));
       if (!data) {
         // 只有**非衝突的 4xx**（驗證/認證，確定未提交）才清鍵。409＝該鍵已屬先前已提交的
         // 收購（改了內容才會撞）→ 保留鍵，否則改表單再送會以新鍵重複建單/撥款；5xx/逾時/網路
@@ -1196,7 +1234,9 @@ export default function AcquisitionPage() {
       }
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: (results) => {
+      const data = results[0];
+      const lotResults = results.slice(1);
       clearPendingAcqIdemKey(); // 本單完成，下一單換新冪等鍵
       setSessionOwnsKey(false);
       setIdemNotDurable(false);
@@ -1221,8 +1261,15 @@ export default function AcquisitionPage() {
         lot: data.lot_code,
         basket: data.basket_code ?? null,
         joinedBasket: isBulk && lot.basketMode === "JOIN",
-        creditGranted: data.payout_credit_granted,
-        creditBalanceAfter: data.payout_credit_balance_after,
+        // 買斷＋散裝一起收：購物金是分幾筆撥的，憑證聯印加總與最後一筆撥入後的總額。
+        creditGranted: sumNtd(results.map((r) => r.payout_credit_granted)),
+        creditBalanceAfter: results[results.length - 1].payout_credit_balance_after,
+        extraLots: lotResults.map((r, i) => ({
+          acquisitionId: r.acquisition_id,
+          lot: r.lot_code,
+          basket: r.basket_code ?? null,
+          joinedBasket: extraLots[i]?.basketMode === "JOIN",
+        })),
       });
       // 憑證聯快照（K6）：綁定簽署完成的收購才可列印憑證聯；值取自已簽切結內容
       // （後端於綁定時逐欄驗證過）。在清除 signTaskId/seller 前擷取。
@@ -1248,6 +1295,8 @@ export default function AcquisitionPage() {
       setVoidedNote(null);
       setRows([emptyItem()]);
       setLot(emptyLot());
+      setExtraLots([]);
+      setExtraLotKeys([]);
       setSeller(null);
       setSignTaskId(null); // 完成即解除手持切結綁定，下一單重新推送
       setFormKey((k) => k + 1);
@@ -1277,6 +1326,12 @@ export default function AcquisitionPage() {
         signaturePngBase64,
         storeCreditGranted: result.creditGranted ?? undefined,
         storeCreditBalanceAfter: result.creditBalanceAfter ?? undefined,
+        reference:
+          result.extraLots.length > 0
+            ? `收購單 ${[result.acquisitionId, ...result.extraLots.map((l) => l.acquisitionId)]
+                .map((id) => `#${id}`)
+                .join("、")}`
+            : null,
       });
     },
     onSuccess: () => setReceiptNote("憑證聯已送出列印"),
@@ -1291,6 +1346,8 @@ export default function AcquisitionPage() {
     setErrors([]);
     setRows([emptyItem()]);
     setLot(emptyLot());
+    setExtraLots([]);
+    setExtraLotKeys([]);
     setSeller(null);
     setSignTaskId(null);
     setFormKey((k) => k + 1);
@@ -1303,7 +1360,7 @@ export default function AcquisitionPage() {
       // 推簽前先跑與送出同一套驗證：否則有效列混著一列件數 0 時，客人會先簽到一份
       // 缺了那列的快照，等到最後按送出才被擋下——只能撤回簽署、請客人重簽一次
       // （Codex 第二輪對抗式審查）。擋在推簽前，客人只會簽一次。
-      const problems = validateDraft(draft);
+      const problems = combined ? validateCombined(draft, extraLots) : validateDraft(draft);
       if (problems.length > 0) {
         setErrors(problems);
         throw new Error(problems[0]);
@@ -1341,6 +1398,19 @@ export default function AcquisitionPage() {
       }
       if (!terminal.paired_kiosk.online) {
         throw new Error("顧客螢幕目前離線，無法進行收購簽署");
+      }
+      if (combined) {
+        // 買斷＋散裝一起收：簽署內容由後端依同一份資料產生，送出時後端再精確比對。
+        const combo = await api.POST("/api/v1/acquisitions/combined/affidavit", {
+          body: {
+            contact_id: seller.id,
+            items: itemsBody() as never,
+            lots: extraLots.map(lotBody) as never,
+            terminal_id: terminal.id,
+          },
+        });
+        if (!combo.data) throw new Error(detail(combo.error) ?? "推送手持簽署失敗");
+        return { id: combo.data.id };
       }
       const { data, error } = await api.POST("/api/v1/signing/tasks", {
         body: {
@@ -1389,7 +1459,7 @@ export default function AcquisitionPage() {
     }
     setErrors([]);
     setResult(null);
-    const found = validateDraft(draft);
+    const found = combined ? validateCombined(draft, extraLots) : validateDraft(draft);
     if (!isConsignment && (payoutMethod === "CASH" || payoutMethod === "SPLIT") && !drawerOpen) {
       found.push("現金/混合撥款需先開帳（前往現金對帳開帳）");
     }
@@ -1516,6 +1586,48 @@ export default function AcquisitionPage() {
         </div>
       )}
 
+      {type === "BUYOUT" && (
+        <div className="card acq-extra-lots" aria-label="一起收的散裝">
+          <h2>同一位客人還有散裝？</h2>
+          <p className="hint">
+            一起收、客人只簽一次名、只付一次錢；送出後會分成買斷一張、散裝每堆一張（作廢與報表照單張算）。
+            一起收時撥款只能全付現金或全給購物金。
+          </p>
+          {extraLots.map((extra, i) => (
+            <div key={extraLotKeys[i]} className="acq-extra-lot">
+              <div className="acq-row-head">
+                <span className="hint">第 {i + 1} 堆散裝</span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => {
+                    setExtraLots((prev) => prev.filter((_, j) => j !== i));
+                    setExtraLotKeys((prev) => prev.filter((_, j) => j !== i));
+                  }}
+                >
+                  移除這堆
+                </button>
+              </div>
+              <BulkLotForm
+                lot={extra}
+                categories={categoriesQuery.data ?? []}
+                onChange={(next) => setExtraLots((prev) => prev.map((l, j) => (j === i ? next : l)))}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setExtraLots((prev) => [...prev, emptyLot()]);
+              setExtraLotKeys((prev) => [...prev, newIdempotencyKey()]);
+            }}
+          >
+            ＋ 加一堆散裝
+          </button>
+        </div>
+      )}
+
       {!isConsignment && (
         <div className="card acq-payout">
           <h2>撥款</h2>
@@ -1526,7 +1638,7 @@ export default function AcquisitionPage() {
                   type="radio"
                   name="payout"
                   checked={effectivePayout === m}
-                  disabled={signed}
+                  disabled={signed || (m === "SPLIT" && combined)}
                   onChange={() => setPayoutMethod(m)}
                 />
                 {PAYOUT_LABEL[m]}
@@ -1674,7 +1786,11 @@ export default function AcquisitionPage() {
 
       {result !== null && (
         <div className="card form-success acq-result" ref={resultRef}>
-          <p>收購完成（單號 #{result.acquisitionId}）。</p>
+          <p>
+            {result.extraLots.length > 0
+              ? `收購完成：買斷 #${result.acquisitionId}、散裝 ${result.extraLots.map((l) => `#${l.acquisitionId}`).join("、")}。`
+              : `收購完成（單號 #${result.acquisitionId}）。`}
+          </p>
           {drawerNotice !== null && (
             <p role="alert" className="form-error">
               錢櫃未開啟：{drawerNotice}（收購已完成，請以鑰匙開櫃付款）
@@ -1693,6 +1809,20 @@ export default function AcquisitionPage() {
             lot={result.basket === null ? result.lot : null}
             basket={result.basket !== null && !result.joinedBasket ? result.basket : null}
           />
+          {result.extraLots.map((extra) => (
+            <div key={extra.acquisitionId}>
+              <p>
+                散裝 #{extra.acquisitionId}：{extra.basket !== null ? `販售籃 ${extra.basket}` : `散裝編號 ${extra.lot}`}
+                {extra.basket !== null && extra.joinedBasket ? "（沿用籃上原本的標籤，不必重印）" : ""}
+              </p>
+              <PrintLabelsAction
+                autoStart={settings.data?.auto_print_acquisition_labels ?? false}
+                codes={[]}
+                lot={extra.basket === null ? extra.lot : null}
+                basket={extra.basket !== null && !extra.joinedBasket ? extra.basket : null}
+              />
+            </div>
+          ))}
           {receiptSnap !== null && (
             <div className="acq-receipt-print">
               <button
@@ -1718,7 +1848,10 @@ export default function AcquisitionPage() {
               繼續收這位賣方（{result.seller.name}）
             </button>
           )}
-          {voidedNote === null && isManager && canVoid({ voided_at: null, type: result.type }) && (
+          {result.extraLots.length > 0 && (
+            <p className="hint">這次分成好幾張收購單；要作廢請到「收購紀錄」逐張處理。</p>
+          )}
+          {voidedNote === null && isManager && result.extraLots.length === 0 && canVoid({ voided_at: null, type: result.type }) && (
             <button
               type="button"
               className="btn-danger acq-void-after-create"

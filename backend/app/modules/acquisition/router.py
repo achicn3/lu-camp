@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.acquisition.schemas import (
+    AcquisitionCombinedAffidavitRead,
+    AcquisitionCombinedAffidavitRequest,
+    AcquisitionCombinedCreate,
+    AcquisitionCombinedResult,
     AcquisitionCreate,
     AcquisitionListRead,
     AcquisitionRead,
@@ -158,6 +162,60 @@ async def create_acquisition(
         raise
     await session.commit()
     return result
+
+
+@router.post(
+    "/combined/affidavit",
+    response_model=AcquisitionCombinedAffidavitRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="requestCombinedAcquisitionAffidavit",
+)
+async def request_combined_acquisition_affidavit(
+    payload: AcquisitionCombinedAffidavitRequest, session: SessionDep, user: CurrentUserDep
+) -> AcquisitionCombinedAffidavitRead:
+    """買斷＋散裝一起收：整張送顧客螢幕給客人簽一次（內容由後端產生）。"""
+    try:
+        task = await AcquisitionService(session).request_combined_affidavit(
+            user.store_id, payload, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
+    read = AcquisitionCombinedAffidavitRead(id=task.id, content=dict(task.content))
+    await session.commit()
+    return read
+
+
+@router.post(
+    "/combined",
+    response_model=AcquisitionCombinedResult,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createCombinedAcquisition",
+)
+async def create_combined_acquisition(
+    payload: AcquisitionCombinedCreate,
+    session: SessionDep,
+    user: CurrentUserDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=72)],
+) -> AcquisitionCombinedResult:
+    """買斷＋散裝一起收（收購①）：拆成買斷一張、散裝每堆一張，同一交易；必帶 Idempotency-Key。"""
+    svc = AcquisitionService(session)
+    try:
+        results = await svc.create_combined(
+            user.store_id, user.id, payload, idempotency_key=idempotency_key
+        )
+    except DomainError as exc:
+        await session.rollback()
+        await _fail_acquisition_signature(
+            session,
+            store_id=user.store_id,
+            task_id=payload.signature_task_id,
+            actor_user_id=user.id,
+            reason_detail=str(exc),
+        )
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
+    await session.commit()
+    return AcquisitionCombinedResult(results=results)
 
 
 # 收購紀錄清單一頁上限。

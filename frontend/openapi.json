@@ -1,6 +1,164 @@
 {
   "components": {
     "schemas": {
+      "AcquisitionCombinedAffidavitRead": {
+        "description": "送出的簽署任務（輪詢狀態請用簽署任務端點）與客人會看到的內容。",
+        "properties": {
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "content"
+        ],
+        "title": "AcquisitionCombinedAffidavitRead",
+        "type": "object"
+      },
+      "AcquisitionCombinedAffidavitRequest": {
+        "description": "送顧客螢幕簽署：內容由後端依同一份資料產生（付款時再精確比對）。",
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionItemIn"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionLotIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Lots",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "terminal_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Id"
+          }
+        },
+        "required": [
+          "contact_id",
+          "items",
+          "lots"
+        ],
+        "title": "AcquisitionCombinedAffidavitRequest",
+        "type": "object"
+      },
+      "AcquisitionCombinedCreate": {
+        "description": "送出時拆成買斷一張、每堆散裝各一張；只簽一次、只付一次。\n\n撥款只收現金或購物金——混合撥款（SPLIT）要拆到好幾張單上，容易對不起來，這裡不提供。",
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionItemIn"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionLotIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Lots",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "payout_method": {
+            "default": "CASH",
+            "enum": [
+              "CASH",
+              "STORE_CREDIT"
+            ],
+            "title": "Payout Method",
+            "type": "string"
+          },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          }
+        },
+        "required": [
+          "contact_id",
+          "items",
+          "lots"
+        ],
+        "title": "AcquisitionCombinedCreate",
+        "type": "object"
+      },
+      "AcquisitionCombinedResult": {
+        "description": "依序：買斷一張、散裝每堆一張。",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "AcquisitionCombinedResult",
+        "type": "object"
+      },
       "AcquisitionCreate": {
         "description": "收購單輸入。BUYOUT/CONSIGNMENT 走 items；BULK_LOT 走 lot。",
         "properties": {
@@ -16585,6 +16743,113 @@
           }
         ],
         "summary": "Create Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/combined": {
+      "post": {
+        "description": "買斷＋散裝一起收（收購①）：拆成買斷一張、散裝每堆一張，同一交易；必帶 Idempotency-Key。",
+        "operationId": "createCombinedAcquisition",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 72,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquisitionCombinedCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionCombinedResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Combined Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/combined/affidavit": {
+      "post": {
+        "description": "買斷＋散裝一起收：整張送顧客螢幕給客人簽一次（內容由後端產生）。",
+        "operationId": "requestCombinedAcquisitionAffidavit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquisitionCombinedAffidavitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionCombinedAffidavitRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Combined Acquisition Affidavit",
         "tags": [
           "acquisition"
         ]
