@@ -56,7 +56,7 @@ async function fillCombined(sellerName) {
   await page.locator(".acq-row").first().getByRole("option", { name: CATEGORY, exact: true }).click();
   await page.fill('input[aria-label="收購價"]', "1000");
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "3000");
-  await page.getByRole("button", { name: "＋ 加一堆散裝" }).click();
+  await page.getByRole("button", { name: "＋ 同一位客人還有散裝" }).click();
   const extra = page.locator(".acq-extra-lot").first();
   await extra.getByRole("textbox", { name: "名稱" }).fill("營釘");
   await extra.getByLabel("整堆收購成本").fill("150");
@@ -132,8 +132,14 @@ try {
   await page.fill('input[aria-label="收購價"]', "1000");
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "3000");
 
+  ok(
+    "沒有散裝時只有一顆小按鈕、不顯示散裝區",
+    (await page.locator(".acq-extra-lots").count()) === 0 &&
+      (await page.getByRole("button", { name: "＋ 同一位客人還有散裝" }).count()) === 1,
+  );
+  await page.screenshot({ path: join(SHOTS, "00-no-bulk.png"), fullPage: true });
   // 再加一堆散裝：營釘 30 件、整堆 150、每件 20
-  await page.getByRole("button", { name: "＋ 加一堆散裝" }).click();
+  await page.getByRole("button", { name: "＋ 同一位客人還有散裝" }).click();
   const extra = page.locator(".acq-extra-lot").first();
   await extra.getByRole("textbox", { name: "名稱" }).fill("營釘");
   await extra.getByLabel("整堆收購成本").fill("150");

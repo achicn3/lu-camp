@@ -5029,3 +5029,6 @@ a.btn-ghost {
 .acq-records-pending {
   color: #7a4800;
 }
+.acq-extra-lots-open {
+  align-self: flex-start;
+}

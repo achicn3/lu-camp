@@ -1586,7 +1586,21 @@ export default function AcquisitionPage() {
         </div>
       )}
 
-      {type === "BUYOUT" && (
+      {type === "BUYOUT" && extraLots.length === 0 && (
+        // 沒有散裝時只留一顆小按鈕，不佔版面；按了才展開散裝區。
+        <button
+          type="button"
+          className="btn-ghost acq-extra-lots-open"
+          onClick={() => {
+            setExtraLots([emptyLot()]);
+            setExtraLotKeys([newIdempotencyKey()]);
+          }}
+        >
+          ＋ 同一位客人還有散裝
+        </button>
+      )}
+
+      {type === "BUYOUT" && extraLots.length > 0 && (
         <div className="card acq-extra-lots" aria-label="一起收的散裝">
           <h2>同一位客人還有散裝？</h2>
           <p className="hint">
@@ -1623,7 +1637,7 @@ export default function AcquisitionPage() {
               setExtraLotKeys((prev) => [...prev, newIdempotencyKey()]);
             }}
           >
-            ＋ 加一堆散裝
+            ＋ 再加一堆散裝
           </button>
         </div>
       )}
