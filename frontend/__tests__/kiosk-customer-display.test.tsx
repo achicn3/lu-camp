@@ -14,6 +14,16 @@ vi.mock("@/components/ui/SplitText", () => ({
   default: ({ text, className }: { text: string; className?: string }) => <h1 className={className}>{text}</h1>,
 }));
 
+// 露營動畫本身在真瀏覽器由 kiosk-camping-scene-smoke 驗；這裡只記下每個畫面交給它的模式，
+// 並確認換畫面時它沒有被重掛（重掛＝動畫從頭播，結帳就接不上當下的畫面）。
+vi.mock("@/features/customer-display/CampingScene", () => ({
+  CampingScene: ({ mode }: { mode: string }) => <div data-testid="camping-scene" data-mode={mode} />,
+}));
+
+function sceneMode(): string | null {
+  return screen.getByTestId("camping-scene").getAttribute("data-mode");
+}
+
 vi.mock("@/app/kiosk/SignatureCanvas", async () => {
   const React = await import("react");
   return {
@@ -240,6 +250,8 @@ describe("/kiosk 客顯", () => {
     expect(screen.getByText("折扣已重新計算").parentElement?.textContent).toBe(
       "折扣已重新計算，應付總額已更新",
     );
+    // 開始結帳：動畫不關掉，鏡頭帶到營桌（cart 模式）
+    expect(sceneMode()).toBe("cart");
     expect(screen.getByText("原價 $140")).toBeTruthy();
     expect(screen.getByText("優惠價 $120")).toBeTruthy();
     expect(screen.getByText("折扣 $40")).toBeTruthy();
@@ -416,9 +428,15 @@ describe("/kiosk 客顯", () => {
       renderPage();
 
       await user.click(await screen.findByRole("button", { name: "模擬簽名" }));
+      // 簽署內容要完整閱讀：動畫暫停藏起來
+      expect(sceneMode()).toBe("hidden");
+      const scene = screen.getByTestId("camping-scene");
       await user.click(screen.getByRole("button", { name: "確認並送出" }));
       expect(await screen.findByText("已完成簽署")).toBeTruthy();
       expect(screen.getByText(/10 秒後自動回到待機畫面/)).toBeTruthy();
+      // 簽完：動畫回來舉杯慶祝，而且是同一份（沒有重掛）
+      expect(sceneMode()).toBe("celebrate");
+      expect(screen.getByTestId("camping-scene")).toBe(scene);
 
       // 倒數結束：不需任何店員操作即恢復輪詢；此筆仍為 SIGNED 時只顯示等待訊息。
       await act(async () => {
@@ -435,6 +453,8 @@ describe("/kiosk 客顯", () => {
       });
       expect(await screen.findByText("折疊露營椅")).toBeTruthy();
       expect(screen.queryByText("已完成簽署")).toBeNull();
+      expect(sceneMode()).toBe("hidden");
+      expect(screen.getByTestId("camping-scene")).toBe(scene);
       expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -776,6 +796,7 @@ describe("/kiosk 客顯", () => {
 
     expect(await screen.findByText("交易已完成")).toBeTruthy();
     expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
+    expect(sceneMode()).toBe("celebrate");
   });
 
   it("升級後殘留的舊交回鎖不得讓下一張任務要求店員帳密", async () => {
@@ -1027,6 +1048,8 @@ describe("/kiosk 客顯", () => {
 
     renderPage();
     expect(await screen.findByText("顧客螢幕同步中斷，正在重新連線…")).toBeTruthy();
+    expect(sceneMode()).toBe("idle");
+    const scene = screen.getByTestId("camping-scene");
 
     backendUp = true;
     await act(async () => {
@@ -1036,6 +1059,9 @@ describe("/kiosk 客顯", () => {
     await waitFor(() => {
       expect(screen.getByText("瓦斯罐三入組")).toBeTruthy();
     });
+    // 待機→結帳：同一份動畫從當下接過去，不是重新掛一份
+    expect(sceneMode()).toBe("cart");
+    expect(screen.getByTestId("camping-scene")).toBe(scene);
     vi.useRealTimers();
   });
 });

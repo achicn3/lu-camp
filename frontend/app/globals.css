@@ -5182,3 +5182,216 @@ a.btn-ghost {
   font-weight: 400;
   margin-left: var(--sp-1);
 }
+
+/* ── 顧客螢幕露營動畫（手繪風，店主 2026-09-27） ──
+   舞台固定 1000×1400 設計單位，由程式依螢幕等比放大、貼齊底部；每個會動的東西各自一層 div，
+   平移時只做合成、不重畫手繪濾鏡。 */
+.camping-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: #f2ead9;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.camping-scene.is-ready {
+  opacity: 1;
+}
+.camping-scene[data-mode="hidden"] {
+  visibility: hidden;
+}
+.cs-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.cs-stage {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1000px;
+  height: 1400px;
+  transform-origin: 0 100%;
+}
+.cs-zoom,
+.cs-door {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+.cs-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 1400px;
+  will-change: transform;
+}
+.cs-layer > svg,
+.cs-actor > svg,
+.cs-door svg {
+  display: block;
+  overflow: visible;
+}
+.cs-tile {
+  position: absolute;
+  top: 0;
+  height: 1400px;
+}
+.cs-tile > svg {
+  display: block;
+  overflow: hidden;
+}
+.cs-sea-clip {
+  position: absolute;
+  top: 0;
+  height: 1400px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
+}
+.cs-actor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+.cs-tint {
+  left: -600px;
+  width: 2200px;
+  background: #1b2a55;
+  opacity: 0;
+  mix-blend-mode: multiply;
+}
+.cs-night,
+.cs-rain,
+.cs-thanks,
+.cs-lights-wrap {
+  opacity: 0;
+}
+.cs-rain {
+  width: 1000px;
+}
+.cs-door {
+  perspective: 2200px;
+}
+.cs-door-light,
+.cs-door-leaf {
+  position: absolute;
+  left: 314px;
+  top: 464px;
+  width: 372px;
+  height: 942px;
+}
+.cs-door-light {
+  background: radial-gradient(circle at 50% 45%, #fffdf2, #ffe6a8 70%, #f7c46a);
+}
+.cs-door-leaf {
+  transform-origin: 0 50%;
+  backface-visibility: hidden;
+}
+.cs-door-hand {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.cs-flash {
+  position: absolute;
+  inset: 0;
+  background: #fffaf0;
+  opacity: 0;
+}
+.cs-paper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  mix-blend-mode: multiply;
+}
+
+/* 待機：店名提示縮成底部一張紙卡，不擋動畫 */
+.kiosk-standby-scene {
+  overflow: hidden;
+  align-items: end;
+  background: transparent;
+}
+.kiosk-standby-card {
+  position: relative;
+  z-index: 1;
+  margin-bottom: max(var(--sp-6), env(safe-area-inset-bottom));
+  padding: var(--sp-4) var(--sp-6);
+  border: 2px solid #2a2018;
+  border-radius: 18px 22px 16px 24px;
+  background: color-mix(in srgb, #fffaf0 86%, transparent);
+  box-shadow: 4px 5px 0 #2a2018;
+  gap: var(--sp-2);
+}
+.kiosk-standby-card .kiosk-standby-title {
+  font-size: clamp(26px, 4.4vw, 40px);
+}
+.kiosk-standby-card .kiosk-standby-sub {
+  font-size: var(--text-md);
+}
+.kiosk-standby-scene .kiosk-terminal-label {
+  z-index: 1;
+}
+
+/* 結帳：上方留一扇窗看動畫（鏡頭拉近到營桌），明細寫在手繪紙卡上 */
+.kiosk-cart-shell.is-scene {
+  position: relative;
+  z-index: 1;
+  grid-template-rows: auto minmax(18vh, 0.8fr) auto minmax(0, 2.2fr) auto;
+  background: transparent;
+}
+.kiosk-cart-shell.is-scene .kiosk-cart-header {
+  margin: var(--sp-4) var(--sp-4) 0;
+  padding: var(--sp-3) var(--sp-5);
+  border: 2px solid #2a2018;
+  border-radius: 16px 20px 14px 22px;
+  background: color-mix(in srgb, #fffaf0 90%, transparent);
+  box-shadow: 3px 4px 0 #2a2018;
+}
+.kiosk-cart-shell.is-scene .kiosk-cart-changes {
+  grid-row: 3;
+}
+.kiosk-cart-shell.is-scene .kiosk-cart-items,
+.kiosk-cart-shell.is-scene .kiosk-cart-scroll-hint {
+  grid-row: 4;
+}
+.kiosk-cart-shell.is-scene .kiosk-cart-items {
+  margin: 0 var(--sp-4);
+  border: 2px solid #2a2018;
+  border-bottom: 0;
+  border-radius: 20px 24px 0 0;
+  background:
+    repeating-linear-gradient(transparent 0 47px, rgba(111, 143, 174, 0.18) 47px 48px),
+    #fbf6ea;
+  box-shadow: 4px 0 0 #2a2018;
+}
+.kiosk-cart-shell.is-scene .kiosk-cart-total {
+  grid-row: 5;
+  margin: 0 var(--sp-4);
+  border: 2px solid #2a2018;
+  border-top: 2px dashed rgba(255, 255, 255, 0.4);
+}
+
+/* 簽署完成／交易完成：紙卡浮在動畫上，勾勾用畫的 */
+.kiosk-thanks.is-scene {
+  position: relative;
+  z-index: 1;
+  align-items: end;
+  background: transparent;
+}
+.kiosk-thanks.is-scene .kiosk-thanks-inner {
+  margin-bottom: max(var(--sp-6), env(safe-area-inset-bottom));
+  padding: var(--sp-5) var(--sp-6);
+  border: 2px solid #2a2018;
+  border-radius: 20px 24px 18px 26px;
+  background: color-mix(in srgb, #fffaf0 92%, transparent);
+  box-shadow: 4px 5px 0 #2a2018;
+}
+.kiosk-doodle-check {
+  width: 96px;
+  height: 96px;
+}

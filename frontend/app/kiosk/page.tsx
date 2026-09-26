@@ -4,6 +4,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -12,6 +13,8 @@ import {
 } from "react";
 
 import SplitText from "@/components/ui/SplitText";
+import { DoodleCheck } from "@/features/customer-display/DoodleCheck";
+import { CampingScene, type SceneMode } from "@/features/customer-display/CampingScene";
 import { API_BASE_URL, kioskApi } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { verifyStaffCredentials } from "@/lib/auth";
@@ -569,106 +572,118 @@ function KioskConsole({
     }
   }
 
-  // 付款階段是購物車的權威狀態，必須蓋過簽署完成畫面與仍為 SIGNED 的任務：
-  // - PROCESSING 讓顧客知道店員正在收款；
-  // - PAYMENT_UNCERTAIN 明確警告不得重複付款；
-  // - COMPLETED 立即顯示成交結果。
-  // 這些畫面只使用同一筆交易的後端最小快照，不會切換到下一位顧客的簽署內容。
-  if (
-    cart.data?.status === "PROCESSING" ||
-    cart.data?.status === "PAYMENT_UNCERTAIN"
-  ) {
-    return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
-  }
-  if (cart.data?.status === "COMPLETED") {
-    return <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} />;
-  }
-
-  if (recovering) {
-    return (
-      <StaffGate
-        title="上一筆簽署尚未確認"
-        message="請店員確認此筆是否已簽署後解鎖，再接續作業。"
-        unlockLabel="店員確認並解鎖"
-        onReset={() => {
-          // 店員已確認：清簽署鎖＋當前任務快取＋釘選再恢復輪詢。
-          setSigningLock(false);
-          setEngagedTaskId(null);
-          setPendingTaskId(null);
-          queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
-          setRecovering(false);
-        }}
-      />
-    );
-  }
-  if (completed) {
-    return <SignedThanksScreen remainingSeconds={signedSeconds} />;
-  }
-  if (pendingTaskId !== null) {
-    return (
-      <StaffGate
-        title="任務已更新"
-        message="內容已由店員更新，請店員確認後解鎖再交予客人。"
-        unlockLabel="店員確認並解鎖"
-        onReset={() => {
-          setEngagedTaskId(pendingTaskId);
-          setPendingTaskId(null);
-        }}
-      />
-    );
-  }
-  // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
-  const shown = frozenTask ?? data;
-  if (!shown) {
-    if (cart.isError) {
-      return (
-        <Standby
-          message="顧客螢幕同步中斷，正在重新連線…"
-          terminalName={terminalName}
-        />
-      );
-    }
-    if (cart.data) {
-      return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
-    }
-    return <Standby terminalName={terminalName} />;
-  }
-  if (shown.status === "PENDING") {
-    return (
-      <PendingTaskScreen
-        task={shown}
-        message={ackError ?? "正在確認簽署畫面…"}
-      />
-    );
-  }
-  if (shown.status === "SIGNED") {
-    // 已簽畢但店員尚未完成後續作業（收購送出／結帳）：只顯示等待訊息，輪詢照常，
-    // 任務被消化或換新任務時自動更新畫面。
-    return <SignedThanksScreen remainingSeconds={null} />;
-  }
-  // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
-  // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
+  const itemCount = cart.data?.snapshot.items.reduce((sum, item) => sum + item.qty, 0) ?? 0;
+  // 露營動畫整個顧客螢幕只掛一份（固定在最底層），換畫面時不重掛，結帳才能從當下的動畫接過去。
+  const view = currentView();
   return (
-    <TaskScreen
-      key={shown.id}
-      task={shown}
-      csrf={csrf}
-      onSigningChange={onSigningChange}
-      onComplete={() => {
-        // 簽名是個資：完成後立即從顧客螢幕記憶體快取與同步 state 清除；
-        // 感謝畫面只有不含內容的倒數，到期自動回待機。
-        queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
-        setSyncedData(undefined);
-        setAckError(null);
-        setPendingTaskId(null);
-        // 客人已簽畢＝不再「進行中」：釋放釘選（含 localStorage），倒數結束或中途重整
-        // 都能直接接續下一張任務，不必店員輸入帳密。
-        setEngagedTaskId(null);
-        setFrozenTask(null);
-        setSignedAt(Date.now());
-      }}
-    />
+    <>
+      <CampingScene mode={view.mode} itemCount={itemCount} />
+      {view.screen}
+    </>
   );
+
+  function currentView(): { mode: SceneMode; screen: ReactNode } {
+    // 付款階段是購物車的權威狀態，必須蓋過簽署完成畫面與仍為 SIGNED 的任務：
+    // - PROCESSING 讓顧客知道店員正在收款；
+    // - PAYMENT_UNCERTAIN 明確警告不得重複付款；
+    // - COMPLETED 立即顯示成交結果。
+    // 這些畫面只使用同一筆交易的後端最小快照，不會切換到下一位顧客的簽署內容。
+    if (
+      cart.data?.status === "PROCESSING" ||
+      cart.data?.status === "PAYMENT_UNCERTAIN"
+    ) {
+      return { mode: "cart", screen: <CartScreen cart={cart.data} streamConnected={streamConnected} /> };
+    }
+    if (cart.data?.status === "COMPLETED") {
+      return { mode: "celebrate", screen: <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} /> };
+    }
+
+    if (recovering) {
+      return { mode: "hidden", screen: (
+        <StaffGate
+          title="上一筆簽署尚未確認"
+          message="請店員確認此筆是否已簽署後解鎖，再接續作業。"
+          unlockLabel="店員確認並解鎖"
+          onReset={() => {
+            // 店員已確認：清簽署鎖＋當前任務快取＋釘選再恢復輪詢。
+            setSigningLock(false);
+            setEngagedTaskId(null);
+            setPendingTaskId(null);
+            queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+            setRecovering(false);
+          }}
+        />
+      ) };
+    }
+    if (completed) {
+      return { mode: "celebrate", screen: <SignedThanksScreen remainingSeconds={signedSeconds} /> };
+    }
+    if (pendingTaskId !== null) {
+      return { mode: "hidden", screen: (
+        <StaffGate
+          title="任務已更新"
+          message="內容已由店員更新，請店員確認後解鎖再交予客人。"
+          unlockLabel="店員確認並解鎖"
+          onReset={() => {
+            setEngagedTaskId(pendingTaskId);
+            setPendingTaskId(null);
+          }}
+        />
+      ) };
+    }
+    // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
+    const shown = frozenTask ?? data;
+    if (!shown) {
+      if (cart.isError) {
+        return { mode: "idle", screen: (
+          <Standby
+            message="顧客螢幕同步中斷，正在重新連線…"
+            terminalName={terminalName}
+          />
+        ) };
+      }
+      if (cart.data) {
+        return { mode: "cart", screen: <CartScreen cart={cart.data} streamConnected={streamConnected} /> };
+      }
+      return { mode: "idle", screen: <Standby terminalName={terminalName} /> };
+    }
+    if (shown.status === "PENDING") {
+      return { mode: "hidden", screen: (
+        <PendingTaskScreen
+          task={shown}
+          message={ackError ?? "正在確認簽署畫面…"}
+        />
+      ) };
+    }
+    if (shown.status === "SIGNED") {
+      // 已簽畢但店員尚未完成後續作業（收購送出／結帳）：只顯示等待訊息，輪詢照常，
+      // 任務被消化或換新任務時自動更新畫面。
+      return { mode: "celebrate", screen: <SignedThanksScreen remainingSeconds={null} /> };
+    }
+    // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
+    // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
+    return { mode: "hidden", screen: (
+      <TaskScreen
+        key={shown.id}
+        task={shown}
+        csrf={csrf}
+        onSigningChange={onSigningChange}
+        onComplete={() => {
+          // 簽名是個資：完成後立即從顧客螢幕記憶體快取與同步 state 清除；
+          // 感謝畫面只有不含內容的倒數，到期自動回待機。
+          queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+          setSyncedData(undefined);
+          setAckError(null);
+          setPendingTaskId(null);
+          // 客人已簽畢＝不再「進行中」：釋放釘選（含 localStorage），倒數結束或中途重整
+          // 都能直接接續下一張任務，不必店員輸入帳密。
+          setEngagedTaskId(null);
+          setFrozenTask(null);
+          setSignedAt(Date.now());
+        }}
+      />
+    ) };
+  }
 }
 
 function CompletedSaleScreen({
@@ -679,11 +694,9 @@ function CompletedSaleScreen({
   remainingSeconds: number;
 }) {
   return (
-    <main className="kiosk-thanks">
+    <main className="kiosk-thanks is-scene">
       <div className="kiosk-thanks-inner">
-        <div className="kiosk-thanks-check" aria-hidden>
-          ✓
-        </div>
+        <DoodleCheck />
         <h1 className="kiosk-thanks-title">交易已完成</h1>
         <p className="kiosk-standby-sub">
           本次金額 ${formatNtd(parseNtd(cart.snapshot.total) ?? 0)}
@@ -700,11 +713,9 @@ function CompletedSaleScreen({
 // 完成（任務仍為 SIGNED）則不倒數，僅告知稍候，畫面不含任何個資。
 function SignedThanksScreen({ remainingSeconds }: { remainingSeconds: number | null }) {
   return (
-    <main className="kiosk-thanks">
+    <main className="kiosk-thanks is-scene">
       <div className="kiosk-thanks-inner">
-        <div className="kiosk-thanks-check" aria-hidden>
-          ✓
-        </div>
+        <DoodleCheck />
         <h1 className="kiosk-thanks-title">已完成簽署</h1>
         <p className="kiosk-standby-sub">感謝您</p>
         <p className="hint" role="status">
@@ -765,7 +776,7 @@ function CartScreen({
   );
   const visibleChanges = changes.filter((change) => change.type !== "ADDED");
   return (
-    <main className="kiosk-cart-shell">
+    <main className="kiosk-cart-shell is-scene">
       <header className="kiosk-cart-header">
         <div>
           <p className="kiosk-eyebrow">顧客購物明細</p>
@@ -1046,6 +1057,9 @@ function StandbyTitle() {
       tag="h1"
       className="kiosk-standby-title"
       text={STORE_DISPLAY_NAME}
+      // 店名卡在畫面底部：預設「捲到可視範圍 90% 才開始」永遠不會觸發，改成一出現就播
+      threshold={0}
+      rootMargin="0px"
       delay={90}
       duration={0.9}
       from={{ opacity: 0, y: 32 }}
@@ -1062,14 +1076,14 @@ function Standby({
   terminalName?: string;
 }) {
   return (
-    <main className="kiosk-standby">
+    <main className="kiosk-standby kiosk-standby-scene">
+      {/* 露營動畫在背後（KioskConsole 掛的那一份）；店名與提示縮成底部一張紙卡，不擋畫面。 */}
       {terminalName && (
         <p className="kiosk-terminal-label">櫃檯 · {terminalName}</p>
       )}
-      <div className="kiosk-standby-inner">
+      <div className="kiosk-standby-inner kiosk-standby-card">
         <StandbyTitle />
         <p className="kiosk-standby-sub">{message}</p>
-        <div className="kiosk-standby-dot" aria-hidden />
       </div>
     </main>
   );
