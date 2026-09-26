@@ -1,15 +1,16 @@
-// K4 收購×手持切結整合煙霧（docs/23）：店員於收購頁鑑價 → 送至手持裝置 → 客人（KIOSK）
-// 簽署（API）→ 店員完成收購 → 驗證收購單綁定 signature_task_id、撥款＝客人所選。
-// 需 backend:8000 + frontend:3000、dev-manager + dev-kiosk 已 seed、開帳。
+// K4 收購×手持切結整合煙霧（docs/23）：店員於收購頁鑑價 → 送至手持裝置 → 客人在顧客螢幕頁
+// 勾同意、選撥款、簽名 → 店員完成收購 → 驗證撥款＝客人所選、切結用過即作廢（CONSUMED）、不能重複綁定。
+// 2026-09-26 更新：先把顧客螢幕與這台櫃檯配對（現在送簽一定要配對且在線）、改在顧客螢幕頁實際簽名、
+// 等待字樣改成現行文字；綁定後任務狀態由 SIGNED 改為 CONSUMED（單次使用，見 acquisition service）。
+// 需 backend:8000 + frontend:3000 + 硬體代理（假機即可，需 AGENT_BACKEND_URL，見 docs/20 §3.1）、dev-manager + dev-kiosk 已 seed。
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import zlib from "node:zlib";
-
 import { chromium } from "playwright";
 
-import { pickGrade } from "./_acquisition.mjs";
+import { fillItemName, pickGrade } from "./_acquisition.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -31,73 +32,73 @@ async function apiLogin(u, p) {
   return (await r.json()).access_token;
 }
 
-function signaturePng() {
-  // 擬真手寫筆跡（非色塊）：主筆劃＝雙頻正弦曲線、加一撇收尾，2px 半徑圓筆頭；
-  // 400x120 RGBA，如實呈現簽名管線的渲染結果（憑證上看起來像真的簽名）。
-  const w = 400, h = 120;
-  const ink = Array.from({ length: h }, () => new Uint8Array(w));
-  const dab = (cx, cy) => {
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        if (dx * dx + dy * dy > 4) continue;
-        const x = Math.round(cx) + dx, y = Math.round(cy) + dy;
-        if (x >= 0 && x < w && y >= 0 && y < h) ink[y][x] = 1;
-      }
-    }
-  };
-  for (let i = 0; i <= 2400; i++) {
-    const t = i / 2400;
-    dab(20 + t * 360, 62 + 26 * Math.sin(t * Math.PI * 3) + 10 * Math.sin(t * Math.PI * 9 + 1));
-  }
-  for (let i = 0; i <= 700; i++) {
-    const t = i / 700;
-    dab(140 + t * 150, 98 - t * 60); // 收尾一撇
-  }
-  const magic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const crc = (buf) => {
-    let c = ~0;
-    for (const b of buf) {
-      c ^= b;
-      for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
-    }
-    return (~c) >>> 0;
-  };
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const c = Buffer.alloc(4);
-    c.writeUInt32BE(crc(td));
-    return Buffer.concat([len, td, c]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; ihdr[9] = 6;
-  const raw = [];
-  for (let y = 0; y < h; y++) {
-    raw.push(0);
-    for (let x = 0; x < w; x++) {
-      if (ink[y][x]) raw.push(0, 0, 0, 255);
-      else raw.push(255, 255, 255, 255);
-    }
-  }
-  const idat = zlib.deflateSync(Buffer.from(raw));
-  return Buffer.concat([
-    magic,
-    chunk("IHDR", ihdr),
-    chunk("IDAT", idat),
-    chunk("IEND", Buffer.alloc(0)),
-  ]).toString("base64");
-}
 
 const browser = await chromium.launch();
+const INSTALLATION = crypto.randomUUID();
+const kioskPage = await browser.newPage({ viewport: { width: 834, height: 1112 } });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+await page.addInitScript((id) => {
+  window.localStorage.setItem("lu-camp.pos-terminal.installation", id);
+}, INSTALLATION);
 page.on("pageerror", (e) => ok("頁面 JS 錯誤", false, String(e)));
+
+async function drawSignature(target) {
+  const canvas = target.locator("canvas.kiosk-sign-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  const pts = [[0.15, 0.5], [0.3, 0.25], [0.45, 0.7], [0.6, 0.3], [0.75, 0.6], [0.85, 0.4]];
+  await target.mouse.move(box.x + box.width * pts[0][0], box.y + box.height * pts[0][1]);
+  await target.mouse.down();
+  for (const [fx, fy] of pts.slice(1)) {
+    await target.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 12 });
+  }
+  await target.mouse.up();
+}
+
+/** 客人在顧客螢幕頁簽名：勾同意、選撥款、簽名、送出。 */
+async function customerSigns(payoutLabel) {
+  await kioskPage.waitForSelector("button.kiosk-payout-btn", { timeout: 10000 });
+  await kioskPage.check('.kiosk-agree-check input[type="checkbox"]');
+  await kioskPage.click(`button.kiosk-payout-btn:has-text("${payoutLabel}")`);
+  await drawSignature(kioskPage);
+  await kioskPage.click("button.kiosk-submit");
+}
+
+/** 送簽並攔下新建的簽署任務 id（之後查狀態、測重複綁定用）。 */
+async function pushSignAndCaptureTask() {
+  const created = page.waitForResponse(
+    (r) => r.request().method() === "POST" && r.url().endsWith("/api/v1/signing/tasks"),
+    { timeout: 8000 },
+  );
+  await page.click('button:has-text("送至手持裝置簽署")');
+  const task = await (await created).json();
+  await page.waitForSelector("text=/已送至顧客螢幕|客人正在核對/", { timeout: 8000 });
+  return task;
+}
 
 try {
   const mgr = await apiLogin("dev-manager", "dev-test-123456");
-  const kiosk = await apiLogin("dev-kiosk", "dev-test-123456");
+
+  // 顧客螢幕啟用並與這台櫃檯配對（櫃檯的安裝碼預先寫進店員頁的瀏覽器）
+  await kioskPage.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await kioskPage.fill('input[name="username"]', "dev-kiosk");
+  await kioskPage.fill('input[name="password"]', "dev-test-123456");
+  await kioskPage.click('button:has-text("啟用裝置")');
+  await kioskPage.waitForSelector(".kiosk-pairing-code", { timeout: 8000 });
+  const pairingCode = (await kioskPage.textContent(".kiosk-pairing-code"))?.trim();
+  const terminal = await (
+    await fetch(`${API}/api/v1/customer-display/terminals`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${mgr}` },
+      body: JSON.stringify({ installation_id: INSTALLATION, name: `切結煙霧 ${Date.now()}` }),
+    })
+  ).json();
+  const pairResp = await fetch(`${API}/api/v1/customer-display/terminals/${terminal.id}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${mgr}` },
+    body: JSON.stringify({ pairing_code: pairingCode }),
+  });
+  ok("顧客螢幕與櫃檯配對", pairResp.status === 200, `status=${pairResp.status}`);
 
   // 開帳（CASH 收購需要）
   await fetch(`${API}/api/v1/cash-sessions/open`, {
@@ -107,6 +108,7 @@ try {
   });
 
   // 店員：登入 → 收購頁
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
@@ -127,7 +129,7 @@ try {
   ok("建立並選取賣方", true);
 
   // 鑑價列
-  await page.fill('input[aria-label="品名"]', "登山外套");
+  await fillItemName(page, "登山外套");
   await pickGrade(page, "A");
   const brand = page.getByLabel("品牌");
   await brand.click();
@@ -141,24 +143,13 @@ try {
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "3000");
 
   // 送至手持裝置簽署
-  await page.click('button:has-text("送至手持裝置簽署")');
-  await page.waitForSelector("text=等待客人確認並簽署", { timeout: 8000 });
-  ok("送至手持裝置、等待簽署", true);
+  const cur = await pushSignAndCaptureTask();
+  ok("送至手持裝置、等待簽署", cur && cur.kind === "ACQUISITION_AFFIDAVIT", `kind=${cur?.kind}`);
   await page.screenshot({ path: join(SHOTS, "01-pushed.png"), fullPage: true });
 
-  // 客人（KIOSK）簽署：取當前任務 → 簽名（選現金）
-  const cur = await (
-    await fetch(`${API}/api/v1/kiosk/tasks/current`, {
-      headers: { authorization: `Bearer ${kiosk}` },
-    })
-  ).json();
-  ok("手持端收到切結任務", cur && cur.kind === "ACQUISITION_AFFIDAVIT", `kind=${cur?.kind}`);
-  const signResp = await fetch(`${API}/api/v1/kiosk/tasks/${cur.id}/sign`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${kiosk}` },
-    body: JSON.stringify({ signature_image_base64: signaturePng(), chosen_payout: "CASH" }),
-  });
-  ok("手持端簽署成功", signResp.status === 200, `status=${signResp.status}`);
+  // 客人在顧客螢幕上簽名（選現金）
+  await customerSigns("現金");
+  ok("客人在顧客螢幕簽署完成", true);
 
   // 店員端輪詢應轉為「已完成簽署」
   await page.waitForSelector("text=客人已完成簽署", { timeout: 10000 });
@@ -204,7 +195,7 @@ try {
   // 完成收購後表單已重置（seller 已清空），直接搜尋選取會員賣家。
   await page.fill('input[aria-label="賣方搜尋"]', memberSeller.phone);
   await page.click(`.acq-results button:has-text("${memberSeller.name}")`);
-  await page.fill('input[aria-label="品名"]', "睡袋");
+  await fillItemName(page, "睡袋");
   await pickGrade(page, "A");
   const cat2 = page.getByLabel("分類");
   await cat2.click();
@@ -212,22 +203,9 @@ try {
   await page.click('button:has-text("建立「")');
   await page.fill('input[aria-label="收購價"]', "800");
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "2000");
-  await page.click('button:has-text("送至手持裝置簽署")');
-  await page.waitForSelector("text=等待客人確認並簽署", { timeout: 8000 });
-  const cur2 = await (
-    await fetch(`${API}/api/v1/kiosk/tasks/current`, {
-      headers: { authorization: `Bearer ${kiosk}` },
-    })
-  ).json();
-  const sign2 = await fetch(`${API}/api/v1/kiosk/tasks/${cur2.id}/sign`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${kiosk}` },
-    body: JSON.stringify({
-      signature_image_base64: signaturePng(),
-      chosen_payout: "STORE_CREDIT",
-    }),
-  });
-  ok("購物金撥款簽署成功", sign2.status === 200, `status=${sign2.status}`);
+  await pushSignAndCaptureTask();
+  await customerSigns("購物金");
+  ok("購物金撥款簽署完成", true);
   // 等簽署面板轉「已完成」（面板唯一、不受流程一殘留影響）
   await page.waitForSelector('text=客人已完成簽署', { timeout: 15000 });
   await page.click('button:has-text("送出收購")');
@@ -275,7 +253,7 @@ try {
       headers: { authorization: `Bearer ${mgr}` },
     })
   ).json();
-  ok("切結任務仍為 SIGNED", taskAfter.status === "SIGNED");
+  ok("切結綁定收購後即用掉（CONSUMED，單次使用）", taskAfter.status === "CONSUMED", taskAfter.status);
 
   // 綁定不可重複使用：以同一 task 再建收購 → 409
   const dup = await fetch(`${API}/api/v1/acquisitions`, {

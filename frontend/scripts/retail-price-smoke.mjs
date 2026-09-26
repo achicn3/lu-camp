@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { pickGrade } from "./_acquisition.mjs";
+import { fillEstimatedResale, fillItemName, pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -48,10 +48,25 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 950 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
+let restoreFees = null;
 try {
   const { access_token: token } = await apiJson("/api/v1/auth/login", {
     method: "POST",
     body: { username: "dev-manager", password: "dev-test-123456" },
+  });
+  // 本煙霧的價格斷言以「沒有行動支付手續費」計（例：3000→3150）；別支煙霧可能改過設定，
+  // 先設回 0、結束時還原，不讓測試順序影響結果。
+  const feesBefore = await apiJson("/api/v1/settings", { token });
+  restoreFees = () =>
+    apiJson("/api/v1/settings", {
+      method: "PATCH",
+      token,
+      body: { linepay_fee_pct: feesBefore.linepay_fee_pct, taiwanpay_fee_pct: feesBefore.taiwanpay_fee_pct },
+    });
+  await apiJson("/api/v1/settings", {
+    method: "PATCH",
+    token,
+    body: { linepay_fee_pct: "0", taiwanpay_fee_pct: "0" },
   });
   // 開帳：收購付現要在開帳中的班別下進行（§7 不變量 8）。已開帳就略過。
   await fetch(`${API}/api/v1/cash-sessions/open`, {
@@ -78,7 +93,7 @@ try {
   await page.waitForSelector(`text=${SELLER}`);
 
   // ── 鑑價列 ──────────────────────────────────────────────────────────
-  await page.fill('input[aria-label="品名"]', ITEM);
+  await fillItemName(page, ITEM);
   await pickGrade(page, "A");
   const cat = page.getByLabel("分類");
   await cat.click();
@@ -88,7 +103,7 @@ try {
   // ── 1. 自動帶入的上架售價要 0 結尾 ──────────────────────────────────
   // 未稅 2010 × 1.05 = 2110.5 → 2111 → 進位 → 2120。挑這個數字是因為它在進位前後不同，
   // 隨便挑一個剛好整十的數（例如 3000 → 3150）根本驗不出這條規則。
-  await page.fill('input[aria-label="估計轉售價"]', "2010");
+  await fillEstimatedResale(page, "2010");
   const listed = page.locator('input[aria-label="上架售價（含稅與手續費）"]');
   const rounded = await page
     .waitForFunction(
@@ -119,11 +134,14 @@ try {
   );
   await listed.fill("2120");
 
-  // ── 3. 全新售價（原價）欄位 ─────────────────────────────────────────
-  const retail = page.locator('input[aria-label="全新售價（原價）"]').first();
-  ok("收購頁有全新售價（原價）欄位", await retail.isVisible());
+  // ── 3. 原價欄位 ─────────────────────────────────────────────────────
+  // 買斷的原價自 2709b45 起就是「參考價（原價或目前最低價）」那一欄（同一個 retail_price，
+  // 另外可搭配折數估價）；寄售才另有「全新售價（原價）」欄。這裡守的是「收購時記得下原價」。
+  const retail = page.locator('input[aria-label="參考價（原價或目前最低價）"]').first();
+  ok("收購頁（買斷）有記錄原價的欄位", await retail.isVisible());
   await retail.fill("8000");
   await page.fill('input[aria-label="收購價"]', "900");
+  await listed.fill("2120"); // 填參考價不帶折數不會改售價；保險起見再確認一次
   await page.screenshot({ path: join(SHOTS, "01-acquisition-retail-price.png"), fullPage: true });
 
   await page.click('button:has-text("送出收購")');
@@ -166,6 +184,7 @@ try {
   ok("改過的原價出現在清單上", changed);
   await page.screenshot({ path: join(SHOTS, "05-inventory-updated.png"), fullPage: true });
 } finally {
+  await restoreFees?.();
   await browser.close();
 }
 

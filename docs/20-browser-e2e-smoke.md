@@ -75,6 +75,21 @@ NEXT_PUBLIC_AGENT_URL=http://localhost:8001 \
 > 從 WSL 外部（Windows 主機／區網平板）連進來時，兩個位址都要改成 WSL 的 IP
 > （`hostname -I`），不能用 `localhost`——那個 localhost 指的是瀏覽器所在的機器。
 
+### 3.1 硬體代理（假機，:8001）
+
+多數煙霧在瀏覽器裡攔下列印請求，不需要代理；`label-print-smoke`、`kiosk-acquisition-smoke`
+則是**真的送到代理**、驗代理回 200。沒有接印表機時用假機起一個，位址要跟上面
+`NEXT_PUBLIC_AGENT_URL` 一致；收據／憑證聯要向後端拿店名抬頭，`AGENT_BACKEND_URL` 沒給會回 503：
+
+```bash
+cd hardware-agent
+AGENT_DEVICES=fake AGENT_CORS_ORIGINS=http://localhost:3000 AGENT_BACKEND_URL=http://localhost:8000 \
+  uv run uvicorn agent.main:build_app --factory --host 127.0.0.1 --port 8001
+```
+
+> 會改店家設定的煙霧（手續費、自動印標籤、一定要簽名…）必須在結束時還原，否則之後跑的煙霧
+> 價格或流程會不對（2026-09-26 實際發生：折數煙霧留下手續費，收購煙霧的 3000→3150 全紅）。
+
 ## 4. 跑煙霧腳本 + 截圖
 
 ```bash

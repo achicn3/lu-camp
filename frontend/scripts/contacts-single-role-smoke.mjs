@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { pickGrade } from "./_acquisition.mjs";
+import { fillItemName, pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -53,7 +53,9 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
 try {
-  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  // 等前端接手表單（hydration）再填：只等 domcontentloaded 時，按登入會變成瀏覽器原生 GET 送出。
+  await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', USERNAME);
   await page.fill('input[name="password"]', PASSWORD);
   await page.click('button:has-text("登入")');
@@ -107,14 +109,14 @@ try {
     JSON.stringify(afterBackfill.roles));
 
   // 真的完成一次收購 → 這時才該變成賣方
-  await page.getByLabel("品名").first().fill(`身分測試品-${RUN}`);
+  await fillItemName(page, `身分測試品-${RUN}`);
   await pickGrade(page, "A");
   const cat = page.getByLabel("分類");
   await cat.click();
   await cat.fill(`身分分類-${RUN}`);
   await page.click(`button:has-text("建立「身分分類-${RUN}」")`);
-  await page.getByLabel("上架售價（含稅與手續費）").fill("1000");
-  await page.getByLabel("收購價").fill("300");
+  await page.getByRole("textbox", { name: "上架售價（含稅與手續費）", exact: true }).fill("1000");
+  await page.getByRole("textbox", { name: "收購價", exact: true }).fill("300");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector("text=收購完成", { timeout: 20000 });
   await page.screenshot({ path: join(SHOTS, "025-after-acquisition.png") });

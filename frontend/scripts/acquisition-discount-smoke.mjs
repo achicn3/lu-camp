@@ -23,6 +23,8 @@ async function api(path, method = "GET", body) {
   return response.json();
 }
 token = (await api("/auth/login", "POST", { username: "dev-manager", password: process.env.SMOKE_PASSWORD ?? "dev-test-123456" })).access_token;
+// 結束時把改過的設定還原：沒還原的手續費會讓之後跑的收購煙霧價格全部不對（2026-09-26 實際發生）。
+const settingsBefore = await api("/settings");
 await api("/settings", "PATCH", { default_margin_pct: 45, tax_rate: "0.0500", linepay_fee_pct: "0.0220", taiwanpay_fee_pct: "0.0100", require_acquisition_affidavit: false });
 const brand = await api("/brands", "POST", { name: `折數品牌${run}` });
 const model = await api("/product-models", "POST", { name: `測試型號${run}`, brand_id: brand.id });
@@ -141,5 +143,12 @@ try {
   await page.screenshot({ path: join(shots, "failure.png"), fullPage: true });
   throw error;
 } finally {
+  await api("/settings", "PATCH", {
+    default_margin_pct: settingsBefore.default_margin_pct,
+    tax_rate: settingsBefore.tax_rate,
+    linepay_fee_pct: settingsBefore.linepay_fee_pct,
+    taiwanpay_fee_pct: settingsBefore.taiwanpay_fee_pct,
+    require_acquisition_affidavit: settingsBefore.require_acquisition_affidavit,
+  });
   await browser.close();
 }

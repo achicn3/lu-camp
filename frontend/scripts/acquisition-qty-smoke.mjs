@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { pickGrade } from "./_acquisition.mjs";
+import { fillItemName, pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -51,7 +51,9 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
 try {
-  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  // 等前端接手表單（hydration）再填：只等 domcontentloaded 時，按登入會變成瀏覽器原生 GET 送出。
+  await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   await page.fill('input[name="username"]', USERNAME);
   await page.fill('input[name="password"]', PASSWORD);
   await page.click('button:has-text("登入")');
@@ -67,7 +69,7 @@ try {
   await page.click('button:has-text("建立並選取")');
   await page.waitForSelector(`text=多件賣家-${RUN}`, { timeout: 15000 });
 
-  await page.fill('input[aria-label="品名"]', ITEM_NAME);
+  await fillItemName(page, ITEM_NAME);
   await pickGrade(page, "A");
   const cat = page.getByLabel("分類");
   await cat.click();
@@ -76,7 +78,7 @@ try {
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "1500");
   await page.fill('input[aria-label="收購價"]', String(COST));
 
-  const qtyBox = page.getByLabel("件數").first();
+  const qtyBox = page.getByRole("textbox", { name: "件數", exact: true }).first();
   ok("件數欄預設為 1", (await qtyBox.inputValue()) === "1", await qtyBox.inputValue());
 
   // 件數不合法必須擋住送出，而不只是顯示紅字（Codex High #1）。
@@ -88,14 +90,14 @@ try {
   const rows = page.locator(".acq-row");
   // 第二列必須**除了件數以外全部合法**，否則它會因為缺分類之類的理由被擋，
   // 測試又一次為了錯的理由變綠（Codex 第三輪：同一個陷阱的第三次）。
-  await rows.nth(1).getByLabel("品名").fill(`${ITEM_NAME}-B`);
+  await fillItemName(rows.nth(1), `${ITEM_NAME}-B`);
   await pickGrade(rows.nth(1), "A");
   const cat2 = rows.nth(1).getByLabel("分類");
   await cat2.click();
   await cat2.fill(`多件分類-${RUN}`);
   await page.click(`button:has-text("多件分類-${RUN}")`);
-  await rows.nth(1).getByLabel("上架售價（含稅與手續費）").fill("1500");
-  await rows.nth(1).getByLabel("收購價").fill(String(COST));
+  await rows.nth(1).getByRole("textbox", { name: "上架售價（含稅與手續費）", exact: true }).fill("1500");
+  await rows.nth(1).getByRole("textbox", { name: "收購價", exact: true }).fill(String(COST));
   await page.waitForTimeout(300);
 
   // 先證明「第二列在件數合法時可以送出」——否則下面的「被擋」證明不了是件數擋的
@@ -104,7 +106,7 @@ try {
     errorsBefore.filter((t) => !t.includes("件數")).length === 0,
     errorsBefore.join(" | "));
 
-  await rows.nth(1).getByLabel("件數").fill("0");
+  await rows.nth(1).getByRole("textbox", { name: "件數", exact: true }).fill("0");
   await page.waitForTimeout(400);
 
   let posted = false;
@@ -131,6 +133,8 @@ try {
 
   await rows.nth(1).locator('button:has-text("移除")').click();
   await page.waitForTimeout(300);
+  // 第一列在按「新增一列」時已收合成一行摘要：點摘要展開回來再改件數。
+  await page.locator(".acq-row-collapsed").first().click();
   await qtyBox.fill(String(QTY));
   await page.waitForTimeout(400);
   const bodyText = await page.locator("body").innerText();

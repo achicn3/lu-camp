@@ -40,6 +40,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
+let restoreFees = null;
 try {
   const { access_token: token } = await apiJson("/api/v1/auth/login", {
     method: "POST",
@@ -50,6 +51,21 @@ try {
     token,
     body: { default_commission_pct: 37 },
   });
+  // 本煙霧的價格斷言以「沒有行動支付手續費」計（例：3000→3150）；別支煙霧可能改過設定，
+  // 先設回 0、結束時還原，不讓測試順序影響結果。
+  const feesBefore = await apiJson("/api/v1/settings", { token });
+  restoreFees = () =>
+    apiJson("/api/v1/settings", {
+      method: "PATCH",
+      token,
+      body: { linepay_fee_pct: feesBefore.linepay_fee_pct, taiwanpay_fee_pct: feesBefore.taiwanpay_fee_pct },
+    });
+  await apiJson("/api/v1/settings", {
+    method: "PATCH",
+    token,
+    body: { linepay_fee_pct: "0", taiwanpay_fee_pct: "0" },
+  });
+
 
   // 1) 登入（先關掉開店前檢查的每日導向，否則會在半路把煙霧帶去 /opening-check）
   await skipOpeningCheckRedirect(page);
@@ -166,6 +182,7 @@ try {
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {
+  await restoreFees?.();
   await browser.close();
 }
 

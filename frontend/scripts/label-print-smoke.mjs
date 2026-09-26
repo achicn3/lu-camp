@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { pickGrade } from "./_acquisition.mjs";
+import { fillEstimatedResale, fillItemName, pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
@@ -27,6 +27,21 @@ function ok(name, pass, detail = "") {
   results.push({ name, pass, detail });
   console.log(`${pass ? "✅" : "❌"} ${name}${detail ? `：${detail}` : ""}`);
 }
+
+const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
+async function api(token, method, path, body) {
+  const res = await fetch(`${API}/api/v1${path}`, {
+    method,
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return res.json();
+}
+// 本煙霧要自己按「列印標籤」、在中間模擬品牌查不到：「收購送出後自動印標籤」（2026-09-23 加的設定）
+// 開著的話，完成畫面一出來就已經印掉了。先關掉、結束時還原。
+const adminToken = (await api(null, "POST", "/auth/login", { username: "dev-manager", password: "dev-test-123456" })).access_token;
+const autoPrintBefore = (await api(adminToken, "GET", "/settings")).auto_print_acquisition_labels;
+await api(adminToken, "PATCH", "/settings", { auto_print_acquisition_labels: false });
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -64,7 +79,7 @@ try {
   await page.click('button:has-text("建立並選取")');
   await page.waitForSelector(`text=${SELLER_NAME}`);
 
-  await page.fill('input[aria-label="品名"]', "標籤測試外套");
+  await fillItemName(page, "標籤測試外套");
   await pickGrade(page, GRADE);
 
   const brand = page.getByLabel("品牌");
@@ -77,7 +92,7 @@ try {
   await cat.fill("登山服飾");
   await page.click('button:has-text("建立「登山服飾」")');
 
-  await page.fill('input[aria-label="估計轉售價"]', "3000");
+  await fillEstimatedResale(page, "3000");
   // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
   await page.waitForFunction(
     () => (document.querySelector('input[aria-label="上架售價（含稅與手續費）"]')?.value ?? "") !== "",
@@ -147,6 +162,7 @@ try {
   // 失敗時留一張現場截圖，否則只有一行 timeout 訊息，查不出卡在哪一步。
   await page.screenshot({ path: `${SHOTS}/b3-99-failure.png` }).catch(() => {});
 } finally {
+  await api(adminToken, "PATCH", "/settings", { auto_print_acquisition_labels: autoPrintBefore });
   await browser.close();
 }
 
