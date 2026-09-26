@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import SplitText from "@/components/ui/SplitText";
 import { API_BASE_URL, kioskApi } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { verifyStaffCredentials } from "@/lib/auth";
@@ -1018,6 +1019,41 @@ function StaffGate({
   );
 }
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(REDUCED_MOTION_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** 不支援 matchMedia 的舊瀏覽器一律不做動畫（安全預設）。 */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia !== "function" || window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
+/** 待機畫面店名：逐字浮現（React Bits SplitText）；系統設定「減少動態效果」時直接顯示文字。 */
+function StandbyTitle() {
+  const reduceMotion = useSyncExternalStore(
+    subscribeReducedMotion,
+    prefersReducedMotion,
+    () => true, // 伺服器端先輸出靜態文字，瀏覽器接手後才決定要不要動畫
+  );
+  if (reduceMotion) return <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>;
+  return (
+    <SplitText
+      tag="h1"
+      className="kiosk-standby-title"
+      text={STORE_DISPLAY_NAME}
+      delay={90}
+      duration={0.9}
+      from={{ opacity: 0, y: 32 }}
+      to={{ opacity: 1, y: 0 }}
+    />
+  );
+}
+
 function Standby({
   message = "請稍候，店員將為您加入商品。",
   terminalName,
@@ -1031,7 +1067,7 @@ function Standby({
         <p className="kiosk-terminal-label">櫃檯 · {terminalName}</p>
       )}
       <div className="kiosk-standby-inner">
-        <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>
+        <StandbyTitle />
         <p className="kiosk-standby-sub">{message}</p>
         <div className="kiosk-standby-dot" aria-hidden />
       </div>

@@ -8,6 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import KioskPage from "@/app/kiosk/page";
 import { STORE_DISPLAY_NAME } from "@/lib/branding";
 
+// 待機店名動畫（React Bits SplitText，靠 gsap）：jsdom 沒有 matchMedia，gsap 一載入就會出錯；
+// 這支測的是顧客螢幕流程，不是動畫——換成直接輸出文字（動畫由 kiosk-standby-animation-smoke 在真瀏覽器驗）。
+vi.mock("@/components/ui/SplitText", () => ({
+  default: ({ text, className }: { text: string; className?: string }) => <h1 className={className}>{text}</h1>,
+}));
+
 vi.mock("@/app/kiosk/SignatureCanvas", async () => {
   const React = await import("react");
   return {
