@@ -91,6 +91,22 @@ try {
   ok("折數說明段落收進 ⓘ（列上不再有那段長字）", !(await row.innerText()).includes("也可不填參考價與折數"));
   await page.screenshot({ path: join(SHOTS, "01-grade-buttons.png") });
 
+  // 付款一個步驟：撥款方式與簽名在同一張「付款」卡（店主 2026-09-27）
+  const pay = page.getByLabel("付款", { exact: true });
+  const payText = await pay.innerText();
+  ok("撥款與簽名合成一個「付款」步驟（① 撥款方式、② 簽名）", payText.includes("① 撥款方式") && payText.includes("② 請客人在顧客螢幕簽名") && (await pay.getByRole("button", { name: "送至手持裝置簽署" }).count()) === 1, payText.replace(/\s+/g, " ").slice(0, 80));
+  ok("手持簽署不再是另一張卡", (await page.locator(".card", { hasText: "手持簽署" }).count()) === 0);
+  await pay.screenshot({ path: join(SHOTS, "04-payment-step.png") });
+
+  // Enter 跳下一格：收購價 → 件數；一列最後一格（備註）→「新增一列」
+  const costInput = row.getByRole("textbox", { name: "收購價", exact: true });
+  await costInput.click();
+  await page.keyboard.press("Enter");
+  ok("收購價按 Enter 跳到件數", (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "件數");
+  await row.getByRole("textbox", { name: "商品備註", exact: true }).click();
+  await page.keyboard.press("Enter");
+  ok("備註按 Enter 停在「新增一列」", (await page.evaluate(() => document.activeElement?.textContent ?? "")).includes("新增一列"));
+
   // 選型號 → 自動帶上次的分類
   const brandBox = row.getByLabel("品牌", { exact: true });
   await brandBox.click();

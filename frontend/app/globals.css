@@ -5163,3 +5163,22 @@ a.btn-ghost {
 .acq-grade-field {
   grid-column: 1 / -1;
 }
+
+/* 付款一個步驟：① 撥款方式 ② 客人簽名（店主 2026-09-27） */
+.acq-pay-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.acq-pay-step + .acq-pay-step {
+  border-top: 1px dashed var(--border);
+  padding-top: var(--sp-3);
+}
+.acq-pay-step h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.acq-pay-step h3 .hint {
+  font-weight: 400;
+  margin-left: var(--sp-1);
+}

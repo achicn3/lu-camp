@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
+  type KeyboardEvent,
   useEffect,
   useId,
   useMemo,
@@ -228,6 +229,30 @@ function CollapsedRow({
 }
 
 /** 成色一排按鈕：一按就選（原本是下拉選單，要點開再找）。按鈕寫短字、完整名稱在下方與報讀。 */
+/**
+ * 收購頁按 Enter 跳下一格（店主 2026-09-27）：填完一格不必伸手去點下一格。
+ * - 中文輸入法選字時的 Enter（isComposing／keyCode 229）不跳，否則選字就把游標帶走。
+ * - 下拉選單（品牌／型號／分類）自己用 Enter 選項目，不攔。
+ * - 一列最後一格再按 Enter 會停在「新增一列」鈕上，再按一次就新增。
+ */
+function focusNextOnEnter(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) return;
+  if (event.defaultPrevented) return; // 欄位自己處理了 Enter（例如搜尋）就不搶
+  const target = event.target as HTMLElement;
+  if (target.tagName !== "INPUT" || target.classList.contains("combo-input")) return;
+  const type = (target as HTMLInputElement).type;
+  if (type === "radio" || type === "checkbox") return;
+  const fields = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>(
+      'input:not([type="radio"]):not([type="checkbox"]):not([disabled]), select:not([disabled]), .acq-add-row',
+    ),
+  ).filter((el) => el.offsetParent !== null);
+  const next = fields[fields.indexOf(target) + 1];
+  if (next === undefined) return;
+  event.preventDefault();
+  next.focus();
+}
+
 function GradeButtons({ value, onChange }: { value: Grade | ""; onChange: (grade: Grade) => void }) {
   return (
     <div className="field acq-grade-field">
@@ -1574,7 +1599,7 @@ export default function AcquisitionPage() {
 
       {/* 寬螢幕兩欄：左邊商品、右邊固定「賣方／撥款／簽署／應付＋送出」，不用捲到底就能送出（店主 2026-09-26）。
           窄螢幕（平板直立、手機）兩欄拆開、照原本順序排成一欄（CSS order）。 */}
-      <div className="acq-layout">
+      <div className="acq-layout" onKeyDown={focusNextOnEnter}>
       <div className="acq-main">
       <fieldset
         className="acq-signature-lock"
@@ -1755,9 +1780,19 @@ export default function AcquisitionPage() {
       <div className="acq-o-seller">
         <SellerSection seller={seller} onSelect={setSeller} />
       </div>
+      </fieldset>
+
+      {/* 付款一個步驟（店主 2026-09-27）：① 撥款方式 → ② 請客人簽名，原本是兩張卡片。
+          撥款控制在送簽中鎖住（內層 fieldset）；簽署控制不能被鎖（要能撤回）。 */}
       {!isConsignment && (
-        <div className="card acq-payout acq-o-payout">
-          <h2>撥款</h2>
+        <div className="card acq-payout acq-o-payout" aria-label="付款">
+          <h2>付款</h2>
+          <section className="acq-pay-step">
+            <h3>① 撥款方式</h3>
+            <fieldset
+              className="acq-signature-lock"
+              disabled={signTaskId !== null && !signTaskEnded}
+            >
           <div className="acq-payout-modes">
             {(["CASH", "STORE_CREDIT", "SPLIT"] as PayoutMethod[]).map((m) => (
               <label key={m} className="acq-payout-mode">
@@ -1772,6 +1807,13 @@ export default function AcquisitionPage() {
               </label>
             ))}
           </div>
+          {effectivePayout === "SPLIT" && (
+            <label className="field">
+              <span className="field-label">現金部分</span>
+              <input inputMode="numeric" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} />
+            </label>
+          )}
+            </fieldset>
           {signed && (
             <p className="form-success">
               客人已於手持裝置選擇撥款：{signedPayout ? PAYOUT_LABEL[signedPayout] : "—"}
@@ -1780,12 +1822,6 @@ export default function AcquisitionPage() {
           <p>
             應付現金總額：<strong className="money">{formatNtd(payable)}</strong>
           </p>
-          {effectivePayout === "SPLIT" && (
-            <label className="field">
-              <span className="field-label">現金部分</span>
-              <input inputMode="numeric" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} />
-            </label>
-          )}
           {(effectivePayout === "STORE_CREDIT" || effectivePayout === "SPLIT") && (
             <p className="acq-premium">
               {sellerIsMember
@@ -1796,14 +1832,14 @@ export default function AcquisitionPage() {
           {(effectivePayout === "CASH" || effectivePayout === "SPLIT") && !drawerOpen && (
             <p className="form-error">尚未開帳：現金/混合撥款需先至「現金對帳」開帳</p>
           )}
-        </div>
-      )}
-      </fieldset>
-
-      {/* 手持切結（docs/23 K4）：BUYOUT/BULK_LOT 可送至手持裝置請客人確認切結＋撥款＋簽名 */}
-      {!isConsignment && (
-        <div className="card acq-sign acq-o-sign">
-          <h2>手持簽署</h2>
+          </section>
+          <section className="acq-pay-step acq-sign">
+            <h3>
+              ② 請客人在顧客螢幕簽名
+              <span className="hint">
+                {settings.data?.require_acquisition_affidavit ? "（本店規定一定要簽）" : "（選填）"}
+              </span>
+            </h3>
           {signTaskId == null ? (
             <button
               type="button"
@@ -1859,6 +1895,7 @@ export default function AcquisitionPage() {
               </button>
             </div>
           )}
+          </section>
         </div>
       )}
 

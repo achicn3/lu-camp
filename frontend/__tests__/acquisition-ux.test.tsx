@@ -3,7 +3,7 @@
 // ② 送出後自動印標籤（設定可關）③ 繼續收同一位賣方 ④ 填好的列收合＋底部固定摘要
 // ⑤ 少用的補印憑證聯／作廢收購收進「更多操作」。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -131,6 +131,31 @@ async function submitOneConsignment(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("收購頁操作速度改善", () => {
+  it("Enter 跳到下一格；中文輸入法選字時的 Enter 不跳（店主 2026-09-27）", async () => {
+    // jsdom 不排版、offsetParent 恆為 null；這裡讓「看得見」判斷成立，只驗跳格規則本身。
+    const offsetParent = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent");
+    Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+      configurable: true,
+      get() {
+        return this.closest("[hidden]") === null ? document.body : null;
+      },
+    });
+    try {
+      stub();
+      renderPage();
+      const cost = await screen.findByRole("textbox", { name: "收購價" });
+      cost.focus();
+      fireEvent.keyDown(cost, { key: "Enter", isComposing: true });
+      expect(document.activeElement).toBe(cost); // 選字中：不動
+      fireEvent.keyDown(cost, { key: "Enter", keyCode: 229 });
+      expect(document.activeElement).toBe(cost); // 部分瀏覽器選字時只給 229
+      fireEvent.keyDown(cost, { key: "Enter" });
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("件數");
+    } finally {
+      if (offsetParent) Object.defineProperty(HTMLElement.prototype, "offsetParent", offsetParent);
+    }
+  });
+
   it("送出後自動印標籤，不必再按一次", async () => {
     stub({ autoPrint: true });
     const user = userEvent.setup();
