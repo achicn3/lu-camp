@@ -40,6 +40,7 @@
 - [手開紙本發票登記](./36-manual-paper-invoice.md)
 - [收購佇列：現場收件估價付款、空檔上架（規格草案）](./42-acquisition-intake-queue.md)
 - [MacBook 正式機：讓區網平板也能列印](./41-macbook-lan-tablet-printing.md)
+- [MacBook 正式機：升級到 2026-09-26 版（給正式機上的 AI 照做）](./43-macbook-upgrade-2026-09-26.md)
 
 ## 評估與後續實作
 
