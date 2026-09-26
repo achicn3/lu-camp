@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
@@ -49,7 +50,7 @@ async function fillCombined(sellerName) {
   await page.waitForSelector(`text=${sellerName}`);
   await page.locator('.acq-row summary:has-text("品名")').first().click();
   await page.fill('input[aria-label="品名"]', "雙人帳篷");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const cat = page.locator(".acq-row").first().getByLabel("分類");
   await cat.click();
   await cat.fill(CATEGORY);
@@ -124,7 +125,7 @@ try {
   // 買斷一件：帳篷，收購價 1000、上架 3000
   await page.locator('.acq-row summary:has-text("品名")').first().click();
   await page.fill('input[aria-label="品名"]', "雙人帳篷");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const cat = page.locator(".acq-row").first().getByLabel("分類");
   await cat.click();
   await cat.fill(CATEGORY);

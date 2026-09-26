@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
@@ -57,7 +58,7 @@ async function fillRow(row, { name, price, cost, category }) {
   // 品名收在可展開的「品名：…」區塊裡（選型號會自動帶入），手填要先展開。
   await row.locator('summary:has-text("品名")').click();
   await row.getByLabel("品名", { exact: true }).fill(name);
-  await row.locator("select").first().selectOption("A");
+  await pickGrade(row, "A");
   const cat = row.getByLabel("分類");
   await cat.click();
   await cat.fill(category);

@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
@@ -57,7 +58,7 @@ async function fillRow(page, index, { name, cost, listed }) {
   }
   await row.locator('summary:has-text("品名")').click();
   await row.getByLabel("品名", { exact: true }).fill(name);
-  await row.getByLabel("成色").selectOption("A");
+  await pickGrade(row, "A");
   await row.getByLabel("收購價", { exact: true }).fill(String(cost));
   await row.getByLabel("上架售價（含稅與手續費）", { exact: true }).fill(String(listed));
 }

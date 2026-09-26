@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -67,7 +68,7 @@ try {
   await page.waitForSelector(`text=多件賣家-${RUN}`, { timeout: 15000 });
 
   await page.fill('input[aria-label="品名"]', ITEM_NAME);
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const cat = page.getByLabel("分類");
   await cat.click();
   await cat.fill(`多件分類-${RUN}`);
@@ -88,7 +89,7 @@ try {
   // 第二列必須**除了件數以外全部合法**，否則它會因為缺分類之類的理由被擋，
   // 測試又一次為了錯的理由變綠（Codex 第三輪：同一個陷阱的第三次）。
   await rows.nth(1).getByLabel("品名").fill(`${ITEM_NAME}-B`);
-  await rows.nth(1).locator("select").first().selectOption("A");
+  await pickGrade(rows.nth(1), "A");
   const cat2 = rows.nth(1).getByLabel("分類");
   await cat2.click();
   await cat2.fill(`多件分類-${RUN}`);

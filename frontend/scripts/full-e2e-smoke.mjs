@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { validNationalId } from "./_national-id.mjs";
 import { openReport } from "./_reports.mjs";
 
@@ -182,7 +183,7 @@ try {
   await page.locator(".combo-menu .combo-create").filter({ hasText: "帳篷" }).click();
   ok("4) 分類 autocomplete：查無即建", true);
   // 成色、定價
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   await page.fill('input[aria-label="估計轉售價"]', "2400");
   // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
   await page.waitForFunction(
@@ -221,7 +222,7 @@ try {
   await opt.click();
   await comboPickExisting("型號", "Ame", "Amenity Dome").then(({ opt: o }) => o.click());
   await comboPickExisting("分類", "帳", "帳篷").then(({ opt: o }) => o.click());
-  await page.locator(".acq-row select").first().selectOption("B");
+  await pickGrade(page, "B");
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
   await page.waitForFunction(
@@ -248,7 +249,7 @@ try {
   await page.fill('input[aria-label="品名"]', "Coleman 寄售汽化爐");
   await comboPickExisting("品牌", "Snow", "Snow Peak").then(({ opt: o }) => o.click());
   await comboPickExisting("分類", "帳", "帳篷").then(({ opt: o }) => o.click());
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   await page.locator('label:has-text("抽成") input').fill("50");
   await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "1000");
   await shot(page, "consign-filled");

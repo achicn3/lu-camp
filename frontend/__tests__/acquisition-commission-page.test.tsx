@@ -138,7 +138,7 @@ describe("/acquisition 寄售抽成", () => {
     await user.type(screen.getByLabelText("賣方搜尋"), "王");
     await user.click(await screen.findByRole("button", { name: /王寄售人/ }));
     await user.type(screen.getByLabelText("品名"), "底片相機");
-    await user.selectOptions(screen.getByLabelText("成色"), "A");
+    await user.click(screen.getByRole("radio", { name: "A 近全新/精品" }));
     await user.click(screen.getByLabelText("分類"));
     await user.click(await screen.findByRole("option", { name: "相機" }));
     await user.type(

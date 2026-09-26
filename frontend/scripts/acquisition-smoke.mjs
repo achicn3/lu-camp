@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
@@ -96,7 +97,7 @@ try {
   // 品名收在可展開的區塊裡（選了品牌型號就自動帶入，要手打才展開）。
   await page.locator('.acq-row summary:has-text("品名")').first().click();
   await page.fill('input[aria-label="品名"]', "登山外套");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
 
   const brand = page.getByLabel("品牌");
   await brand.click();

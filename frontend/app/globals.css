@@ -5119,3 +5119,47 @@ a.btn-ghost {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* 收購列精簡（店主 2026-09-26）：成色一排按鈕、收購價與件數同一行、列首多一顆「複製這列」。 */
+.acq-grade-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.acq-grade {
+  min-width: 52px;
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 700;
+  cursor: pointer;
+}
+.acq-grade:hover {
+  border-color: var(--accent);
+}
+.acq-grade.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.acq-row-actions {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+.acq-cost-qty {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.acq-auto-category {
+  margin: 0;
+  grid-column: 1 / -1;
+}
+.acq-grade-field {
+  grid-column: 1 / -1;
+}

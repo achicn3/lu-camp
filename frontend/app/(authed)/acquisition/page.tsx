@@ -128,6 +128,9 @@ function emptyLot(): LotDraft {
 }
 
 type Row = ItemDraft & {
+  /** 選過的品牌／型號名稱：複製這列時，下拉選單才顯示得出來（只有 id 會看起來像沒選）。 */
+  brandName?: string | null;
+  modelName?: string | null;
   estimatedResale: string;
   rowKey: string;
   qty: string;
@@ -224,6 +227,32 @@ function CollapsedRow({
   );
 }
 
+/** 成色一排按鈕：一按就選（原本是下拉選單，要點開再找）。按鈕寫短字、完整名稱在下方與報讀。 */
+function GradeButtons({ value, onChange }: { value: Grade | ""; onChange: (grade: Grade) => void }) {
+  return (
+    <div className="field acq-grade-field">
+      <span className="field-label">成色</span>
+      <div className="acq-grade-buttons" role="radiogroup" aria-label="成色">
+        {SERIALIZED_GRADES.map((g) => (
+          <button
+            key={g}
+            type="button"
+            role="radio"
+            aria-checked={value === g}
+            aria-label={GRADE_LABEL[g]}
+            data-grade={g}
+            className={value === g ? "acq-grade is-on" : "acq-grade"}
+            onClick={() => onChange(g)}
+          >
+            {g === "N" ? "全新" : g}
+          </button>
+        ))}
+      </div>
+      <span className="hint">{value === "" ? "請選成色" : GRADE_LABEL[value]}</span>
+    </div>
+  );
+}
+
 function ItemRowCard({
   type,
   index,
@@ -231,6 +260,7 @@ function ItemRowCard({
   categories,
   onChange,
   onRemove,
+  onDuplicate,
   refreshCategories,
   defaultCommissionPct,
   defaultMarginPct,
@@ -245,6 +275,8 @@ function ItemRowCard({
   categories: Category[];
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
+  /** 複製這列（同批相似的商品只改差異）。 */
+  onDuplicate: () => void;
   refreshCategories: () => void;
   /** 寄售設定預設值；列尚未自訂時顯示，第一次輸入會取代而不是接在預設值後。 */
   defaultCommissionPct: string;
@@ -260,6 +292,25 @@ function ItemRowCard({
 }) {
   const category = categories.find((c) => c.id === row.categoryId) ?? null;
   const targetMargin = defaultMarginPct;
+  // 選了型號、分類還空著：照這個型號最近一次收的分類帶入（店員可改）。
+  const [categoryFromModel, setCategoryFromModel] = useState(false);
+  const latestRow = useRef(row);
+  useEffect(() => {
+    latestRow.current = row;
+  });
+  async function fillCategoryFromModel(productModelId: number) {
+    const { data } = await api.GET("/api/v1/serialized-items", {
+      params: { query: { product_model_id: productModelId, limit: 1 } },
+    });
+    const categoryId = data?.[0]?.category_id ?? null;
+    // 查詢期間店員自己選了分類或換了型號，就不覆蓋。
+    const current = latestRow.current;
+    if (categoryId === null || current.categoryId !== null || current.productModelId !== productModelId) {
+      return;
+    }
+    setCategoryFromModel(true);
+    onChange({ categoryId });
+  }
   const [customDiscount, setCustomDiscount] = useState(() => row.discount !== "" && !/^[1-9]$/.test(row.discount));
 
   const rulesQuery = useQuery({
@@ -423,9 +474,14 @@ function ItemRowCard({
     <div className="card acq-row">
       <div className="acq-row-head">
         <span className="hint">第 {index + 1} 列</span>
-        <button type="button" className="btn-ghost" onClick={onRemove}>
-          移除
-        </button>
+        <span className="acq-row-actions">
+          <button type="button" className="btn-ghost" onClick={onDuplicate}>
+            複製這列
+          </button>
+          <button type="button" className="btn-ghost" onClick={onRemove}>
+            移除
+          </button>
+        </span>
       </div>
       <div className="acq-row-grid">
         <CreatableCombobox
@@ -434,7 +490,15 @@ function ItemRowCard({
           create={createBrand}
           placeholder="選擇或新增品牌"
           selectedId={row.brandId}
-          onChange={(o) => onChange({ brandId: o?.id ?? null, productModelId: null })}
+          selectedName={row.brandName ?? null}
+          onChange={(o) =>
+            onChange({
+              brandId: o?.id ?? null,
+              brandName: o?.name ?? null,
+              productModelId: null,
+              modelName: null,
+            })
+          }
         />
         <CreatableCombobox
           label="型號"
@@ -443,7 +507,15 @@ function ItemRowCard({
           placeholder={row.brandId === null ? "先選品牌" : "選擇或新增型號"}
           disabled={row.brandId === null}
           selectedId={row.productModelId}
-          onChange={(o) => onChange({ productModelId: o?.id ?? null, ...(o ? { name: o.name } : {}) })}
+          selectedName={row.modelName ?? null}
+          onChange={(o) => {
+            onChange({
+              productModelId: o?.id ?? null,
+              modelName: o?.name ?? null,
+              ...(o ? { name: o.name } : {}),
+            });
+            if (o !== null && row.categoryId === null) void fillCategoryFromModel(o.id);
+          }}
         />
         <CreatableCombobox
           label="分類"
@@ -463,23 +535,20 @@ function ItemRowCard({
           }
           placeholder="選擇或新增分類"
           selectedId={row.categoryId}
-          onChange={(o) => onChange({ categoryId: o?.id ?? null })}
+          selectedName={category?.name ?? null}
+          onChange={(o) => {
+            setCategoryFromModel(false);
+            onChange({ categoryId: o?.id ?? null });
+          }}
         />
+        {categoryFromModel && category !== null && (
+          <p className="hint acq-auto-category">分類照這個型號上次收的帶入，不對可以改。</p>
+        )}
         <details className="acq-name-detail">
           <summary>品名：{row.name || "選型號自動帶入，或展開填寫"}</summary>
           <ItemNameField value={row.name} onChange={(name) => onChange({ name })} />
         </details>
-        <label className="field">
-          <span className="field-label">成色</span>
-          <select aria-label="成色" value={row.grade} onChange={(e) => onChange({ grade: e.target.value as Grade })}>
-            <option value="">請選擇</option>
-            {SERIALIZED_GRADES.map((g) => (
-              <option key={g} value={g}>
-                {GRADE_LABEL[g]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <GradeButtons value={row.grade} onChange={(grade) => onChange({ grade })} />
         {/* 定價前先看同款以前的行情：品牌＋型號都選了才查得到（見 PriceHint）。 */}
         <PriceHint
           brandId={row.brandId}
@@ -523,6 +592,13 @@ function ItemRowCard({
             <button type="button" className="btn-secondary" aria-pressed={customDiscount}
               onClick={() => setCustomDiscount(true)}>自訂</button>
           </div>
+          {/* 說明收進 ⓘ（放在 label 外面：放進 label 會變成 label 指到這顆按鈕、而不是參考價輸入框）。 */}
+          <span className="hint acq-discount-help">
+            折數怎麼算
+            <InfoTip
+              text={`也可不填參考價與折數，直接輸入上架售價，自動計算收購價；成色請自行選擇。折後價包含稅與手續費；自動售價進位至十元。${targetMargin !== null ? `目標毛利率：${targetMargin}%（可於設定維護）` : "正在讀取毛利設定"}。價格及成色皆可手動調整。`}
+            />
+          </span>
           {customDiscount && <label className="field"><span className="field-label">自訂折數（0.1–10）</span>
             <input aria-label="自訂折數" inputMode="decimal" value={row.discount}
               onChange={(e) => applyDiscount(row.retailPrice, e.target.value)} />
@@ -534,7 +610,6 @@ function ItemRowCard({
               {row.discount} 折偏高，可能是新品：請確認商品狀況並修改成色。
             </p>
           )}
-          <p className="hint">也可不填參考價與折數，直接輸入上架售價，自動計算收購價；成色請自行選擇。折後價包含稅與手續費；自動售價進位至十元。{targetMargin !== null ? `目標毛利率：${targetMargin}%（可於設定維護）` : "正在讀取毛利設定"}。價格及成色皆可手動調整。</p>
         </div>
       )}
 
@@ -548,7 +623,7 @@ function ItemRowCard({
       )}
 
       {type === "BUYOUT" ? (
-        <>
+        <div className="acq-cost-qty">
         <label className="field">
           <span className="field-label">收購價（每件）</span>
           <input
@@ -580,7 +655,7 @@ function ItemRowCard({
             )
           )}
         </label>
-        </>
+        </div>
       ) : (
         <label className="field">
           <span className="field-label">抽成 %（寄售）</span>
@@ -1559,6 +1634,19 @@ export default function AcquisitionPage() {
               onChange={(patch) => patchRow(row.rowKey, patch)}
               onRemove={() =>
                 setRows((prev) => prev.filter((r) => r.rowKey !== row.rowKey))
+              }
+              onDuplicate={() =>
+                // 複本插在這列正下方、展開可改；原列有品名就收合成一行摘要。
+                setRows((prev) =>
+                  prev.flatMap((r) =>
+                    r.rowKey === row.rowKey
+                      ? [
+                          r.name.trim() ? { ...r, collapsed: true } : r,
+                          { ...r, rowKey: newIdempotencyKey(), collapsed: false },
+                        ]
+                      : [r],
+                  ),
+                )
               }
               refreshCategories={() =>
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })

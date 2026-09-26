@@ -95,11 +95,11 @@ describe("AcquisitionPage", () => {
     renderPage();
     const listed = () => screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     const cost = () => screen.getByLabelText("收購價") as HTMLInputElement;
-    await userEvent.selectOptions(await screen.findByLabelText("成色"), "B");
+    await userEvent.click(await screen.findByRole("radio", { name: "B 良好" }));
     await userEvent.type(listed(), "500");
     await waitFor(() => expect(cost().value).toBe("256"));
     expect((screen.getByLabelText("參考價（原價或目前最低價）") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("B");
+    expect(screen.getByRole("radio", { name: "B 良好" }).getAttribute("aria-checked")).toBe("true");
     await userEvent.clear(listed());
     await waitFor(() => expect(cost().value).toBe(""));
     await userEvent.type(listed(), "500");
@@ -113,7 +113,7 @@ describe("AcquisitionPage", () => {
     expect(cost().value).toBe("250");
     await userEvent.click(screen.getByRole("button", { name: "重新依毛利計算收購價" }));
     await waitFor(() => expect(cost().value).toBe("512"));
-    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("B");
+    expect(screen.getByRole("radio", { name: "B 良好" }).getAttribute("aria-checked")).toBe("true");
   });
   it("折數鑑價採設定頁的收購毛利率，不被分類舊規則蓋掉", async () => {
     stub();
@@ -139,7 +139,7 @@ describe("AcquisitionPage", () => {
     const cost = () => screen.getByLabelText("收購價") as HTMLInputElement;
     await waitFor(() => expect(cost().value).toBe("256"));
     expect(listed().value).toBe("500");
-    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("A");
+    expect(screen.getByRole("radio", { name: "A 近全新/精品" }).getAttribute("aria-checked")).toBe("true");
     await userEvent.clear(cost());
     await userEvent.type(cost(), "250");
     await userEvent.clear(listed());

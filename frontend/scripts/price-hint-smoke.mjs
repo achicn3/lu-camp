@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
@@ -190,7 +191,7 @@ try {
     ranges.replace(/\n/g, " | "),
   );
   // 換成色不得改變區間——店員選的成色不參與篩選。
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const rangesAfterGrade = await page.locator(".price-hint-ranges").innerText();
   ok("選了成色區間不變", rangesAfterGrade === ranges, rangesAfterGrade.replace(/\n/g, " | "));
   const subLine = await page.locator(".price-hint-sub").nth(1).innerText();

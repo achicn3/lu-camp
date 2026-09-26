@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
@@ -64,7 +65,7 @@ try {
   await page.waitForSelector(`text=${SELLER_NAME}`);
 
   await page.fill('input[aria-label="品名"]', "標籤測試外套");
-  await page.locator(".acq-row select").first().selectOption(GRADE);
+  await pickGrade(page, GRADE);
 
   const brand = page.getByLabel("品牌");
   await brand.click();

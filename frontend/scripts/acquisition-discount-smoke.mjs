@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
+
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const base = process.env.SMOKE_BASE ?? "http://localhost:3800";
@@ -51,7 +53,7 @@ try {
   assert.equal(await page.getByLabel("品名", { exact: true }).inputValue(), model.name);
   const listed = page.getByLabel("上架售價（含稅與手續費）", { exact: true });
   if (directPrice) {
-    await page.getByLabel("成色", { exact: true }).selectOption("A");
+    await pickGrade(page, "A");
     await listed.fill("500");
     assert.equal(await page.getByLabel("參考價（原價或目前最低價）").inputValue(), "");
   } else {
@@ -60,7 +62,11 @@ try {
   }
   await page.waitForFunction(() => document.querySelector('input[aria-label="收購價"]')?.value === "256");
   assert.equal(await listed.inputValue(), "500");
-  assert.equal(await page.getByLabel("成色", { exact: true }).inputValue(), "A");
+  // 成色是一排按鈕（2026-09-26）：看哪一顆被選中。
+  assert.equal(
+    await page.locator('[role="radiogroup"][aria-label="成色"] button[aria-checked="true"]').first().getAttribute("data-grade"),
+    "A",
+  );
   await page.screenshot({ path: join(shots, "01-discount-pricing.png"), fullPage: true });
   await page.getByText("查看未稅價、手續費與實得", { exact: true }).click();
   assert.deepEqual(await page.locator(".acq-price-breakdown dd").allTextContents(), ["476 元", "11 元", "465 元"]);

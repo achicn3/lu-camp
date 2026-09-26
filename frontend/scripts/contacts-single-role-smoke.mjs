@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -107,7 +108,7 @@ try {
 
   // 真的完成一次收購 → 這時才該變成賣方
   await page.getByLabel("品名").first().fill(`身分測試品-${RUN}`);
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const cat = page.getByLabel("分類");
   await cat.click();
   await cat.fill(`身分分類-${RUN}`);

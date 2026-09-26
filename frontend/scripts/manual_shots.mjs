@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
+
 const BASE = process.env.QA_BASE ?? "http://localhost:3010";
 const API = process.env.QA_API ?? "http://localhost:8010/api/v1";
 const SHOTS = process.env.MANUAL_SHOTS ?? "/home/test/tmp/store-manual/screenshots";
@@ -271,7 +273,7 @@ async function main() {
       .first();
     if (await categoryOption.count()) await categoryOption.click();
     else await page.locator('.acq-row .combo-create:has-text("帳篷")').click();
-    await page.selectOption('.acq-row select', "A").catch(() => {});
+    await pickGrade(page, "A").catch(() => {});
     await page.fill('input[aria-label="估計轉售價"]', "9000");
     // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
     await page.waitForFunction(

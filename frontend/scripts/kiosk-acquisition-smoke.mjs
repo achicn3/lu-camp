@@ -9,6 +9,8 @@ import zlib from "node:zlib";
 
 import { chromium } from "playwright";
 
+import { pickGrade } from "./_acquisition.mjs";
+
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "codex-test", "kiosk-acq-smoke");
@@ -126,7 +128,7 @@ try {
 
   // 鑑價列
   await page.fill('input[aria-label="品名"]', "登山外套");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const brand = page.getByLabel("品牌");
   await brand.click();
   await brand.fill(`品牌${Date.now().toString().slice(-5)}`);
@@ -203,7 +205,7 @@ try {
   await page.fill('input[aria-label="賣方搜尋"]', memberSeller.phone);
   await page.click(`.acq-results button:has-text("${memberSeller.name}")`);
   await page.fill('input[aria-label="品名"]', "睡袋");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await pickGrade(page, "A");
   const cat2 = page.getByLabel("分類");
   await cat2.click();
   await cat2.fill(`分類${Date.now().toString().slice(-5)}`);
