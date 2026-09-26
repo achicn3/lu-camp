@@ -146,6 +146,14 @@ class AcquisitionService:
                 store_id, [acquisition_id], limit=_RECEIPT_ITEM_CAP
             )
         ]
+        # 撥入購物金：與第一次列印同源——本筆 CREDIT 分錄的實發額（含溢價）與撥入後總額
+        # （不可變的帳本事實，不是列印當下另查的活餘額）。代理的憑證版型兩欄都必填。
+        entry = await self._storecredit.find_entry_by_source(
+            store_id,
+            StoreCreditSourceType.ACQUISITION,
+            acquisition.id,
+            StoreCreditEntryType.CREDIT,
+        )
         return AcquisitionReceiptRead(
             acquisition_id=acquisition.id,
             store_id=acquisition.store_id,
@@ -155,7 +163,8 @@ class AcquisitionService:
             payout_method=acquisition.payout_method,
             created_at=acquisition.created_at,
             signature_task_id=acquisition.signature_task_id,
-            store_credit_granted=acquisition.payout_credit_cash_equivalent,
+            store_credit_granted=Decimal(entry.signed_amount) if entry is not None else None,
+            store_credit_balance_after=Decimal(entry.balance_after) if entry is not None else None,
             voided_at=acquisition.voided_at,
         )
 

@@ -349,6 +349,53 @@ async def test_acquisition_receipt_reprint(
     assert sorted(item["amount"] for item in body["items"]) == ["1800", "600"]
 
 
+async def test_store_credit_receipt_reprint_has_the_ledger_facts(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """購物金撥款的憑證聯補印：撥入額（含溢價）與撥入後總額都取自當時的帳本分錄，跟第一次印的一樣。
+
+    原本只回「現金等值」、沒有撥入後總額——代理的憑證版型兩欄都必填，補印一定被擋下，
+    而且就算印得出來，撥入額也少了溢價。
+    """
+    _, token = await _seed_token(db_session)
+    await _open_drawer(client, token)
+    resp = await client.post(
+        "/api/v1/contacts",
+        json={
+            "name": "會員賣家",
+            "phone": _uphone(),
+            "national_id": "A123456789",
+            "roles": ["SELLER", "MEMBER"],
+        },
+        headers=_auth(token),
+    )
+    contact_id = int(resp.json()["id"])
+    created = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": contact_id,
+            "items": [
+                {"name": "帳篷", "grade": "A", "listed_price": "3000", "acquisition_cost": "1000"}
+            ],
+            "payout_method": "STORE_CREDIT",
+        },
+        headers={**_auth(token), "Idempotency-Key": "receipt-credit-1"},
+    )
+    assert created.status_code == 201, created.text
+    first = created.json()
+
+    body = (
+        await client.get(
+            f"/api/v1/acquisitions/{first['acquisition_id']}/receipt", headers=_auth(token)
+        )
+    ).json()
+    assert body["payout_method"] == "STORE_CREDIT"
+    assert body["store_credit_granted"] == first["payout_credit_granted"]
+    assert body["store_credit_balance_after"] == first["payout_credit_balance_after"]
+    assert body["store_credit_balance_after"] is not None
+
+
 async def test_acquisition_receipt_unknown_id_is_404(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

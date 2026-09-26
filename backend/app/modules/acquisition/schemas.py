@@ -280,7 +280,9 @@ class AcquisitionReceiptRead(BaseModel):
     payout_method: PayoutMethod
     created_at: datetime
     signature_task_id: int | None
+    # 撥入購物金實發額（含溢價）與撥入後總額＝本筆帳本分錄；沒撥購物金為 None。
     store_credit_granted: NTDAmount | None
+    store_credit_balance_after: NTDAmount | None = None
     voided_at: datetime | None
 
 

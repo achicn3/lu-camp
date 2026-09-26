@@ -4051,6 +4051,8 @@ export interface components {
             seller_name: string;
             /** Signature Task Id */
             signature_task_id: number | null;
+            /** Store Credit Balance After */
+            store_credit_balance_after?: string | null;
             /** Store Credit Granted */
             store_credit_granted: string | null;
             /** Store Id */

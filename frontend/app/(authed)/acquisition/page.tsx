@@ -991,6 +991,7 @@ function ReprintAcquisitionReceipt() {
         createdAt: data.created_at,
         signaturePngBase64,
         storeCreditGranted: data.store_credit_granted ?? undefined,
+        storeCreditBalanceAfter: data.store_credit_balance_after ?? undefined,
       });
       return data.acquisition_id;
     },

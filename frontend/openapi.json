@@ -813,6 +813,17 @@
             ],
             "title": "Signature Task Id"
           },
+          "store_credit_balance_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Balance After"
+          },
           "store_credit_granted": {
             "anyOf": [
               {
