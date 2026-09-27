@@ -5411,9 +5411,6 @@ a.btn-ghost {
     0 2px 0 rgba(51, 38, 28, 0.25);
   overflow: hidden;
 }
-.is-payment-failed .ledger-paper {
-  animation: ledger-wiggle 0.45s ease;
-}
 .is-ledger .kiosk-cart-header {
   padding: 0 0 var(--sp-2);
 }
@@ -5430,7 +5427,7 @@ a.btn-ghost {
   height: 0.45em;
   border: 0;
   border-radius: 50%;
-  background: #c9553a;
+  background: #8a6a4a;
   animation: ledger-pulse 1.4s ease-in-out infinite;
 }
 .is-ledger .kiosk-cart-changes {
@@ -5456,21 +5453,57 @@ a.btn-ghost {
 .is-ledger .kiosk-cart-item.is-updated {
   animation: none;
 }
-.kiosk-cart-item.is-ghost {
+.is-ledger .kiosk-cart-item {
   position: relative;
-  max-height: 240px;
-  animation: ledger-collapse 0.3s ease 0.26s both;
 }
-.kiosk-cart-item.is-ghost::after {
-  content: "";
+.kiosk-cart-item.is-ghost {
+  overflow: hidden;
+}
+.kiosk-cart-item.is-ghost.is-fading {
+  animation: ledger-fade 0.18s ease both;
+}
+/* 筆劃掉那一行：深炭棕、略微不直，跟著筆尖描出來（stroke-dashoffset 1→0） */
+.ledger-strike {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 2px;
-  background: #5c4838;
-  transform-origin: left center;
-  animation: ledger-strike 0.24s ease-out both;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.ledger-strike path {
+  fill: none;
+  stroke: #3a2a20;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.ledger-strike-2 {
+  stroke-width: 1.9;
+}
+.ledger-old-qty {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: clamp(20px, 2.8vw, 30px);
+  pointer-events: none;
+}
+.ledger-breath {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.ledger-breath b {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8a6a4a;
+  animation: ledger-pulse 1.6s ease-in-out infinite;
+}
+.ledger-breath b:nth-child(2) {
+  animation-delay: 0.25s;
+}
+.ledger-breath b:nth-child(3) {
+  animation-delay: 0.5s;
 }
 .is-ledger .kiosk-cart-scroll-hint {
   background: rgba(251, 246, 234, 0.95);
@@ -5557,35 +5590,13 @@ a.btn-ghost {
 }
 @keyframes ledger-out {
   to {
-    transform: translateY(70vh) rotate(8deg);
+    transform: translateX(80vw) translateY(4vh) rotate(7deg);
     opacity: 0;
   }
 }
-@keyframes ledger-wiggle {
-  25% {
-    transform: rotate(-0.6deg);
-  }
-  50% {
-    transform: rotate(0.5deg);
-  }
-  75% {
-    transform: rotate(-0.3deg);
-  }
-}
-@keyframes ledger-strike {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-@keyframes ledger-collapse {
+@keyframes ledger-fade {
   to {
     opacity: 0;
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
   }
 }
 @keyframes ledger-pulse {
@@ -5597,8 +5608,8 @@ a.btn-ghost {
 @media (prefers-reduced-motion: reduce) {
   .ledger-board,
   .is-leaving .ledger-board,
-  .is-payment-failed .ledger-paper,
-  .is-ledger .kiosk-payment-spinner {
+  .is-ledger .kiosk-payment-spinner,
+  .ledger-breath b {
     animation: none;
   }
   .ledger-board {

@@ -130,7 +130,7 @@ function farLayer(): string {
   const width = PANEL_W + CAM_MAX * PARALLAX.far + 100;
   const r = rng(41);
   const art =
-    range(r, width, 900, 560, 110, { body: "#cfd7db", face: "#c3ccd1", ink: "#b3bcc1", stroke: "#bcc5ca" }, 640) +
+    range(r, width, 900, 560, 110, { body: "#d3dade", face: "#c9d1d5", ink: "#bcc4c9", stroke: "#c3cbcf" }, 640) +
     h("rect", { x: -40, y: 760, width: width + 80, height: 260, fill: "url(#cs-haze)" }) +
     range(r, width, 960, 700, 70, { body: "#a9b6b0", face: "#98a69f", ink: "#7f8b86", stroke: "#86928d" }, 0) +
     h("rect", { x: -40, y: 850, width: width + 80, height: 200, fill: "url(#cs-haze)" });
@@ -240,6 +240,8 @@ function balloon(): string {
   let basket = "";
   for (let x = -12; x <= 12; x += 4) basket += `M${x} 120 L${x - 1} 138 `;
   return g(
+    { class: "cs-balloon-bob" },
+    g(
     { transform: "scale(0.82)" },
     fillPath(env, "#e36f4f"),
     fillPath("M0 -110 C30 -110 40 -60 36 -10 C32 40 16 70 8 92 L-8 92 C-16 70 -32 40 -36 -10 C-40 -60 -30 -110 0 -110 Z", "#f3e9d6"),
@@ -252,6 +254,7 @@ function balloon(): string {
     inkPath("M-14 92 L-12 118 M14 92 L12 118 M-5 92 L-5 118 M5 92 L5 118", 1),
     shape("M-16 118 L16 118 L13 140 L-13 140 Z", "#b98352", 1.8),
     h("path", { d: basket + "M-15 126 L15 126 M-14 133 L14 133", stroke: "#6b4a2e", "stroke-width": 0.8, fill: "none" }),
+    ),
   );
 }
 

@@ -15,6 +15,7 @@ import {
 import SplitText from "@/components/ui/SplitText";
 import { CheckMark, LedgerStars, PaidStamp } from "@/features/customer-display/checkout/LedgerMarks";
 import { PenHand } from "@/features/customer-display/checkout/PenHand";
+import { type PenActivity, ledgerStateFor } from "@/features/customer-display/checkout/ledgerState";
 import { type LedgerPhase, useLedgerPen } from "@/features/customer-display/checkout/useLedgerPen";
 import { DoodleCheck } from "@/features/customer-display/DoodleCheck";
 import { CampingScene, type SceneMode } from "@/features/customer-display/CampingScene";
@@ -758,20 +759,25 @@ function CartScreen({
   });
   const completed = completedSeconds !== undefined || cart.status === "COMPLETED";
 
-  // 被刪掉的品項：先留在原位劃一條線再收起來（只在動畫允許時；否則直接消失）
-  const [ghosts, setGhosts] = useState<{ item: LedgerRowItem; index: number }[]>([]);
-  const [prevItems, setPrevItems] = useState(snapshot.items);
+  // 被刪掉的品項：留在原位讓筆劃掉、停一下再收起來；總額等它收起來才更新（店主定稿規格 L）。
+  // 減少動態效果時改成快速淡出；測試環境（沒有 matchMedia）直接消失。
+  const canFade = typeof window !== "undefined" && typeof window.matchMedia === "function";
+  const [ghosts, setGhosts] = useState<{ item: LedgerRowItem; index: number; total: string }[]>([]);
+  const [prevSnapshot, setPrevSnapshot] = useState(snapshot);
   // 付款後又回到可修改狀態＝這次付款沒完成
   const [prevStatus, setPrevStatus] = useState(cart.status);
   const [paymentFailed, setPaymentFailed] = useState(false);
-  if (prevItems !== snapshot.items) {
-    const removed = motion
-      ? prevItems
-          .map((item, index) => ({ item, index }))
+  const [pen, setPen] = useState<PenActivity>(null);
+  if (prevSnapshot !== snapshot) {
+    const removed = canFade
+      ? prevSnapshot.items
+          .map((item, index) => ({ item, index, total: prevSnapshot.total }))
           .filter((g) => !snapshot.items.some((n) => n.item_key === g.item.item_key))
       : [];
-    setPrevItems(snapshot.items);
-    if (removed.length > 0) setGhosts((current) => [...current, ...removed]);
+    setPrevSnapshot(snapshot);
+    // 還沒收起來又加回來（恢復）：拿掉劃線的那一行，真的那一行照常顯示、不重跑新增動畫
+    const kept = ghosts.filter((g) => !snapshot.items.some((n) => n.item_key === g.item.item_key));
+    if (removed.length > 0 || kept.length !== ghosts.length) setGhosts([...kept, ...removed]);
   }
   if (prevStatus !== cart.status) {
     setPrevStatus(cart.status);
@@ -780,7 +786,8 @@ function CartScreen({
   }
   useEffect(() => {
     if (ghosts.length === 0) return;
-    const timer = window.setTimeout(() => setGhosts([]), 560);
+    // 保險：動畫若沒回報（例如分頁在背景），3 秒後一定收掉
+    const timer = window.setTimeout(() => setGhosts([]), 3_000);
     return () => window.clearTimeout(timer);
   }, [ghosts]);
   useEffect(() => {
@@ -788,19 +795,25 @@ function CartScreen({
     const timer = window.setTimeout(() => setPaymentFailed(false), 6_000);
     return () => window.clearTimeout(timer);
   }, [paymentFailed]);
+  const displayedTotal = ghosts[0]?.total ?? snapshot.total;
 
   const phase: LedgerPhase = completed
     ? "paid"
-    : cart.status === "PROCESSING"
-      ? "processing"
-      : cart.status === "FROZEN" || cart.status === "PAYMENT_UNCERTAIN"
-        ? "paying"
+    : cart.status === "PROCESSING" || cart.status === "FROZEN" || cart.status === "PAYMENT_UNCERTAIN"
+      ? "paying"
+      : paymentFailed
+        ? "failed"
         : "writing";
+  const animState = ledgerStateFor({ status: cart.status, completed, paymentFailed, leaving, pen });
   useLedgerPen(
     { shell: shellRef, hand: handRef, check: checkRef },
     snapshot.items.map((item) => ({ key: item.item_key, qty: item.qty, amount: item.net_amount })),
     phase,
     motion,
+    {
+      onGhostDone: (key) => setGhosts((current) => current.filter((g) => g.item.item_key !== key)),
+      onPen: setPen,
+    },
   );
 
   const updateScrollState = useCallback(() => {
@@ -836,7 +849,8 @@ function CartScreen({
       .filter((change) => change.item_key !== "TOTAL")
       .map((change) => [change.item_key, change.type]),
   );
-  const visibleChanges = changes.filter((change) => change.type !== "ADDED");
+  // 新增由筆寫、刪除由筆劃掉，不另外跳「已移除」通知（店主定稿規格 K）
+  const visibleChanges = changes.filter((change) => change.type !== "ADDED" && change.type !== "REMOVED");
   // 畫面上的行：現有品項，再把剛刪掉的插回原本的位置
   const rows: { item: LedgerRowItem; index: number; ghost: boolean }[] = snapshot.items.map((item, index) => ({ item, index, ghost: false }));
   for (const g of [...ghosts].sort((x, y) => x.index - y.index)) {
@@ -854,6 +868,7 @@ function CartScreen({
       ref={shellRef}
       className={`kiosk-cart-shell is-ledger${leaving ? " is-leaving" : ""}${paymentFailed ? " is-payment-failed" : ""}`}
       data-phase={phase}
+      data-anim-state={animState}
       aria-hidden={leaving || undefined}
     >
       <div className="ledger-window" aria-hidden="true" />
@@ -922,7 +937,9 @@ function CartScreen({
               <article
                 className={`kiosk-cart-item ${
                   ghost
-                    ? "is-ghost"
+                    ? motion
+                      ? "is-ghost"
+                      : "is-ghost is-fading"
                     : changesByItem.get(item.item_key) === "ADDED"
                       ? "is-added"
                       : changesByItem.get(item.item_key) === "QUANTITY_CHANGED"
@@ -984,6 +1001,14 @@ function CartScreen({
                 <span className="kiosk-cart-qty">× {item.qty}</span>
                 {/* 小計認**實付**：line_total 是活動折後的牌價小計，不含臨時折扣。 */}
                 <strong>${formatNtd(parseNtd(item.net_amount) ?? 0)}</strong>
+                {ghost && (
+                  // 筆劃掉這一行的兩筆：主要一條微斜、第二條短一些角度略不同
+                  // 劃線依這一行的實際大小由筆的動畫畫上去（不拉伸，線寬才一致）
+                  <svg className="ledger-strike" aria-hidden="true">
+                    <path className="ledger-strike-1" />
+                    <path className="ledger-strike-2" />
+                  </svg>
+                )}
               </article>
             ))}
           </section>
@@ -1034,10 +1059,19 @@ function CartScreen({
               </p>
             )}
             <div className="kiosk-cart-grand-total">
-              <span>{completed ? "本次金額" : "應付總額"}</span>
+              <span>
+                {completed ? "本次金額" : "應付總額"}
+                {cart.status === "PROCESSING" && (
+                  <i className="ledger-breath" aria-hidden="true">
+                    <b />
+                    <b />
+                    <b />
+                  </i>
+                )}
+              </span>
               <strong>
                 {completed && <CheckMark ref={checkRef} />}
-                ${formatNtd(parseNtd(snapshot.total) ?? 0)}
+                ${formatNtd(parseNtd(displayedTotal) ?? 0)}
               </strong>
             </div>
             {paymentFailed && (
@@ -1045,6 +1079,7 @@ function CartScreen({
                 付款未完成，請重新操作
               </p>
             )}
+            {cart.status === "PROCESSING" && <p className="ledger-note">付款處理中…</p>}
             {completed && (
               <p className="ledger-note" role="status">
                 付款完成。謝謝光臨，{completedSeconds ?? 10} 秒後自動清除。

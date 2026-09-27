@@ -253,7 +253,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   camTo(master, 3760, 4.5, 27);
   walk(master, [3470, 1320], [3855, 1160], 4.5, 27);
   master.set(".cs-walker .cs-tent-bag", { autoAlpha: 0 }, 31.6);
-  master.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 1.3, ease: "elastic.out(1, 0.45)" }, 31.7);
+  // 快速撐開、最後稍微回一下就停，不要卡通式彈跳
+  master.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.75, ease: "back.out(1.3)" }, 31.7);
   master.to(".cs-tent-shadow", { scaleX: 1, duration: 0.8, ease: "power2.out" }, 31.7);
   showPose(master, ".cs-hammerer", 33.2);
   for (let i = 0; i < 4; i += 1) {
@@ -333,11 +334,20 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
 
   // ── 一直在動的小東西（不受結帳暫停影響） ──
   const ambient: gsap.core.Animation[] = [];
-  const loop = (anim: gsap.core.Animation) => ambient.push(anim);
+  // 減少動態效果：連火、雲、蒸氣都不動
+  const loop = (anim: gsap.core.Animation) => {
+    if (reducedMotion) anim.kill();
+    else ambient.push(anim);
+  };
+  /** 結帳時背景降到待機的三成多（店主定稿規格 X）。 */
+  const calmAmbient = (calm: boolean) => {
+    for (const a of ambient) a.timeScale(calm ? 0.35 : 1);
+  };
   loop(gsap.to(".cs-flame-outer", { scaleY: 1.12, scaleX: 0.94, transformOrigin: "50% 100%", duration: 0.3, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-flame-mid", { scaleY: 0.86, transformOrigin: "50% 100%", duration: 0.22, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.fromTo(".cs-sparks circle", { y: 0, opacity: 1 }, { y: -40, opacity: 0, duration: 1.4, stagger: 0.45, repeat: -1, ease: "sine.out" }));
   loop(gsap.fromTo(".cs-steam", { y: 4, opacity: 0.1 }, { y: -10, opacity: 0.65, duration: 1.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
+  loop(gsap.to(".cs-balloon-bob", { y: -6, duration: 3.2, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.fromTo(".cs-pov-steam", { y: 6, opacity: 0.15 }, { y: -12, opacity: 0.6, duration: 2.4, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-sun-rays", { rotation: 360, svgOrigin: "0 0", duration: 60, repeat: -1, ease: "none" }));
   loop(gsap.to(".cs-flag", { skewY: 8, duration: 0.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
@@ -415,7 +425,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tr.set([".cs-driver"], { autoAlpha: 0 }, 0);
     tr.set(".cs-item", { autoAlpha: 1 }, 0);
     for (const p of poses) tr.to(p, { autoAlpha: p === ".cs-sitter" ? 1 : 0, duration: 0.4 * d }, 0.2 * d);
-    tr.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.9 * d, ease: "elastic.out(1, 0.5)" }, 0.2 * d);
+    tr.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.6 * d, ease: "back.out(1.3)" }, 0.2 * d);
     tr.to(".cs-tent-shadow", { scaleX: 1, duration: 0.5 * d }, 0.2 * d);
     cupTo(tr, "rest", 0.5 * d, 0);
     tr.to(zoom, { ...zoomFor(mode), transformOrigin: "0 0", duration: instant ? 0 : 0.9, ease: "power2.inOut" }, instant ? 0 : Math.max(0.1, panDur - 0.5));
@@ -442,8 +452,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     const d = reducedMotion ? 0 : 1;
     tl.set(".cs-thanks", { opacity: 1 }, 0);
     // y 寫死回原位：上一次慶祝的上下飄可能停在半路，不歸位會越飄越高
-    tl.fromTo(".cs-thanks-word", { scale: 0.3, opacity: 0, y: wordY, transformOrigin: "50% 50%" }, { scale: wordScale, opacity: 1, y: wordY, duration: 0.9 * d, ease: "elastic.out(1, 0.55)" }, 0);
-    tl.fromTo(".cs-thanks-star", { scale: 0, rotation: -90, transformOrigin: "50% 50%" }, { scale: 1, rotation: 0, duration: 0.6 * d, stagger: 0.12 * d, ease: "back.out(2.4)" }, 0.2 * d);
+    tl.fromTo(".cs-thanks-word", { scale: 0.3, opacity: 0, y: wordY, transformOrigin: "50% 50%" }, { scale: wordScale, opacity: 1, y: wordY, duration: 0.6 * d, ease: "back.out(1.4)" }, 0);
+    tl.fromTo(".cs-thanks-star", { scale: 0, rotation: -90, transformOrigin: "50% 50%" }, { scale: 1, rotation: 0, duration: 0.45 * d, stagger: 0.1 * d, ease: "back.out(1.8)" }, 0.2 * d);
     cupTo(tl, "cheers", 0.6 * d, 0, "back.out(1.8)");
     tl.to(".cs-nod-head", { ...rot(-8), duration: 0.3 * d, yoyo: true, repeat: 3 }, 0.3 * d);
     if (!reducedMotion) {
@@ -484,6 +494,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
       master.pause();
       return;
     }
+    calmAmbient(next === "cart" || next === "paid");
     if (next === "idle") {
       if (atTable) backToIdle();
       else if (!reducedMotion) master.resume();

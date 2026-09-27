@@ -1,19 +1,22 @@
-// 結帳手帳的筆：每掃一件商品，手移到那一行、筆尖碰紙、快速寫幾下，文字跟著筆尖從左到右出現。
-// 店主 2026-09-27：
-// - 一筆約 0.4～0.8 秒；連續快速掃描時上一筆立刻寫完、下一筆縮到 0.25～0.35 秒，動畫不排隊。
-// - 同品項數量增加：不新增一行，手移到數量改一筆；刪除：在那行劃一條線再收起來。
-// - 付款：筆放到紙旁；處理中輕敲；完成：沿著勾勾一筆畫、星星、蓋章。
-// 只用 transform／clip-path／stroke-dashoffset，不每幀重畫手。
+// 結帳手帳的筆（店主 2026-09-27 定稿規格 G–L、S、AA）：
+// - 新增：手移到那一行、筆尖落下、寫 2～4 下，文字跟著筆尖出現，約 0.55 秒。
+// - 連續掃描（0.5 秒內又來一件、或上一筆還在寫、或一次來好幾件）：上一筆立刻寫完，每筆約 0.25 秒；
+//   POS 資料永遠先到畫面，動畫不排隊。
+// - 同品項數量變了：手移到數量，舊數字淡掉、新數字寫上，不新增一行。
+// - 刪除：手移過去、斜斜劃一條、再補一條短的，那行變淡停一下，才收起來；總額由畫面在收起後才更新。
+// - 付款：筆放在紙上；成功：沿著總額旁的勾勾一筆畫、幾顆星、蓋章。
+// 所有動畫都能被下一個 POS 事件打斷（打斷＝直接跳到結尾），只用 transform／opacity／clip-path／SVG 描線。
 import { gsap } from "gsap";
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 
+import type { PenActivity } from "./ledgerState";
 import { PEN_TIP } from "./PenHand";
 
 export type LedgerLine = { key: string; qty: number; amount: string };
-export type LedgerPhase = "writing" | "paying" | "processing" | "paid";
+export type LedgerPhase = "writing" | "paying" | "paid" | "failed";
 
-/** 兩筆間隔小於這個毫秒數就算「連續快速掃描」。 */
-const RAPID_MS = 700;
+/** 兩筆間隔小於這個毫秒數就算連續快速掃描。 */
+const RAPID_MS = 500;
 
 type Refs = {
   shell: RefObject<HTMLElement | null>;
@@ -21,16 +24,24 @@ type Refs = {
   check: RefObject<SVGPathElement | null>;
 };
 
+type Callbacks = {
+  /** 刪除那行已經收起來了（畫面可以拿掉它、更新總額）。 */
+  onGhostDone(key: string): void;
+  /** 筆正在做什麼（給狀態顯示用）。 */
+  onPen?(activity: PenActivity): void;
+};
+
 /** 不播動畫時直接把手擺到定位（不經過 GSAP：測試環境量不到 SVG 尺寸）。 */
 function snap(hand: SVGSVGElement, x: number, y: number, rotation = 0): void {
   hand.setAttribute("style", `transform: translate(${x - PEN_TIP.x}px, ${y - PEN_TIP.y}px) rotate(${rotation}deg)`);
 }
 
-/** 不管動畫是寫完還是被打斷，都不能讓任何一行卡在半遮住的狀態。 */
-function clearClips(shell: Element | null): void {
+/** 不管動畫是寫完還是被打斷，都不能讓任何一行卡在半遮住的狀態、或留下舊數字的副本。 */
+function clearMarks(shell: Element | null): void {
   shell?.querySelectorAll<HTMLElement>("[data-ledger-key], [data-ledger-key] .kiosk-cart-qty, [data-ledger-key] > strong").forEach((el) => {
     el.style.clipPath = "";
   });
+  shell?.querySelectorAll(".ledger-old-qty").forEach((el) => el.remove());
 }
 
 /**
@@ -55,24 +66,42 @@ function rectIn(el: Element, shell: Element): DOMRect {
   return new DOMRect(x, y, box.offsetWidth, box.offsetHeight);
 }
 
-export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase, motion: boolean): void {
+export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase, motion: boolean, callbacks: Callbacks): void {
   const prev = useRef<Map<string, LedgerLine> | null>(null);
   const current = useRef<gsap.core.Timeline | null>(null);
-  const idle = useRef<gsap.core.Animation | null>(null);
   const lastAt = useRef(0);
+  const cb = useRef(callbacks);
+  useLayoutEffect(() => {
+    cb.current = callbacks;
+  });
   const signature = lines.map((l) => `${l.key}:${l.qty}:${l.amount}`).join("|");
 
-  /** 筆的「休息位置」：紙的左下角（總額在右邊，手不要擋到）。 */
+  /** 筆的休息位置：紙的左下角（總額在右邊，手不要擋到），筆尖落在紙上。 */
   const restPoint = (): { x: number; y: number } => {
     const shell = refs.shell.current;
     const paper = shell?.querySelector(".ledger-paper");
     if (!shell || !paper) return { x: 0, y: 0 };
     const p = rectIn(paper, shell);
-    return { x: p.left + 120, y: p.bottom - 175 };
+    return { x: p.left + 60, y: p.bottom - 40 };
+  };
+  /** 付款時筆放的位置：紙的右側中段（不要蓋到總額）。 */
+  const asidePoint = (): { x: number; y: number } => {
+    const shell = refs.shell.current;
+    const paper = shell?.querySelector(".ledger-paper");
+    if (!shell || !paper) return { x: 0, y: 0 };
+    const p = rectIn(paper, shell);
+    return { x: p.right - 210, y: p.top + p.height * 0.5 };
   };
 
-  const place = (tl: gsap.core.Timeline, x: number, y: number, duration: number, pos?: gsap.Position, rotation = 0) =>
-    tl.to(refs.hand.current, { x: x - PEN_TIP.x, y: y - PEN_TIP.y, rotation, duration, ease: "power2.out" }, pos);
+  const moveTo = (tl: gsap.core.Timeline, x: number, y: number, duration: number, pos?: gsap.Position) =>
+    tl.to(refs.hand.current, { x: x - PEN_TIP.x, y: y - PEN_TIP.y, rotation: 0, duration, ease: "power2.out" }, pos);
+
+  /** 打斷目前的動畫：直接跳到結尾（刪除的行會收起、文字都顯示完整）。 */
+  const finishCurrent = () => {
+    current.current?.progress(1).kill();
+    current.current = null;
+    clearMarks(refs.shell.current);
+  };
 
   // 手第一次出現：從右下角滑進來停在休息位置
   useEffect(() => {
@@ -85,52 +114,59 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
     }
     gsap.fromTo(
       hand,
-      { x: rest.x - PEN_TIP.x + 160, y: rest.y - PEN_TIP.y + 220, rotation: 8, transformOrigin: `${PEN_TIP.x}px ${PEN_TIP.y}px` },
-      { x: rest.x - PEN_TIP.x, y: rest.y - PEN_TIP.y, rotation: 0, duration: 0.7, delay: 0.35, ease: "power2.out" },
+      { x: rest.x - PEN_TIP.x + 150, y: rest.y - PEN_TIP.y + 200, transformOrigin: `${PEN_TIP.x}px ${PEN_TIP.y}px` },
+      { x: rest.x - PEN_TIP.x, y: rest.y - PEN_TIP.y, duration: 0.6, delay: 0.3, ease: "power2.out" },
     );
     return () => {
-      current.current?.progress(1).kill();
-      idle.current?.kill();
+      finishCurrent();
       gsap.killTweensOf(hand);
-      clearClips(refs.shell.current);
+      // 重新掛上時（開發模式會掛兩次）要重新認得「第一件」，不然第一件永遠不會寫
+      prev.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在掛上時跑一次
   }, []);
 
-  // 商品變動 → 寫字
+  // 商品變動 → 寫字／改數量／劃掉
   useLayoutEffect(() => {
     const shell = refs.shell.current;
     const hand = refs.hand.current;
     const before = prev.current;
     const now = new Map(lines.map((l) => [l.key, l]));
     prev.current = now;
-    if (!motion || !shell || !hand || phase !== "writing") return;
-
-    const added = before === null ? (lines.length <= 3 ? lines.slice(-1) : []) : lines.filter((l) => !before.has(l.key));
+    if (!shell || !hand || phase !== "writing") return;
+    const ghosts = [...shell.querySelectorAll<HTMLElement>("[data-ledger-ghost]")].map((el) => el.dataset.ledgerGhost ?? "");
+    const added = before === null ? (lines.length <= 3 ? lines.slice(-1) : []) : lines.filter((l) => !before.has(l.key) && !ghosts.includes(l.key));
     const amended = before === null ? [] : lines.filter((l) => before.has(l.key) && before.get(l.key)?.qty !== l.qty);
     const removed = before === null ? [] : [...before.keys()].filter((k) => !now.has(k));
     if (added.length + amended.length + removed.length === 0) return;
+    if (!motion) {
+      // 減少動態效果：資料直接更新，刪除的行由畫面快速淡出
+      for (const key of removed) window.setTimeout(() => cb.current.onGhostDone(key), 180);
+      return;
+    }
 
-    // 還在寫上一筆：直接寫完，手接著去下一行
     const t = performance.now();
-    // 連續掃描：距上一筆很近、上一筆還在寫、或這次一口氣進來好幾件，都用快速版
     const rapid = t - lastAt.current < RAPID_MS || current.current?.isActive() === true || added.length + amended.length > 1;
     lastAt.current = t;
-    current.current?.progress(1).kill();
-    idle.current?.kill();
-    clearClips(shell);
+    finishCurrent();
 
-    // 剛出現的第一件：等手從右下角滑進來再寫
-    const tl = gsap.timeline({ delay: before === null ? 0.9 : 0, onComplete: () => clearClips(shell), onInterrupt: () => clearClips(shell) });
-    const move = rapid ? 0.12 : 0.22;
-    const write = rapid ? 0.22 : 0.42;
+    const tl = gsap.timeline({
+      // 剛出現的第一件：等手從右下角滑進來再寫
+      delay: before === null ? 0.8 : 0,
+      onComplete: () => {
+        clearMarks(shell);
+        cb.current.onPen?.(null);
+      },
+      onInterrupt: () => clearMarks(shell),
+    });
+    const move = rapid ? 0.07 : 0.18;
+    const write = rapid ? 0.15 : 0.34;
     const rowOf = (key: string) => shell.querySelector<HTMLElement>(`[data-ledger-key="${CSS.escape(key)}"]`);
-
-    const scribble = (fromX: number, toX: number, y: number, duration: number) => {
-      place(tl, fromX, y, move);
+    const writeAcross = (fromX: number, toX: number, y: number, duration: number) => {
+      moveTo(tl, fromX, y, move);
       tl.to(hand, { x: toX - PEN_TIP.x, duration, ease: "none" });
       const strokes = rapid ? 2 : 3 + Math.floor(Math.random() * 2);
-      tl.to(hand, { y: `-=${4 + Math.random() * 2}`, rotation: -3, duration: duration / (strokes * 2), yoyo: true, repeat: strokes * 2 - 1, ease: "sine.inOut" }, "<");
+      tl.to(hand, { y: `-=${3 + Math.random() * 2}`, duration: duration / (strokes * 2), yoyo: true, repeat: strokes * 2 - 1, ease: "sine.inOut" }, "<");
     };
 
     for (const line of added) {
@@ -139,65 +175,110 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
       row.scrollIntoView({ block: "nearest" });
       const r = rectIn(row, shell);
       row.style.clipPath = "inset(0 100% 0 0)";
+      tl.call(() => cb.current.onPen?.("ITEM_ADD"));
       const start = tl.duration() + move;
-      scribble(r.left + 6, r.right - 10, r.top + r.height * 0.45, write);
+      writeAcross(r.left + 4, r.right - 8, r.top + r.height * 0.42, write);
       tl.fromTo(row, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: write, ease: "none", clearProps: "clipPath" }, start);
+      tl.to(hand, { y: "+=10", duration: 0.08, ease: "power1.out" });
     }
+
     for (const line of amended) {
       const row = rowOf(line.key);
       const qty = row?.querySelector<HTMLElement>(".kiosk-cart-qty");
       const amount = row?.querySelector<HTMLElement>(":scope > strong");
+      const old = before?.get(line.key)?.qty;
       if (!row || !qty) continue;
       row.scrollIntoView({ block: "nearest" });
       const q = rectIn(qty, shell);
+      // 舊數字：疊一個淡出的副本在原位（淡完就拿掉；被打斷時 clearMarks 也會拿掉）
+      const oldQty = document.createElement("span");
+      oldQty.className = "ledger-old-qty";
+      oldQty.textContent = `× ${old ?? ""}`;
+      oldQty.style.left = `${qty.offsetLeft}px`;
+      oldQty.style.top = `${qty.offsetTop}px`;
+      row.appendChild(oldQty);
       const targets = amount ? [qty, amount] : [qty];
       for (const el of targets) el.style.clipPath = "inset(0 100% 0 0)";
-      const start = tl.duration() + move;
+      tl.call(() => cb.current.onPen?.("ITEM_UPDATE"));
+      moveTo(tl, q.left - 2, q.top + q.height * 0.55, move);
+      tl.to(oldQty, { opacity: 0, duration: 0.12, onComplete: () => oldQty.remove() });
+      const start = tl.duration() - 0.04;
       const end = amount ? rectIn(amount, shell).right : q.right;
-      scribble(q.left, end, q.top + q.height * 0.5, write * 0.7);
+      tl.to(hand, { x: end - PEN_TIP.x, duration: write * 0.7, ease: "none" }, start);
+      tl.to(hand, { y: "-=4", duration: (write * 0.7) / 4, yoyo: true, repeat: 3, ease: "sine.inOut" }, start);
       tl.fromTo(targets, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: write * 0.7, ease: "none", clearProps: "clipPath" }, start);
     }
+
     for (const key of removed) {
       const ghost = shell.querySelector<HTMLElement>(`[data-ledger-ghost="${CSS.escape(key)}"]`);
-      if (!ghost) continue;
+      if (!ghost) {
+        cb.current.onGhostDone(key);
+        continue;
+      }
       const r = rectIn(ghost, shell);
-      place(tl, r.left + 4, r.top + r.height * 0.5, move);
-      tl.to(hand, { x: r.right - 8 - PEN_TIP.x, duration: 0.22, ease: "power1.in" });
+      const strike1 = ghost.querySelector<SVGPathElement>(".ledger-strike-1");
+      const strike2 = ghost.querySelector<SVGPathElement>(".ledger-strike-2");
+      // 兩筆劃線：主要一條從左下斜到右上、略微不直；第二條短一些、角度略不同（行內像素座標）
+      const w = r.width;
+      const hgt = r.height;
+      const jitter = () => (Math.random() - 0.5) * hgt * 0.06;
+      const p1 = [0.01 * w, 0.64 * hgt, 0.99 * w, 0.32 * hgt];
+      const p2 = [0.14 * w, 0.78 * hgt, 0.8 * w, 0.5 * hgt];
+      const curve = ([x0, y0, x1, y1]: number[]) =>
+        `M${x0} ${y0} C${x0 + (x1 - x0) * 0.3} ${y0 + (y1 - y0) * 0.22 + jitter()} ${x0 + (x1 - x0) * 0.7} ${y0 + (y1 - y0) * 0.8 + jitter()} ${x1} ${y1}`;
+      const svg = strike1?.ownerSVGElement;
+      svg?.setAttribute("viewBox", `0 0 ${w} ${hgt}`);
+      const prep = (path: SVGPathElement | null, coords: number[]) => {
+        if (!path) return;
+        path.setAttribute("d", curve(coords));
+        const len = path.getTotalLength();
+        path.setAttribute("stroke-dasharray", `${len}`);
+        path.setAttribute("stroke-dashoffset", `${len}`);
+      };
+      prep(strike1, p1);
+      prep(strike2, p2);
+      const at = (px: number, py: number) => ({ x: r.left + px, y: r.top + py });
+      const a0 = at(p1[0]!, p1[1]!);
+      const a1 = at(p1[2]!, p1[3]!);
+      const b0 = at(p2[0]!, p2[1]!);
+      const b1 = at(p2[2]!, p2[3]!);
+      tl.call(() => cb.current.onPen?.("ITEM_DELETE"));
+      moveTo(tl, a0.x, a0.y, rapid ? 0.12 : 0.22);
+      tl.to(hand, { x: a1.x - PEN_TIP.x, y: a1.y - PEN_TIP.y, duration: rapid ? 0.14 : 0.26, ease: "power1.inOut" });
+      if (strike1) tl.to(strike1, { attr: { "stroke-dashoffset": 0 }, duration: rapid ? 0.14 : 0.26, ease: "power1.inOut" }, "<");
+      moveTo(tl, b0.x, b0.y, 0.09);
+      tl.to(hand, { x: b1.x - PEN_TIP.x, y: b1.y - PEN_TIP.y, duration: rapid ? 0.1 : 0.16, ease: "power1.out" });
+      if (strike2) tl.to(strike2, { attr: { "stroke-dashoffset": 0 }, duration: rapid ? 0.1 : 0.16, ease: "power1.out" }, "<");
+      // 字變淡到一半，劃線維持深色
+      tl.to(ghost.querySelectorAll(":scope > :not(.ledger-strike)"), { opacity: 0.48, duration: 0.15 });
+      // 停一下讓客人看到真的被劃掉，再收起來、下面的行往上補
+      tl.to(ghost, { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0, duration: 0.3, ease: "power2.inOut" }, rapid ? "+=0.2" : "+=0.45");
+      tl.call(() => cb.current.onGhostDone(key));
     }
+
     const rest = restPoint();
-    place(tl, rest.x, rest.y, 0.35, "+=0.05");
+    moveTo(tl, rest.x, rest.y, 0.3, "+=0.05");
     current.current = tl;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 用 signature 代表商品內容變了
   }, [signature, motion, phase]);
 
-  // 付款各階段
+  // 付款各階段（一進入付款就立刻結束還在寫的商品動畫）
   useEffect(() => {
     const shell = refs.shell.current;
     const hand = refs.hand.current;
     if (!shell || !hand) return;
-    const paper = shell.querySelector(".ledger-paper");
-    if (!paper) return;
-    idle.current?.kill();
-    if (phase === "writing") return;
-    current.current?.progress(1).kill();
-    const p = rectIn(paper, shell);
-    // 筆放在紙的右側中段：不要蓋到總額
-    const aside = { x: p.right - 120, y: p.top + p.height * 0.4 };
+    const paper = shell.querySelector<HTMLElement>(".ledger-paper");
+    if (!paper || phase === "writing" || phase === "failed") return;
+    finishCurrent();
+    const aside = asidePoint();
     if (!motion) {
-      snap(hand, aside.x, aside.y, 18);
+      snap(hand, aside.x, aside.y);
       return;
     }
     const tl = gsap.timeline();
-    if (phase === "paying" || phase === "processing") {
-      // 筆放到紙旁邊；處理中每隔一下輕敲一次紙
-      place(tl, aside.x, aside.y, 0.5, 0, 18);
-      if (phase === "processing") {
-        idle.current = gsap
-          .timeline({ repeat: -1, repeatDelay: 1.3, delay: 0.9 })
-          .to(hand, { rotation: 11, duration: 0.14, ease: "sine.inOut" })
-          .to(hand, { rotation: 18, duration: 0.18, ease: "sine.inOut" });
-      }
-    } else if (phase === "paid") {
+    if (phase === "paying") {
+      moveTo(tl, aside.x, aside.y, 0.45, 0);
+    } else {
       // 拿起筆，沿著總額旁的勾勾一筆畫完
       const path = refs.check.current;
       if (path) {
@@ -212,11 +293,11 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
         };
         const first = pointAt(0);
         gsap.set(path, { strokeDasharray: len, strokeDashoffset: len });
-        place(tl, first.x, first.y, 0.35, 0);
+        moveTo(tl, first.x, first.y, 0.32, 0);
         const proxy = { t: 0 };
         tl.to(proxy, {
           t: 1,
-          duration: 0.45,
+          duration: 0.42,
           ease: "power1.inOut",
           onUpdate: () => {
             const pt = pointAt(proxy.t);
@@ -224,15 +305,16 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
             gsap.set(path, { strokeDashoffset: len * (1 - proxy.t) });
           },
         });
-        tl.fromTo(path.ownerSVGElement, { scale: 1 }, { scale: 1.12, duration: 0.12, yoyo: true, repeat: 1, transformOrigin: "50% 50%" });
+        tl.to(hand, { y: "+=14", x: "+=10", duration: 0.12, ease: "power1.out" });
+        tl.fromTo(path.ownerSVGElement, { scale: 1 }, { scale: 1.08, duration: 0.1, yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, "<");
       }
-      tl.fromTo(shell.querySelectorAll(".ledger-star"), { scale: 0, rotation: -90, transformOrigin: "50% 50%" }, { scale: 1, rotation: 0, duration: 0.4, stagger: 0.08, ease: "back.out(2.4)" }, "-=0.1");
+      tl.fromTo(shell.querySelectorAll(".ledger-star"), { scale: 0, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.3, stagger: 0.07, ease: "back.out(1.8)" }, "-=0.05");
       const stamp = shell.querySelector(".ledger-stamp");
       if (stamp) {
-        tl.fromTo(stamp, { scale: 1.5, opacity: 0, rotation: -2 }, { scale: 1, opacity: 1, rotation: -10, duration: 0.22, ease: "power3.in" }, "-=0.15");
-        tl.fromTo(paper, { y: 0 }, { y: 3, duration: 0.06, yoyo: true, repeat: 1 });
+        tl.fromTo(stamp, { scale: 1.06, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.16, ease: "power2.in" }, "+=0.05");
+        tl.fromTo(paper, { y: 0 }, { y: 1.5, duration: 0.05, yoyo: true, repeat: 1 });
       }
-      place(tl, aside.x, aside.y, 0.4, "+=0.05", 18);
+      moveTo(tl, aside.x, aside.y, 0.4, "+=0.05");
     }
     current.current = tl;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只看付款階段變化

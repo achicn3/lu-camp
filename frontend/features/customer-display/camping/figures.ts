@@ -268,7 +268,7 @@ export function camperVan(): string {
 /** 帳篷：cs-tent-body 由收合（scaleY 0）撐開；原點在帳篷底中央。 */
 export function tent(): string {
   // 品牌字不要比人物搶眼：暖米白、外框與陰影都放淡一點
-  const word = doodleText("露坑", { font: "marker", size: 80, fill: "#f1e3c6", outline: "#6a4522", outlineWidth: 9, drop: 3 });
+  const word = doodleText("露坑", { font: "marker", size: 80, fill: "#ecdcbd", outline: "#76502c", outlineWidth: 9, drop: 3 });
   return g(
     { class: "cs-tent" },
     g({ class: "cs-tent-shadow" }, shadow(10, 8, 210, 18, 0.16), h("path", { d: "M-176 1 C-60 8 80 8 246 2 L244 7 C80 14 -60 14 -174 7 Z", fill: INK, opacity: 0.35 })),

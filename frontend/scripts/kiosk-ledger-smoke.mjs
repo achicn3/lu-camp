@@ -7,7 +7,7 @@
 //   減少動態效果：商品直接顯示，沒有手寫遮罩
 // 需 backend + frontend 已起、已 seed（dev-manager、dev-kiosk）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/kiosk-ledger-smoke.mjs
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -120,10 +120,17 @@ try {
   await put([kettle]);
   await page.waitForSelector(`[data-ledger-key]`, { timeout: 15000 });
   ok("開始結帳：動畫帶到營桌、第一人稱手帳", (await sceneMode(page)) === "cart");
-  await page.waitForTimeout(1250);
-  await page.screenshot({ path: join(SHOTS, "01-first-item-writing.png") });
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: join(SHOTS, "02-first-item.png") });
+  // 連拍第一件寫字的過程，挑一張「字寫到一半」的
+  let writingShot = false;
+  for (let i = 0; i < 16 && !writingShot; i += 1) {
+    const clip = await page.$eval("[data-ledger-key]", (el) => el.style.clipPath);
+    if (clip && clip !== "none" && !clip.includes("100%")) {
+      await page.screenshot({ path: join(SHOTS, "qa02-scanning-first-item.png") });
+      writingShot = true;
+    } else await page.waitForTimeout(60);
+  }
+  ok("第一件：看得到手正在寫、字寫到一半", writingShot);
+  await page.waitForTimeout(1600);
   const firstRowVisible = await page.$eval("[data-ledger-key]", (el) => getComputedStyle(el).clipPath === "none" || getComputedStyle(el).clipPath === "");
   ok("寫完之後整行清楚可讀（沒有殘留遮罩）", firstRowVisible);
 
@@ -136,15 +143,54 @@ try {
   await page.waitForTimeout(1200);
   const rows = await page.$$eval("[data-ledger-key]", (els) => els.map((el) => ({ text: el.textContent, clip: getComputedStyle(el).clipPath })));
   ok("連續掃描三件都顯示、沒有卡在遮罩", rows.length === 3 && rows.every((r) => r.clip === "none" || r.clip === ""), JSON.stringify(rows.map((r) => r.clip)));
-  await page.screenshot({ path: join(SHOTS, "04-three-items.png") });
+  await page.screenshot({ path: join(SHOTS, "qa03-three-items.png") });
 
-  // ── 刪除 ──
+  // ── 刪除：筆移過去、劃兩筆、變淡停一下、收起來，總額最後才改 ──
+  const totalBefore = await page.textContent(".kiosk-cart-grand-total strong");
   await put([kettle, chair]);
   await page.waitForSelector("[data-ledger-ghost]", { timeout: 5000 });
-  await page.waitForTimeout(200);
-  await page.screenshot({ path: join(SHOTS, "05-strike.png") });
-  await page.waitForTimeout(900);
-  ok("刪除後剩兩行", (await page.$$("[data-ledger-key]")).length === 2 && (await page.$$("[data-ledger-ghost]")).length === 0);
+  // 連拍刪除過程（截圖本身有延遲，固定時間點截不準）：每張記下筆的位置與劃線進度，挑四個階段
+  const burst = [];
+  let totalDuring = null;
+  let ghostOpacity = -1;
+  for (let i = 0; i < 14; i += 1) {
+    const state = await page.evaluate(() => {
+      const s1 = document.querySelector(".ledger-strike-1");
+      const s2 = document.querySelector(".ledger-strike-2");
+      const content = document.querySelector("[data-ledger-ghost] > div");
+      const len = (el) => Number(el?.getAttribute("stroke-dasharray") ?? 0);
+      const off = (el) => Number(el?.getAttribute("stroke-dashoffset") ?? 0);
+      return {
+        ghost: Boolean(document.querySelector("[data-ledger-ghost]")),
+        p1: s1 && len(s1) ? 1 - off(s1) / len(s1) : 0,
+        p2: s2 && len(s2) ? 1 - off(s2) / len(s2) : 0,
+        fade: content ? Number(getComputedStyle(content).opacity) : 1,
+        total: document.querySelector(".kiosk-cart-grand-total strong")?.textContent,
+      };
+    });
+    if (!state.ghost) break;
+    const file = `burst-${String(i).padStart(2, "0")}.png`;
+    await page.screenshot({ path: join(SHOTS, file) });
+    burst.push({ ...state, file });
+    if (totalDuring === null) totalDuring = state.total;
+    if (state.fade < 0.7) ghostOpacity = state.fade;
+  }
+  const pick = (name, found) => {
+    if (found) copyFileSync(join(SHOTS, found.file), join(SHOTS, name));
+    ok(`刪除截圖：${name}`, Boolean(found));
+  };
+  pick("qa05-delete-pen-touching.png", burst[0]);
+  pick("qa06-delete-first-strike.png", burst.slice(1).find((b) => b.p1 > 0.05 && b.p2 < 0.99) ?? burst[1]);
+  pick("qa07-delete-struck-through.png", burst.find((b) => b.fade < 0.7));
+  pick("qa08-delete-before-collapse.png", [...burst].reverse().find((b) => b.fade < 0.7));
+  for (const b of burst) rmSync(join(SHOTS, b.file), { force: true });
+  await page.waitForTimeout(1000);
+  await page.screenshot({ path: join(SHOTS, "qa09-after-delete.png") });
+  const totalAfter = await page.textContent(".kiosk-cart-grand-total strong");
+  ok("刪除：劃掉時那行變淡但還在", ghostOpacity > 0.3 && ghostOpacity < 0.7, `opacity=${ghostOpacity}`);
+  ok("刪除：總額等那行收起來才更新", totalDuring === totalBefore && totalAfter !== totalBefore, `${totalBefore} → ${totalDuring} → ${totalAfter}`);
+  ok("刪除後剩兩行、沒有殘留", (await page.$$("[data-ledger-key]")).length === 2 && (await page.$$("[data-ledger-ghost]")).length === 0);
+  ok("不跳「已移除」通知", (await page.locator(".kiosk-cart-change.is-removed").count()) === 0);
 
   // ── 同品項數量 1→2（一般商品）──
   const product = await api(mgr, "POST", "/api/v1/catalog-products", { sku: `LEDGER-GAS-${RUN}`, name: `瓦斯罐 ${RUN}`, unit_price: "120" });
@@ -161,7 +207,7 @@ try {
   const before = (await page.$$("[data-ledger-key]")).length;
   await put([kettle, chair, gas(2)]);
   await page.waitForTimeout(250);
-  await page.screenshot({ path: join(SHOTS, "05b-qty-amend.png") });
+  await page.screenshot({ path: join(SHOTS, "qa04-updating-quantity.png") });
   await page.waitForTimeout(1000);
   const gasRow = await page.$eval(`[data-ledger-key^="CATALOG"]`, (el) => ({ qty: el.querySelector(".kiosk-cart-qty").textContent, clip: getComputedStyle(el.querySelector(".kiosk-cart-qty")).clipPath }));
   ok("數量 1→2：不新增一行、只改數量", (await page.$$("[data-ledger-key]")).length === before && gasRow.qty.includes("2") && (gasRow.clip === "none" || gasRow.clip === ""), JSON.stringify(gasRow));
@@ -178,8 +224,8 @@ try {
   revision = begun.json?.revision ?? revision;
   await page.waitForTimeout(1500);
   const phase = await page.getAttribute(".kiosk-cart-shell", "data-phase");
-  ok("付款中：筆放到紙旁", phase === "processing" || phase === "paying", phase);
-  await page.screenshot({ path: join(SHOTS, "06-paying.png") });
+  ok("付款中：筆放到紙上、總額旁小點點", phase === "paying" && (await page.locator(".ledger-breath").count()) === 1, phase);
+  await page.screenshot({ path: join(SHOTS, "qa10-payment-pending.png") });
   const sale = await api(
     mgr,
     "POST",
@@ -190,26 +236,52 @@ try {
   ok("成交", sale.status === 201, `status=${sale.status} ${sale.status !== 201 ? JSON.stringify(sale.json) : ""}`);
   await page.waitForSelector('h1:has-text("交易已完成")', { timeout: 15000 });
   ok("成交：留在手帳、背景舉杯（paid）", (await sceneMode(page)) === "paid");
-  await page.waitForTimeout(700);
-  await page.screenshot({ path: join(SHOTS, "07-check-drawing.png") });
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: join(SHOTS, "08-paid.png") });
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: join(SHOTS, "qa11a-check-drawing.png") });
+  await page.waitForTimeout(1900);
+  await page.screenshot({ path: join(SHOTS, "qa11-payment-success.png") });
   const dash = await page.$eval(".ledger-check-path", (el) => Number(getComputedStyle(el).strokeDashoffset.replace("px", "")));
   ok("勾勾畫完", Math.abs(dash) < 1, `dashoffset=${dash}`);
   const stamp = await page.$eval(".ledger-stamp", (el) => Number(getComputedStyle(el).opacity));
   ok("印章蓋上", stamp > 0.9, `opacity=${stamp}`);
+  // ── 付款失敗：金額對不上 → POS 退回可修改 → 手帳寫「付款未完成」，不蓋章 ──
+  await page.waitForSelector(".kiosk-standby-title", { timeout: 20000 });
+  revision = null;
+  const failLines = [lamp];
+  await put(failLines);
+  await page.waitForSelector("[data-ledger-key]", { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const failQuote = await api(mgr, "POST", "/api/v1/sales/quote", { lines: failLines });
+  await put(failLines, { tenders: [{ tender_type: "CASH", amount: String(failQuote.json.total) }] });
+  const failBegun = await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/cart/begin-checkout`, { expected_revision: revision });
+  revision = failBegun.json?.revision ?? revision;
+  await page.waitForTimeout(800);
+  const failed = await api(
+    mgr,
+    "POST",
+    "/api/v1/sales",
+    { lines: failLines, tenders: [{ tender_type: "CASH", amount: String(Number(failQuote.json.total) + 1) }], cart_session_id: failBegun.json?.id, cart_revision: revision },
+    { "Idempotency-Key": `ledger-fail-${RUN}` },
+  );
+  await page.waitForSelector(".ledger-note.is-warn", { timeout: 15000 });
+  ok("付款失敗：寫「付款未完成」、不蓋章", (await page.locator(".ledger-stamp").count()) === 0, `sale status=${failed.status}`);
+  await page.screenshot({ path: join(SHOTS, "qa12-payment-failed.png") });
+  const current2 = await api(mgr, "GET", `/api/v1/customer-display/terminals/${terminalId}/cart/current`);
+  revision = current2.json?.revision ?? revision;
   await context.close();
 
   // ── 減少動態效果 ──
   const calm = await browser.newContext({ viewport: { width: 810, height: 1080 }, reducedMotion: "reduce" });
   const calmPaired = await pair(calm, mgr);
+  await calmPaired.page.waitForTimeout(800);
+  await calmPaired.page.screenshot({ path: join(SHOTS, "qa01-idle-hero.png") });
   const calmCart = await api(mgr, "PUT", `/api/v1/customer-display/terminals/${calmPaired.terminalId}/cart`, { expected_revision: null, lines: [lamp] });
   carts.push({ terminalId: calmPaired.terminalId, revision: () => calmCart.json.revision, id: calmCart.json.id });
   await calmPaired.page.waitForSelector("[data-ledger-key]", { timeout: 15000 });
   await calmPaired.page.waitForTimeout(150);
   const calmClip = await calmPaired.page.$eval("[data-ledger-key]", (el) => getComputedStyle(el).clipPath);
   ok("減少動態效果：商品直接顯示", calmClip === "none" || calmClip === "", calmClip);
-  await calmPaired.page.screenshot({ path: join(SHOTS, "09-reduced-motion.png") });
+  await calmPaired.page.screenshot({ path: join(SHOTS, "qa13-reduced-motion.png") });
   await calm.close();
 
   ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));
