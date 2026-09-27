@@ -119,9 +119,9 @@ function farLayer(): string {
   const width = PANEL_W + CAM_MAX * PARALLAX.far + 100;
   const r = rng(41);
   const art =
-    range(r, width, 900, 560, 110, { body: "#c5cfd3", face: "#b3bec4", ink: "#8f9ba2", stroke: "#9aa6ad" }, 640) +
+    range(r, width, 900, 560, 110, { body: "#c9d2d6", face: "#b9c3c9", ink: "#a4aeb4", stroke: "#adb7bd" }, 640) +
     h("rect", { x: -40, y: 760, width: width + 80, height: 260, fill: "url(#cs-haze)" }) +
-    range(r, width, 960, 700, 70, { body: "#a9b6b0", face: "#98a69f", ink: "#6f7b76", stroke: "#7c8983" }, 0) +
+    range(r, width, 960, 700, 70, { body: "#a9b6b0", face: "#98a69f", ink: "#7f8b86", stroke: "#86928d" }, 0) +
     h("rect", { x: -40, y: 850, width: width + 80, height: 200, fill: "url(#cs-haze)" });
   let tiles = "";
   for (let tx = 0; tx < width; tx += PANEL_W) tiles += tileSvg(tx, Math.min(PANEL_W, width - tx), art);
@@ -186,6 +186,8 @@ function groundTrack(): string {
     actor("cs-pose cs-cliffsitter", { ox: 90, oy: 180, w: 200, h: 200 }, backViewPerson()) +
     actor("cs-pose cs-roaster", { ox: 80, oy: 190, w: 300, h: 210 }, roastingPerson()) +
     actor("cs-pose cs-hammock-actor", { ox: 280, oy: 60, w: 560, h: 220 }, hammock(470)) +
+    // 營火的暖光：很淡地染到周圍的草、木棧台、帳篷與人（柔光混合，不是發光）
+    actor("cs-fire-ambient", { ox: 340, oy: 260, w: 680, h: 420 }, h("ellipse", { cx: 0, cy: -20, rx: 330, ry: 200, fill: "url(#cs-ambient)" })) +
     `</div>`
   );
 }
@@ -233,6 +235,7 @@ function balloon(): string {
     hatchArea("M0 -110 C62 -110 88 -60 80 -10 C72 40 30 70 14 92 L8 92 C16 70 32 40 36 -10 C40 -60 30 -110 0 -110 Z", "cs-hatch-fine"),
     h("path", { d: `${gore(-60)} ${gore(-36)} ${gore(36)} ${gore(60)}`, fill: "none", stroke: "#8a3a26", "stroke-width": 0.9, opacity: 0.6 }),
     h("path", { d: "M-50 -80 C-60 -60 -62 -30 -58 -8", stroke: "#fff", "stroke-width": 4, fill: "none", opacity: 0.5, "stroke-linecap": "round" }),
+    h("path", { d: env, fill: "url(#cs-fabric)", opacity: 0.8 }),
     brandMark("cs-balloon-mark", LOGO_MARK, -24, -44, 48, 41, "#3a2210"),
     inkPath(env, 2.2),
     inkPath("M-14 92 L-12 118 M14 92 L12 118 M-5 92 L-5 118 M5 92 L5 118", 1),

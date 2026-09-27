@@ -1,6 +1,6 @@
 // 會動的角色與道具：人物（各種姿勢）、露營車、帳篷。每個都有 class 讓時間軸抓得到要動的關節。
 // 座標：人物原點在腳底中央、面向右；露營車原點在前後輪中間的地面。
-import { INK, INK_SOFT, doodleText, fillPath, g, h, hatchArea, inkPath, shadow, shape } from "./svg";
+import { INK, INK_SOFT, doodleText, fillPath, g, h, inkPath, shadow, shape } from "./svg";
 
 const SKIN = "#efc9a6";
 const SKIN_SHADE = "#e6b692";
@@ -47,6 +47,8 @@ function head(r = 25, closedEyes = true): string {
     h("path", { d: ribs, "stroke-width": 1, opacity: 0.45, stroke: INK_SOFT }),
     h("path", { d: knit, "stroke-width": 0.9, opacity: 0.5, stroke: "#8a5f1c" }),
     h("path", { d: fluff, "stroke-width": 1.1, opacity: 0.8, stroke: "#9c7a2c" }),
+    h("path", { d: `M3 ${-r - 8} C5 ${-r + 2} 7 -18 7 -10`, "stroke-width": 1, opacity: 0.55, stroke: INK_SOFT, "stroke-dasharray": "2 2" }),
+    h("path", { d: `M${-r - 3} -8 C${-r * 0.3} -12 ${r * 0.4} -13 ${r + 5} -10`, "stroke-width": 0.9, opacity: 0.5, stroke: "#8a5f1c" }),
     h("path", { d: eyes, "stroke-width": 1.8 }),
     h("path", { d: "M18 14 q4 3 8 0", "stroke-width": 1.6 }),
   );
@@ -268,7 +270,7 @@ export function tent(): string {
   const word = doodleText("露坑", { font: "marker", size: 80, fill: "#fff1d6", outline: "#3a2210", outlineWidth: 10, drop: 5 });
   return g(
     { class: "cs-tent" },
-    g({ class: "cs-tent-shadow" }, shadow(10, 8, 210, 18, 0.18)),
+    g({ class: "cs-tent-shadow" }, shadow(10, 8, 210, 18, 0.16), h("path", { d: "M-176 1 C-60 8 80 8 246 2 L244 7 C80 14 -60 14 -174 7 Z", fill: INK, opacity: 0.35 })),
     g(
       { class: "cs-tent-body" },
       fillPath("M-170 0 L0 -320 L170 0 Z", "#dca64a"),
@@ -287,6 +289,9 @@ export function tent(): string {
       inkPath("M60 -300 C90 -230 130 -150 178 -70 M80 -250 C120 -190 160 -120 206 -40", 1, { opacity: 0.55 }),
       inkPath("M-50 -8 l-4 -2 M-46 -20 l-4 -2 M-42 -32 l-4 -2 M-38 -44 l-4 -2 M-34 -56 l-4 -2 M-30 -68 l-4 -2 M-26 -80 l-4 -2 M-22 -92 l-4 -2 M-18 -104 l-4 -2 M-14 -116 l-4 -2 M-10 -128 l-4 -2 M50 -8 l4 -2 M46 -20 l4 -2 M42 -32 l4 -2 M38 -44 l4 -2 M34 -56 l4 -2 M30 -68 l4 -2 M26 -80 l4 -2 M22 -92 l4 -2 M18 -104 l4 -2 M14 -116 l4 -2 M10 -128 l4 -2", 0.9),
       shape("M-62 -44 L-40 -48 L-39 -40 L-61 -36 Z M-50 -100 L-30 -104 L-29 -96 L-49 -92 Z", "#8a5a24", 1.1),
+      // 帳門的布厚度（門邊一條較深的布緣）
+      fillPath("M0 -160 L54 0 L45 0 L-2 -148 Z", "#9a6a28"),
+      inkPath("M45 0 L-2 -148", 0.9),
       g({ transform: "translate(2 -170) rotate(-7)" }, word, g({ transform: "translate(74 -58)" }, h("path", { d: "M0 -12 l3.5 10 l10 1 l-8 6 l2.5 10 l-8 -6 l-8 6 l2.5 -10 l-8 -6 l10 -1z", fill: "#e8674a", stroke: "#3a2210", "stroke-width": 2.2, filter: "url(#cs-rough)" }))),
       g(
         { filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-linecap": "round", "stroke-linejoin": "round" },
@@ -339,6 +344,7 @@ export function sittingPerson(): string {
     // 鞋底、鞋底紋、褲子接縫與膝蓋的摺痕、坐下時大腿被椅面壓出的皺褶
     fillPath("M636 1106 L680 1106 L680 1112 L636 1112 Z", "#3a2a20") +
     inkPath("M642 1109 l3 3 M650 1109 l3 3 M658 1109 l3 3 M666 1109 l3 3", 0.8) +
+    inkPath("M666 1106 C668 1100 674 1098 678 1100 M650 1098 l6 4 M656 1096 l-4 5", 0.9) +
     inkPath("M556 1068 C586 1064 612 1064 632 1068 M614 1062 C620 1068 622 1074 628 1078 M626 1058 C634 1064 636 1070 640 1080 M646 1066 C650 1076 652 1086 656 1098", 1.1) +
     inkPath("M560 1080 q6 -4 12 0 M580 1078 q6 -4 12 0", 0.9);
   const body =
@@ -363,7 +369,9 @@ export function sittingPerson(): string {
     inkPath("M540 1048 q8 4 14 0 M566 1046 q8 5 16 1", 0.9) +
     // 圍巾：針織橫紋與流蘇
     inkPath("M532 972 l2 6 M542 975 l1 7 M552 976 l0 7 M562 976 l-1 7 M572 974 l-2 6", 0.8) +
-    inkPath("M536 1010 l-2 6 M540 1011 l-1 6 M544 1009 l0 6", 0.9);
+    inkPath("M536 1010 l-2 6 M540 1011 l-1 6 M544 1009 l0 6", 0.9) +
+    inkPath("M530 970 C542 980 564 980 580 970 M538 988 C538 996 537 1002 536 1008 M544 986 C544 994 543 1000 542 1006", 0.8, { opacity: 0.7 }) +
+    inkPath("M516 1000 q5 3 4 10 M598 1000 q-4 4 -3 10 M524 1016 q4 2 8 0", 0.8, { opacity: 0.7 });
   const headArt = g({ transform: "translate(552 932)" }, head());
   const cup =
     fillPath("M572 1002 L612 1002 L608 1034 L576 1034 Z", "#f4efe4") +
@@ -378,6 +386,7 @@ export function sittingPerson(): string {
     ) +
     inkPath("M568 1018 l7 -1 M567 1023 l8 -1 M568 1028 l7 -1", 0.8) +
     shape("M603 1008 C609 1004 616 1006 615 1011 C614 1015 607 1015 603 1012 Z", SKIN, 1.2) +
+
     g({ class: "cs-steam", filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.6 },
       h("path", { d: "M586 996 c-10 -16 10 -24 0 -40 c-10 -16 10 -24 0 -38" }),
       h("path", { d: "M600 994 c-10 -14 10 -22 0 -36" }),

@@ -367,6 +367,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   // 從世界某處放上固定位置的角色
   place(".cs-tent-actor", SPOTS.tentX, 1120);
   place(".cs-fire-coffee", SPOTS.coffeeFireX, 1250);
+  place(".cs-fire-ambient", SPOTS.coffeeFireX, 1250);
   place(".cs-fire-evening", SPOTS.eveningFireX, 1260);
   place(".cs-hammerer", 3935, 1160);
   place(".cs-sitter", SPOTS.sitX, 1150);

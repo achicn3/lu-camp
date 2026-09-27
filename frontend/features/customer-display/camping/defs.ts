@@ -79,6 +79,11 @@ export const DEFS = `
   <stop offset="0.45" stop-color="#ffb85c" stop-opacity="0.35"/>
   <stop offset="1" stop-color="#ff9a3c" stop-opacity="0"/>
 </radialGradient>
+<radialGradient id="cs-ambient">
+  <stop offset="0" stop-color="#ffb35c" stop-opacity="0.55"/>
+  <stop offset="0.5" stop-color="#ffb35c" stop-opacity="0.2"/>
+  <stop offset="1" stop-color="#ffb35c" stop-opacity="0"/>
+</radialGradient>
 <radialGradient id="cs-firefly">
   <stop offset="0" stop-color="#fff7b0" stop-opacity="1"/>
   <stop offset="1" stop-color="#e8f06a" stop-opacity="0"/>

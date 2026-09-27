@@ -5257,6 +5257,10 @@ a.btn-ghost {
   top: 0;
   will-change: transform;
 }
+.cs-fire-ambient {
+  mix-blend-mode: soft-light;
+  opacity: 0.8;
+}
 .cs-tint {
   left: -600px;
   width: 2200px;
