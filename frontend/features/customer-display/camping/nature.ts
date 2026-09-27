@@ -194,17 +194,35 @@ export function stone(r: Rng, x: number, y: number, w: number): string {
   );
 }
 
-/** 一朵手繪雲（原點在雲底中央），w 為寬：兩層雲團、底部淡灰藍陰影與細斜線、柔和的線。 */
-export function cloud(w: number, fill = "#fbf8f0", shade = "#dde3e8"): string {
+/** 雲的輪廓（-100..100 × 0..-90 的單位座標，逆時針從左下角開始），四種不同的隆起。 */
+const CLOUD_SHAPES: number[][][] = [
+  [[-100, 0], [-114, -24], [-88, -44], [-62, -36], [-60, -68], [-16, -80], [4, -56], [20, -86], [74, -76], [70, -40], [98, -46], [116, -16], [100, 0]],
+  [[-100, 0], [-106, -18], [-80, -30], [-70, -52], [-36, -58], [-20, -46], [-4, -62], [30, -60], [40, -40], [70, -44], [94, -28], [104, -10], [100, 0]],
+  [[-100, 0], [-118, -14], [-96, -34], [-50, -38], [-40, -72], [0, -76], [22, -50], [56, -52], [64, -30], [100, -24], [110, -8], [100, 0]],
+  [[-100, 0], [-110, -22], [-84, -28], [-78, -46], [-44, -50], [-30, -40], [-12, -52], [18, -42], [48, -48], [60, -30], [92, -30], [108, -14], [100, 0]],
+];
+
+/**
+ * 一朵手繪雲（原點在雲底中央），w 為寬；variant 選四種輪廓之一。兩層雲團、底部淡灰藍陰影與細斜線、柔和的線。
+ */
+export function cloud(w: number, fill = "#fbf8f0", shade = "#dde3e8", variant = 0): string {
   const s = w / 200;
   const p = (x: number, y: number) => `${f(x * s)} ${f(y * s)}`;
-  const d = `M${p(-100, 0)} C${p(-114, -24)} ${p(-88, -44)} ${p(-62, -36)} C${p(-60, -68)} ${p(-16, -80)} ${p(4, -56)} C${p(20, -86)} ${p(74, -76)} ${p(70, -40)} C${p(98, -46)} ${p(116, -16)} ${p(100, 0)} Z`;
+  const pts = CLOUD_SHAPES[variant % CLOUD_SHAPES.length] ?? CLOUD_SHAPES[0]!;
+  let d = `M${p(pts[0]![0]!, pts[0]![1]!)}`;
+  for (let i = 1; i + 2 < pts.length; i += 3) {
+    const [a1, b1] = pts[i]!;
+    const [a2, b2] = pts[i + 1]!;
+    const [a3, b3] = pts[i + 2]!;
+    d += ` C${p(a1!, b1!)} ${p(a2!, b2!)} ${p(a3!, b3!)}`;
+  }
+  d += ` L${p(100, 0)} Z`;
   const inner = `M${p(-40, -30)} C${p(-30, -50)} ${p(-6, -52)} ${p(4, -38)} M${p(28, -44)} C${p(40, -58)} ${p(60, -54)} ${p(62, -36)}`;
   return (
     fillPath(d, fill) +
     h("path", { d: `M${p(-98, -2)} C${p(-60, -16)} ${p(40, -18)} ${p(99, -5)} L${p(100, 0)} L${p(-100, 0)} Z`, fill: shade, opacity: 0.85 }) +
     hatchArea(`M${p(-90, -2)} C${p(-50, -12)} ${p(40, -14)} ${p(92, -4)} L${p(92, 0)} L${p(-90, 0)} Z`, "cs-hatch-fine", 0.5) +
-    h("path", { d: inner, fill: "none", stroke: "#8d98a3", "stroke-width": 1, opacity: 0.7, filter: "url(#cs-rough)" }) +
+    (variant % 2 === 0 ? h("path", { d: inner, fill: "none", stroke: "#8d98a3", "stroke-width": 1, opacity: 0.7, filter: "url(#cs-rough)" }) : "") +
     h("path", { d, fill: "none", stroke: "#6c6a68", "stroke-width": 1.5, "stroke-linejoin": "round", filter: "url(#cs-rough)" })
   );
 }

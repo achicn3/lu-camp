@@ -7,7 +7,10 @@ export const SKY_STOPS = {
   golden: ["#e9b98a", "#fbe3b8"],
   sunset: ["#7c6aa0", "#f3a676"],
   night: ["#0d1a38", "#2b3f6b"],
-  dawn: ["#f6d9b8", "#fdf3e2"],
+  dawn: ["#c9d8e2", "#f8e6cf"],
+  afternoon: ["#a6c6da", "#f3ead2"],
+  rain: ["#8f9ba6", "#c7cccf"],
+  dusk: ["#8e84a8", "#f1c29a"],
 } as const;
 
 export const DEFS = `

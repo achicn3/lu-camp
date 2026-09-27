@@ -1,6 +1,6 @@
 // 會動的角色與道具：人物（各種姿勢）、露營車、帳篷。每個都有 class 讓時間軸抓得到要動的關節。
 // 座標：人物原點在腳底中央、面向右；露營車原點在前後輪中間的地面。
-import { INK, INK_SOFT, doodleText, fillPath, g, h, inkPath, shadow, shape } from "./svg";
+import { INK, INK_SOFT, doodleText, fillPath, g, h, hatchArea, inkPath, shadow, shape } from "./svg";
 
 const SKIN = "#efc9a6";
 const SKIN_SHADE = "#e6b692";
@@ -99,12 +99,21 @@ function torso(withPack = true): string {
       h("path", { d: "M8 -56 L10 2", "stroke-width": 1.6 }),
       h("path", { d: "M-2 -16 L20 -16 L20 -2 L-2 -2 Z", "stroke-width": 1.6 }),
       h("path", { d: scarf, "stroke-width": 2 }),
-    )
+    ) +
+    // 和坐著那一位同一件外套：下襬收邊、拉鍊齒、口袋釦、肩線、圍巾針織紋
+    fillPath("M-26 -4 C-8 0 12 0 26 -4 L26 4 L-26 4 Z", JACKET_SHADE) +
+    inkPath("M-26 -4 C-8 0 12 0 26 -4", 1.1) +
+    inkPath("M7 -50 l3 0 M7 -42 l3 0 M8 -34 l3 0 M8 -26 l3 0 M9 -18 l3 0 M9 -10 l3 0", 0.8) +
+    inkPath("M-2 -10 L20 -10", 0.9) +
+    h("circle", { cx: 9, cy: -7, r: 1.4, fill: "#3a2a20" }) +
+    inkPath("M-18 -64 C-20 -48 -22 -34 -24 -22 M22 -62 C26 -50 28 -40 28 -30", 1) +
+    inkPath("M-8 -66 l1 6 M2 -64 l0 6 M12 -64 l-1 6 M20 -66 l-1 5", 0.8) +
+    inkPath("M2 -40 q5 3 10 0 M-14 -30 q4 3 8 0", 0.8, { opacity: 0.7 })
   );
 }
 
 /** 站姿／走路的人：legs、arms 可擺動；hold 為前手拿的東西。 */
-export function standingPerson(cls: string, hold = ""): string {
+export function standingPerson(cls: string, hold = "", carry = ""): string {
   return g(
     { class: `cs-person ${cls}` },
     shadow(0, 2, 40, 7),
@@ -114,10 +123,26 @@ export function standingPerson(cls: string, hold = ""): string {
       g({ transform: "translate(4 -78)" }, leg(78, "cs-leg-front")),
       g({ transform: "translate(0 -76)" }, torso()),
       g({ transform: "translate(8 -176)", class: "cs-head" }, head()),
+      // 抱在胸前的東西（紙箱、保冷箱），畫在身體與前手之間
+      g({ class: "cs-carry", transform: "translate(22 -104)" }, carry),
       g({ transform: "translate(6 -146)" }, arm(58, "cs-arm-front", hold)),
     ),
   );
 }
+
+/** 抱在胸前搬的紙箱、保冷箱（原點在抱的位置）。 */
+export const CARRY_BOX = g(
+  { class: "cs-carry-box", opacity: 0 },
+  shape("M-30 -26 L30 -26 L30 22 L-30 22 Z", "#c99a63", 2),
+  inkPath("M-30 -10 L30 -10 M0 -26 L0 -10", 1.2),
+  hatchArea("M12 -26 L30 -26 L30 22 L12 22 Z", "cs-hatch-fine", 0.8),
+);
+export const CARRY_COOLER = g(
+  { class: "cs-carry-cooler", opacity: 0 },
+  shape("M-34 -18 L34 -18 L32 26 L-32 26 Z", "#5fa38a", 2, "cs-hatch-fine"),
+  shape("M-37 -28 L37 -28 L37 -17 L-37 -17 Z", "#f3e9d2", 1.8),
+  inkPath("M-10 -34 L10 -34 M-10 -34 L-12 -28 M10 -34 L12 -28", 1.6),
+);
 
 /** 手上的收納袋（帳篷），接在手臂末端。 */
 export const TENT_BAG = g(
@@ -151,9 +176,18 @@ export function crouchingPerson(): string {
     shape(thigh, PANTS, 2.2),
     shape(shin, PANTS, 2.2),
     shape("M24 -12 L46 -12 C56 -10 58 0 52 2 L24 2 Z", BOOT, 2),
-    g({ transform: "translate(-2 -40) rotate(28)" }, torso()),
-    g({ transform: "translate(44 -142) rotate(12)", class: "cs-head" }, head()),
-    g({ transform: "translate(30 -104)" }, g({ class: "cs-hammer-arm" }, arm(44, "cs-arm-hammer", mallet))),
+    // 上半身一起前傾（繞髖關節），肩膀帶動手臂敲下去
+    g(
+      { transform: "translate(-2 -40)" },
+      g(
+        { class: "cs-hammer-body" },
+        g({ transform: "translate(2 40)" },
+          g({ transform: "translate(-2 -40) rotate(28)" }, torso()),
+          g({ transform: "translate(44 -142) rotate(12)", class: "cs-head" }, head()),
+          g({ transform: "translate(30 -104)" }, g({ class: "cs-hammer-arm" }, arm(44, "cs-arm-hammer", mallet))),
+        ),
+      ),
+    ),
   );
 }
 
@@ -214,8 +248,12 @@ export function camperVan(): string {
       g(
         { class: "cs-wheel" },
         h("circle", { r: 34, fill: "#3a3330", filter: "url(#cs-pencil)" }),
-        h("circle", { r: 16, fill: "#d9dbd6", stroke: INK, "stroke-width": 2 }),
-        inkPath("M-16 0 L16 0 M0 -16 L0 16 M-11 -11 L11 11 M-11 11 L11 -11", 1.6),
+        // 輪胎胎紋（跟著輪子轉）
+        h("circle", { r: 29, fill: "none", stroke: "#57504b", "stroke-width": 4, "stroke-dasharray": "5 4" }),
+        h("circle", { r: 18, fill: "#d9dbd6", stroke: INK, "stroke-width": 2 }),
+        h("circle", { r: 11, fill: "#b8bcbf", stroke: INK, "stroke-width": 1.2 }),
+        inkPath("M-11 0 L11 0 M0 -11 L0 11", 1.2),
+        h("circle", { r: 3, fill: "#6e7276" }),
         h("circle", { r: 34, fill: "none", stroke: INK, "stroke-width": 2.6, filter: "url(#cs-rough)" }),
       ),
     );
@@ -253,10 +291,17 @@ export function camperVan(): string {
         inkPath("M70 -84 L84 -84", 3.2),
       ),
       g({ transform: "translate(-120 -68) rotate(-4)" }, word),
+      // 鈑件分界、窗框、門把、後照鏡、車身下緣陰影
+      inkPath("M-100 -206 L-100 -40 M92 -196 L96 -40", 1.1, { opacity: 0.8 }),
+      inkPath("M-176 -190 L-54 -190 L-54 -124 L-176 -124 Z M96 -194 L130 -194", 1.1),
+      hatchArea("M-190 -56 L198 -56 L198 -40 L-190 -40 Z", "cs-hatch-fine", 0.9),
+      inkPath("M-180 -66 L-170 -66 M100 -96 L112 -96", 2),
+      shape("M160 -142 L176 -150 L180 -136 L166 -132 Z", "#9aa0a6", 1.4),
       inkPath(body, 3),
       inkPath("M-190 -104 L196 -104", 2),
       // 車燈、保險桿
-      shape("M186 -96 C194 -96 198 -84 198 -76 L186 -76 Z", "#f7d67a", 2),
+      shape("M184 -98 C194 -98 199 -86 199 -76 L184 -76 Z", "#f7e3a0", 2),
+      h("path", { d: "M188 -94 L192 -84", stroke: "#fff", "stroke-width": 2, "stroke-linecap": "round", opacity: 0.8 }),
       shape("M-196 -52 L-184 -52 L-184 -36 L-196 -36 Z M190 -52 L206 -52 L206 -36 L190 -36 Z", "#9aa0a6", 2),
     ),
     wheel(-110),
@@ -294,6 +339,15 @@ export function tent(): string {
       fillPath("M0 -160 L54 0 L45 0 L-2 -148 Z", "#9a6a28"),
       inkPath("M45 0 L-2 -148", 0.9),
       g({ transform: "translate(2 -170) rotate(-7)" }, word, g({ transform: "translate(74 -58)" }, h("path", { d: "M0 -12 l3.5 10 l10 1 l-8 6 l2.5 10 l-8 -6 l-8 6 l2.5 -10 l-8 -6 l10 -1z", fill: "#e8674a", stroke: "#3a2210", "stroke-width": 2.2, filter: "url(#cs-rough)" }))),
+      // 夜晚：人進了帳篷、裡面點燈——布透出暖光，帳壁上一個坐著的人影
+      g(
+        { class: "cs-tent-lit", opacity: 0 },
+        h("path", { d: "M-170 0 L0 -320 L170 0 Z", fill: "#ffcf7a", opacity: 0.55 }),
+        h("path", { d: "M0 -320 L170 0 L240 0 L58 -320 Z", fill: "#f0a850", opacity: 0.45 }),
+        h("path", { d: "M-54 0 L0 -160 L54 0 Z", fill: "#ffe7a6" }),
+        h("path", { d: "M-60 0 C-46 -60 -28 -120 0 -160 C-12 -116 -20 -60 -24 0 Z", fill: "#f7c46a" }),
+        h("path", { d: "M70 -8 C66 -40 72 -70 86 -84 C80 -96 84 -112 98 -112 C112 -112 116 -96 108 -84 C124 -70 128 -40 124 -8 Z", fill: "#7a4a24", opacity: 0.32 }),
+      ),
       g(
         { filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-linecap": "round", "stroke-linejoin": "round" },
         h("path", { d: "M-170 0 L0 -320 L170 0", "stroke-width": 3.4 }),
@@ -446,8 +500,13 @@ export function hammock(span: number): string {
     h("clipPath", { id: "cs-hammock-clip" }, h("path", { d: inner })),
     inkPath(`M${-half} 0 L${-half - 22} -34 M${half} 0 L${half + 22} -34`, 1.8),
     fillPath(inner, "#3f7361"),
-    g({ "clip-path": "url(#cs-hammock-clip)" }, shape(blanket, "#c9553a", 2.2, "cs-hatch-fine")),
-    g({ transform: `translate(${-half * 0.58} ${sag * 0.3}) rotate(-80)` }, head(21)),
+    // 傍晚躺著放鬆看天空（眼睛張開、胸前捧著杯子），不是睡覺
+    g(
+      { class: "cs-hammock-person" },
+      g({ "clip-path": "url(#cs-hammock-clip)" }, shape(blanket, "#c9553a", 2.2, "cs-hatch-fine")),
+      g({ transform: `translate(${-half * 0.58} ${sag * 0.3}) rotate(-80)` }, head(21, false)),
+      g({ transform: `translate(${-half * 0.28} ${sag * 0.3})` }, shape("M-9 -12 L9 -12 L8 6 L-8 6 Z", "#f4efe4", 1.6), h("circle", { cx: -10, cy: 0, r: 5, fill: SKIN, stroke: INK, "stroke-width": 1.2 })),
+    ),
     fillPath(outer, "#5fa38a"),
     h("path", { d: outer, fill: "url(#cs-hatch-fine)", filter: "url(#cs-rough)" }),
     inkPath(outer, 2.6),
@@ -468,5 +527,104 @@ export function flame(scale = 1): string {
     g({ class: "cs-flame-mid" }, fillPath(mid, "#f6b73f"), h("path", { d: mid, ...edge, stroke: "#c06a22", "stroke-width": 1.1, opacity: 0.8 })),
     g({ class: "cs-flame-core" }, fillPath(core, "#fff1b8")),
     g({ class: "cs-sparks" }, h("circle", { cx: -16, cy: -120, r: 2.2, fill: "#f7b33c" }), h("circle", { cx: 14, cy: -134, r: 1.8, fill: "#f7b33c" }), h("circle", { cx: 4, cy: -152, r: 1.4, fill: "#f7b33c" })),
+  );
+}
+
+/**
+ * 矩形天幕（兩主柱＋四角拉繩的「飛行式」搭法）。原點在兩柱中間的地面。
+ * 前半片布面朝鏡頭斜下，邊緣受拉力往內彎、中間略有弧度；右側露出一點後半片的背光面。
+ * cs-tarp-poles／cs-tarp-fabric／cs-tarp-line 讓時間軸做「立柱→展開→拉繩」。
+ */
+export const TARP_PTS = { L: [-200, -330], R: [210, -346], FL: [-372, -188], FR: [384, -204], BR: [318, -266], BL: [-322, -250] } as const;
+export function tarpBulbs(): [number, number][] {
+  const [x0, y0] = TARP_PTS.FL;
+  const [x1, y1] = TARP_PTS.FR;
+  const pts: [number, number][] = [];
+  for (let i = 1; i < 10; i += 1) {
+    const t = i / 10;
+    pts.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - 46 * 2 * t * (1 - t) + 20 + Math.sin(t * Math.PI) * 24]);
+  }
+  return pts;
+}
+export function tarp(): string {
+  const { L, R, FL, FR, BR, BL } = TARP_PTS;
+  const P = (p: readonly number[]) => `${p[0]} ${p[1]}`;
+  // 前半片：脊線略拱、前緣往上彎（受拉力）、兩側往內彎
+  // 脊線在兩柱間微微下垂；前緣受拉力明顯往上彎；兩側往內彎（布被四角拉繩拉緊的樣子）
+  const ridgeQ = `Q${(L[0] + R[0]) / 2} ${(L[1] + R[1]) / 2 + 10}`;
+  const sideR = `Q${R[0] + 96} ${(R[1] + FR[1]) / 2 + 14}`;
+  const sideL = `Q${L[0] - 104} ${(L[1] + FL[1]) / 2 + 18}`;
+  const frontQ = `Q${(FL[0] + FR[0]) / 2 + 20} ${(FL[1] + FR[1]) / 2 - 46}`;
+  const front = `M${P(L)} ${ridgeQ} ${P(R)} ${sideR} ${P(FR)} ${frontQ} ${P(FL)} ${sideL} ${P(L)} Z`;
+  // 左右兩端露出一點後半片（背光面）
+  const back = `M${P(R)} Q${R[0] + 60} ${R[1] + 36} ${P(BR)} L${P(FR)} ${sideR.replace("Q", "Q")} ${P(R)} Z M${P(L)} Q${L[0] - 70} ${L[1] + 40} ${P(BL)} L${P(FL)} ${sideL} ${P(L)} Z`;
+  let bulbs = "";
+  for (const [x, y] of tarpBulbs()) bulbs += h("circle", { cx: x, cy: y, r: 5.5, fill: "#f7e3a0", stroke: INK, "stroke-width": 1.2 });
+  const [sx0, sy0] = FL;
+  const [sx1, sy1] = FR;
+  // 電線順著每顆燈泡一段段垂下
+  const pts: [number, number][] = [[sx0, sy0 + 4], ...tarpBulbs().map(([x, y]) => [x, y - 5] as [number, number]), [sx1, sy1 + 4]];
+  let wire = `M${pts[0]![0]} ${pts[0]![1]}`;
+  for (let i = 1; i < pts.length; i += 1) {
+    const [ax, ay] = pts[i - 1]!;
+    const [bx, by] = pts[i]!;
+    wire += ` Q${((ax + bx) / 2).toFixed(1)} ${(Math.max(ay, by) + 7).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}`;
+  }
+  const pole = (x: number, top: number) =>
+    h("path", { d: `M${x} 0 L${x} ${top}`, stroke: "#5b5f63", "stroke-width": 6, "stroke-linecap": "round" }) +
+    h("path", { d: `M${x - 1.5} -4 L${x - 1.5} ${top + 6}`, stroke: "#b8bcbf", "stroke-width": 1.4 }) +
+    inkPath(`M${x - 5} ${top * 0.34} l10 0 M${x - 5} ${top * 0.67} l10 0 M${x} ${top} l0 -16`, 1.4);
+  const line = (x0: number, y0: number, x1: number, y1: number) =>
+    h("path", { class: "cs-tarp-line", d: `M${x0} ${y0} L${x1} ${y1}`, stroke: INK_SOFT, "stroke-width": 1.3, fill: "none", "stroke-dasharray": 600, "stroke-dashoffset": 0 }) +
+    inkPath(`M${x1 - 2} ${y1 - 6} l4 14`, 2.2);
+  return g(
+    { class: "cs-tarp" },
+    g({ class: "cs-tarp-shadow" }, shadow(10, 6, 380, 26, 0.16)),
+    g(
+      { class: "cs-tarp-lines" },
+      line(L[0], L[1], -470, 8),
+      line(R[0], R[1], 480, 4),
+      line(FL[0], FL[1], -430, 46),
+      line(FR[0], FR[1], 450, 44),
+      line(BR[0], BR[1], 420, -16),
+    ),
+    g({ class: "cs-tarp-poles" }, pole(L[0], L[1]), pole(R[0], R[1])),
+    g(
+      { class: "cs-tarp-fabric" },
+      fillPath(back, "#a88a5e"),
+      hatchArea(back, "cs-hatch", 0.9),
+      inkPath(back, 1.8),
+      fillPath(front, "#d9bd8c"),
+      h("path", { d: front, fill: "url(#cs-fabric)", opacity: 0.8 }),
+      // 越靠近前緣越暗（布面往下斜、背光）
+      h("path", { d: `M${P(FL)} ${frontQ.replace("Q", "Q")} ${P(FR)} L${FR[0] - 36} ${FR[1] - 36} Q${(FL[0] + FR[0]) / 2 + 20} ${(FL[1] + FR[1]) / 2 - 84} ${FL[0] + 40} ${FL[1] - 32} Z`, fill: "#b99a68", opacity: 0.55 }),
+      // 布面張力的皺褶：從柱頂往四角放射
+      inkPath(`M${L[0] + 10} ${L[1] + 12} Q${L[0] - 40} ${L[1] + 70} ${FL[0] + 30} ${FL[1] - 12} M${R[0] - 6} ${R[1] + 12} Q${R[0] + 40} ${R[1] + 70} ${FR[0] - 28} ${FR[1] - 14} M${(L[0] + R[0]) / 2} ${(L[1] + R[1]) / 2 + 4} Q${(L[0] + R[0]) / 2 + 4} ${(L[1] + R[1]) / 2 + 60} ${(FL[0] + FR[0]) / 2} ${(FL[1] + FR[1]) / 2 - 22}`, 1, { opacity: 0.55 }),
+      // 脊線車縫、角落補強片、邊緣收邊
+      inkPath(`M${P(L)} ${ridgeQ} ${P(R)}`, 1, { "stroke-dasharray": "5 5", opacity: 0.7, transform: "translate(0 7)" }),
+      shape(`M${FL[0]} ${FL[1]} l26 -4 l-12 -20 Z M${FR[0]} ${FR[1]} l-26 -4 l12 -20 Z`, "#9c7c4f", 1.2),
+      // 柱頂穿出布面的尖端
+      inkPath(`M${L[0]} ${L[1]} l0 -18 M${R[0]} ${R[1]} l0 -18`, 2.4),
+      inkPath(front, 2.4),
+    ),
+    // 串燈沿著前緣垂下（光暈在燈光層）
+    g({ class: "cs-tarp-lights" }, h("path", { d: wire, stroke: INK, "stroke-width": 1.1, fill: "none" }), bulbs),
+  );
+}
+
+/** 復古煤油暖爐（圓筒、玻璃窗裡的火、頂部散熱罩與提把）。原點在底部中央；cs-heater-flame 點燃才出現。 */
+export function heater(): string {
+  return g(
+    { class: "cs-heater" },
+    shadow(0, 2, 34, 6, 0.28),
+    shape("M-26 0 L26 0 L24 -8 L-24 -8 Z", "#3c4a3f", 1.8),
+    shape("M-24 -8 L24 -8 L24 -72 L-24 -72 Z", "#4f6a57", 2.2),
+    hatchArea("M8 -8 L24 -8 L24 -72 L8 -72 Z", "cs-hatch-fine", 0.9),
+    h("path", { d: "M-18 -14 L-18 -66", stroke: "#8fae96", "stroke-width": 2.4, "stroke-linecap": "round", opacity: 0.7 }),
+    shape("M-14 -30 L14 -30 L14 -52 L-14 -52 Z", "#2c2a28", 1.6),
+    g({ class: "cs-heater-flame", opacity: 0 }, h("rect", { x: -13, y: -51, width: 26, height: 20, fill: "#f7a93c" }), h("path", { d: "M-10 -34 C-8 -44 -2 -46 0 -50 C2 -46 8 -44 10 -34 Z", fill: "#ffe7a6" })),
+    shape("M-26 -72 L26 -72 L20 -86 L-20 -86 Z", "#9aa0a4", 1.8),
+    inkPath("M-18 -76 L18 -76 M-16 -81 L16 -81", 1),
+    inkPath("M-14 -86 C-14 -104 14 -104 14 -86", 1.8),
   );
 }

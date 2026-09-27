@@ -1,6 +1,6 @@
 // 地面層的八格場景（每格 1000×1400，靜態不動的部分）。會動的角色另外疊在上面（figures.ts）。
-//   0–2 開露營車上山　3 營地停車卸貨　4 搭帳篷＋泡咖啡　5 懸崖看雲海　6 天幕下烤棉花糖　7 星空吊床
-import { cloud, flowers, grassField, meadow, pine, stone } from "./nature";
+//   0–2 開露營車上山　3 營地停車卸貨　4 主營地（帳篷＋木棧台營桌，夜晚入帳篷）　5 天幕營位（避雨、串燈、暖爐、營火）　6 雲海　7 傍晚吊床
+import { cloud, flowers, grassField, pine, stone } from "./nature";
 import { beanBag, campChair, campTable, deck, dripperSet, firePit, kettle, lantern } from "./props";
 import {
   INK,
@@ -8,6 +8,7 @@ import {
   fillPath,
   g,
   h,
+  hatchArea,
   inkPath,
   rng,
   shadow,
@@ -53,8 +54,25 @@ function frontGrass(r: Rng, y0 = 1310): string {
 }
 
 function bush(x: number, y: number, s: number): string {
-  const d = `M${x - 40 * s} ${y} C${x - 50 * s} ${y - 30 * s} ${x - 20 * s} ${y - 50 * s} ${x} ${y - 38 * s} C${x + 20 * s} ${y - 56 * s} ${x + 52 * s} ${y - 30 * s} ${x + 42 * s} ${y} Z`;
-  return shape(d, "#6f8f4c", 2.2, "cs-hatch-fine");
+  // 幾團葉叢疊起來：外輪廓鋸齒、背光面深色與斜線、幾片亮葉
+  const r = rng(Math.round(x * 7 + y));
+  let out = h("ellipse", { cx: x, cy: y + 1, rx: 46 * s, ry: 6 * s, fill: INK, opacity: 0.22 });
+  const lumps: [number, number, number][] = [[-22, -18, 24], [4, -30, 28], [26, -16, 22], [-2, -10, 26]];
+  for (const [dx, dy, rr] of lumps) {
+    const cx = x + dx * s;
+    const cy = y + dy * s;
+    const pts: string[] = [];
+    for (let k = 0; k < 14; k += 1) {
+      const a2 = (k / 14) * Math.PI * 2;
+      const rad = rr * s * (k % 2 ? 0.86 : 1) * (0.92 + r() * 0.12);
+      pts.push(`${(cx + Math.cos(a2) * rad).toFixed(1)} ${(cy + Math.sin(a2) * rad * 0.8).toFixed(1)}`);
+    }
+    const d = `M${pts.join(" L")} Z`;
+    out += fillPath(d, "#6c8c4a") + inkPath(d, 1.6);
+    out += hatchArea(`M${cx} ${cy - rr * s * 0.2} L${cx + rr * s} ${cy} L${cx + rr * s * 0.6} ${cy + rr * s * 0.7} L${cx} ${cy + rr * s * 0.8} Z`, "cs-hatch-fine", 0.8);
+    out += h("path", { d: `M${cx - rr * s * 0.5} ${cy - rr * s * 0.3} q4 -4 8 -2`, stroke: "#9cbb6e", "stroke-width": 2, fill: "none", "stroke-linecap": "round" });
+  }
+  return out;
 }
 
 /** 木頭指示牌。 */
@@ -134,7 +152,7 @@ function campsitePanel(): string {
     fillPath("M100 1224 C300 1210 600 1212 790 1226 C800 1290 110 1298 100 1224 Z", "#cbbd9f") +
     gravel +
     inkPath("M100 1224 C300 1210 600 1212 790 1226", 1.6, { opacity: 0.6 }) +
-    signpost(560, 1172, "露坑", false) +
+    signpost(730, 1172, "露坑", false) +
     bush(40, 1260, 0.9) +
     frontGrass(r, 1320) +
     flowers(r, 0, 1000, 1330, 1390, 12)
@@ -168,17 +186,27 @@ function coffeePanel(): string {
 
 /** 懸崖看雲海（後景）：一整片雲海蓋住山腳，兩側往面板邊緣收低，才不會跟隔壁格硬接。 */
 function cliffBack(): string {
+  // 雲海：遠處一整片柔和的雲層（幾道淡淡的層次線、偶爾一團隆起），不是一朵朵重複的雲
   const r = rng(505);
   const top = "M-20 1045 C60 1040 140 950 260 930 C420 915 640 920 780 930 C900 948 950 1036 1020 1045";
-  let puffs = "";
-  for (let row = 0; row < 5; row += 1) {
-    for (let i = 0; i < 7; i += 1) {
-      const x = 180 + i * 105 + r() * 40 - (row % 2) * 50;
-      const y = 975 + row * 95 + r() * 25;
-      puffs += g({ transform: `translate(${x.toFixed(0)} ${y.toFixed(0)})` }, cloud(150 + r() * 70, "#fbf7ee", row % 2 ? "#e3e0e8" : "#e7e3dc"));
-    }
+  let bands = "";
+  for (let i = 0; i < 6; i += 1) {
+    const y = 960 + i * 70 + r() * 14;
+    bands += `M${120 + r() * 60} ${y.toFixed(0)} C${300 + r() * 60} ${(y - 10).toFixed(0)} ${560 + r() * 60} ${(y + 8).toFixed(0)} ${880 + r() * 60} ${(y - 4).toFixed(0)} `;
   }
-  return fillPath(`${top} L1020 1420 L-20 1420 Z`, "#f4f1ea") + inkPath(top, 1.6, { opacity: 0.5 }) + puffs;
+  let humps = "";
+  for (let i = 0; i < 5; i += 1) {
+    const x = 220 + i * 150 + r() * 60;
+    const y = 950 + (i % 2) * 110 + r() * 40;
+    humps += g({ transform: `translate(${x.toFixed(0)} ${y.toFixed(0)})`, opacity: (0.7 + (i % 3) * 0.12).toFixed(2) }, cloud(150 + r() * 110, i % 2 ? "#f7f5f0" : "#fbf8f1", "#e3e2e6", i));
+  }
+  return (
+    fillPath(`${top} L1020 1420 L-20 1420 Z`, "#f6f3ec") +
+    h("path", { d: `${top} L1020 1420 L-20 1420 Z`, fill: "url(#cs-haze)", opacity: 0.5 }) +
+    h("path", { d: bands, stroke: "#c9cfd6", "stroke-width": 1.4, fill: "none", opacity: 0.8, "stroke-linecap": "round" }) +
+    humps +
+    h("path", { d: top, stroke: "#9aa3aa", "stroke-width": 1.2, fill: "none", opacity: 0.6, filter: "url(#cs-rough)" })
+  );
 }
 
 /** 懸崖看雲海（前景）：左右兩片草地，邊緣是岩石；中間的缺口看下去是雲海。流動的雲夾在前後景之間。 */
@@ -187,99 +215,63 @@ export function cliffFront(): string {
   const left = "M-20 1030 C120 1024 300 1036 470 1046 C500 1120 540 1240 600 1420 L-20 1420 Z";
   const right = "M1020 1036 C960 1036 920 1042 890 1052 C876 1140 862 1260 850 1420 L1020 1420 Z";
   const rim = (d: string) => fillPath(d, "#9a9383") + h("path", { d, fill: "url(#cs-hatch)", filter: "url(#cs-rough)" });
+  // 崖邊只放幾顆大小不一的石頭，不要排成一串
   let rocks = "";
-  for (let i = 0; i < 8; i += 1) {
-    const t = i / 7;
-    rocks += stone(r, 470 + t * 120 + r() * 10, 1060 + t * 340, 12 + r() * 10);
-  }
-  for (let i = 0; i < 5; i += 1) {
-    const t = i / 4;
-    rocks += stone(r, 890 - t * 36 + r() * 8, 1070 + t * 330, 10 + r() * 8);
-  }
+  for (const [t, w] of [[0.05, 16], [0.22, 11], [0.5, 19], [0.8, 13]] as const) rocks += stone(r, 468 + t * 125 + r() * 6, 1060 + t * 330, w);
+  for (const [t, w] of [[0.15, 12], [0.6, 15]] as const) rocks += stone(r, 890 - t * 36, 1072 + t * 320, w);
   return (
-    fillPath(left, "#9bb468") +
-    fillPath(right, "#9bb468") +
+    // 崖頂草地用和其他格同一套草原底色（裁成左右兩片），格與格接起來才不會有色差
+    h("clipPath", { id: "cs-cliff-grass" }, h("path", { d: `${left} ${right}` })) +
+    g({ "clip-path": "url(#cs-cliff-grass)" }, meadowBase(rng(508), 1036)) +
     rim("M470 1046 C500 1120 540 1240 600 1420 L560 1420 C510 1260 470 1140 440 1050 Z") +
     rim("M890 1052 C876 1140 862 1260 850 1420 L880 1420 C890 1260 902 1140 916 1050 Z") +
-    meadow(r, -10, 450, 1036, 1400, 300) +
-    meadow(r, 900, 1010, 1040, 1400, 70) +
     rocks +
     inkPath(left, 2.8) +
     inkPath(right, 2.8) +
     shape("M330 1032 L338 1032 L338 972 L330 972 Z M440 1042 L448 1042 L448 982 L440 982 Z", "#8a5a34", 2) +
     shape("M326 982 L452 992 L452 1000 L326 990 Z M326 1004 L452 1014 L452 1020 L326 1012 Z", "#b98352", 1.8) +
     pine(40, 1040, 1.1) +
-    signpost(130, 1042, "雲海", false, "round")
+    signpost(130, 1042, "露坑", false)
   );
 }
 
-/** 天幕下烤棉花糖：天幕、營柱、串燈（燈泡的光在燈光層）、木頭座位旁的營火、保冷箱。 */
-function eveningPanel(): string {
+/**
+ * 天幕營位（天幕、暖爐、火焰是角色，另外疊上）：草地、兩側松樹、天幕下的保冷箱與木箱、
+ * 前方的營火堆（和泡咖啡那一幕同一種畫法）、坐的木頭。
+ */
+function tarpSitePanel(): string {
   const r = rng(606);
-  let stones = "";
-  for (let i = 0; i < 9; i += 1) {
-    const a = Math.PI * (0.05 + (i / 8) * 0.9);
-    stones += stone(r, Math.cos(a) * -70, Math.sin(a) * 16 + 6, 14 + r() * 8);
-  }
-  let bulbs = "";
-  for (let i = 0; i < 9; i += 1) {
-    const t = i / 8;
-    const x = 170 + t * 640;
-    const y = 842 + Math.sin(t * Math.PI) * 44;
-    bulbs += h("circle", { cx: x, cy: y + 12, r: 7, fill: "#f7e3a0", stroke: INK, "stroke-width": 1.6 });
-  }
   return (
     meadowBase(r) +
-    pine(60, 1030, 1.2) +
-    pine(950, 1020, 1.1) +
-    // 天幕
-    shape("M170 842 L500 770 L830 842 L760 900 L240 900 Z", "#e8674a", 2.8, "cs-hatch-fine") +
-    fillPath("M240 900 L760 900 L830 842 L760 860 Z", "#c24f36") +
-    inkPath("M500 770 L500 1150 M170 842 L150 1150 M830 842 L852 1150", 3.2) +
-    inkPath("M170 842 L60 1170 M830 842 L940 1170", 1.4) +
-    inkPath("M170 842 C380 900 620 900 830 842", 1.4) +
-    g({ filter: "url(#cs-rough)" }, bulbs) +
-    // 保冷箱＋紙箱
-    shape("M720 1110 L840 1110 L836 1180 L724 1180 Z", "#5fa38a", 2.4, "cs-hatch-fine") +
-    shape("M716 1096 L844 1096 L844 1112 L716 1112 Z", "#f3e9d2", 2.2) +
-    shape("M600 1140 L690 1140 L690 1200 L600 1200 Z", "#c99a63", 2.2) +
-    inkPath("M600 1160 L690 1160 M645 1140 L645 1160", 1.4) +
-    // 營火底座（火焰是角色）
-    g(
-      { transform: "translate(560 1260)" },
-      stones,
-      fillPath("M-52 2 L44 -18 L50 -6 L-46 12 Z", "#6b4323"),
-      fillPath("M-50 -18 L46 2 L40 12 L-54 -6 Z", "#7a4d29"),
-      inkPath("M-52 2 L44 -18 L50 -6 L-46 12 Z M-50 -18 L46 2 L40 12 L-54 -6 Z", 2.4),
-    ) +
+    pine(70, 1040, 1.25, false, "near") +
+    pine(955, 1030, 1.1, false, "mid") +
+    // 木箱（層板＋提手孔）與保冷箱
+    shadow(705, 1172, 60, 6, 0.24) +
+    shape("M650 1172 L760 1172 L760 1112 L650 1112 Z", "#c99a63", 2.2) +
+    inkPath("M650 1132 L760 1132 M650 1152 L760 1152 M672 1122 l12 0 M726 1122 l12 0", 1.1) +
+    hatchArea("M736 1112 L760 1112 L760 1172 L736 1172 Z", "cs-hatch-fine", 0.9) +
+    shadow(820, 1180, 58, 6, 0.24) +
+    shape("M772 1180 L868 1180 L864 1124 L776 1124 Z", "#5fa38a", 2.2, "cs-hatch-fine") +
+    shape("M768 1112 L872 1112 L872 1126 L768 1126 Z", "#f3e9d2", 1.8) +
+    inkPath("M806 1104 L834 1104 M806 1104 L802 1112 M834 1104 L838 1112", 1.6) +
+    // 營火堆（火焰是角色）；坐的木頭畫在烤棉花糖的人身上
+    g({ transform: "translate(620 1290) scale(0.9)" }, firePit(r)) +
     frontGrass(r) +
-    flowers(r, 0, 1000, 1320, 1390, 10)
+    flowers(r, 0, 1000, 1330, 1390, 6)
   );
 }
 
-/** 星空吊床：兩棵松樹之間掛吊床（吊床是角色會晃），旁邊小帳篷從裡面透出燈光。 */
-function nightPanel(): string {
+/** 傍晚吊床：兩棵松樹之間掛吊床（吊床是角色會晃）。只有吊床、人與天空，不放帳篷（不是過夜的地方）。 */
+function hammockPanel(): string {
   const r = rng(707);
   return (
     meadowBase(r) +
     pine(250, 1150, 2.2, true) +
     pine(760, 1150, 2.1, true) +
-    // 小帳篷（裡面點著營燈，布透出暖光；光暈在燈光層）
-    shadow(915, 1224, 110, 10, 0.25) +
-    fillPath("M900 1080 L936 1080 L1004 1220 L980 1220 Z", "#c98f3c") +
-    h("path", { d: "M900 1080 L936 1080 L1004 1220 L980 1220 Z", fill: "url(#cs-hatch)", filter: "url(#cs-rough)" }) +
-    fillPath("M820 1220 L900 1080 L980 1220 Z", "#f3c872") +
-    fillPath("M872 1220 L900 1140 L928 1220 Z", "#fff0b0") +
-    fillPath("M864 1220 C872 1190 884 1162 900 1140 C890 1168 884 1196 882 1220 Z", "#e2b24a") +
-    h("circle", { cx: 902, cy: 1196, r: 7, fill: "#f7a93c" }) +
-    inkPath("M820 1220 L900 1080 L980 1220 M900 1080 L936 1080 L1004 1220 L980 1220 M872 1220 L900 1140 L928 1220 M864 1220 C872 1190 884 1162 900 1140", 2.4) +
-    inkPath("M852 1164 L900 1090 M948 1164 L906 1090", 1.3, { "stroke-dasharray": "5 5", opacity: 0.6 }) +
-    inkPath("M900 1080 L900 1058 M820 1220 L792 1236 M936 1080 L1030 1226", 1.3) +
-    inkPath("M788 1230 l4 12 M1026 1220 l4 12", 2.4) +
-    shape("M60 1240 L180 1240 L176 1262 L64 1262 Z", "#7a4d29", 2.2) +
-    bush(120, 1236, 0.7) +
+    bush(110, 1240, 0.8) +
+    bush(900, 1250, 0.7) +
     frontGrass(r) +
-    flowers(r, 0, 1000, 1320, 1390, 8)
+    flowers(r, 0, 1000, 1320, 1390, 6)
   );
 }
 
@@ -288,7 +280,7 @@ export function panelArt(index: number): string {
   if (index <= 2) return drivePanel(index);
   if (index === 3) return campsitePanel();
   if (index === 4) return coffeePanel();
-  if (index === 5) return cliffBack();
-  if (index === 6) return eveningPanel();
-  return nightPanel();
+  if (index === 5) return tarpSitePanel();
+  if (index === 6) return cliffBack();
+  return hammockPanel();
 }

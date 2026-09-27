@@ -8,7 +8,12 @@ import {
   crouchingPerson,
   flame,
   hammock,
+  heater,
   MUG_IN_HAND,
+  CARRY_BOX,
+  CARRY_COOLER,
+  tarp,
+  tarpBulbs,
   roastingPerson,
   sittingPerson,
   standingPerson,
@@ -46,14 +51,19 @@ export const SPOTS = {
   // 帳篷右下角（含營繩營釘）要停在木棧台左緣之前
   tentX: 4180,
   sitX: 4560,
-  cliffX: 5270,
-  roastX: 6420,
-  eveningFireX: 6560,
   coffeeFireX: 4330,
-  hammockX: 7505,
+  /** 天幕營位（第 5 格）：天幕、暖爐、營火、坐的木頭。 */
+  tarpX: 5460,
+  tarpY: 1175,
+  heaterX: 5330,
+  eveningFireX: 5620,
+  roastX: 5470,
+  /** 雲海（第 6 格）。 */
+  cliffX: 6270,
   /** 雲海的流動雲只露在兩片崖之間。 */
-  seaClipX: 5120,
+  seaClipX: 6120,
   seaClipW: 760,
+  hammockX: 7505,
 } as const;
 
 type Box = { ox: number; oy: number; w: number; h: number };
@@ -176,7 +186,9 @@ function groundTrack(): string {
   const r = rng(909);
   let seaClouds = "";
   for (let i = 0; i < 4; i += 1) {
-    seaClouds += actor(`cs-sea-cloud cs-sea-cloud-${i}`, { ox: 160, oy: 90, w: 320, h: 110 }, cloud(260 + r() * 60, "#fdfbf6", "#e9e6df"));
+    // 前後層：前面的大、亮、清楚；後面的小、灰、淡，四種輪廓輪流用
+    const back = i % 2 === 1;
+    seaClouds += actor(`cs-sea-cloud cs-sea-cloud-${i}`, { ox: 160, oy: 90, w: 320, h: 110 }, g({ opacity: back ? 0.65 : 1 }, cloud(back ? 190 + r() * 40 : 260 + r() * 60, back ? "#f1efea" : "#fdfbf6", back ? "#dedcdc" : "#e9e6df", i + 1)));
   }
   const items =
     actor("cs-item cs-item-cooler", { ox: 70, oy: 90, w: 140, h: 100 }, shape("M-56 -70 L56 -70 L52 0 L-52 0 Z", "#5fa38a", 2.4, "cs-hatch-fine") + shape("M-60 -84 L60 -84 L60 -68 L-60 -68 Z", "#f3e9d2", 2.2)) +
@@ -185,13 +197,17 @@ function groundTrack(): string {
   return (
     `<div class="cs-layer cs-track">${tiles}` +
     `<div class="cs-sea-clip" style="left:${SPOTS.seaClipX}px;width:${SPOTS.seaClipW}px">${seaClouds}</div>` +
-    `<div class="cs-tile" style="left:${5 * PANEL_W}px;width:${PANEL_W}px"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}">${cliffFront()}</svg></div>` +
+    `<div class="cs-tile" style="left:${6 * PANEL_W}px;width:${PANEL_W}px"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}">${cliffFront()}</svg></div>` +
+    actor("cs-tarp-actor", { ox: 500, oy: 380, w: 1000, h: 460 }, tarp()) +
+    actor("cs-heater-actor", { ox: 40, oy: 110, w: 80, h: 120 }, heater()) +
+    // 雨後地上的濕：幾灘水窪反光（天幕營位附近）
+    actor("cs-wet", { ox: 500, oy: 60, w: 1000, h: 200 }, h("ellipse", { cx: -250, cy: 40, rx: 70, ry: 9, fill: "#b8cad6", opacity: 0.55 }) + h("ellipse", { cx: 60, cy: 90, rx: 90, ry: 11, fill: "#b8cad6", opacity: 0.5 }) + h("ellipse", { cx: 330, cy: 55, rx: 55, ry: 7, fill: "#b8cad6", opacity: 0.5 }) + inkPath("M-290 38 q20 -3 40 0 M30 88 q30 -3 60 0", 1, { stroke: "#fff", opacity: 0.8, filter: undefined }), "opacity:0") +
     actor("cs-tent-actor", { ox: 320, oy: 420, w: 680, h: 480 }, tent()) +
     actor("cs-fire cs-fire-coffee", { ox: 60, oy: 180, w: 120, h: 200 }, flame()) +
     actor("cs-fire cs-fire-evening", { ox: 60, oy: 180, w: 120, h: 200 }, flame(0.9)) +
     items +
     actor("cs-van-actor", { ox: 280, oy: 300, w: 560, h: 330 }, camperVan()) +
-    actor("cs-pose cs-walker", { ox: 80, oy: 230, w: 180, h: 260 }, standingPerson("cs-pose-walk", TENT_BAG + MUG_IN_HAND)) +
+    actor("cs-pose cs-walker", { ox: 80, oy: 230, w: 180, h: 260 }, standingPerson("cs-pose-walk", TENT_BAG + MUG_IN_HAND, CARRY_BOX + CARRY_COOLER)) +
     actor("cs-pose cs-hammerer", { ox: 100, oy: 190, w: 260, h: 220 }, crouchingPerson()) +
     actor("cs-pose cs-sitter", { ox: 100, oy: 250, w: 220, h: 270 }, sittingPerson()) +
     actor("cs-pose cs-cliffsitter", { ox: 90, oy: 180, w: 200, h: 200 }, backViewPerson()) +
@@ -199,6 +215,9 @@ function groundTrack(): string {
     actor("cs-pose cs-hammock-actor", { ox: 280, oy: 60, w: 560, h: 220 }, hammock(470)) +
     // 營火的暖光：很淡地染到周圍的草、木棧台、帳篷與人（柔光混合，不是發光）
     actor("cs-fire-ambient", { ox: 340, oy: 260, w: 680, h: 420 }, h("ellipse", { cx: 0, cy: -20, rx: 330, ry: 200, fill: "url(#cs-ambient)" })) +
+    // 傍晚營火、暖爐與串燈、夜裡帳篷的暖光：同樣用柔光很淡地染到周圍的草、布、人
+    actor("cs-evening-ambient", { ox: 500, oy: 300, w: 1000, h: 460 }, h("ellipse", { cx: 150, cy: 0, rx: 360, ry: 200, fill: "url(#cs-ambient)" }) + h("ellipse", { cx: -140, cy: -80, rx: 300, ry: 190, fill: "url(#cs-ambient)" }), "opacity:0") +
+    actor("cs-tent-ambient", { ox: 400, oy: 300, w: 800, h: 460 }, h("ellipse", { cx: 0, cy: -60, rx: 360, ry: 230, fill: "url(#cs-ambient)" }), "opacity:0") +
     `</div>`
   );
 }
@@ -229,7 +248,7 @@ function skyLayers(): string {
     clouds +
     actor("cs-balloon", { ox: 90, oy: 130, w: 180, h: 280 }, balloon()) +
     actor("cs-birds", { ox: 40, oy: 30, w: 140, h: 100 }, h("path", { d: birds, fill: "none", stroke: INK, "stroke-width": 2.4, "stroke-linecap": "round", filter: "url(#cs-rough)" })) +
-    actor("cs-rainbow", { ox: 520, oy: 520, w: 1040, h: 560 }, g({ fill: "none", "stroke-linecap": "round", filter: "url(#cs-rough)" }, ...["#e8674a", "#f0a93b", "#f2d25a", "#7fb36a", "#6fa3cf", "#8a79c2"].map((c, i) => h("path", { class: "cs-rainbow-band", d: `M${-440 + i * 18} 0 A${440 - i * 18} ${420 - i * 18} 0 0 1 ${440 - i * 18} 0`, stroke: c, "stroke-width": 16, opacity: 0.85 }))))
+    actor("cs-rainbow", { ox: 520, oy: 520, w: 1040, h: 560 }, g({ fill: "none", "stroke-linecap": "round", filter: "url(#cs-rough)" }, ...["#d98a72", "#e2b27a", "#e6d38e", "#9fbf8f", "#93b3cf", "#a79bc6"].map((c, i) => h("path", { class: "cs-rainbow-band", d: `M${-440 + i * 14} 0 A${440 - i * 14} ${420 - i * 14} 0 0 1 ${440 - i * 14} 0`, stroke: c, "stroke-width": 13, opacity: 0.55 }))))
   );
 }
 
@@ -290,32 +309,56 @@ function nightSky(): string {
 function lightsTrack(): string {
   const glow = (x: number, y: number, rr: number, cls: string) => h("circle", { class: cls, cx: x, cy: y, r: rr, fill: "url(#cs-glow)" });
   let bulbs = "";
-  for (let i = 0; i < 9; i += 1) {
-    const t = i / 8;
-    bulbs += glow(6170 + t * 640, 854 + Math.sin(t * Math.PI) * 44, 34, "cs-bulb-glow");
-  }
+  for (const [x, y] of tarpBulbs()) bulbs += glow(SPOTS.tarpX + x, SPOTS.tarpY + y, 22, "cs-bulb-glow");
   const r = rng(12);
   let flies = "";
-  for (let i = 0; i < 16; i += 1) flies += h("circle", { class: "cs-firefly", cx: 7050 + r() * 900, cy: 950 + r() * 330, r: 9, fill: "url(#cs-firefly)" });
+  for (let i = 0; i < 14; i += 1) flies += h("circle", { class: "cs-firefly", cx: 3800 + r() * 1300, cy: 980 + r() * 320, r: 8, fill: "url(#cs-firefly)" });
   return (
     `<div class="cs-layer cs-lights"><svg viewBox="0 0 ${PANEL_COUNT * PANEL_W} ${STAGE_H}" width="${PANEL_COUNT * PANEL_W}" height="${STAGE_H}">` +
-    g({ class: "cs-lights-evening" }, glow(4700, 980, 90, "cs-lantern-glow"), glow(SPOTS.coffeeFireX, 1200, 200, "cs-fire-glow"), glow(SPOTS.eveningFireX, 1210, 230, "cs-fire-glow"), bulbs, glow(7900, 1180, 140, "cs-tentlamp-glow")) +
+    g({ class: "cs-lights-evening" }, g({ class: "cs-lights-tarp" }, bulbs), glow(SPOTS.heaterX, SPOTS.tarpY - 40, 70, "cs-heater-glow"), glow(SPOTS.eveningFireX, SPOTS.tarpY + 80, 170, "cs-fire-glow")) +
+    g({ class: "cs-lights-tent" }, glow(SPOTS.tentX + 10, 1010, 230, "cs-tentlamp-glow")) +
     g({ class: "cs-fireflies" }, flies) +
     `</svg></div>`
   );
 }
 
 function rainLayer(): string {
-  const r = rng(33);
-  let drops = "";
-  for (let i = 0; i < 120; i += 1) {
-    const x = r() * 1100 - 50;
-    const y = r() * 1400;
-    drops += `M${x.toFixed(0)} ${y.toFixed(0)} l-8 26 `;
+  // 遠景雨：細、淡、短；近景雨：粗、長、少。每條長短角度略不同，兩份疊起來往下捲接縫看不出來
+  const sheet = (seed: number, count: number, len: number, width: number, color: string, opacity: number) => {
+    const r = rng(seed);
+    let d = "";
+    for (let i = 0; i < count; i += 1) {
+      const x = r() * 1100 - 50;
+      const y = r() * 1400;
+      const l = len * (0.6 + r() * 0.8);
+      d += `M${x.toFixed(0)} ${y.toFixed(0)} l${(-l * 0.28).toFixed(1)} ${l.toFixed(1)} `;
+    }
+    const one = h("path", { d, stroke: color, "stroke-width": width, "stroke-linecap": "round", fill: "none", opacity });
+    return one + g({ transform: `translate(0 ${STAGE_H})` }, one);
+  };
+  return (
+    `<div class="cs-layer cs-rain">` +
+    `<svg class="cs-rain-far" viewBox="0 0 ${PANEL_W} ${STAGE_H * 2}" width="${PANEL_W}" height="${STAGE_H * 2}">${sheet(33, 150, 20, 1.1, "#8aa0b4", 0.45)}</svg>` +
+    `<svg class="cs-rain-near" viewBox="0 0 ${PANEL_W} ${STAGE_H * 2}" width="${PANEL_W}" height="${STAGE_H * 2}">${sheet(34, 45, 46, 2.2, "#6f8aa4", 0.6)}</svg>` +
+    `</div>`
+  );
+}
+
+/** 開車時最前景的草叢與柵欄柱：比地面移動得快，做出速度感（車本身保持穩定）。 */
+function foregroundLayer(): string {
+  const r = rng(71);
+  let tufts = "";
+  for (let x = 40; x < 4600; x += 180 + r() * 260) {
+    let blades = "";
+    for (let k = 0; k < 9; k += 1) {
+      const bx = x + (r() - 0.5) * 40;
+      const hgt = 40 + r() * 50;
+      const lean = (r() - 0.5) * 30;
+      blades += `M${(bx - 3).toFixed(0)} 1400 Q${(bx + lean * 0.4).toFixed(0)} ${(1400 - hgt * 0.6).toFixed(0)} ${(bx + lean).toFixed(0)} ${(1400 - hgt).toFixed(0)} Q${(bx + lean * 0.3 + 4).toFixed(0)} ${(1400 - hgt * 0.5).toFixed(0)} ${(bx + 4).toFixed(0)} 1400 Z `;
+    }
+    tufts += h("path", { d: blades, fill: r() > 0.5 ? "#4f6d32" : "#5d7d39" });
   }
-  // 兩份疊起來往下捲，接縫看不出來
-  const sheet = inkPath(drops, 2, { stroke: "#6f8fae", opacity: 0.7, filter: undefined });
-  return `<div class="cs-layer cs-rain"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H * 2}" width="${PANEL_W}" height="${STAGE_H * 2}">${sheet}${g({ transform: `translate(0 ${STAGE_H})` }, sheet)}</svg></div>`;
+  return `<div class="cs-layer cs-fg"><svg viewBox="0 0 4600 ${STAGE_H}" width="4600" height="${STAGE_H}">${tufts}</svg></div>`;
 }
 
 /** 櫥窗：玻璃、反光、裡面擺露營用品。 */
@@ -426,18 +469,38 @@ function doorIntro(): string {
     // 門把（拉桿）
     shape("M300 440 L340 440 L340 500 L300 500 Z", "#e2b24a", 2.2) +
     shape("M296 462 L346 462 L346 478 L296 478 Z", "#c89a36", 2.2);
-  // 握住門把的手：從右下伸進來的袖子＋拳頭（四根指節在左、大拇指壓在門把上），門把橫穿過拳頭 y=0
+  // 握住門把的手（原點＝門把橫桿中心）：只露四根手指包住橫桿、大拇指從下面扣住、一點手腕與針織袖口，
+  // 袖子往右下延伸出畫面。和結帳那隻手同一種鏽紅羅紋袖口。
+  const SKIN = "#efc9a6";
+  const fingers = [-24, -12, 0, 12]
+    .map((x, i) => `M${x} ${-16 + i} C${x - 1} ${-22 + i} ${x + 11} ${-22 + i} ${x + 11} ${-15 + i} L${x + 11} ${10 - i} C${x + 11} ${16 - i} ${x} ${16 - i} ${x} ${10 - i} Z`)
+    .join(" ");
+  let ribs = "";
+  for (let k = 0; k < 9; k += 1) ribs += `M${52 + k * 7} ${14 - k * 5} l20 26 `;
   const hand =
-    shape("M34 -20 L170 96 L128 150 L30 22 Z", "#c2643f", 3, "cs-hatch") +
-    shape("M30 -22 L50 -6 L40 30 L22 22 Z", "#a8502f", 2.4) +
-    shape("M-6 -24 C-16 -24 -19 -15 -12 -12 C-21 -9 -21 1 -12 2 C-21 5 -20 14 -11 15 C-17 19 -13 27 -4 27 L24 28 C38 28 42 16 40 0 C38 -16 32 -26 20 -26 Z", "#efc9a6", 2.6) +
-    inkPath("M-12 -12 C-4 -12 2 -11 6 -10 M-12 2 C-4 2 2 2 8 3 M-11 15 C-4 15 2 15 6 14", 1.6, { opacity: 0.75 }) +
-    shape("M18 -24 C10 -34 -6 -36 -16 -30 C-22 -26 -18 -20 -10 -21 C0 -22 8 -20 14 -16 Z", "#efc9a6", 2.4);
+    // 袖子與羅紋袖口
+    fillPath("M56 20 L130 -26 L240 150 L150 210 Z", "#c2643f") +
+    hatchArea("M56 20 L130 -26 L240 150 L150 210 Z", "cs-hatch-fine", 0.8) +
+    fillPath("M40 30 L118 -18 L140 16 L62 64 Z", "#b85a38") +
+    h("clipPath", { id: "cs-door-cuff" }, h("path", { d: "M40 30 L118 -18 L140 16 L62 64 Z" })) +
+    g({ "clip-path": "url(#cs-door-cuff)" }, h("path", { d: ribs, stroke: "#8a3e24", "stroke-width": 1.4, fill: "none", opacity: 0.8 })) +
+    inkPath("M40 30 L118 -18 L140 16 L62 64 Z M62 64 L150 210 M140 16 L240 150", 1.9) +
+    // 手背一小塊＋手腕（藏在袖口下）
+    fillPath("M14 -18 C26 -26 44 -24 58 -8 L66 26 C54 34 38 34 26 22 Z", SKIN) +
+    inkPath("M14 -18 C26 -26 44 -24 58 -8 M66 26 C54 34 38 34 26 22", 1.8) +
+    // 大拇指從橫桿下方扣過來
+    fillPath("M42 20 C30 30 10 30 -2 24 C-10 20 -8 12 0 12 C12 14 24 12 32 6 Z", SKIN) +
+    inkPath("M42 20 C30 30 10 30 -2 24 C-10 20 -8 12 0 12 C12 14 24 12 32 6", 1.6) +
+    // 四根手指包住橫桿（橫桿在手指後面露出左端）
+    fillPath(fingers, SKIN) +
+    h("path", { d: fingers, fill: "none", stroke: INK, "stroke-width": 1.5, "stroke-linejoin": "round", filter: "url(#cs-rough)" }) +
+    inkPath("M-22 -6 l6 0 M-10 -5 l6 0 M2 -4 l6 0 M14 -3 l6 0", 0.9, { opacity: 0.6 }) +
+    h("path", { d: "M-22 -15 q4 -3 7 0 M-10 -14 q4 -3 7 0 M2 -13 q4 -3 7 0 M14 -12 q4 -3 7 0", stroke: "#f6dcc4", "stroke-width": 1.4, fill: "none" });
   return (
     `<div class="cs-door"><svg class="cs-door-wall" viewBox="0 0 1000 1400" width="1000" height="1400">${wall}</svg>` +
     `<div class="cs-door-light"></div>` +
     `<div class="cs-door-leaf"><svg viewBox="-6 -6 372 942" width="372" height="942">${doorArt}</svg></div>` +
-    `<div class="cs-door-hand"><svg viewBox="-40 -60 240 240" width="240" height="240">${hand}</svg></div>` +
+    `<div class="cs-door-hand"><svg viewBox="-40 -60 280 280" width="280" height="280" overflow="visible">${hand}</svg></div>` +
     `</div>`
   );
 }
@@ -465,6 +528,7 @@ export function buildSceneHtml(): string {
     farLayer() +
     midLayer() +
     groundTrack() +
+    foregroundLayer() +
     `<div class="cs-layer cs-tint"></div>` +
     nightSky() +
     `<div class="cs-layer cs-lights-wrap">${lightsTrack()}</div>` +

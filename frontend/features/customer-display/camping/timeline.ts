@@ -1,5 +1,6 @@
 // 露營動畫的時間軸與結帳銜接。
-// 待機一輪約 93 秒：開門 → 開露營車上山 → 卸貨 → 搭帳篷 → 泡咖啡 → 懸崖看雲海 → 下雨、彩虹、烤棉花糖 → 星空吊床。
+// 待機一輪約 121 秒（店主 2026-09-27 完整分鏡）：店門口開門 → 露營車上山 → 卸貨 → 搭帳篷 → 搭天幕 →
+// 泡咖啡（Hero）→ 雲海散步 → 傍晚吊床休息 → 下雨避雨 → 雨停彩虹、串燈、營火 → 夜晚入帳篷 → 星空收尾。
 // 結帳（店主 2026-09-27：不要直接把動畫關掉）：不論播到哪，鏡頭都順順地帶回營桌、拉近，
 // 客人坐著喝咖啡等結帳；成交或簽完名就舉杯、畫出「謝謝光臨」；結束後從泡咖啡那段接著播。
 import { gsap } from "gsap";
@@ -23,16 +24,20 @@ export type CampingController = {
 type SkyKey = keyof typeof SKY_STOPS;
 
 /** 天上的斜光帶：白天最明顯，傍晚淡掉，晚上沒有。 */
-const LIGHTBANDS: Record<SkyKey, number> = { day: 0, dawn: 0, golden: 0.1, sunset: 0.04, night: 0 };
+const LIGHTBANDS: Record<SkyKey, number> = { day: 0, dawn: 0, afternoon: 0, golden: 0.1, sunset: 0.04, rain: 0, dusk: 0.03, night: 0 };
 
 /** 天空水彩暈染的濃淡：晚上幾乎看不到。 */
-const WASH: Record<SkyKey, number> = { day: 1, dawn: 1, golden: 0.7, sunset: 0.45, night: 0.08 };
+const WASH: Record<SkyKey, number> = { day: 1, dawn: 1, afternoon: 0.9, golden: 0.7, sunset: 0.45, rain: 0.6, dusk: 0.4, night: 0.08 };
 
 const TINT: Record<SkyKey, { backgroundColor: string; opacity: number }> = {
   day: { backgroundColor: "#f0c080", opacity: 0 },
   dawn: { backgroundColor: "#f0c080", opacity: 0 },
   golden: { backgroundColor: "#f0a050", opacity: 0.2 },
   sunset: { backgroundColor: "#b8506a", opacity: 0.3 },
+  afternoon: { backgroundColor: "#f0c080", opacity: 0.06 },
+  // 下雨：整體降飽和、偏冷灰
+  rain: { backgroundColor: "#7d8a96", opacity: 0.32 },
+  dusk: { backgroundColor: "#c07060", opacity: 0.24 },
   night: { backgroundColor: "#1b2a55", opacity: 0.6 },
 };
 
@@ -45,7 +50,7 @@ const CELEBRATE_ZOOM = { scale: 1.15, x: -150, y: -210 };
 const PAID_THANKS_Y = 205;
 const DOOR_HANDLE = { x: 641, y: 940 };
 /** 手的圖裡，手指握的位置（相對手那張圖的左上角）。 */
-const HAND_GRIP = { x: 54, y: 60 };
+const HAND_GRIP = { x: 40, y: 60 };
 const PARK_Y = 1262;
 
 /**
@@ -103,21 +108,23 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   const setMid = gsap.quickSetter(mid, "x", "px");
   const setTrack = gsap.quickSetter(track, "x", "px");
   const setLights = gsap.quickSetter(lights, "x", "px");
+  const setFg = gsap.quickSetter($(".cs-fg"), "x", "px");
   let lastWheel = Number.NaN;
   const tick = () => {
     setFar(-cam.x * PARALLAX.far);
     setMid(-cam.x * PARALLAX.mid);
     setTrack(-cam.x);
     setLights(-cam.x);
+    setFg(-cam.x * 1.35);
     const x = vanState.x;
     const blend = Math.min(1, Math.max(0, (x - 3000) / 200));
     const y = roadY(x) * (1 - blend) + PARK_Y * blend;
     const slope = (roadY(x + 40) - roadY(x - 40)) / 80;
-    gsap.set(van, { x: x - vanOff.ox, y: y - vanOff.oy, rotation: (Math.atan(slope) * 180 * (1 - blend)) / Math.PI, transformOrigin: `${vanOff.ox}px ${vanOff.oy}px` });
+    gsap.set(van, { x: x - vanOff.ox, y: y - vanOff.oy, rotation: (Math.atan(slope) * 180 * 0.5 * (1 - blend)) / Math.PI, transformOrigin: `${vanOff.ox}px ${vanOff.oy}px` });
     if (x !== lastWheel) {
       const deg = ((x / 34) * 180) / Math.PI;
       for (const wheel of wheels) wheel.setAttribute("transform", `rotate(${deg.toFixed(1)})`);
-      vanBody.setAttribute("transform", `translate(0 ${(Math.sin(x / 23) * 1.6 * (1 - blend)).toFixed(2)})`);
+      vanBody.setAttribute("transform", `translate(0 ${(Math.sin(x / 23) * 0.5 * (1 - blend)).toFixed(2)})`);
       lastWheel = x;
     }
   };
@@ -161,6 +168,19 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set([".cs-walker .cs-leg-back", ".cs-walker .cs-leg-front", ".cs-walker .cs-arm-back", ".cs-walker .cs-arm-front"], rot(0), pos + duration);
   };
   const camTo = (tl: gsap.core.Timeline, x: number, duration: number, pos: gsap.Position, ease = "power1.inOut") => tl.to(cam, { x, duration, ease }, pos);
+  /** 走路的人轉身（往左走時左右翻過來）。 */
+  const face = (tl: gsap.core.Timeline, dir: 1 | -1, pos: gsap.Position) => tl.set(".cs-walker > svg", { scaleX: dir, transformOrigin: "80px 50%" }, pos);
+  /** 彎腰放東西：上半身繞髖關節前傾再站直。 */
+  const bend = (tl: gsap.core.Timeline, pos: number) => {
+    tl.to(".cs-walker .cs-bob", { rotation: 22, svgOrigin: "0 -78", duration: 0.4, ease: "power2.inOut" }, pos);
+    tl.to(".cs-walker .cs-bob", { rotation: 0, svgOrigin: "0 -78", duration: 0.4, ease: "power2.inOut" }, pos + 0.5);
+  };
+  /** 抱東西走：前手往前伸，胸前出現要搬的東西。 */
+  const carry = (tl: gsap.core.Timeline, what: ".cs-carry-box" | ".cs-carry-cooler" | null, pos: number) => {
+    tl.set([".cs-carry-box", ".cs-carry-cooler"], { opacity: 0 }, pos);
+    if (what) tl.set(what, { opacity: 1 }, pos);
+    tl.set(".cs-walker .cs-arm-front", rot(what ? -55 : 0), pos);
+  };
 
   // ── 待機主時間軸 ──
   const master = gsap.timeline({ repeat: -1, paused: true });
@@ -169,7 +189,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(vanState, { x: SPOTS.vanStartX }, 0);
     tl.set(".cs-door", { autoAlpha: 1, scale: 1, transformOrigin: `${DOOR_HANDLE.x}px ${DOOR_HANDLE.y}px` }, 0);
     tl.set(".cs-door-leaf", { rotationY: 0 }, 0);
-    tl.set(".cs-door-hand", { x: 1000, y: 1420, autoAlpha: 1 }, 0);
+    tl.set(".cs-door-hand", { x: 1000, y: 1420, rotation: 0, autoAlpha: 1 }, 0);
     tl.set(".cs-flash", { opacity: 1 }, 0);
     tl.set(".cs-van-door", { x: 0 }, 0);
     tl.set(".cs-driver", { autoAlpha: 1 }, 0);
@@ -191,10 +211,28 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(".cs-marsh-fire", { opacity: 0 }, 0);
     tl.set(".cs-marsh-body", { attr: { fill: "#fbf6ee" } }, 0);
     tl.set(".cs-fire-evening", { scale: 0, transformOrigin: "60px 180px" }, 0);
-    tl.set(skyTop, { attr: { "stop-color": SKY_STOPS.day[0] } }, 0);
-    tl.set(skyBottom, { attr: { "stop-color": SKY_STOPS.day[1] } }, 0);
-    tl.set(tint, TINT.day, 0);
+    tl.set(".cs-fire-coffee", { scale: 1, opacity: 1, transformOrigin: "60px 180px" }, 0);
+    // 開場是柔和的早晨，開車途中轉成清爽白天
+    tl.set(skyTop, { attr: { "stop-color": SKY_STOPS.dawn[0] } }, 0);
+    tl.set(skyBottom, { attr: { "stop-color": SKY_STOPS.dawn[1] } }, 0);
+    tl.set(tint, TINT.dawn, 0);
     tl.set(".cs-lightbands", { opacity: LIGHTBANDS.day }, 0);
+    tl.set(".cs-walker > svg", { scaleX: 1, transformOrigin: "80px 50%" }, 0);
+    tl.set([".cs-carry-box", ".cs-carry-cooler"], { opacity: 0 }, 0);
+    tl.set(".cs-hammer-body", rot(0), 0);
+    tl.set(".cs-tarp-poles", { scaleY: 0, transformOrigin: "50% 100%" }, 0);
+    tl.set(".cs-tarp-fabric", { scale: 0.08, autoAlpha: 0, transformOrigin: "50% 20%" }, 0);
+    tl.set(".cs-tarp-line", { attr: { "stroke-dashoffset": 600 } }, 0);
+    tl.set(".cs-tarp-lights", { autoAlpha: 0 }, 0);
+    tl.set(".cs-tarp-shadow", { autoAlpha: 0 }, 0);
+    tl.set(".cs-heater-flame", { opacity: 0 }, 0);
+    tl.set(".cs-lights-tarp", { opacity: 0 }, 0);
+    tl.set(".cs-heater-glow", { opacity: 0 }, 0);
+    tl.set(".cs-fire-glow", { opacity: 1 }, 0);
+    tl.set(".cs-lights-tent", { opacity: 0 }, 0);
+    tl.set(".cs-tent-lit", { opacity: 0 }, 0);
+    tl.set([".cs-evening-ambient", ".cs-tent-ambient", ".cs-wet"], { opacity: 0 }, 0);
+    tl.set(".cs-hammock-person", { opacity: 0 }, 0);
     tl.set(".cs-pov", { yPercent: 70, autoAlpha: 0 }, 0);
     tl.set(".cs-skywash", { opacity: WASH.day }, 0);
     tl.set(".cs-balloon", at($(".cs-balloon"), 1150, 330), 0);
@@ -208,7 +246,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(".cs-const-star", { scale: 0, transformOrigin: "50% 50%" }, 0);
     tl.set(".cs-night-word", { scale: 0.3, opacity: 0, transformOrigin: "50% 50%" }, 0);
     tl.set(".cs-fireflies", { opacity: 0 }, 0);
-    tl.set(".cs-sun", at($(".cs-sun"), 770, 250), 0);
+    tl.set(".cs-sun", { ...at($(".cs-sun"), 770, 250), autoAlpha: 1 }, 0);
     tl.set(".cs-moon", { ...at($(".cs-moon"), 230, 760), autoAlpha: 0 }, 0);
     tl.set(".cs-birds", { ...at($(".cs-birds"), -200, 380) }, 0);
     showPose(tl, null, 0);
@@ -219,9 +257,12 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   master.to(".cs-flash", { opacity: 0, duration: 0.9, ease: "sine.out" }, 0);
   master.to(".cs-door", { scale: 1.1, duration: 3, ease: "sine.inOut" }, 0);
   master.to(".cs-door-hand", { x: DOOR_HANDLE.x - HAND_GRIP.x, y: DOOR_HANDLE.y - HAND_GRIP.y, duration: 1.3, ease: "power2.out" }, 0.8);
-  master.to(".cs-door-hand", { x: "-=14", duration: 0.25, ease: "power1.inOut", yoyo: true, repeat: 1 }, 2.1);
+  // 握緊、往下壓一下門把
+  master.to(".cs-door-hand", { y: "+=6", duration: 0.25, ease: "power1.inOut", yoyo: true, repeat: 1 }, 2.1);
   master.to(".cs-door-leaf", { rotationY: -100, duration: 1.6, ease: "power2.in" }, 2.5);
-  master.to(".cs-door-hand", { x: "+=40", y: "+=30", autoAlpha: 0, duration: 0.9, ease: "power2.in" }, 2.9);
+  // 門往內轉開時，手跟著門把往左移、手腕轉一點，再放開
+  master.to(".cs-door-hand", { x: "-=130", rotation: -14, transformOrigin: `${HAND_GRIP.x}px ${HAND_GRIP.y}px`, duration: 1, ease: "power2.in" }, 2.5);
+  master.to(".cs-door-hand", { autoAlpha: 0, duration: 0.4 }, 3.3);
   master.to(".cs-door", { scale: 1.9, duration: 1.3, ease: "power2.in" }, 3.1);
   master.to(".cs-flash", { opacity: 1, duration: 0.5, ease: "sine.in" }, 3.6);
   master.set(".cs-door", { autoAlpha: 0 }, 4.1);
@@ -236,107 +277,164 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   // 熱氣球慢慢從右飄到左，陪整個白天
   master.to(".cs-balloon", { ...at($(".cs-balloon"), -150, 250), duration: 50, ease: "none" }, 6);
 
-  // ② 卸貨（21.5–27s）：側門滑開，保冷箱、紙箱、營燈一件件跳出來，人帶著帳篷袋下車。
-  master.addLabel("unload", 21.5);
-  master.to(".cs-van-door", { x: -118, duration: 0.7, ease: "power2.inOut" }, 21.7);
-  const hop = (sel: string, toX: number, toY: number, pos: number) => {
-    const el = $(sel);
-    const start = at(el, SPOTS.vanParkX + 25, 1190);
-    const end = at(el, toX, toY);
-    master.fromTo(el, { ...start, autoAlpha: 0, scale: 0.7, transformOrigin: "50% 100%" }, { x: end.x, autoAlpha: 1, scale: 1, duration: 0.8, ease: "none" }, pos);
-    master.to(el, { y: start.y - 90, duration: 0.35, ease: "power2.out" }, pos);
-    master.to(el, { y: end.y, duration: 0.45, ease: "bounce.out" }, pos + 0.35);
-  };
-  hop(".cs-item-cooler", 3240, 1338, 22.4);
-  hop(".cs-item-box", 3330, 1346, 23);
-  hop(".cs-item-lantern", 3150, 1332, 23.6);
-  master.set(".cs-driver", { autoAlpha: 0 }, 24.2);
-  showPose(master, ".cs-walker", 24.2);
-  walk(master, [SPOTS.vanParkX + 30, 1262], [3470, 1320], 1.4, 24.2);
+  skyTo(master, "day", 8, 6);
 
-  // ③ 搭帳篷（27–38.6s）：邊走邊跟著鏡頭到草地，帳篷「啪」地撐開，蹲下來敲營釘，再走去坐下。
+  // ② 抵達營地卸貨（21.5–27s）：側門滑開，人抱著紙箱下車、走幾步彎腰放下；回頭再搬保冷箱（營燈擱在上面）。
+  master.addLabel("unload", 21.5);
+  master.to(".cs-van-door", { x: -118, duration: 0.7, ease: "power2.inOut" }, 21.6);
+  master.set(".cs-driver", { autoAlpha: 0 }, 22.2);
+  master.set(".cs-walker .cs-tent-bag", { autoAlpha: 0 }, 22.2);
+  showPose(master, ".cs-walker", 22.3);
+  carry(master, ".cs-carry-box", 22.3);
+  walk(master, [3420, 1268], [3478, 1322], 0.9, 22.3);
+  bend(master, 23.2);
+  carry(master, null, 23.55);
+  master.set(".cs-item-box", { ...at($(".cs-item-box"), 3500, 1322), autoAlpha: 1 }, 23.55);
+  face(master, -1, 24.1);
+  walk(master, [3478, 1322], [3420, 1272], 0.8, 24.1);
+  face(master, 1, 24.9);
+  carry(master, ".cs-carry-cooler", 24.9);
+  walk(master, [3420, 1272], [3585, 1336], 1.1, 24.9);
+  bend(master, 26.0);
+  carry(master, null, 26.35);
+  master.set(".cs-item-cooler", { ...at($(".cs-item-cooler"), 3610, 1336), autoAlpha: 1 }, 26.35);
+  master.set(".cs-item-lantern", { ...at($(".cs-item-lantern"), 3494, 1262), autoAlpha: 1 }, 26.35);
+  master.set(".cs-walker .cs-tent-bag", { autoAlpha: 1 }, 26.85);
+
+  // ③ 搭帳篷（27–36.4s）：拎著帳篷袋走到草地，帳篷撐開，蹲下來敲營釘（身體前傾、肩膀帶動、槌子順勢收回）。
   master.addLabel("tent", 27);
   camTo(master, 3760, 4.5, 27);
-  walk(master, [3470, 1320], [3855, 1160], 4.5, 27);
+  walk(master, [3585, 1336], [3855, 1160], 4.5, 27);
   master.set(".cs-walker .cs-tent-bag", { autoAlpha: 0 }, 31.6);
-  // 快速撐開、最後稍微回一下就停，不要卡通式彈跳
-  master.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.75, ease: "back.out(1.3)" }, 31.7);
+  master.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.75, ease: "back.out(1.2)" }, 31.7);
   master.to(".cs-tent-shadow", { scaleX: 1, duration: 0.8, ease: "power2.out" }, 31.7);
+  master.set(".cs-hammerer", at($(".cs-hammerer"), 3855, 1160), 33.2);
   showPose(master, ".cs-hammerer", 33.2);
-  for (let i = 0; i < 4; i += 1) {
-    const t = 33.4 + i * 0.7;
-    master.to(".cs-hammer-arm", { ...rot(-37), duration: 0.2, ease: "power3.in" }, t);
-    master.to(".cs-peg:first-child", { y: `+=${3}`, duration: 0.08 }, t + 0.2);
-    master.to(".cs-hammer-arm", { ...rot(-150), duration: 0.4, ease: "power2.out" }, t + 0.28);
-  }
-  showPose(master, ".cs-walker", 36.4);
-  camTo(master, 4000, 2.2, 36.4);
-  walk(master, [3855, 1160], [4480, 1150], 2.2, 36.4);
+  const hammerAt = (t: number, peg: string) => {
+    master.to(".cs-hammer-arm", { ...rot(-30), duration: 0.18, ease: "power3.in" }, t);
+    master.to(".cs-hammer-body", { ...rot(6), duration: 0.18, ease: "power2.in" }, t);
+    master.to(peg, { y: "+=3", duration: 0.08 }, t + 0.18);
+    master.to(".cs-hammer-arm", { ...rot(-44), duration: 0.1, ease: "power1.out" }, t + 0.18);
+    master.to(".cs-hammer-arm", { ...rot(-150), duration: 0.42, ease: "power2.out" }, t + 0.3);
+    master.to(".cs-hammer-body", { ...rot(0), duration: 0.42, ease: "power2.out" }, t + 0.3);
+  };
+  for (let i = 0; i < 4; i += 1) hammerAt(33.4 + i * 0.72, ".cs-peg:first-child");
 
-  // ④ 泡咖啡（38.6–49s）：坐進露營椅，捧著露坑的杯子喝一口、點點頭。結帳結束後從這裡接著播。
-  master.addLabel("coffee", 38.6);
-  showPose(master, ".cs-sitter", 38.6);
+  // ④ 搭天幕（36.4–44.6s）：走到隔壁營位，兩根主柱立起、布面展開繃緊、四角拉繩拉出去，再敲一支營釘。
+  master.addLabel("tarp", 36.4);
+  showPose(master, ".cs-walker", 36.4);
+  camTo(master, 4880, 5, 36.4);
+  walk(master, [3855, 1160], [5060, 1290], 5, 36.4);
+  master.to(".cs-tarp-poles", { scaleY: 1, duration: 0.9, ease: "power2.out" }, 41.2);
+  master.to(".cs-tarp-fabric", { scale: 1, autoAlpha: 1, duration: 1, ease: "power2.out" }, 41.8);
+  master.to(".cs-tarp-shadow", { autoAlpha: 1, duration: 0.8 }, 42.2);
+  master.to(".cs-tarp-line", { attr: { "stroke-dashoffset": 0 }, duration: 0.7, stagger: 0.12, ease: "power1.inOut" }, 42.5);
+  master.set(".cs-hammerer", at($(".cs-hammerer"), 5050, 1290), 42.6);
+  showPose(master, ".cs-hammerer", 42.6);
+  hammerAt(43.0, ".cs-tarp-line");
+  hammerAt(43.7, ".cs-tarp-line");
+
+  // ⑤ 回主營地泡咖啡（44.6–57.8s）：走回營桌、坐下，捧著露坑的杯子喝一口、點點頭。結帳結束後從這裡接著播。
+  showPose(master, ".cs-walker", 44.6);
+  face(master, -1, 44.6);
+  camTo(master, 4000, 3, 44.6);
+  walk(master, [5050, 1290], [4620, 1150], 3, 44.6);
+  face(master, 1, 47.6);
+  skyTo(master, "afternoon", 8, 48);
+  master.addLabel("coffee", 47.8);
+  showPose(master, ".cs-sitter", 47.8);
   const sip = (t: number) => {
     cupTo(master, "sip", 0.9, t);
     master.to(".cs-nod-head", { ...rot(-6), duration: 0.6, ease: "sine.inOut" }, t + 0.5);
     master.to(".cs-nod-head", { ...rot(0), duration: 0.6, ease: "sine.inOut" }, t + 1.9);
     cupTo(master, "rest", 0.9, t + 2.1);
   };
-  sip(39.6);
-  master.to(".cs-nod-head", { ...rot(8), duration: 0.35, yoyo: true, repeat: 3, ease: "sine.inOut" }, 43.4);
-  sip(45);
+  sip(48.8);
+  master.to(".cs-nod-head", { ...rot(7), duration: 0.4, yoyo: true, repeat: 3, ease: "sine.inOut" }, 52.6);
+  sip(54.2);
 
-  // ⑤ 懸崖看雲海（49–63s）：拿著杯子走到崖邊，天色轉金黃，雲海在腳下流，伸手指遠方。
-  master.addLabel("cliff", 49);
-  master.set(".cs-walker .cs-mug", { autoAlpha: 1 }, 49);
-  showPose(master, ".cs-walker", 49);
-  camTo(master, 5000, 4.5, 49);
-  // 從木牌前面（較靠近鏡頭）走過，不要穿過木牌
-  walk(master, [4600, 1150], [5215, 1096], 4.5, 49);
-  showPose(master, ".cs-cliffsitter", 53.5);
-  skyTo(master, "golden", 5, 51);
-  master.to(".cs-sun", { ...at($(".cs-sun"), 760, 560), duration: 10, ease: "sine.inOut" }, 51);
-  master.to(".cs-point-arm", { ...rot(-118), duration: 0.8, ease: "back.out(1.6)" }, 56);
-  master.to(".cs-point-arm", { ...rot(-20), duration: 0.8, ease: "power2.inOut" }, 59);
-  master.fromTo(".cs-birds", at($(".cs-birds"), -200, 520), { ...at($(".cs-birds"), 1150, 420), duration: 8, ease: "none" }, 54);
+  // ⑥ 雲海散步（57.8–71.8s）：拿著杯子從天幕旁走到崖邊的「露坑」木牌，坐下看雲海，天色進入 golden hour。
+  master.addLabel("cliff", 57.8);
+  master.set(".cs-walker .cs-mug", { autoAlpha: 1 }, 57.8);
+  showPose(master, ".cs-walker", 57.8);
+  camTo(master, 6000, 6, 57.8);
+  walk(master, [4620, 1150], [6215, 1096], 6, 57.8);
+  showPose(master, ".cs-cliffsitter", 63.8);
+  skyTo(master, "golden", 6, 60);
+  master.to(".cs-sun", { ...at($(".cs-sun"), 760, 560), duration: 12, ease: "sine.inOut" }, 60);
+  master.to(".cs-point-arm", { ...rot(-110), duration: 0.9, ease: "power2.out" }, 66.4);
+  master.to(".cs-point-arm", { ...rot(-20), duration: 0.9, ease: "power2.inOut" }, 69);
+  master.fromTo(".cs-birds", at($(".cs-birds"), -200, 520), { ...at($(".cs-birds"), 1150, 420), duration: 9, ease: "none" }, 64);
 
-  // ⑥ 傍晚（63–79s）：走向天幕途中下起雨，躲進天幕；雨停出彩虹，營火點起來、串燈亮，烤棉花糖烤到著火，吹熄吃掉。
-  master.addLabel("evening", 63);
-  showPose(master, ".cs-walker", 63);
-  camTo(master, 6000, 4.5, 63);
-  walk(master, [5270, 1094], [6300, 1244], 4.5, 63);
-  skyTo(master, "sunset", 12, 63);
-  master.to(".cs-sun", { ...at($(".cs-sun"), 700, 930), duration: 12, ease: "sine.in" }, 63);
-  master.to(".cs-rain", { opacity: 1, duration: 0.8 }, 64.6);
-  master.to(".cs-rain", { opacity: 0, duration: 1 }, 70);
-  master.set(".cs-rainbow", { ...at($(".cs-rainbow"), 520, 900), autoAlpha: 1 }, 70.8);
-  master.to(".cs-rainbow-band", { strokeDashoffset: 0, duration: 1.6, stagger: 0.12, ease: "power2.out" }, 70.8);
-  master.to(".cs-rainbow", { autoAlpha: 0, duration: 1.5 }, 76.5);
-  showPose(master, ".cs-roaster", 72);
-  master.to(".cs-fire-evening", { scale: 1, duration: 0.8, ease: "back.out(2)" }, 72.2);
-  master.to(".cs-lights-wrap", { opacity: 1, duration: 1.5 }, 72.4);
-  master.to(".cs-marsh-fire", { opacity: 1, duration: 0.3 }, 74.2);
-  master.to(".cs-marsh-body", { attr: { fill: "#6b4323" }, duration: 0.8 }, 74.2);
-  master.to(".cs-stick-arm", { ...rot(-84), duration: 0.5, ease: "power2.out" }, 75.3);
-  master.to(".cs-marsh-fire", { opacity: 0, duration: 0.2 }, 75.9);
-  master.to(".cs-marsh", { scale: 0, duration: 0.3, ease: "back.in(2)" }, 76.8);
-  master.to(".cs-stick-arm", { ...rot(-62), duration: 0.6, ease: "power2.inOut" }, 77.2);
+  // ⑦ 傍晚吊床（71.8–85.8s）：走到兩棵松樹間的吊床躺下，捧著杯子看天空、隨風輕晃（是休息，不是過夜）。
+  master.addLabel("hammock", 71.8);
+  showPose(master, ".cs-walker", 71.8);
+  camTo(master, 7000, 4.5, 71.8);
+  walk(master, [6270, 1094], [7290, 1170], 4.5, 71.8);
+  showPose(master, null, 76.3);
+  master.to(".cs-hammock-person", { opacity: 1, duration: 0.4 }, 76.2);
+  skyTo(master, "sunset", 9, 73);
+  master.to(".cs-sun", { ...at($(".cs-sun"), 720, 900), duration: 10, ease: "sine.in" }, 73);
 
-  // ⑦ 星空（79–93s）：鏡頭到吊床，天黑、月亮升起、螢火蟲；星星連成露坑的 logo，再寫出「露坑」，流星劃過。
-  master.addLabel("night", 79);
-  camTo(master, 7000, 5, 79);
-  skyTo(master, "night", 5, 79);
-  master.to(".cs-night", { opacity: 1, duration: 4 }, 80);
-  master.to(".cs-moon", { ...at($(".cs-moon"), 230, 290), autoAlpha: 1, duration: 6, ease: "sine.out" }, 80);
-  master.to(".cs-fireflies", { opacity: 1, duration: 3 }, 82);
-  master.set(".cs-constellation", { opacity: 1 }, 84);
-  master.to(".cs-const-star", { scale: 1, duration: 0.5, stagger: 0.25, ease: "back.out(2.5)" }, 84);
-  master.to(".cs-const-line", { strokeDashoffset: 0, duration: 2.4, ease: "power1.inOut" }, 84.3);
-  master.to(".cs-night-word", { scale: 1, opacity: 1, duration: 1, ease: "back.out(1.8)" }, 87);
-  master.fromTo(".cs-shooting", { opacity: 0, x: 0, y: 0 }, { opacity: 1, x: -220, y: 150, duration: 0.9, ease: "power2.in" }, 89);
-  master.to(".cs-shooting", { opacity: 0, duration: 0.3 }, 89.9);
-  master.to(".cs-flash", { opacity: 1, duration: 1.2, ease: "sine.in" }, 92);
-  master.set({}, {}, 93.2);
+  // ⑧ 下雨避雨（85.8–95.5s）：天色轉灰、下雨，人起身走回天幕下，站在暖爐旁；地上慢慢出現水窪。
+  master.addLabel("rain", 85.8);
+  skyTo(master, "rain", 3, 85.8);
+  master.to(".cs-sun", { autoAlpha: 0, duration: 2 }, 85.8);
+  master.to(".cs-rain", { opacity: 1, duration: 1.5 }, 86.6);
+  master.to(".cs-hammock-person", { opacity: 0, duration: 0.3 }, 86.8);
+  showPose(master, ".cs-walker", 86.8);
+  face(master, -1, 86.8);
+  camTo(master, 5000, 5, 86.6);
+  walk(master, [7290, 1170], [5390, 1190], 5, 86.8);
+  face(master, 1, 91.8);
+  master.set(".cs-wet", at($(".cs-wet"), SPOTS.tarpX, SPOTS.tarpY + 90), 86);
+  master.to(".cs-wet", { opacity: 1, duration: 3 }, 89);
+  master.to(".cs-rain", { opacity: 0, duration: 2 }, 94.5);
+
+  // ⑨ 雨停・彩虹・串燈（95.5–104.5s）：天慢慢轉亮、柔和的彩虹，串燈與暖爐亮起，營火點燃，坐在木頭上烤棉花糖——烤到著火、吹熄、吃掉。
+  master.addLabel("rainbow", 95.5);
+  skyTo(master, "dusk", 4, 95.5);
+  master.set(".cs-rainbow", { ...at($(".cs-rainbow"), 520, 900), autoAlpha: 1 }, 96);
+  master.to(".cs-rainbow-band", { strokeDashoffset: 0, duration: 2, stagger: 0.14, ease: "power2.out" }, 96);
+  master.to(".cs-rainbow", { autoAlpha: 0, duration: 2.5 }, 103);
+  master.set(".cs-tarp-lights", { autoAlpha: 1 }, 97);
+  master.to(".cs-lights-wrap", { opacity: 1, duration: 1.5 }, 97.2);
+  master.to(".cs-lights-tarp", { opacity: 1, duration: 1.2, stagger: 0.1 }, 97.4);
+  master.to(".cs-heater-flame", { opacity: 1, duration: 0.6 }, 98);
+  master.to(".cs-heater-glow", { opacity: 1, duration: 1 }, 98);
+  master.to(".cs-evening-ambient", { opacity: 1, duration: 2 }, 98.4);
+  master.to(".cs-wet", { opacity: 0, duration: 6 }, 99);
+  showPose(master, ".cs-roaster", 98.6);
+  master.to(".cs-fire-evening", { scale: 1, duration: 0.8, ease: "power2.out" }, 98.8);
+  master.to(".cs-marsh-fire", { opacity: 1, duration: 0.3 }, 101);
+  master.to(".cs-marsh-body", { attr: { fill: "#6b4323" }, duration: 0.8 }, 101);
+  master.to(".cs-stick-arm", { ...rot(-84), duration: 0.5, ease: "power2.out" }, 102.1);
+  master.to(".cs-marsh-fire", { opacity: 0, duration: 0.2 }, 102.7);
+  master.to(".cs-marsh", { scale: 0, duration: 0.3, ease: "power2.in" }, 103.6);
+  master.to(".cs-stick-arm", { ...rot(-62), duration: 0.6, ease: "power2.inOut" }, 104);
+
+  // ⑩ 夜晚入帳篷（104.5–112s）：天黑，鏡頭回到主營地——人已經進了帳篷，帳篷裡亮著暖燈，螢火蟲慢慢飛。
+  master.addLabel("night", 104.5);
+  skyTo(master, "night", 4, 104.5);
+  master.to(".cs-night", { opacity: 1, duration: 4 }, 105);
+  master.to(".cs-moon", { ...at($(".cs-moon"), 230, 290), autoAlpha: 1, duration: 6, ease: "sine.out" }, 105);
+  camTo(master, 4000, 4.5, 105.5);
+  showPose(master, null, 105.6);
+  master.to([".cs-tent-lit", ".cs-lights-tent", ".cs-tent-ambient"], { opacity: 1, duration: 1.6 }, 107);
+  // 人都進帳篷了：營火只剩一點餘燼
+  master.to(".cs-fire-coffee", { scale: 0.35, opacity: 0.7, transformOrigin: "60px 180px", duration: 2 }, 106);
+  master.to(".cs-fireflies", { opacity: 1, duration: 3 }, 108);
+
+  // ⑪ 星空收尾（112–121s）：星星連成露坑的 logo，再寫出「露坑」，流星劃過；淡出回到店門口。
+  master.addLabel("stars", 112);
+  master.set(".cs-constellation", { opacity: 1 }, 112);
+  master.to(".cs-const-star", { scale: 1, duration: 0.6, stagger: 0.3, ease: "power2.out" }, 112);
+  master.to(".cs-const-line", { strokeDashoffset: 0, duration: 2.6, ease: "power1.inOut" }, 112.4);
+  master.to(".cs-night-word", { scale: 1, opacity: 1, duration: 1.2, ease: "power2.out" }, 115.2);
+  master.fromTo(".cs-shooting", { opacity: 0, x: 0, y: 0 }, { opacity: 1, x: -220, y: 150, duration: 0.9, ease: "power2.in" }, 117.4);
+  master.to(".cs-shooting", { opacity: 0, duration: 0.3 }, 118.3);
+  master.to(".cs-flash", { opacity: 1, duration: 1.4, ease: "sine.in" }, 119.6);
+  master.set({}, {}, 121);
 
   // ── 一直在動的小東西（不受結帳暫停影響） ──
   const ambient: gsap.core.Animation[] = [];
@@ -355,11 +453,12 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   loop(gsap.fromTo(".cs-steam", { y: 4, opacity: 0.1 }, { y: -10, opacity: 0.65, duration: 1.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-balloon-bob", { y: -6, duration: 3.2, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.fromTo(".cs-pov-steam", { y: 6, opacity: 0.15 }, { y: -12, opacity: 0.6, duration: 2.4, repeat: -1, yoyo: true, ease: "sine.inOut" }));
-  loop(gsap.to(".cs-sun-rays", { rotation: 360, svgOrigin: "0 0", duration: 60, repeat: -1, ease: "none" }));
   loop(gsap.to(".cs-flag", { skewY: 8, duration: 0.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-hammock", { rotation: 3, svgOrigin: "0 0", duration: 2.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
-  loop(gsap.fromTo(".cs-rain svg", { y: -1400 }, { y: 0, duration: 0.9, repeat: -1, ease: "none" }));
-  loop(gsap.to(".cs-lantern-glow, .cs-fire-glow, .cs-tentlamp-glow", { opacity: 0.75, duration: 0.8, repeat: -1, yoyo: true, stagger: 0.3, ease: "sine.inOut" }));
+  loop(gsap.fromTo(".cs-rain-far", { y: -1400 }, { y: 0, duration: 1.3, repeat: -1, ease: "none" }));
+  loop(gsap.fromTo(".cs-rain-near", { y: -1400 }, { y: 0, duration: 0.75, repeat: -1, ease: "none" }));
+  loop(gsap.to(".cs-bulb-glow", { opacity: 0.7, duration: 1.6, repeat: -1, yoyo: true, stagger: { each: 0.37, repeat: -1, yoyo: true }, ease: "sine.inOut" }));
+  loop(gsap.to(".cs-tentlamp-glow, .cs-heater-glow", { scale: 0.96, transformOrigin: "50% 50%", duration: 2.2, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   $$(".cs-cloud").forEach((el, i) => {
     const y = [300, 200, 430, 540][i] ?? 300;
     const dur = 70 + i * 17;
@@ -388,11 +487,15 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   place(".cs-tent-actor", SPOTS.tentX, 1120);
   place(".cs-fire-coffee", SPOTS.coffeeFireX, 1250);
   place(".cs-fire-ambient", SPOTS.coffeeFireX, 1250);
-  place(".cs-fire-evening", SPOTS.eveningFireX, 1260);
+  place(".cs-fire-evening", SPOTS.eveningFireX, 1290);
   place(".cs-hammerer", 3855, 1160);
+  place(".cs-tarp-actor", SPOTS.tarpX, SPOTS.tarpY);
+  place(".cs-heater-actor", SPOTS.heaterX, SPOTS.tarpY + 4);
+  place(".cs-evening-ambient", SPOTS.tarpX + 60, SPOTS.tarpY + 60);
+  place(".cs-tent-ambient", SPOTS.tentX, 1120);
   place(".cs-sitter", SPOTS.sitX, 1150);
   place(".cs-cliffsitter", SPOTS.cliffX, 1094);
-  place(".cs-roaster", SPOTS.roastX, 1262);
+  place(".cs-roaster", SPOTS.roastX, 1300);
   place(".cs-hammock-actor", SPOTS.hammockX, 1000);
 
   // ── 結帳銜接 ──
@@ -424,9 +527,12 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tr.to(tint, { ...TINT.day, duration: 1.2 * d }, 0);
     tr.to(".cs-lightbands", { opacity: LIGHTBANDS.day, duration: 1.2 * d }, 0);
     tr.to(".cs-skywash", { opacity: WASH.day, duration: 1.2 * d }, 0);
-    tr.to([".cs-night", ".cs-rain", ".cs-lights-wrap"], { opacity: 0, duration: 0.8 * d }, 0);
+    tr.to([".cs-night", ".cs-rain", ".cs-lights-wrap", ".cs-tent-lit", ".cs-tent-ambient", ".cs-evening-ambient", ".cs-wet"], { opacity: 0, duration: 0.8 * d }, 0);
+    tr.to(".cs-hammock-person", { opacity: 0, duration: 0.3 * d }, 0);
+    tr.to(".cs-fire-coffee", { scale: 1, opacity: 1, duration: 0.5 * d }, 0);
+    tr.set(".cs-walker > svg", { scaleX: 1 }, 0);
     tr.to(".cs-rainbow", { autoAlpha: 0, duration: 0.5 * d }, 0);
-    tr.to(".cs-sun", { ...at($(".cs-sun"), 770, 250), duration: 1.2 * d }, 0);
+    tr.to(".cs-sun", { ...at($(".cs-sun"), 770, 250), autoAlpha: 1, duration: 1.2 * d }, 0);
     tr.to(".cs-moon", { autoAlpha: 0, duration: 0.6 * d }, 0);
     tr.set([".cs-driver"], { autoAlpha: 0 }, 0);
     tr.set(".cs-item", { autoAlpha: 1 }, 0);

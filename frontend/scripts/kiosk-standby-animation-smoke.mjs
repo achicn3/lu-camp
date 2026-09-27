@@ -1,4 +1,4 @@
-// 顧客螢幕待機畫面店名動畫煙霧（React Bits SplitText）：配對後進待機 → 店名逐字浮現、最後全部看得到、
+// 顧客螢幕待機畫面店名動畫煙霧（純 CSS 逐字浮現）：配對後進待機 → 店名逐字浮現、最後全部看得到、
 // 讀出來仍是完整店名；系統「減少動態效果」時不拆字、直接顯示。
 // 需 backend + frontend 已起、已 seed（dev-manager、dev-kiosk）。執行：node scripts/kiosk-standby-animation-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -59,10 +59,15 @@ try {
   await page.waitForSelector(".kiosk-standby-title .split-char", { timeout: 5000 });
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(SHOTS, "01-animating.png") });
+  // 店名改成純 CSS 逐字浮現（2026-09-27）：每個字有自己的動畫、延遲一個比一個晚
   const midOpacities = await page.$$eval(".kiosk-standby-title .split-char", (els) =>
-    els.map((el) => Number(getComputedStyle(el).opacity)),
+    els.map((el) => ({ name: getComputedStyle(el).animationName, delay: parseFloat(getComputedStyle(el).animationDelay) })),
   );
-  ok("店名拆成逐字、動畫中有字還沒完全出現", midOpacities.length > 1 && midOpacities.some((o) => o < 1), `字數 ${midOpacities.length}`);
+  ok(
+    "店名拆成逐字、一個字接一個字浮上來",
+    midOpacities.length > 1 && midOpacities.every((c) => c.name === "standby-char-rise") && midOpacities.every((c, i) => i === 0 || c.delay > midOpacities[i - 1].delay),
+    `字數 ${midOpacities.length}`,
+  );
   await page.waitForTimeout(3000);
   const endOpacities = await page.$$eval(".kiosk-standby-title .split-char", (els) =>
     els.map((el) => Number(getComputedStyle(el).opacity)),

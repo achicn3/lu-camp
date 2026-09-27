@@ -5261,6 +5261,15 @@ a.btn-ghost {
   mix-blend-mode: soft-light;
   opacity: 0.8;
 }
+.cs-evening-ambient,
+.cs-tent-ambient {
+  mix-blend-mode: soft-light;
+}
+.cs-rain > svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
 .cs-tint {
   left: -600px;
   width: 2200px;
