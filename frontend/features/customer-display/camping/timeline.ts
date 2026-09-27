@@ -5,6 +5,7 @@
 import { gsap } from "gsap";
 
 import { SKY_STOPS } from "./defs";
+import { SIT_POSES } from "./figures";
 import { roadY } from "./panels";
 import { PARALLAX, SPOTS, THANKS_Y } from "./world";
 
@@ -39,7 +40,7 @@ const CART_ZOOM = { scale: 1.3, x: -290, y: -930 };
 const CELEBRATE_ZOOM = { scale: 1.15, x: -150, y: -210 };
 const DOOR_HANDLE = { x: 641, y: 940 };
 /** 手的圖裡，手指握的位置（相對手那張圖的左上角）。 */
-const HAND_GRIP = { x: 36, y: 72 };
+const HAND_GRIP = { x: 54, y: 60 };
 const PARK_Y = 1262;
 
 /**
@@ -130,6 +131,11 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     for (const p of poses) tl.set(p, { autoAlpha: p === sel ? 1 : 0 }, pos);
   };
   const rot = (deg: number) => ({ attr: { transform: `rotate(${deg})` } });
+  /** 喝咖啡的人把杯子移到某個位置（杯子平移、袖子跟著彎）。 */
+  const cupTo = (tl: gsap.core.Timeline, pose: keyof typeof SIT_POSES, duration: number, pos: gsap.Position, ease = "power2.inOut") => {
+    tl.to(".cs-cup", { attr: { transform: SIT_POSES[pose].cup }, duration, ease }, pos);
+    tl.to(".cs-sleeve", { attr: { d: SIT_POSES[pose].sleeve }, duration, ease }, pos);
+  };
   /** 走路：腿與手臂前後擺、身體上下晃；走完回正。 */
   const walk = (tl: gsap.core.Timeline, from: [number, number], to: [number, number], duration: number, pos: number) => {
     const el = $(".cs-walker");
@@ -164,7 +170,9 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(".cs-tent-shadow", { scaleX: 0.2, transformOrigin: "50% 50%" }, 0);
     tl.set(".cs-peg", { y: 0 }, 0);
     tl.set(".cs-hammer-arm", rot(-150), 0);
-    tl.set(".cs-cup-arm", rot(0), 0);
+    tl.set(".cs-cup", { attr: { transform: SIT_POSES.rest.cup } }, 0);
+    tl.set(".cs-sleeve", { attr: { d: SIT_POSES.rest.sleeve } }, 0);
+    tl.set(".cs-nod-head", rot(0), 0);
     tl.set(".cs-point-arm", rot(-20), 0);
     tl.set(".cs-stick-arm", rot(-62), 0);
     tl.set(".cs-marsh", { scale: 1, transformOrigin: "50% 50%" }, 0);
@@ -254,8 +262,10 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   master.addLabel("coffee", 38.6);
   showPose(master, ".cs-sitter", 38.6);
   const sip = (t: number) => {
-    master.to(".cs-cup-arm", { ...rot(-34), duration: 0.9, ease: "power2.inOut" }, t);
-    master.to(".cs-cup-arm", { ...rot(0), duration: 0.9, ease: "power2.inOut" }, t + 2.1);
+    cupTo(master, "sip", 0.9, t);
+    master.to(".cs-nod-head", { ...rot(-6), duration: 0.6, ease: "sine.inOut" }, t + 0.5);
+    master.to(".cs-nod-head", { ...rot(0), duration: 0.6, ease: "sine.inOut" }, t + 1.9);
+    cupTo(master, "rest", 0.9, t + 2.1);
   };
   sip(39.6);
   master.to(".cs-nod-head", { ...rot(8), duration: 0.35, yoyo: true, repeat: 3, ease: "sine.inOut" }, 43.4);
@@ -266,7 +276,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   master.set(".cs-walker .cs-mug", { autoAlpha: 1 }, 49);
   showPose(master, ".cs-walker", 49);
   camTo(master, 5000, 4.5, 49);
-  walk(master, [4600, 1150], [5190, 1052], 4.5, 49);
+  // 從木牌前面（較靠近鏡頭）走過，不要穿過木牌
+  walk(master, [4600, 1150], [5215, 1096], 4.5, 49);
   showPose(master, ".cs-cliffsitter", 53.5);
   skyTo(master, "golden", 5, 51);
   master.to(".cs-sun", { ...at($(".cs-sun"), 760, 560), duration: 10, ease: "sine.inOut" }, 51);
@@ -278,7 +289,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   master.addLabel("evening", 63);
   showPose(master, ".cs-walker", 63);
   camTo(master, 6000, 4.5, 63);
-  walk(master, [5250, 1060], [6300, 1244], 4.5, 63);
+  walk(master, [5270, 1094], [6300, 1244], 4.5, 63);
   skyTo(master, "sunset", 12, 63);
   master.to(".cs-sun", { ...at($(".cs-sun"), 700, 930), duration: 12, ease: "sine.in" }, 63);
   master.to(".cs-rain", { opacity: 1, duration: 0.8 }, 64.6);
@@ -354,7 +365,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   place(".cs-fire-evening", SPOTS.eveningFireX, 1260);
   place(".cs-hammerer", 3935, 1160);
   place(".cs-sitter", SPOTS.sitX, 1150);
-  place(".cs-cliffsitter", SPOTS.cliffX, 1052);
+  place(".cs-cliffsitter", SPOTS.cliffX, 1094);
   place(".cs-roaster", SPOTS.roastX, 1262);
   place(".cs-hammock-actor", SPOTS.hammockX, 1000);
 
@@ -390,7 +401,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     for (const p of poses) tr.to(p, { autoAlpha: p === ".cs-sitter" ? 1 : 0, duration: 0.4 * d }, 0.2 * d);
     tr.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.9 * d, ease: "elastic.out(1, 0.5)" }, 0.2 * d);
     tr.to(".cs-tent-shadow", { scaleX: 1, duration: 0.5 * d }, 0.2 * d);
-    tr.to(".cs-cup-arm", { ...rot(0), duration: 0.5 * d }, 0);
+    cupTo(tr, "rest", 0.5 * d, 0);
     tr.to(zoom, { ...zoomFor(mode), transformOrigin: "0 0", duration: instant ? 0 : 1.6, ease: "power2.inOut" }, instant ? 0 : Math.max(0.2, panDur - 0.9));
     transition = tr;
     atTable = true;
@@ -400,8 +411,10 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     cartLoop?.kill();
     if (reducedMotion) return;
     const tl = gsap.timeline({ repeat: -1, delay: 2.5, repeatDelay: 3 });
-    tl.to(".cs-cup-arm", { ...rot(-34), duration: 0.9, ease: "power2.inOut" });
-    tl.to(".cs-cup-arm", { ...rot(0), duration: 0.9, ease: "power2.inOut" }, "+=1.6");
+    cupTo(tl, "sip", 0.9, 0);
+    tl.to(".cs-nod-head", { ...rot(-6), duration: 0.6, ease: "sine.inOut" }, 0.5);
+    tl.to(".cs-nod-head", { ...rot(0), duration: 0.6, ease: "sine.inOut" }, 1.9);
+    cupTo(tl, "rest", 0.9, 2.1);
     cartLoop = tl;
   };
 
@@ -414,7 +427,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     // y 寫死回原位：上一次慶祝的上下飄可能停在半路，不歸位會越飄越高
     tl.fromTo(".cs-thanks-word", { scale: 0.3, opacity: 0, y: THANKS_Y, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, y: THANKS_Y, duration: 0.9 * d, ease: "elastic.out(1, 0.55)" }, 0);
     tl.fromTo(".cs-thanks-star", { scale: 0, rotation: -90, transformOrigin: "50% 50%" }, { scale: 1, rotation: 0, duration: 0.6 * d, stagger: 0.12 * d, ease: "back.out(2.4)" }, 0.2 * d);
-    tl.to(".cs-cup-arm", { ...rot(-105), duration: 0.6 * d, ease: "back.out(2)" }, 0);
+    cupTo(tl, "cheers", 0.6 * d, 0, "back.out(1.8)");
     tl.to(".cs-nod-head", { ...rot(-8), duration: 0.3 * d, yoyo: true, repeat: 3 }, 0.3 * d);
     if (!reducedMotion) {
       tl.to(".cs-thanks-star", { rotation: 20, duration: 1.2, yoyo: true, repeat: -1, ease: "sine.inOut", stagger: 0.2 }, 1.4);
@@ -438,7 +451,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     });
     const d = reducedMotion ? 0 : 1;
     tr.to(".cs-thanks", { opacity: 0, duration: 0.6 * d }, 0);
-    tr.to(".cs-cup-arm", { ...rot(0), duration: 0.6 * d }, 0);
+    cupTo(tr, "rest", 0.6 * d, 0);
     tr.to(".cs-nod-head", { ...rot(0), duration: 0.3 * d }, 0);
     tr.to(zoom, { scale: 1, x: 0, y: 0, duration: 1.5 * d, ease: "power2.inOut" }, 0.2 * d);
     transition = tr;

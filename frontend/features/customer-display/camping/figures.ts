@@ -216,9 +216,9 @@ export function camperVan(): string {
       h("path", { d: lower, fill: "url(#cs-hatch-fine)", filter: "url(#cs-rough)" }),
       fillPath("M-190 -110 L196 -110 L196 -98 L-190 -98 Z", "#e2b24a"),
       // 窗戶：前窗有司機
-      shape("M104 -190 L140 -190 C150 -176 164 -150 174 -128 L104 -128 Z", "#bfe0ea", 2.4),
-      g({ class: "cs-driver", transform: "translate(126 -140)" }, h("circle", { cy: -18, r: 17, fill: SKIN, stroke: INK, "stroke-width": 2, filter: "url(#cs-rough)" }), fillPath("M-18 -22 C-20 -48 20 -48 20 -24 Z", BEANIE), inkPath("M-18 -22 C-20 -48 20 -48 20 -24", 2), inkPath("M4 -16 q4 4 8 0", 1.6)),
-      h("path", { d: "M110 -184 L126 -184 L114 -150 Z", fill: "#fff", opacity: 0.7 }),
+      shape("M100 -190 L124 -190 C136 -176 148 -154 158 -132 L100 -132 Z", "#bfe0ea", 2.4),
+      g({ class: "cs-driver", transform: "translate(120 -144)" }, h("circle", { cy: -18, r: 17, fill: SKIN, stroke: INK, "stroke-width": 2, filter: "url(#cs-rough)" }), fillPath("M-18 -22 C-20 -48 20 -48 20 -24 Z", BEANIE), inkPath("M-18 -22 C-20 -48 20 -48 20 -24", 2), inkPath("M4 -16 q4 4 8 0", 1.6)),
+      h("path", { d: "M106 -184 L120 -184 L110 -154 Z", fill: "#fff", opacity: 0.7 }),
       shape("M-170 -186 L-60 -186 L-60 -128 L-170 -128 Z", "#bfe0ea", 2.4),
       h("path", { d: "M-160 -180 L-138 -180 L-160 -150 Z", fill: "#fff", opacity: 0.7 }),
       inkPath("M-170 -170 C-150 -176 -80 -176 -60 -170", 1.6, { opacity: 0.7 }),
@@ -284,6 +284,13 @@ function joint(cls: string, px: number, py: number, rotate: number, body: string
   return g({ transform: `translate(${px} ${py})` }, g({ class: cls, transform: `rotate(${rotate})` }, g({ transform: `translate(${-px} ${-py})` }, body)));
 }
 
+/** 喝咖啡的人手上杯子的三個位置：放在胸前、湊到嘴邊喝、舉高乾杯。 */
+export const SIT_POSES = {
+  rest: { cup: "translate(0 0)", sleeve: "M584 980 Q606 1004 590 1022" },
+  sip: { cup: "translate(-12 -50)", sleeve: "M584 980 Q612 994 578 972" },
+  cheers: { cup: "translate(22 -86)", sleeve: "M584 980 Q622 978 612 936" },
+} as const;
+
 /**
  * 坐在露營椅上喝咖啡的人（店主定稿樣張那一位）。沿用樣張的座標，原點移到椅腳中間 (560,1150)。
  * cs-cup-arm 舉杯喝／乾杯，cs-nod-head 點頭，cs-steam 冒煙。
@@ -313,45 +320,60 @@ export function sittingPerson(): string {
       h("path", { d: "M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M540 984 L534 1012 L546 1008", "stroke-width": 2 }),
     );
   const headArt = g({ transform: "translate(552 932)" }, head());
-  const cupArm =
-    fillPath("M580 978 C594 998 598 1016 588 1026 C580 1032 574 1024 580 1014 C586 1004 580 992 572 986 Z", "#b1573a") +
+  const cup =
     fillPath("M572 1002 L612 1002 L608 1034 L576 1034 Z", "#f4efe4") +
     h("circle", { cx: 574, cy: 1022, r: 8, fill: SKIN, filter: "url(#cs-pencil)" }) +
     h("circle", { cx: 610, cy: 1016, r: 7, fill: SKIN, filter: "url(#cs-pencil)" }) +
-    g({ transform: "translate(583 1010) scale(0.8)" }, h("use", { href: "#cs-mug-mark" })) +
+    g({ transform: "translate(592 1018) scale(0.8)" }, h("use", { href: "#cs-mug-mark" })) +
     h("path", { d: "M578 1006 L576 1028", stroke: "#fff", "stroke-width": 3, "stroke-linecap": "round", opacity: 0.8 }) +
     g(INKG,
       h("path", { d: "M572 1002 L612 1002 L608 1034 L576 1034 Z" }),
       h("path", { d: "M612 1010 c12 0 12 16 -2 16" }),
-      h("path", { d: "M580 978 C594 998 598 1016 588 1026", "stroke-width": 2 }),
+      h("circle", { cx: 574, cy: 1022, r: 8, "stroke-width": 1.8 }),
     ) +
     g({ class: "cs-steam", filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.6 },
       h("path", { d: "M586 996 c-10 -16 10 -24 0 -40 c-10 -16 10 -24 0 -38" }),
       h("path", { d: "M600 994 c-10 -14 10 -22 0 -36" }),
     );
+  // 袖子是一條從肩膀彎到手的粗線：杯子（連手）整個平移、袖子終點跟著走，杯子一直保持正的
+  const rest = SIT_POSES.rest;
+  const sleeveAttrs = { fill: "none", "stroke-linecap": "round", filter: "url(#cs-rough)" };
+  const cupArm =
+    h("path", { class: "cs-sleeve", d: rest.sleeve, stroke: INK, "stroke-width": 19, ...sleeveAttrs }) +
+    h("path", { class: "cs-sleeve", d: rest.sleeve, stroke: "#b1573a", "stroke-width": 14, ...sleeveAttrs }) +
+    g({ class: "cs-cup", transform: rest.cup }, cup);
   return g(
     { class: "cs-person cs-pose-sit", transform: "translate(-560 -1150)" },
     legs,
     body,
     joint("cs-nod-head", 552, 960, 0, headArt),
-    joint("cs-cup-arm", 582, 980, 0, cupArm),
+    g({ class: "cs-cup-arm" }, cupArm),
   );
 }
 
-/** 吊床上看星星的人：cs-hammock 繞兩端中點輕晃。原點在兩樹中間、吊床掛點高度。 */
+/**
+ * 吊床上看星星的人（側面）：吊床內側布 → 躺著的人（頭朝左、臉朝上、蓋毯子）→ 吊床外側布蓋住下半身。
+ * cs-hammock 繞掛點中間輕晃。原點在兩個掛點連線的中間。
+ */
 export function hammock(span: number): string {
   const half = span / 2;
-  const sag = 120;
-  const bed = `M${-half} 0 C${-half * 0.5} ${sag} ${half * 0.5} ${sag} ${half} 0 C${half * 0.4} ${sag * 0.7} ${-half * 0.4} ${sag * 0.7} ${-half} 0 Z`;
+  const sag = 130;
+  const bottom = `C${-half * 0.5} ${sag * 1.15} ${half * 0.5} ${sag * 1.15} ${half} 0`;
+  const inner = `M${-half} 0 ${bottom} C${half * 0.5} ${sag * 0.4} ${-half * 0.5} ${sag * 0.4} ${-half} 0 Z`;
+  const outer = `M${-half} 0 ${bottom} C${half * 0.5} ${sag * 0.8} ${-half * 0.5} ${sag * 0.8} ${-half} 0 Z`;
+  // 身體沿著吊床躺：肩膀在左、膝蓋微微拱起、腳在右；超出吊床的部分裁掉
+  const blanket = `M${-half * 0.5} ${sag * 0.4} C${-half * 0.2} ${sag * 0.46} ${half * 0.05} ${sag * 0.5} ${half * 0.2} ${sag * 0.38} C${half * 0.3} ${sag * 0.28} ${half * 0.42} ${sag * 0.34} ${half * 0.55} ${sag * 0.36} L${half * 0.6} ${sag * 1.2} L${-half * 0.5} ${sag * 1.2} Z`;
   return g(
     { class: "cs-hammock" },
-    fillPath(bed, "#5fa38a"),
-    h("path", { d: bed, fill: "url(#cs-hatch-fine)", filter: "url(#cs-rough)" }),
-    // 蓋毯子的人：頭在左、腳在右
-    g({ transform: `translate(${-half * 0.45} ${sag * 0.52}) rotate(-8)` }, head(22)),
-    shape(`M${-half * 0.3} ${sag * 0.6} C${-half * 0.1} ${sag * 0.36} ${half * 0.4} ${sag * 0.46} ${half * 0.55} ${sag * 0.52} C${half * 0.3} ${sag * 0.82} ${-half * 0.1} ${sag * 0.86} ${-half * 0.3} ${sag * 0.6} Z`, "#c9553a", 2.2, "cs-hatch-fine"),
-    inkPath(bed, 2.6),
-    inkPath(`M${-half} 0 L${-half - 20} -30 M${half} 0 L${half + 20} -30`, 1.6),
+    h("clipPath", { id: "cs-hammock-clip" }, h("path", { d: inner })),
+    inkPath(`M${-half} 0 L${-half - 22} -34 M${half} 0 L${half + 22} -34`, 1.8),
+    fillPath(inner, "#3f7361"),
+    g({ "clip-path": "url(#cs-hammock-clip)" }, shape(blanket, "#c9553a", 2.2, "cs-hatch-fine")),
+    g({ transform: `translate(${-half * 0.58} ${sag * 0.3}) rotate(-80)` }, head(21)),
+    fillPath(outer, "#5fa38a"),
+    h("path", { d: outer, fill: "url(#cs-hatch-fine)", filter: "url(#cs-rough)" }),
+    inkPath(outer, 2.6),
+    inkPath(`M${-half * 0.62} ${sag * 0.5} L${-half * 0.6} ${sag * 0.76} M${-half * 0.25} ${sag * 0.62} L${-half * 0.24} ${sag * 0.86} M${half * 0.12} ${sag * 0.64} L${half * 0.12} ${sag * 0.86} M${half * 0.5} ${sag * 0.5} L${half * 0.47} ${sag * 0.74}`, 1.2, { opacity: 0.5 }),
   );
 }
 

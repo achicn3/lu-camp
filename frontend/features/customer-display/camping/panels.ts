@@ -132,7 +132,7 @@ function campsitePanel(): string {
     fillPath("M100 1224 C300 1210 600 1212 790 1226 C800 1290 110 1298 100 1224 Z", "#cbbd9f") +
     gravel +
     inkPath("M100 1224 C300 1210 600 1212 790 1226", 1.6, { opacity: 0.6 }) +
-    signpost(880, 1236, "露坑", false) +
+    signpost(700, 1172, "露坑", false) +
     bush(40, 1260, 0.9) +
     frontGrass(r, 1320) +
     flowers(r, 0, 1000, 1330, 1390, 12)
@@ -142,12 +142,12 @@ function campsitePanel(): string {
 /** 帳篷＋泡咖啡那格（店主定稿的樣張）：木棧台、營火、營桌、露營椅。帳篷與人物是角色，另外疊上。 */
 function coffeePanel(): string {
   const r = rng(11);
-  let deck = inkPath("M470 1110 L990 1110 L1040 1200 L420 1200 Z", 2.6) + inkPath("M420 1200 L420 1222 L1040 1222 L1040 1200", 2.4);
+  let deck = inkPath("M470 1110 L950 1110 L990 1200 L420 1200 Z", 2.6) + inkPath("M420 1200 L420 1222 L990 1222 L990 1200", 2.4);
   for (let i = 1; i < 7; i += 1) {
     const t = i / 7;
     const y = 1110 + 90 * t;
     const xl = 470 - 50 * t;
-    const xr = 990 + 50 * t;
+    const xr = 950 + 40 * t;
     deck += inkPath(`M${xl} ${y} L${xr} ${y}`, 1.8);
     for (let k = 0; k < 3; k += 1) {
       const gx = xl + 40 + r() * (xr - xl - 120);
@@ -173,8 +173,8 @@ function coffeePanel(): string {
     pine(40, 1010, 0.9) +
     pine(930, 1000, 1) +
     // 木棧台
-    fillPath("M470 1110 L990 1110 L1040 1200 L420 1200 Z", "#c99a63") +
-    fillPath("M420 1200 L1040 1200 L1040 1222 L420 1222 Z", "#9c6f41") +
+    fillPath("M470 1110 L950 1110 L990 1200 L420 1200 Z", "#c99a63") +
+    fillPath("M420 1200 L990 1200 L990 1222 L420 1222 Z", "#9c6f41") +
     g({ filter: "url(#cs-rough)" }, deck.replace(/ filter="url\(#cs-rough\)"/g, "")) +
     // 營火（火焰是角色，會閃）
     g(
@@ -264,8 +264,8 @@ export function cliffFront(): string {
     inkPath(right, 2.8) +
     shape("M330 1032 L338 1032 L338 972 L330 972 Z M440 1042 L448 1042 L448 982 L440 982 Z", "#8a5a34", 2) +
     shape("M326 982 L452 992 L452 1000 L326 990 Z M326 1004 L452 1014 L452 1020 L326 1012 Z", "#b98352", 1.8) +
-    signpost(150, 1060, "雲海", false, "round") +
-    pine(40, 1040, 1.1)
+    pine(40, 1040, 1.1) +
+    signpost(130, 1042, "雲海", false, "round")
   );
 }
 
@@ -320,10 +320,18 @@ function nightPanel(): string {
     meadowBase(r) +
     pine(250, 1150, 2.2, true) +
     pine(760, 1150, 2.1, true) +
-    // 小帳篷（裡面亮燈，光暈在燈光層）
-    shape("M820 1220 L900 1080 L980 1220 Z", "#dca64a", 2.8) +
-    fillPath("M880 1220 L900 1150 L920 1220 Z", "#f7d67a") +
-    inkPath("M880 1220 L900 1150 L920 1220", 2) +
+    // 小帳篷（裡面點著營燈，布透出暖光；光暈在燈光層）
+    shadow(915, 1224, 110, 10, 0.25) +
+    fillPath("M900 1080 L936 1080 L1004 1220 L980 1220 Z", "#c98f3c") +
+    h("path", { d: "M900 1080 L936 1080 L1004 1220 L980 1220 Z", fill: "url(#cs-hatch)", filter: "url(#cs-rough)" }) +
+    fillPath("M820 1220 L900 1080 L980 1220 Z", "#f3c872") +
+    fillPath("M872 1220 L900 1140 L928 1220 Z", "#fff0b0") +
+    fillPath("M864 1220 C872 1190 884 1162 900 1140 C890 1168 884 1196 882 1220 Z", "#e2b24a") +
+    h("circle", { cx: 902, cy: 1196, r: 7, fill: "#f7a93c" }) +
+    inkPath("M820 1220 L900 1080 L980 1220 M900 1080 L936 1080 L1004 1220 L980 1220 M872 1220 L900 1140 L928 1220 M864 1220 C872 1190 884 1162 900 1140", 2.4) +
+    inkPath("M852 1164 L900 1090 M948 1164 L906 1090", 1.3, { "stroke-dasharray": "5 5", opacity: 0.6 }) +
+    inkPath("M900 1080 L900 1058 M820 1220 L792 1236 M936 1080 L1030 1226", 1.3) +
+    inkPath("M788 1230 l4 12 M1026 1220 l4 12", 2.4) +
     shape("M60 1240 L180 1240 L176 1262 L64 1262 Z", "#7a4d29", 2.2) +
     bush(120, 1236, 0.7) +
     frontGrass(r) +

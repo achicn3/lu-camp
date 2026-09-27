@@ -46,7 +46,7 @@ export const SPOTS = {
   vanParkX: 3380,
   tentX: 4260,
   sitX: 4560,
-  cliffX: 5250,
+  cliffX: 5270,
   roastX: 6420,
   eveningFireX: 6560,
   coffeeFireX: 4330,
@@ -325,8 +325,8 @@ function doorIntro(): string {
     inkPath("M300 60 L300 120 M700 60 L700 120", 2.6, { "stroke-dasharray": "8 5" }) +
     shape(board, "#8a5a34", 3.2, "cs-hatch-fine") +
     inkPath("M240 150 q60 -4 120 0 M620 270 q60 3 120 0", 1.2, { opacity: 0.4 }) +
-    brandMark("cs-door-mark", LOGO_MARK, 250, 160, 110, 94, "#fff1d6") +
-    g({ transform: "translate(560 262)" }, doodleText("露坑", { font: "marker", size: 150, fill: "#fff1d6", outline: "#2a1a0c", outlineWidth: 14, drop: 7 })) +
+    brandMark("cs-door-mark", LOGO_MARK, 300, 158, 116, 99, "#fff1d6") +
+    g({ transform: "translate(580 250)" }, doodleText("露坑", { font: "marker", size: 104, fill: "#fff1d6", outline: "#2a1a0c", outlineWidth: 11, drop: 5 })) +
     // 條紋雨遮
     fillPath("M110 330 L890 330 L890 420 L110 420 Z", "#f3e9d2") +
     stripes +
@@ -366,19 +366,18 @@ function doorIntro(): string {
     // 門把（拉桿）
     shape("M300 440 L340 440 L340 500 L300 500 Z", "#e2b24a", 2.2) +
     shape("M296 462 L346 462 L346 478 L296 478 Z", "#c89a36", 2.2);
+  // 握住門把的手：從右下伸進來的袖子＋拳頭（四根指節在左、大拇指壓在門把上），門把橫穿過拳頭 y=0
   const hand =
-    // 袖子從右下伸進來
-    shape("M260 170 L110 40 C100 30 90 30 80 36 L60 60 C54 70 56 80 64 88 L210 230 Z", "#c2643f", 3, "cs-hatch") +
-    shape("M60 60 C54 70 56 80 64 88 L84 70 C78 62 76 54 80 44 Z", "#a8502f", 2.2) +
-    // 手掌＋四指握住門把、大拇指在上
-    shape("M72 44 C60 20 40 10 18 12 C4 14 -4 24 -2 36 C0 50 12 60 30 64 C48 70 64 64 72 56 Z", "#efc9a6", 2.6) +
-    shape("M22 14 C12 -6 0 -14 -12 -10 C-20 -6 -18 6 -8 10 C0 14 8 18 14 24 Z", "#efc9a6", 2.4) +
-    inkPath("M0 28 C-10 28 -16 34 -12 40 M4 42 C-6 44 -10 50 -6 56 M14 54 C6 58 4 64 10 68", 2);
+    shape("M34 -20 L170 96 L128 150 L30 22 Z", "#c2643f", 3, "cs-hatch") +
+    shape("M30 -22 L50 -6 L40 30 L22 22 Z", "#a8502f", 2.4) +
+    shape("M-6 -24 C-16 -24 -19 -15 -12 -12 C-21 -9 -21 1 -12 2 C-21 5 -20 14 -11 15 C-17 19 -13 27 -4 27 L24 28 C38 28 42 16 40 0 C38 -16 32 -26 20 -26 Z", "#efc9a6", 2.6) +
+    inkPath("M-12 -12 C-4 -12 2 -11 6 -10 M-12 2 C-4 2 2 2 8 3 M-11 15 C-4 15 2 15 6 14", 1.6, { opacity: 0.75 }) +
+    shape("M18 -24 C10 -34 -6 -36 -16 -30 C-22 -26 -18 -20 -10 -21 C0 -22 8 -20 14 -16 Z", "#efc9a6", 2.4);
   return (
     `<div class="cs-door"><svg class="cs-door-wall" viewBox="0 0 1000 1400" width="1000" height="1400">${wall}</svg>` +
     `<div class="cs-door-light"></div>` +
     `<div class="cs-door-leaf"><svg viewBox="-6 -6 372 942" width="372" height="942">${doorArt}</svg></div>` +
-    `<div class="cs-door-hand"><svg viewBox="-40 -40 320 300" width="320" height="300">${hand}</svg></div>` +
+    `<div class="cs-door-hand"><svg viewBox="-40 -60 240 240" width="240" height="240">${hand}</svg></div>` +
     `</div>`
   );
 }
