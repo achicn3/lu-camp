@@ -42,7 +42,8 @@ export const CAM_MAX = (PANEL_COUNT - 1) * PANEL_W;
 export const SPOTS = {
   vanStartX: 380,
   vanParkX: 3380,
-  tentX: 4260,
+  // 帳篷右下角（含營繩營釘）要停在木棧台左緣之前
+  tentX: 4180,
   sitX: 4560,
   cliffX: 5270,
   roastX: 6420,
@@ -95,8 +96,17 @@ function range(r: ReturnType<typeof rng>, width: number, base: number, peakMin: 
   for (let i = 1; i < peaks.length - 1; i += 2) {
     const [px, py] = peaks[i] ?? [0, 0];
     const [nx, ny] = peaks[i + 1] ?? [0, 0];
-    faces += `M${px.toFixed(0)} ${py.toFixed(0)} L${nx.toFixed(0)} ${ny.toFixed(0)} L${(px + (nx - px) * 0.35).toFixed(0)} ${(base + 20).toFixed(0)} L${(px + 6).toFixed(0)} ${(base + 20).toFixed(0)} Z `;
-    if (py < snowBelow) snow += `M${px.toFixed(0)} ${py.toFixed(0)} l24 30 l-12 -2 l-10 14 l-10 -12 l-14 6 l-6 -8 Z `;
+    // 每座山的背光面切法不同：有的整片、有的只到半山腰、有的是一道斜谷
+    const kind = Math.floor(r() * 3);
+    if (kind === 0) faces += `M${px.toFixed(0)} ${py.toFixed(0)} L${nx.toFixed(0)} ${ny.toFixed(0)} L${(px + (nx - px) * 0.35).toFixed(0)} ${(base + 20).toFixed(0)} L${(px + 6).toFixed(0)} ${(base + 20).toFixed(0)} Z `;
+    else if (kind === 1) faces += `M${px.toFixed(0)} ${py.toFixed(0)} L${(px + (nx - px) * 0.7).toFixed(0)} ${(py + (ny - py) * 0.7).toFixed(0)} C${(px + 30).toFixed(0)} ${((py + base) / 2).toFixed(0)} ${(px + 14).toFixed(0)} ${((py + base) / 2 + 30).toFixed(0)} ${(px + 4).toFixed(0)} ${(base - 30).toFixed(0)} Z `;
+    else faces += `M${(px + 2).toFixed(0)} ${(py + 8).toFixed(0)} C${(px + 22).toFixed(0)} ${(py + 60).toFixed(0)} ${(px + 40).toFixed(0)} ${(py + 110).toFixed(0)} ${(px + 70).toFixed(0)} ${(base + 20).toFixed(0)} L${(px + 20).toFixed(0)} ${(base + 20).toFixed(0)} C${(px + 14).toFixed(0)} ${(py + 120).toFixed(0)} ${(px + 6).toFixed(0)} ${(py + 60).toFixed(0)} ${(px + 2).toFixed(0)} ${(py + 8).toFixed(0)} Z `;
+    if (py < snowBelow) {
+      // 積雪每座不同：大小、左右垂下的長度都隨機
+      const a = 16 + r() * 16;
+      const b = 12 + r() * 14;
+      snow += `M${px.toFixed(0)} ${py.toFixed(0)} l${a.toFixed(0)} ${(a * 1.2).toFixed(0)} l${(-a * 0.35).toFixed(0)} ${(-3 + r() * 4).toFixed(0)} l${(-a * 0.3).toFixed(0)} ${(8 + r() * 12).toFixed(0)} l${(-a * 0.3).toFixed(0)} ${(-10 - r() * 6).toFixed(0)} l${(-b * 0.5).toFixed(0)} ${(4 + r() * 6).toFixed(0)} l${(-b * 0.5).toFixed(0)} ${(-b * 0.6).toFixed(0)} Z `;
+    }
     for (let k = 0; k < 9; k += 1) {
       const t = 0.1 + r() * 0.8;
       const sx = px + (nx - px) * t * 0.6 + 4;
@@ -119,7 +129,7 @@ function farLayer(): string {
   const width = PANEL_W + CAM_MAX * PARALLAX.far + 100;
   const r = rng(41);
   const art =
-    range(r, width, 900, 560, 110, { body: "#c9d2d6", face: "#b9c3c9", ink: "#a4aeb4", stroke: "#adb7bd" }, 640) +
+    range(r, width, 900, 560, 110, { body: "#cfd7db", face: "#c3ccd1", ink: "#b3bcc1", stroke: "#bcc5ca" }, 640) +
     h("rect", { x: -40, y: 760, width: width + 80, height: 260, fill: "url(#cs-haze)" }) +
     range(r, width, 960, 700, 70, { body: "#a9b6b0", face: "#98a69f", ink: "#7f8b86", stroke: "#86928d" }, 0) +
     h("rect", { x: -40, y: 850, width: width + 80, height: 200, fill: "url(#cs-haze)" });

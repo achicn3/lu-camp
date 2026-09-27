@@ -71,8 +71,8 @@ export function deck(r: Rng): string {
 
 /** 營桌：三片木板桌面、桌板厚度、X 型金屬腳（管子有亮面、接點螺絲）。 */
 export function campTable(r: Rng): string {
-  let top = fillPath("M660 1010 L940 1010 L934 1030 L666 1030 Z", "#b98352");
-  top += fillPath("M662 1004 L938 1004 L940 1012 L660 1012 Z", "#d6a676");
+  let top = fillPath("M660 1010 L940 1010 L934 1030 L666 1030 Z", "#bd8450");
+  top += fillPath("M662 1004 L938 1004 L940 1012 L660 1012 Z", "#d9a66f");
   for (const x of [753, 846]) top += h("path", { d: `M${x} 1004 L${x} 1012`, stroke: "#7a5634", "stroke-width": 1 });
   top += woodGrain(r, 670, 930, 1014, 1028, 2);
   const tube = (d: string) =>
@@ -81,7 +81,7 @@ export function campTable(r: Rng): string {
     inkPath(d, 1.2);
   return (
     shadow(800, 1146, 150, 9, 0.18) +
-    h("path", { d: "M660 1147 l24 0 M916 1147 l24 0", stroke: INK, "stroke-width": 3, opacity: 0.45, "stroke-linecap": "round" }) +
+    h("path", { d: "M660 1147 l24 0 M916 1147 l24 0", stroke: INK, "stroke-width": 3, opacity: 0.32, "stroke-linecap": "round" }) +
     tube("M690 1030 L672 1140") +
     tube("M910 1030 L928 1140") +
     tube("M684 1034 L922 1138") +
@@ -100,10 +100,10 @@ export function kettle(): string {
   const body = "M742 1004 C738 990 740 966 750 952 L790 952 C800 966 802 990 798 1004 Z";
   return (
     h("ellipse", { cx: 770, cy: 1005, rx: 32, ry: 3.5, fill: INK, opacity: 0.28 }) +
-    fillPath(body, "#d3d6d1") +
-    fillPath("M776 952 L790 952 C800 966 802 990 798 1004 L780 1004 C786 986 784 966 776 952 Z", "#a6aba6") +
+    fillPath(body, "#cfd5d8") +
+    fillPath("M776 952 L790 952 C800 966 802 990 798 1004 L780 1004 C786 986 784 966 776 952 Z", "#a3abb0") +
     hatchArea("M782 956 L790 952 C800 966 802 990 798 1004 L786 1004 C790 986 790 968 782 956 Z", "cs-hatch-fine") +
-    h("path", { d: "M752 960 C749 974 749 988 751 998", stroke: "#fff", "stroke-width": 2.6, "stroke-linecap": "round", fill: "none", opacity: 0.65 }) +
+    h("path", { d: "M752 960 C749 974 749 988 751 998", stroke: "#eef4f8", "stroke-width": 2.6, "stroke-linecap": "round", fill: "none", opacity: 0.55 }) +
     h("path", { d: "M760 958 L759 1000 M771 956 L771 1002", stroke: "#eef0ec", "stroke-width": 1, fill: "none", opacity: 0.5 }) +
     inkPath("M741 996 C760 999 782 999 799 996", 0.9) +
     // 壺蓋：金屬蓋＋木頭蓋鈕
@@ -129,12 +129,13 @@ export function dripperSet(): string {
   const glass = "M846 1004 C842 990 844 978 850 972 L880 972 C886 978 888 990 884 1004 Z";
   return (
     h("ellipse", { cx: 865, cy: 1005, rx: 24, ry: 3, fill: INK, opacity: 0.28 }) +
-    fillPath(glass, "#e3f0f1", { opacity: 0.75 }) +
+    fillPath(glass, "#e6f2f4", { opacity: 0.4 }) +
     fillPath("M845 1004 C843 996 844 990 846 986 L884 986 C886 990 887 996 885 1004 Z", "#6a4126") +
     fillPath("M845 1004 C844 999 844 996 845 994 L885 994 C886 996 886 999 885 1004 Z", "#472a17") +
     h("ellipse", { cx: 865, cy: 986, rx: 19, ry: 2.4, fill: "#8a5a36" }) +
     h("path", { d: "M852 976 L851 1000 M856 976 L855 984", stroke: "#fff", "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.8 }) +
-    inkPath(glass, 1.7) +
+    h("path", { d: glass, fill: "none", stroke: "#f7fbfc", "stroke-width": 2.2, opacity: 0.8, transform: "translate(1 0)" }) +
+    h("path", { d: glass, fill: "none", stroke: INK_SOFT, "stroke-width": 1.3, filter: "url(#cs-rough)" }) +
     inkPath("M848 972 L882 972", 1.1) +
     shape("M884 978 c10 0 11 16 0 18 l0 -4 c6 -1 5 -10 0 -10 Z", "#e3f0f1", 1.2) +
     // 正在滴的咖啡
@@ -142,7 +143,7 @@ export function dripperSet(): string {
     h("circle", { cx: 865, cy: 983, r: 1.3, fill: "#5a3620" }) +
     // 濾杯（陶瓷）＋底座
     shape("M850 966 L880 966 L882 972 L848 972 Z", "#e7e2d8", 1.4) +
-    shape("M838 950 L892 950 L880 966 L850 966 Z", "#f1ede4", 1.9) +
+    shape("M838 950 L892 950 L880 966 L850 966 Z", "#efe7da", 1.9) +
     hatchArea("M872 950 L892 950 L880 966 L868 966 Z", "cs-hatch-fine", 0.8) +
     h("path", { d: "M841 950 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6", stroke: "#b9b2a4", "stroke-width": 0.9, fill: "#fbf9f3" }) +
     inkPath("M852 955 L856 964 M865 955 L865 964 M878 955 L874 964", 0.8)
@@ -189,7 +190,7 @@ export function campChair(): string {
   const tube = (d: string) => h("path", { d, stroke: "#55595c", "stroke-width": 4, "stroke-linecap": "round", fill: "none" }) + inkPath(d, 1.1);
   return (
     shadow(560, 1150, 96, 9, 0.18) +
-    h("path", { d: "M466 1146 l16 0 M616 1146 l16 0", stroke: INK, "stroke-width": 3, opacity: 0.45, "stroke-linecap": "round" }) +
+    h("path", { d: "M466 1146 l16 0 M616 1146 l16 0", stroke: INK, "stroke-width": 3, opacity: 0.32, "stroke-linecap": "round" }) +
     tube("M500 1090 L476 1146 M598 1090 L622 1146 M496 1090 L626 1146 M602 1090 L472 1146") +
     fillPath(back, "#4f7a5f") +
     hatchArea("M560 946 L618 944 L604 1064 L572 1064 Z", "cs-hatch") +

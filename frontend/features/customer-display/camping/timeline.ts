@@ -247,8 +247,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
 
   // ③ 搭帳篷（27–38.6s）：邊走邊跟著鏡頭到草地，帳篷「啪」地撐開，蹲下來敲營釘，再走去坐下。
   master.addLabel("tent", 27);
-  camTo(master, 3850, 4.5, 27);
-  walk(master, [3470, 1320], [3935, 1160], 4.5, 27);
+  camTo(master, 3760, 4.5, 27);
+  walk(master, [3470, 1320], [3855, 1160], 4.5, 27);
   master.set(".cs-walker .cs-tent-bag", { autoAlpha: 0 }, 31.6);
   master.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 1.3, ease: "elastic.out(1, 0.45)" }, 31.7);
   master.to(".cs-tent-shadow", { scaleX: 1, duration: 0.8, ease: "power2.out" }, 31.7);
@@ -261,7 +261,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   }
   showPose(master, ".cs-walker", 36.4);
   camTo(master, 4000, 2.2, 36.4);
-  walk(master, [3935, 1160], [4480, 1150], 2.2, 36.4);
+  walk(master, [3855, 1160], [4480, 1150], 2.2, 36.4);
 
   // ④ 泡咖啡（38.6–49s）：坐進露營椅，捧著露坑的杯子喝一口、點點頭。結帳結束後從這裡接著播。
   master.addLabel("coffee", 38.6);
@@ -369,7 +369,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   place(".cs-fire-coffee", SPOTS.coffeeFireX, 1250);
   place(".cs-fire-ambient", SPOTS.coffeeFireX, 1250);
   place(".cs-fire-evening", SPOTS.eveningFireX, 1260);
-  place(".cs-hammerer", 3935, 1160);
+  place(".cs-hammerer", 3855, 1160);
   place(".cs-sitter", SPOTS.sitX, 1150);
   place(".cs-cliffsitter", SPOTS.cliffX, 1094);
   place(".cs-roaster", SPOTS.roastX, 1262);

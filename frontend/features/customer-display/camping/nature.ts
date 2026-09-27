@@ -143,7 +143,7 @@ export function grassField(r: Rng, x0: number, x1: number, y0: number, y1: numbe
       out += grassBlade(r, bx, cy + (r() - 0.5) * 3, hgt, (1.4 + depth * 2.4) * scale);
     }
   }
-  for (let i = 0; i < clusters * 2; i += 1) {
+  for (let i = 0; i < Math.round(clusters * 0.6); i += 1) {
     const x = x0 + r() * (x1 - x0);
     const y = y0 + r() * span;
     const depth = (y - y0) / span;

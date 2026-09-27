@@ -27,28 +27,29 @@ export function roadY(x: number): number {
 /** 草原：兩層底色（遠處偏黃綠、近處偏深）、乾筆刷的橫向筆觸、成叢的草（有密有疏有空白）。 */
 function meadowBase(r: Rng, topY = 1040): string {
   let brush = "";
-  for (let i = 0; i < 70; i += 1) {
+  for (let i = 0; i < 40; i += 1) {
     const x = r() * 1000;
     const y = topY + 20 + Math.pow(r(), 0.9) * (1380 - topY);
     const len = 20 + r() * 60;
     brush += h("path", { d: `M${x.toFixed(0)} ${y.toFixed(0)} q${(len / 2).toFixed(0)} ${(-2 + r() * 4).toFixed(1)} ${len.toFixed(0)} 0`, stroke: r() > 0.5 ? "#7f9a52" : "#b3c47c", "stroke-width": 2 + r() * 3, opacity: 0.35, fill: "none", "stroke-linecap": "round" });
   }
   return (
+    // 大片草地只用紙紋顆粒（不做大範圍顏料深淺），格與格接起來才不會看到接縫
     g(
-      { filter: "url(#cs-pencil)" },
-      h("path", { d: `M-20 ${topY} C250 ${topY - 20} 600 ${topY + 10} 1020 ${topY - 10} L1020 1400 L-20 1400 Z`, fill: "#a3b86c" }),
-      h("path", { d: `M-20 ${topY + 130} C300 ${topY + 110} 700 ${topY + 145} 1020 ${topY + 120} L1020 1400 L-20 1400 Z`, fill: "#8fa85c" }),
-      h("path", { d: `M-20 ${topY + 260} C300 ${topY + 250} 700 ${topY + 270} 1020 ${topY + 255} L1020 1400 L-20 1400 Z`, fill: "#7f9a4f" }),
+      { filter: "url(#cs-grain)" },
+      h("path", { d: `M-20 ${topY} C250 ${topY - 20} 600 ${topY + 10} 1020 ${topY} L1020 1400 L-20 1400 Z`, fill: "#a3b86c" }),
+      h("path", { d: `M-20 ${topY + 130} C300 ${topY + 110} 700 ${topY + 145} 1020 ${topY + 130} L1020 1400 L-20 1400 Z`, fill: "#8fa85c" }),
+      h("path", { d: `M-20 ${topY + 260} C300 ${topY + 250} 700 ${topY + 270} 1020 ${topY + 260} L1020 1400 L-20 1400 Z`, fill: "#7f9a4f" }),
     ) +
-    h("path", { d: `M-20 ${topY} C250 ${topY - 20} 600 ${topY + 10} 1020 ${topY - 10}`, stroke: "#6f8a4a", "stroke-width": 1.4, fill: "none", opacity: 0.8, filter: "url(#cs-rough)" }) +
+    h("path", { d: `M-20 ${topY} C250 ${topY - 20} 600 ${topY + 10} 1020 ${topY}`, stroke: "#6f8a4a", "stroke-width": 1.4, fill: "none", opacity: 0.8, filter: "url(#cs-rough)" }) +
     brush +
-    grassField(r, -10, 1010, topY + 4, 1300, 46)
+    grassField(r, -10, 1010, topY + 4, 1300, 24)
   );
 }
 
 /** 最前景的草叢（比較高、顏色較深，蓋住下緣）。 */
 function frontGrass(r: Rng, y0 = 1310): string {
-  return grassField(r, -20, 1020, y0, 1420, 22, 1.5);
+  return grassField(r, -20, 1020, y0, 1420, 11, 1.5);
 }
 
 function bush(x: number, y: number, s: number): string {
@@ -133,7 +134,7 @@ function campsitePanel(): string {
     fillPath("M100 1224 C300 1210 600 1212 790 1226 C800 1290 110 1298 100 1224 Z", "#cbbd9f") +
     gravel +
     inkPath("M100 1224 C300 1210 600 1212 790 1226", 1.6, { opacity: 0.6 }) +
-    signpost(700, 1172, "露坑", false) +
+    signpost(560, 1172, "露坑", false) +
     bush(40, 1260, 0.9) +
     frontGrass(r, 1320) +
     flowers(r, 0, 1000, 1330, 1390, 12)
@@ -147,8 +148,8 @@ function coffeePanel(): string {
     meadowBase(r) +
     // 營火旁被踩出來的一小塊泥地
     fillPath("M190 1262 C220 1226 440 1222 480 1256 C470 1290 220 1296 190 1262 Z", "#b59d73", { opacity: 0.55 }) +
-    pine(960, 1016, 1.35, false, "near") +
-    pine(40, 1020, 1.15, false, "near") +
+    pine(962, 1016, 1.3, false, "mid") +
+    pine(90, 1020, 1.15, false, "near") +
     deck(r) +
     g({ transform: "translate(330 1250)" }, firePit(r)) +
     campTable(r) +
@@ -160,8 +161,8 @@ function coffeePanel(): string {
     stone(r, 610, 1310, 14) +
     stone(r, 632, 1318, 9) +
     frontGrass(r) +
-    flowers(r, 40, 360, 1320, 1380, 8) +
-    flowers(r, 700, 980, 1330, 1385, 5)
+    flowers(r, 40, 300, 1330, 1380, 4) +
+    flowers(r, 760, 980, 1335, 1385, 3)
   );
 }
 

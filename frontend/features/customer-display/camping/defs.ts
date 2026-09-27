@@ -28,6 +28,13 @@ export const DEFS = `
   <feComponentTransfer in="b2" result="b3"><feFuncR type="linear" slope="1.1"/><feFuncG type="linear" slope="1.1"/><feFuncB type="linear" slope="1.1"/></feComponentTransfer>
   <feComposite in="b3" in2="SourceGraphic" operator="in"/>
 </filter>
+<filter id="cs-grain" x="0" y="0" width="100%" height="100%">
+  <feTurbulence type="fractalNoise" baseFrequency="1.3" numOctaves="1" seed="9" result="g"/>
+  <feColorMatrix in="g" type="matrix" values="0.2 0 0 0 0.84  0.2 0 0 0 0.84  0.2 0 0 0 0.84  0 0 0 0 1" result="gm"/>
+  <feBlend in="SourceGraphic" in2="gm" mode="multiply" result="b"/>
+  <feComponentTransfer in="b" result="c"><feFuncR type="linear" slope="1.1"/><feFuncG type="linear" slope="1.1"/><feFuncB type="linear" slope="1.1"/></feComponentTransfer>
+  <feComposite in="c" in2="SourceGraphic" operator="in"/>
+</filter>
 <filter id="cs-rough" x="-5%" y="-5%" width="110%" height="110%">
   <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="1" result="t"/>
   <feDisplacementMap in="SourceGraphic" in2="t" scale="3.2" xChannelSelector="R" yChannelSelector="G"/>

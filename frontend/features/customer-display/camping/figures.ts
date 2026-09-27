@@ -267,7 +267,8 @@ export function camperVan(): string {
 
 /** 帳篷：cs-tent-body 由收合（scaleY 0）撐開；原點在帳篷底中央。 */
 export function tent(): string {
-  const word = doodleText("露坑", { font: "marker", size: 80, fill: "#fff1d6", outline: "#3a2210", outlineWidth: 10, drop: 5 });
+  // 品牌字不要比人物搶眼：暖米白、外框與陰影都放淡一點
+  const word = doodleText("露坑", { font: "marker", size: 80, fill: "#f1e3c6", outline: "#6a4522", outlineWidth: 9, drop: 3 });
   return g(
     { class: "cs-tent" },
     g({ class: "cs-tent-shadow" }, shadow(10, 8, 210, 18, 0.16), h("path", { d: "M-176 1 C-60 8 80 8 246 2 L244 7 C80 14 -60 14 -174 7 Z", fill: INK, opacity: 0.35 })),
@@ -302,13 +303,13 @@ export function tent(): string {
         h("path", { d: "M-85 -160 L0 -304 M85 -160 L10 -304", "stroke-width": 1.6, "stroke-dasharray": "6 6", opacity: 0.7 }),
         h("path", { d: "M-150 -14 L150 -14", "stroke-width": 1.4, "stroke-dasharray": "5 6", opacity: 0.6 }),
         h("path", { d: "M0 -320 L0 -368", "stroke-width": 3.2 }),
-        h("path", { d: "M-170 0 L-226 30 M240 0 L300 26 M58 -320 L260 12", "stroke-width": 1.2, stroke: INK_SOFT }),
-        h("path", { d: "M-200 16 l6 -3 l3 5 l-6 3 Z M272 14 l6 -3 l3 5 l-6 3 Z M200 -80 l6 -1 l1 6 l-6 1 Z", "stroke-width": 1 }),
+        h("path", { d: "M-170 0 L-226 30 M240 0 L262 22 M58 -320 L250 12", "stroke-width": 1.2, stroke: INK_SOFT }),
+        h("path", { d: "M-200 16 l6 -3 l3 5 l-6 3 Z M248 6 l6 -2 l3 5 l-6 2 Z M196 -80 l6 -1 l1 6 l-6 1 Z", "stroke-width": 1 }),
         h("path", { d: "M-5 -372 L5 -372 L4 -366 L-4 -366 Z", "stroke-width": 1.4 }),
       ),
       g({ class: "cs-flag", transform: "translate(0 -364)" }, fillPath("M0 0 L42 10 L0 24 Z", "#c9553a"), inkPath("M0 0 L42 10 L0 24", 1.8)),
     ),
-    g({ class: "cs-pegs", filter: "url(#cs-rough)", stroke: INK, "stroke-width": 2.6, "stroke-linecap": "round", fill: "none" }, h("path", { class: "cs-peg", d: "M-230 22 l5 16 M-231 22 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M296 18 l5 16 M295 18 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M256 4 l5 16 M255 4 q-4 -4 1 -6" })),
+    g({ class: "cs-pegs", filter: "url(#cs-rough)", stroke: INK, "stroke-width": 2.6, "stroke-linecap": "round", fill: "none" }, h("path", { class: "cs-peg", d: "M-230 22 l5 16 M-231 22 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M260 16 l5 16 M259 16 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M248 6 l5 16 M247 6 q-4 -4 1 -6" })),
   );
 }
 
@@ -319,9 +320,10 @@ function joint(cls: string, px: number, py: number, rotate: number, body: string
 
 /** 喝咖啡的人手上杯子的三個位置：放在胸前、湊到嘴邊喝、舉高乾杯。 */
 export const SIT_POSES = {
-  rest: { cup: "translate(0 0)", sleeve: "M584 980 Q606 1004 590 1022" },
-  sip: { cup: "translate(-12 -50)", sleeve: "M584 980 Q612 994 578 972" },
-  cheers: { cup: "translate(22 -86)", sleeve: "M584 980 Q622 978 612 936" },
+  // 袖子從右肩出發、手肘往外下方，手腕在杯把右下方；三個位置的手腕都剛好等於杯子的位移
+  rest: { cup: "translate(0 0)", sleeve: "M588 976 Q642 992 626 1030" },
+  sip: { cup: "translate(-12 -50)", sleeve: "M588 976 Q654 1012 614 980" },
+  cheers: { cup: "translate(22 -86)", sleeve: "M588 976 Q646 1006 648 944" },
 } as const;
 
 /**
@@ -331,6 +333,9 @@ export const SIT_POSES = {
 export function sittingPerson(): string {
   const INKG = { filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round" };
   const legs =
+    // 坐下的重量：椅面被壓得往下彎、大腿底下一道影子；靴子踩在棧板上的接地影子
+    h("path", { d: "M498 1064 C530 1080 580 1082 608 1066 L606 1074 C580 1090 530 1088 500 1072 Z", fill: INK, opacity: 0.22 }) +
+    h("ellipse", { cx: 660, cy: 1113, rx: 26, ry: 3.2, fill: INK, opacity: 0.3 }) +
     fillPath("M548 1054 C580 1048 612 1048 640 1052 L652 1102 L632 1106 L622 1072 C598 1070 572 1074 552 1078 Z", PANTS_SHADE) +
     fillPath("M540 1060 C574 1052 612 1054 646 1060 L662 1108 L640 1112 L628 1080 C602 1078 572 1082 546 1086 Z", PANTS) +
     fillPath("M636 1108 L678 1108 L678 1096 L662 1092 L640 1096 Z", BOOT) +
@@ -343,6 +348,8 @@ export function sittingPerson(): string {
     ) +
     // 鞋底、鞋底紋、褲子接縫與膝蓋的摺痕、坐下時大腿被椅面壓出的皺褶
     fillPath("M636 1106 L680 1106 L680 1112 L636 1112 Z", "#3a2a20") +
+    fillPath("M636 1104 L646 1104 L646 1112 L636 1112 Z", "#2e2119") +
+    inkPath("M638 1090 C646 1094 654 1094 660 1092", 0.9, { opacity: 0.7 }) +
     inkPath("M642 1109 l3 3 M650 1109 l3 3 M658 1109 l3 3 M666 1109 l3 3", 0.8) +
     inkPath("M666 1106 C668 1100 674 1098 678 1100 M650 1098 l6 4 M656 1096 l-4 5", 0.9) +
     inkPath("M556 1068 C586 1064 612 1064 632 1068 M614 1062 C620 1068 622 1074 628 1078 M626 1058 C634 1064 636 1070 640 1080 M646 1066 C650 1076 652 1086 656 1098", 1.1) +
@@ -350,13 +357,13 @@ export function sittingPerson(): string {
   const body =
     fillPath("M512 1066 C502 1032 506 996 520 974 C534 952 574 950 590 970 C606 992 606 1032 600 1066 Z", JACKET) +
     fillPath("M522 1030 L548 1030 L548 1044 L522 1044 Z", JACKET_SHADE) +
-    fillPath("M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M540 984 L534 1012 L546 1008 Z", SCARF) +
+    fillPath("M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M538 984 C536 996 532 1008 534 1020 L546 1018 C544 1006 546 994 548 986 Z", SCARF) +
     h("path", { d: "M512 1066 C502 1032 506 996 520 974 L534 970 C524 1002 526 1038 536 1066 Z", fill: "url(#cs-hatch)", filter: "url(#cs-rough)" }) +
     g(INKG,
       h("path", { d: "M512 1066 C502 1032 506 996 520 974 C534 952 574 950 590 970 C606 992 606 1032 600 1066" }),
       h("path", { d: "M556 980 L558 1060", "stroke-width": 1.6 }),
       h("path", { d: "M522 1030 L548 1030 L548 1044 L522 1044 Z", "stroke-width": 1.6 }),
-      h("path", { d: "M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M540 984 L534 1012 L546 1008", "stroke-width": 2 }),
+      h("path", { d: "M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M538 984 C536 996 532 1008 534 1020 M546 1018 C544 1006 546 994 548 986", "stroke-width": 2 }),
     ) +
     // 外套細節：肩線（raglan）、拉鍊齒與拉頭、口袋蓋與釦子、下襬收邊、腰間摺痕
     fillPath("M510 1056 C530 1060 580 1060 602 1056 L602 1066 L512 1066 Z", JACKET_SHADE) +
@@ -369,23 +376,28 @@ export function sittingPerson(): string {
     inkPath("M540 1048 q8 4 14 0 M566 1046 q8 5 16 1", 0.9) +
     // 圍巾：針織橫紋與流蘇
     inkPath("M532 972 l2 6 M542 975 l1 7 M552 976 l0 7 M562 976 l-1 7 M572 974 l-2 6", 0.8) +
-    inkPath("M536 1010 l-2 6 M540 1011 l-1 6 M544 1009 l0 6", 0.9) +
-    inkPath("M530 970 C542 980 564 980 580 970 M538 988 C538 996 537 1002 536 1008 M544 986 C544 994 543 1000 542 1006", 0.8, { opacity: 0.7 }) +
+    inkPath("M535 1020 l-1 6 M539 1020 l0 6 M543 1019 l0 6", 0.9) +
+    inkPath("M530 970 C542 980 564 980 580 970 M540 990 C539 1000 538 1008 539 1016 M544 990 C543 998 542 1006 542 1014", 0.8, { opacity: 0.7 }) +
     inkPath("M516 1000 q5 3 4 10 M598 1000 q-4 4 -3 10 M524 1016 q4 2 8 0", 0.8, { opacity: 0.7 });
   const headArt = g({ transform: "translate(552 932)" }, head());
   const cup =
     fillPath("M572 1002 L612 1002 L608 1034 L576 1034 Z", "#f4efe4") +
-    h("circle", { cx: 574, cy: 1022, r: 8, fill: SKIN, filter: "url(#cs-pencil)" }) +
-    h("circle", { cx: 610, cy: 1016, r: 7, fill: SKIN, filter: "url(#cs-pencil)" }) +
     g({ transform: "translate(592 1018) scale(0.8)" }, h("use", { href: "#cs-mug-mark" })) +
     h("path", { d: "M578 1006 L576 1028", stroke: "#fff", "stroke-width": 3, "stroke-linecap": "round", opacity: 0.8 }) +
     g(INKG,
       h("path", { d: "M572 1002 L612 1002 L608 1034 L576 1034 Z" }),
       h("path", { d: "M612 1010 c12 0 12 16 -2 16" }),
-      h("circle", { cx: 574, cy: 1022, r: 8, "stroke-width": 1.8 }),
     ) +
-    inkPath("M568 1018 l7 -1 M567 1023 l8 -1 M568 1028 l7 -1", 0.8) +
-    shape("M603 1008 C609 1004 616 1006 615 1011 C614 1015 607 1015 603 1012 Z", SKIN, 1.2) +
+    // 左手從杯子左側托住：手掌在後、三根手指繞到杯身前面
+    shape("M572 1010 C562 1012 560 1030 570 1034 L576 1034 L576 1010 Z", SKIN_SHADE, 1.4) +
+    shape("M570 1012 L585 1012 C589 1012 589 1018 585 1018 L570 1018 Z", SKIN, 1.1) +
+    shape("M569 1019 L587 1019 C591 1019 591 1025 587 1025 L569 1025 Z", SKIN, 1.1) +
+    shape("M570 1026 L584 1026 C588 1026 588 1031 584 1031 L570 1031 Z", SKIN, 1.1) +
+    // 右手：袖口在杯把右下，四指勾住杯把、大拇指壓在杯把上緣
+    shape("M620 1024 C628 1020 636 1026 634 1034 C632 1040 624 1040 620 1036 Z", JACKET_SHADE, 1.3) +
+    shape("M612 1012 C620 1008 628 1014 627 1024 C626 1031 618 1032 613 1028 Z", SKIN, 1.3) +
+    inkPath("M614 1016 l8 1 M613 1021 l9 1 M614 1026 l8 0", 0.8) +
+    shape("M606 1008 C611 1003 619 1005 618 1010 C617 1013 610 1014 606 1011 Z", SKIN, 1.1) +
 
     g({ class: "cs-steam", filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.6 },
       h("path", { d: "M586 996 c-10 -16 10 -24 0 -40 c-10 -16 10 -24 0 -38" }),
