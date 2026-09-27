@@ -141,6 +141,10 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   const cupTo = (tl: gsap.core.Timeline, pose: keyof typeof SIT_POSES, duration: number, pos: gsap.Position, ease = "power2.inOut") => {
     tl.to(".cs-cup", { attr: { transform: SIT_POSES[pose].cup }, duration, ease }, pos);
     tl.to(".cs-sleeve", { attr: { d: SIT_POSES[pose].sleeve }, duration, ease }, pos);
+    // 乾杯是單手舉：左手放開杯子、改放在大腿上；其他時候雙手捧杯
+    const oneHand = pose === "cheers";
+    tl.to(".cs-cup-lefthand", { opacity: oneHand ? 0 : 1, duration: Math.min(duration, 0.2) }, pos);
+    tl.to(".cs-lap-lefthand", { opacity: oneHand ? 1 : 0, duration: Math.min(duration, 0.2) }, pos);
   };
   /** 走路：腿與手臂前後擺、身體上下晃；走完回正。 */
   const walk = (tl: gsap.core.Timeline, from: [number, number], to: [number, number], duration: number, pos: number) => {
@@ -178,6 +182,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(".cs-hammer-arm", rot(-150), 0);
     tl.set(".cs-cup", { attr: { transform: SIT_POSES.rest.cup } }, 0);
     tl.set(".cs-sleeve", { attr: { d: SIT_POSES.rest.sleeve } }, 0);
+    tl.set(".cs-cup-lefthand", { opacity: 1 }, 0);
+    tl.set(".cs-lap-lefthand", { opacity: 0 }, 0);
     tl.set(".cs-nod-head", rot(0), 0);
     tl.set(".cs-point-arm", rot(-20), 0);
     tl.set(".cs-stick-arm", rot(-62), 0);

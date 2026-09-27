@@ -379,6 +379,12 @@ export function sittingPerson(): string {
     inkPath("M535 1020 l-1 6 M539 1020 l0 6 M543 1019 l0 6", 0.9) +
     inkPath("M530 970 C542 980 564 980 580 970 M540 990 C539 1000 538 1008 539 1016 M544 990 C543 998 542 1006 542 1014", 0.8, { opacity: 0.7 }) +
     inkPath("M516 1000 q5 3 4 10 M598 1000 q-4 4 -3 10 M524 1016 q4 2 8 0", 0.8, { opacity: 0.7 });
+  // 放在大腿上的左手（單手舉杯時才出現）
+  const lapHand = g(
+    { class: "cs-lap-lefthand", opacity: 0 },
+    shape("M548 1044 C556 1038 570 1040 574 1048 C576 1056 566 1060 556 1058 C548 1056 544 1050 548 1044 Z", SKIN, 1.4),
+    inkPath("M556 1046 l10 1 M555 1051 l11 1", 0.8),
+  );
   const headArt = g({ transform: "translate(552 932)" }, head());
   const cup =
     fillPath("M572 1002 L612 1002 L608 1034 L576 1034 Z", "#f4efe4") +
@@ -388,11 +394,14 @@ export function sittingPerson(): string {
       h("path", { d: "M572 1002 L612 1002 L608 1034 L576 1034 Z" }),
       h("path", { d: "M612 1010 c12 0 12 16 -2 16" }),
     ) +
-    // 左手從杯子左側托住：手掌在後、三根手指繞到杯身前面
-    shape("M572 1010 C562 1012 560 1030 570 1034 L576 1034 L576 1010 Z", SKIN_SHADE, 1.4) +
-    shape("M570 1012 L585 1012 C589 1012 589 1018 585 1018 L570 1018 Z", SKIN, 1.1) +
-    shape("M569 1019 L587 1019 C591 1019 591 1025 587 1025 L569 1025 Z", SKIN, 1.1) +
-    shape("M570 1026 L584 1026 C588 1026 588 1031 584 1031 L570 1031 Z", SKIN, 1.1) +
+    // 左手從杯子左側托住：手掌在後、三根手指繞到杯身前面（單手舉杯時這隻手會放開、改放在大腿上）
+    g(
+      { class: "cs-cup-lefthand" },
+      shape("M572 1010 C562 1012 560 1030 570 1034 L576 1034 L576 1010 Z", SKIN_SHADE, 1.4),
+      shape("M570 1012 L585 1012 C589 1012 589 1018 585 1018 L570 1018 Z", SKIN, 1.1),
+      shape("M569 1019 L587 1019 C591 1019 591 1025 587 1025 L569 1025 Z", SKIN, 1.1),
+      shape("M570 1026 L584 1026 C588 1026 588 1031 584 1031 L570 1031 Z", SKIN, 1.1),
+    ) +
     // 右手：袖口在杯把右下，四指勾住杯把、大拇指壓在杯把上緣
     shape("M620 1024 C628 1020 636 1026 634 1034 C632 1040 624 1040 620 1036 Z", JACKET_SHADE, 1.3) +
     shape("M612 1012 C620 1008 628 1014 627 1024 C626 1031 618 1032 613 1028 Z", SKIN, 1.3) +
@@ -414,6 +423,7 @@ export function sittingPerson(): string {
     { class: "cs-person cs-pose-sit", transform: "translate(-560 -1150)" },
     legs,
     body,
+    lapHand,
     joint("cs-nod-head", 552, 960, 0, headArt),
     g({ class: "cs-cup-arm" }, cupArm),
   );
