@@ -23,7 +23,10 @@ export type CampingController = {
 type SkyKey = keyof typeof SKY_STOPS;
 
 /** 天上的斜光帶：白天最明顯，傍晚淡掉，晚上沒有。 */
-const LIGHTBANDS: Record<SkyKey, number> = { day: 0.3, dawn: 0.3, golden: 0.18, sunset: 0.06, night: 0 };
+const LIGHTBANDS: Record<SkyKey, number> = { day: 0, dawn: 0, golden: 0.1, sunset: 0.04, night: 0 };
+
+/** 天空水彩暈染的濃淡：晚上幾乎看不到。 */
+const WASH: Record<SkyKey, number> = { day: 1, dawn: 1, golden: 0.7, sunset: 0.45, night: 0.08 };
 
 const TINT: Record<SkyKey, { backgroundColor: string; opacity: number }> = {
   day: { backgroundColor: "#f0c080", opacity: 0 },
@@ -125,6 +128,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.to(skyBottom, { attr: { "stop-color": bottom }, duration, ease: "sine.inOut" }, pos);
     tl.to(tint, { ...TINT[key], duration, ease: "sine.inOut" }, pos);
     tl.to(".cs-lightbands", { opacity: LIGHTBANDS[key], duration, ease: "sine.inOut" }, pos);
+    tl.to(".cs-skywash", { opacity: WASH[key], duration, ease: "sine.inOut" }, pos);
   };
   const poses = [".cs-walker", ".cs-hammerer", ".cs-sitter", ".cs-cliffsitter", ".cs-roaster"];
   const showPose = (tl: gsap.core.Timeline, sel: string | null, pos: gsap.Position) => {
@@ -183,6 +187,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(skyBottom, { attr: { "stop-color": SKY_STOPS.day[1] } }, 0);
     tl.set(tint, TINT.day, 0);
     tl.set(".cs-lightbands", { opacity: LIGHTBANDS.day }, 0);
+    tl.set(".cs-skywash", { opacity: WASH.day }, 0);
     tl.set(".cs-balloon", at($(".cs-balloon"), 1150, 330), 0);
     tl.set(".cs-night", { opacity: 0 }, 0);
     tl.set(".cs-lights-wrap", { opacity: 0 }, 0);
@@ -392,6 +397,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tr.to(skyBottom, { attr: { "stop-color": bottom }, duration: 1.2 * d }, 0);
     tr.to(tint, { ...TINT.day, duration: 1.2 * d }, 0);
     tr.to(".cs-lightbands", { opacity: LIGHTBANDS.day, duration: 1.2 * d }, 0);
+    tr.to(".cs-skywash", { opacity: WASH.day, duration: 1.2 * d }, 0);
     tr.to([".cs-night", ".cs-rain", ".cs-lights-wrap"], { opacity: 0, duration: 0.8 * d }, 0);
     tr.to(".cs-rainbow", { autoAlpha: 0, duration: 0.5 * d }, 0);
     tr.to(".cs-sun", { ...at($(".cs-sun"), 770, 250), duration: 1.2 * d }, 0);

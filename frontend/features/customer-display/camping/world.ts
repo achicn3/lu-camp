@@ -15,22 +15,20 @@ import {
   TENT_BAG,
   tent,
 } from "./figures";
+import { cloud, flowers, pine, scribbleSun } from "./nature";
 import { PANEL_COUNT, PANEL_W, STAGE_H, cliffFront, panelArt } from "./panels";
 import {
   INK,
   LOGO_MARK,
   brandMark,
-  cloud,
   doodleStar,
   doodleText,
   fillPath,
-  flowers,
   g,
   h,
+  hatchArea,
   inkPath,
-  pine,
   rng,
-  scribbleSun,
   shape,
 } from "./svg";
 
@@ -67,62 +65,94 @@ function tileSvg(x: number, w: number, content: string, cls = "cs-tile"): string
   return `<div class="${cls}" style="left:${x}px;width:${w}px"><svg viewBox="${x} 0 ${w} ${STAGE_H}" width="${w}" height="${STAGE_H}">${content}</svg></div>`;
 }
 
-/** 遠山：整條山脊一條路徑，每塊圖磚只取自己那段畫。 */
-function farLayer(): string {
-  const width = PANEL_W + CAM_MAX * PARALLAX.far + 100;
-  const r = rng(41);
-  const peaks: [number, number][] = [[-40, 880]];
+/** 一條山脈：山脊點、色塊、背光面、岩壁筆觸、（可選）積雪。 */
+function range(r: ReturnType<typeof rng>, width: number, base: number, peakMin: number, peakVar: number, colors: { body: string; face: string; ink: string; stroke: string }, snowBelow: number): string {
+  const peaks: [number, number][] = [[-40, base - 60]];
   let x = -40;
   while (x < width + 200) {
-    x += 120 + r() * 140;
-    peaks.push([x, 620 + r() * 150]);
-    x += 80 + r() * 90;
-    peaks.push([x, 780 + r() * 60]);
+    x += 110 + r() * 150;
+    peaks.push([x, peakMin + r() * peakVar]);
+    x += 70 + r() * 100;
+    peaks.push([x, peakMin + peakVar * 0.8 + r() * 70]);
   }
-  const ridge = peaks.map(([px, py]) => `${px.toFixed(0)} ${py.toFixed(0)}`).join(" L");
-  const body = `M${ridge} L${(x + 40).toFixed(0)} 1000 L-40 1000 Z`;
+  // 山脊不要是直線：每段再切幾個點、上下抖一點，像手順著山勢畫出來
+  const detailed: [number, number][] = [];
+  for (let i = 0; i < peaks.length - 1; i += 1) {
+    const [ax, ay] = peaks[i] ?? [0, 0];
+    const [bx, by] = peaks[i + 1] ?? [0, 0];
+    const len = Math.hypot(bx - ax, by - ay);
+    for (let k = 0; k < 6; k += 1) {
+      const t = k / 6;
+      const jitter = k === 0 ? 0 : (r() - 0.5) * len * 0.07;
+      detailed.push([ax + (bx - ax) * t, ay + (by - ay) * t + jitter]);
+    }
+  }
+  detailed.push(peaks[peaks.length - 1] ?? [0, 0]);
+  const ridge = detailed.map(([px, py]) => `${px.toFixed(0)} ${py.toFixed(0)}`).join(" L");
   let faces = "";
   let snow = "";
   let strokes = "";
   for (let i = 1; i < peaks.length - 1; i += 2) {
     const [px, py] = peaks[i] ?? [0, 0];
     const [nx, ny] = peaks[i + 1] ?? [0, 0];
-    faces += `M${px.toFixed(0)} ${py.toFixed(0)} L${nx.toFixed(0)} ${ny.toFixed(0)} L${(px + (nx - px) * 0.5).toFixed(0)} ${ny.toFixed(0)} Z `;
-    if (py < 690) snow += `M${px.toFixed(0)} ${py.toFixed(0)} l30 38 l-16 -4 l-14 18 l-14 -16 l-18 4 Z `;
-    for (let k = 0; k < 6; k += 1) {
-      const t = 0.15 + r() * 0.75;
-      const sx = px + (nx - px) * t;
-      const sy = py + (ny - py) * t;
-      strokes += `M${(sx - 4).toFixed(0)} ${(sy + 6).toFixed(0)} L${(sx - 26 - r() * 16).toFixed(0)} ${(sy + 20 + r() * 10).toFixed(0)} `;
+    faces += `M${px.toFixed(0)} ${py.toFixed(0)} L${nx.toFixed(0)} ${ny.toFixed(0)} L${(px + (nx - px) * 0.35).toFixed(0)} ${(base + 20).toFixed(0)} L${(px + 6).toFixed(0)} ${(base + 20).toFixed(0)} Z `;
+    if (py < snowBelow) snow += `M${px.toFixed(0)} ${py.toFixed(0)} l24 30 l-12 -2 l-10 14 l-10 -12 l-14 6 l-6 -8 Z `;
+    for (let k = 0; k < 9; k += 1) {
+      const t = 0.1 + r() * 0.8;
+      const sx = px + (nx - px) * t * 0.6 + 4;
+      const sy = py + (base - py) * t * 0.7;
+      strokes += `M${sx.toFixed(0)} ${sy.toFixed(0)} l${(6 + r() * 10).toFixed(0)} ${(10 + r() * 12).toFixed(0)} `;
     }
   }
+  const body = `M${ridge} L${(x + 40).toFixed(0)} ${base + 120} L-40 ${base + 120} Z`;
+  return (
+    h("path", { d: body, fill: colors.body, filter: "url(#cs-pencil-soft)" }) +
+    h("path", { d: faces, fill: colors.face, opacity: 0.8 }) +
+    h("path", { d: strokes, stroke: colors.stroke, "stroke-width": 1, fill: "none", opacity: 0.55, "stroke-linecap": "round" }) +
+    (snow ? h("path", { d: snow, fill: "#eef2f4" }) + h("path", { d: snow, fill: "none", stroke: colors.stroke, "stroke-width": 0.9, opacity: 0.7 }) : "") +
+    h("path", { d: `M${ridge}`, fill: "none", stroke: colors.ink, "stroke-width": 1.5, "stroke-linejoin": "round", filter: "url(#cs-rough)" })
+  );
+}
+
+/** 遠山：最遠一層淡藍灰、有雪；前一層略深帶綠；兩層山腳各有一片霧，越遠越淡、細節越少。 */
+function farLayer(): string {
+  const width = PANEL_W + CAM_MAX * PARALLAX.far + 100;
+  const r = rng(41);
   const art =
-    fillPath(body, "#b8c4c9") +
-    fillPath(faces, "#9dabb2") +
-    fillPath(snow, "#f5f2ea") +
-    inkPath(strokes, 1.2, { opacity: 0.35 }) +
-    inkPath(`M${ridge}`, 2.8) +
-    inkPath(snow, 2);
+    range(r, width, 900, 560, 110, { body: "#c5cfd3", face: "#b3bec4", ink: "#8f9ba2", stroke: "#9aa6ad" }, 640) +
+    h("rect", { x: -40, y: 760, width: width + 80, height: 260, fill: "url(#cs-haze)" }) +
+    range(r, width, 960, 700, 70, { body: "#a9b6b0", face: "#98a69f", ink: "#6f7b76", stroke: "#7c8983" }, 0) +
+    h("rect", { x: -40, y: 850, width: width + 80, height: 200, fill: "url(#cs-haze)" });
   let tiles = "";
   for (let tx = 0; tx < width; tx += PANEL_W) tiles += tileSvg(tx, Math.min(PANEL_W, width - tx), art);
   return `<div class="cs-layer cs-far">${tiles}</div>`;
 }
 
-/** 林線：起伏的山丘帶＋一排松樹。 */
+/** 林線：遠一排小而灰的樹、近一排中景的樹（高矮胖瘦各不同、成群有空隙），底下起伏的山丘帶。 */
 function midLayer(): string {
   const width = PANEL_W + CAM_MAX * PARALLAX.mid + 100;
   const r = rng(77);
   let top = "M-20 950";
   for (let x = -20; x < width + 200; x += 250) top += ` C${x + 80} ${900 + r() * 30} ${x + 170} ${930 + r() * 30} ${x + 250} ${940 + r() * 20}`;
   const band = `${top} L${width + 250} 1130 L-20 1130 Z`;
-  const pines: [number, number][] = [];
-  for (let x = 10; x < width; x += 26 + r() * 60) if (r() > 0.35) pines.push([x, 0.55 + r() * 0.5]);
+  const farTrees: [number, number][] = [];
+  const midTrees: [number, number][] = [];
+  for (let x = 10; x < width; x += 14 + r() * 30) if (r() > 0.3) farTrees.push([x, 0.35 + r() * 0.25]);
+  let x = 10;
+  while (x < width) {
+    // 一群 2～6 棵，群與群之間留空
+    const count = 2 + Math.floor(r() * 5);
+    for (let i = 0; i < count; i += 1) midTrees.push([x + i * (18 + r() * 16), 0.5 + r() * 0.45]);
+    x += count * 26 + 60 + r() * 160;
+  }
   let tiles = "";
   for (let tx = 0; tx < width; tx += PANEL_W) {
     const w = Math.min(PANEL_W, width - tx);
     let trees = "";
-    for (const [px, s] of pines) if (px > tx - 60 && px < tx + w + 60) trees += pine(px, 990, s);
-    tiles += tileSvg(tx, w, fillPath(band, "#8ea676") + inkPath(top, 2.4) + trees);
+    for (const [px, sc] of farTrees) if (px > tx - 60 && px < tx + w + 60) trees += pine(px, 962, sc, false, "far");
+    trees += h("rect", { x: tx - 60, y: 900, width: w + 120, height: 90, fill: "url(#cs-haze)", opacity: 0.7 });
+    for (const [px, sc] of midTrees) if (px > tx - 60 && px < tx + w + 60) trees += pine(px, 995, sc, false, "mid");
+    tiles += tileSvg(tx, w, h("path", { d: band, fill: "#8ea676", filter: "url(#cs-pencil-soft)" }) + h("path", { d: top, fill: "none", stroke: "#5f7452", "stroke-width": 1.4, filter: "url(#cs-rough)" }) + trees);
   }
   return `<div class="cs-layer cs-mid">${tiles}</div>`;
 }
@@ -179,6 +209,8 @@ function skyLayers(): string {
     h("rect", { x: -600, width: PANEL_W + 1200, height: STAGE_H, fill: "url(#cs-sky)" }) +
     g({ class: "cs-lightbands", opacity: 0.3 }, h("polygon", { points: "-200,0 60,0 1600,1245 1600,1540", fill: "#f4d9a8" }), h("polygon", { points: "160,0 330,0 1600,1020 1600,1240", fill: "#f4d9a8" })) +
     `</svg></div>` +
+    // 天空的水彩暈染（靜態、不跟天色一起重畫）
+    `<div class="cs-layer cs-skywash"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}" preserveAspectRatio="none">${h("rect", { x: -600, width: PANEL_W + 1200, height: 900, fill: "#fff", filter: "url(#cs-wash)" })}</svg></div>` +
     actor("cs-sun", { ox: 150, oy: 150, w: 300, h: 300 }, scribbleSun(rng(21))) +
     actor("cs-moon", { ox: 80, oy: 80, w: 160, h: 160 }, shape("M30 -54 C-20 -60 -56 -20 -50 24 C-44 60 0 76 36 56 C0 50 -22 20 -16 -12 C-10 -36 8 -50 30 -54 Z", "#f7ecc4", 2.6)) +
     clouds +
@@ -188,18 +220,29 @@ function skyLayers(): string {
   );
 }
 
-/** 熱氣球（球皮上印露坑 logo），原點在球皮中心。 */
+/** 熱氣球（球皮上印露坑 logo），原點在球皮中心：分片的球皮、背光面斜線、吊繩、編織吊籃。 */
 function balloon(): string {
   const env = "M0 -110 C62 -110 88 -60 80 -10 C72 40 30 70 14 92 L-14 92 C-30 70 -72 40 -80 -10 C-88 -60 -62 -110 0 -110 Z";
-  return (
-    fillPath(env, "#e8674a") +
-    fillPath("M0 -110 C30 -110 40 -60 36 -10 C32 40 16 70 8 92 L-8 92 C-16 70 -32 40 -36 -10 C-40 -60 -30 -110 0 -110 Z", "#f3e9d2") +
-    h("path", { d: "M0 -110 C62 -110 88 -60 80 -10 C72 40 30 70 14 92 L8 92 C16 70 32 40 36 -10 C40 -60 30 -110 0 -110 Z", fill: "url(#cs-hatch-fine)", filter: "url(#cs-rough)" }) +
-    brandMark("cs-balloon-mark", LOGO_MARK, -24, -44, 48, 41, "#3a2210") +
-    inkPath(env, 2.6) +
-    inkPath("M-14 92 L-12 118 M14 92 L12 118 M0 92 L0 118", 1.4) +
-    shape("M-16 118 L16 118 L13 140 L-13 140 Z", "#b98352", 2.2, "cs-hatch-fine")
+  const gore = (a: number) => `M0 -110 C${f1(a * 0.8)} -100 ${f1(a * 1.1)} -50 ${f1(a)} -10 C${f1(a * 0.9)} 30 ${f1(a * 0.35)} 70 ${f1(a * 0.17)} 92`;
+  let basket = "";
+  for (let x = -12; x <= 12; x += 4) basket += `M${x} 120 L${x - 1} 138 `;
+  return g(
+    { transform: "scale(0.82)" },
+    fillPath(env, "#e36f4f"),
+    fillPath("M0 -110 C30 -110 40 -60 36 -10 C32 40 16 70 8 92 L-8 92 C-16 70 -32 40 -36 -10 C-40 -60 -30 -110 0 -110 Z", "#f3e9d6"),
+    hatchArea("M0 -110 C62 -110 88 -60 80 -10 C72 40 30 70 14 92 L8 92 C16 70 32 40 36 -10 C40 -60 30 -110 0 -110 Z", "cs-hatch-fine"),
+    h("path", { d: `${gore(-60)} ${gore(-36)} ${gore(36)} ${gore(60)}`, fill: "none", stroke: "#8a3a26", "stroke-width": 0.9, opacity: 0.6 }),
+    h("path", { d: "M-50 -80 C-60 -60 -62 -30 -58 -8", stroke: "#fff", "stroke-width": 4, fill: "none", opacity: 0.5, "stroke-linecap": "round" }),
+    brandMark("cs-balloon-mark", LOGO_MARK, -24, -44, 48, 41, "#3a2210"),
+    inkPath(env, 2.2),
+    inkPath("M-14 92 L-12 118 M14 92 L12 118 M-5 92 L-5 118 M5 92 L5 118", 1),
+    shape("M-16 118 L16 118 L13 140 L-13 140 Z", "#b98352", 1.8),
+    h("path", { d: basket + "M-15 126 L15 126 M-14 133 L14 133", stroke: "#6b4a2e", "stroke-width": 0.8, fill: "none" }),
   );
+}
+
+function f1(v: number): string {
+  return (Math.round(v * 10) / 10).toString();
 }
 
 /** 夜空：星星（會閃）、流星、星座連成露坑 logo（三角箭頭＋樹）。 */

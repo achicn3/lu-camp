@@ -1,6 +1,6 @@
 // 會動的角色與道具：人物（各種姿勢）、露營車、帳篷。每個都有 class 讓時間軸抓得到要動的關節。
 // 座標：人物原點在腳底中央、面向右；露營車原點在前後輪中間的地面。
-import { INK, doodleText, fillPath, g, h, inkPath, shadow, shape } from "./svg";
+import { INK, INK_SOFT, doodleText, fillPath, g, h, hatchArea, inkPath, shadow, shape } from "./svg";
 
 const SKIN = "#efc9a6";
 const SKIN_SHADE = "#e6b692";
@@ -22,7 +22,20 @@ function head(r = 25, closedEyes = true): string {
     fillPath(`M${-r - 3} -8 L${r + 5} -10 L${r + 5} 2 L${-r - 3} 4 Z`, BEANIE_BAND) +
     h("circle", { cx: 0, cy: -r - 17, r: 9, fill: "#ecc873", filter: "url(#cs-pencil)" });
   let ribs = "";
-  for (let x = -r; x < r + 4; x += 5) ribs += `M${x} -9 L${x} 2 `;
+  for (let x = -r; x < r + 4; x += 3.5) ribs += `M${x.toFixed(1)} -9 L${(x + 0.4).toFixed(1)} 2 `;
+  // 帽身針織：一排排小 V 字
+  let knit = "";
+  for (let row = 0; row < 3; row += 1) {
+    const y = -13 - row * 7;
+    const half = r * (1 - row * 0.18);
+    for (let x = -half + 3; x < half; x += 6) knit += `M${x.toFixed(1)} ${y} l2 3 l2 -3 `;
+  }
+  // 毛球：一圈短短的毛
+  let fluff = "";
+  for (let i = 0; i < 16; i += 1) {
+    const a = (i / 16) * Math.PI * 2;
+    fluff += `M${(Math.cos(a) * 7).toFixed(1)} ${(-r - 17 + Math.sin(a) * 7).toFixed(1)} l${(Math.cos(a) * 3.5).toFixed(1)} ${(Math.sin(a) * 3.5).toFixed(1)} `;
+  }
   const eyes = closedEyes ? `M8 4 q5 5 10 0 M-10 2 q4 4 8 0` : `M10 2 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M-6 1 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0`;
   const lines = g(
     { filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 2.4, "stroke-linecap": "round", "stroke-linejoin": "round" },
@@ -31,11 +44,15 @@ function head(r = 25, closedEyes = true): string {
     h("path", { d: `M${-r - 1} -6 C${-r - 3} ${-r - 16} ${r + 3} ${-r - 20} ${r + 3} -8` }),
     h("path", { d: `M${-r - 3} -8 L${r + 5} -10 L${r + 5} 2 L${-r - 3} 4 Z`, "stroke-width": 2 }),
     h("circle", { cx: 0, cy: -r - 17, r: 9, "stroke-width": 1.8 }),
-    h("path", { d: ribs, "stroke-width": 1.2, opacity: 0.5 }),
+    h("path", { d: ribs, "stroke-width": 1, opacity: 0.45, stroke: INK_SOFT }),
+    h("path", { d: knit, "stroke-width": 0.9, opacity: 0.5, stroke: "#8a5f1c" }),
+    h("path", { d: fluff, "stroke-width": 1.1, opacity: 0.8, stroke: "#9c7a2c" }),
     h("path", { d: eyes, "stroke-width": 1.8 }),
     h("path", { d: "M18 14 q4 3 8 0", "stroke-width": 1.6 }),
   );
-  return face + ear + h("circle", { cx: 14, cy: 10, r: 4, fill: "#e89b86", opacity: 0.7 }) + hat + lines;
+  const hair = h("path", { d: `M${-r + 2} 2 q4 6 2 12 q5 -3 7 -10`, fill: "#6b4a33" });
+  const faceShade = h("path", { d: `M${-r * 0.2} ${r * 0.95} C${r * 0.5} ${r * 0.9} ${r * 0.9} ${r * 0.4} ${r * 0.98} 0 C${r} ${r * 0.6} ${r * 0.5} ${r} ${-r * 0.2} ${r * 0.95} Z`, fill: SKIN_SHADE, opacity: 0.55 });
+  return face + faceShade + ear + hair + h("circle", { cx: 14, cy: 10, r: 4, fill: "#e89b86", opacity: 0.7 }) + hat + lines;
 }
 
 /** 一隻手臂（袖子＋手），原點在肩膀，自然垂下長 len。 */
@@ -261,6 +278,15 @@ export function tent(): string {
       fillPath("M-60 0 C-46 -60 -28 -120 0 -160 C-12 -116 -20 -60 -24 0 Z", "#e9bd67"),
       h("path", { d: "M0 -320 L170 0 L240 0 L58 -320 Z", fill: "url(#cs-hatch)", filter: "url(#cs-rough)" }),
       h("path", { d: "M-54 0 L0 -160 L54 0 Z", fill: "url(#cs-cross)", filter: "url(#cs-rough)", opacity: 0.7 }),
+      // 帳布：順著布面方向的纖維細線、下襬收邊、從頂端拉出來的皺褶、門邊拉鍊、門簾綁帶
+      h("path", { d: "M-170 0 L0 -320 L-54 0 Z M54 0 L0 -320 L170 0 Z", fill: "url(#cs-fabric)", opacity: 0.9 }),
+      h("path", { d: "M0 -320 L170 0 L240 0 L58 -320 Z", fill: "url(#cs-fabric-side)", opacity: 0.9 }),
+      fillPath("M-170 0 L-164 -14 L-54 -14 L-54 0 Z M54 0 L54 -14 L164 -14 L170 0 Z", "#b9822f"),
+      fillPath("M170 0 L166 -12 L236 -12 L240 0 Z", "#8f6224"),
+      inkPath("M-6 -300 C-26 -240 -52 -170 -88 -104 M6 -296 C22 -236 44 -176 76 -110 M-14 -286 C-44 -236 -84 -190 -120 -150 M-150 -16 C-134 -34 -116 -42 -96 -46 M150 -16 C134 -34 118 -40 100 -44", 1, { opacity: 0.7 }),
+      inkPath("M60 -300 C90 -230 130 -150 178 -70 M80 -250 C120 -190 160 -120 206 -40", 1, { opacity: 0.55 }),
+      inkPath("M-50 -8 l-4 -2 M-46 -20 l-4 -2 M-42 -32 l-4 -2 M-38 -44 l-4 -2 M-34 -56 l-4 -2 M-30 -68 l-4 -2 M-26 -80 l-4 -2 M-22 -92 l-4 -2 M-18 -104 l-4 -2 M-14 -116 l-4 -2 M-10 -128 l-4 -2 M50 -8 l4 -2 M46 -20 l4 -2 M42 -32 l4 -2 M38 -44 l4 -2 M34 -56 l4 -2 M30 -68 l4 -2 M26 -80 l4 -2 M22 -92 l4 -2 M18 -104 l4 -2 M14 -116 l4 -2 M10 -128 l4 -2", 0.9),
+      shape("M-62 -44 L-40 -48 L-39 -40 L-61 -36 Z M-50 -100 L-30 -104 L-29 -96 L-49 -92 Z", "#8a5a24", 1.1),
       g({ transform: "translate(2 -170) rotate(-7)" }, word, g({ transform: "translate(74 -58)" }, h("path", { d: "M0 -12 l3.5 10 l10 1 l-8 6 l2.5 10 l-8 -6 l-8 6 l2.5 -10 l-8 -6 l10 -1z", fill: "#e8674a", stroke: "#3a2210", "stroke-width": 2.2, filter: "url(#cs-rough)" }))),
       g(
         { filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-linecap": "round", "stroke-linejoin": "round" },
@@ -271,11 +297,13 @@ export function tent(): string {
         h("path", { d: "M-85 -160 L0 -304 M85 -160 L10 -304", "stroke-width": 1.6, "stroke-dasharray": "6 6", opacity: 0.7 }),
         h("path", { d: "M-150 -14 L150 -14", "stroke-width": 1.4, "stroke-dasharray": "5 6", opacity: 0.6 }),
         h("path", { d: "M0 -320 L0 -368", "stroke-width": 3.2 }),
-        h("path", { d: "M-170 0 L-226 30 M240 0 L300 26 M58 -320 L260 12", "stroke-width": 1.4 }),
+        h("path", { d: "M-170 0 L-226 30 M240 0 L300 26 M58 -320 L260 12", "stroke-width": 1.2, stroke: INK_SOFT }),
+        h("path", { d: "M-200 16 l6 -3 l3 5 l-6 3 Z M272 14 l6 -3 l3 5 l-6 3 Z M200 -80 l6 -1 l1 6 l-6 1 Z", "stroke-width": 1 }),
+        h("path", { d: "M-5 -372 L5 -372 L4 -366 L-4 -366 Z", "stroke-width": 1.4 }),
       ),
       g({ class: "cs-flag", transform: "translate(0 -364)" }, fillPath("M0 0 L42 10 L0 24 Z", "#c9553a"), inkPath("M0 0 L42 10 L0 24", 1.8)),
     ),
-    g({ class: "cs-pegs", filter: "url(#cs-rough)", stroke: INK, "stroke-width": 3, "stroke-linecap": "round" }, h("path", { class: "cs-peg", d: "M-230 22 l5 16" }), h("path", { class: "cs-peg", d: "M296 18 l5 16" }), h("path", { class: "cs-peg", d: "M256 4 l5 16" })),
+    g({ class: "cs-pegs", filter: "url(#cs-rough)", stroke: INK, "stroke-width": 2.6, "stroke-linecap": "round", fill: "none" }, h("path", { class: "cs-peg", d: "M-230 22 l5 16 M-231 22 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M296 18 l5 16 M295 18 q-4 -4 1 -6" }), h("path", { class: "cs-peg", d: "M256 4 l5 16 M255 4 q-4 -4 1 -6" })),
   );
 }
 
@@ -307,7 +335,12 @@ export function sittingPerson(): string {
       h("path", { d: "M540 1060 C574 1052 612 1054 646 1060 L662 1108 M546 1086 C572 1082 602 1078 628 1080 L640 1112" }),
       h("path", { d: "M636 1108 L678 1108 L678 1096 L662 1092 L640 1096" }),
       h("path", { d: "M648 1098 l6 -4 M656 1100 l6 -4", "stroke-width": 1.4 }),
-    );
+    ) +
+    // 鞋底、鞋底紋、褲子接縫與膝蓋的摺痕、坐下時大腿被椅面壓出的皺褶
+    fillPath("M636 1106 L680 1106 L680 1112 L636 1112 Z", "#3a2a20") +
+    inkPath("M642 1109 l3 3 M650 1109 l3 3 M658 1109 l3 3 M666 1109 l3 3", 0.8) +
+    inkPath("M556 1068 C586 1064 612 1064 632 1068 M614 1062 C620 1068 622 1074 628 1078 M626 1058 C634 1064 636 1070 640 1080 M646 1066 C650 1076 652 1086 656 1098", 1.1) +
+    inkPath("M560 1080 q6 -4 12 0 M580 1078 q6 -4 12 0", 0.9);
   const body =
     fillPath("M512 1066 C502 1032 506 996 520 974 C534 952 574 950 590 970 C606 992 606 1032 600 1066 Z", JACKET) +
     fillPath("M522 1030 L548 1030 L548 1044 L522 1044 Z", JACKET_SHADE) +
@@ -318,7 +351,19 @@ export function sittingPerson(): string {
       h("path", { d: "M556 980 L558 1060", "stroke-width": 1.6 }),
       h("path", { d: "M522 1030 L548 1030 L548 1044 L522 1044 Z", "stroke-width": 1.6 }),
       h("path", { d: "M526 964 C542 974 566 974 584 964 L588 978 C566 990 540 988 522 978 Z M540 984 L534 1012 L546 1008", "stroke-width": 2 }),
-    );
+    ) +
+    // 外套細節：肩線（raglan）、拉鍊齒與拉頭、口袋蓋與釦子、下襬收邊、腰間摺痕
+    fillPath("M510 1056 C530 1060 580 1060 602 1056 L602 1066 L512 1066 Z", JACKET_SHADE) +
+    inkPath("M512 1056 C534 1060 580 1060 601 1056", 1.2) +
+    inkPath("M528 974 C530 994 526 1014 518 1030 M586 974 C592 990 596 1004 598 1016", 1.1) +
+    inkPath("M555 986 l4 0 M555 994 l4 0 M556 1002 l4 0 M556 1010 l4 0 M556 1018 l4 0 M557 1026 l4 0 M557 1034 l4 0 M557 1042 l4 0 M557 1050 l4 0", 0.8) +
+    shape("M552 984 L562 984 L562 994 L552 994 Z", "#c9c2b4", 1.1) +
+    inkPath("M522 1036 L548 1036", 1) +
+    h("circle", { cx: 535, cy: 1040, r: 1.6, fill: "#3a2a20" }) +
+    inkPath("M540 1048 q8 4 14 0 M566 1046 q8 5 16 1", 0.9) +
+    // 圍巾：針織橫紋與流蘇
+    inkPath("M532 972 l2 6 M542 975 l1 7 M552 976 l0 7 M562 976 l-1 7 M572 974 l-2 6", 0.8) +
+    inkPath("M536 1010 l-2 6 M540 1011 l-1 6 M544 1009 l0 6", 0.9);
   const headArt = g({ transform: "translate(552 932)" }, head());
   const cup =
     fillPath("M572 1002 L612 1002 L608 1034 L576 1034 Z", "#f4efe4") +
@@ -331,6 +376,8 @@ export function sittingPerson(): string {
       h("path", { d: "M612 1010 c12 0 12 16 -2 16" }),
       h("circle", { cx: 574, cy: 1022, r: 8, "stroke-width": 1.8 }),
     ) +
+    inkPath("M568 1018 l7 -1 M567 1023 l8 -1 M568 1028 l7 -1", 0.8) +
+    shape("M603 1008 C609 1004 616 1006 615 1011 C614 1015 607 1015 603 1012 Z", SKIN, 1.2) +
     g({ class: "cs-steam", filter: "url(#cs-rough)", fill: "none", stroke: INK, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.6 },
       h("path", { d: "M586 996 c-10 -16 10 -24 0 -40 c-10 -16 10 -24 0 -38" }),
       h("path", { d: "M600 994 c-10 -14 10 -22 0 -36" }),
@@ -377,13 +424,18 @@ export function hammock(span: number): string {
   );
 }
 
-/** 營火的火焰（會閃），原點在柴堆中心。 */
+/** 營火的火焰（會閃），原點在柴堆中心：幾條不對稱的火舌、內層黃、火心淡、線條用深紅棕而不是黑。 */
 export function flame(scale = 1): string {
+  const outer = "M-32 -6 C-40 -30 -26 -44 -24 -62 C-16 -50 -12 -46 -10 -56 C-8 -74 -2 -86 2 -108 C8 -86 14 -76 12 -58 C18 -64 22 -72 22 -84 C32 -64 38 -40 30 -6 Z";
+  const mid = "M-18 -6 C-22 -24 -12 -34 -10 -48 C-4 -40 0 -42 2 -64 C8 -46 16 -36 14 -24 C18 -28 20 -32 20 -38 C26 -24 24 -14 18 -6 Z";
+  const core = "M-8 -6 C-10 -18 -4 -24 -2 -36 C2 -26 8 -20 8 -6 Z";
+  const edge = { fill: "none", stroke: "#8a3b1c", "stroke-linejoin": "round", "stroke-linecap": "round", filter: "url(#cs-rough)" };
   return g(
     { class: "cs-flame", transform: `scale(${scale})` },
-    g({ class: "cs-flame-outer" }, fillPath("M-30 -8 C-34 -50 -8 -62 0 -104 C8 -62 34 -50 30 -8 Z", "#f08a2c"), inkPath("M-30 -8 C-34 -50 -8 -62 0 -104 C8 -62 34 -50 30 -8", 2.4)),
-    g({ class: "cs-flame-mid" }, fillPath("M-15 -8 C-18 -38 -4 -48 0 -76 C4 -48 18 -38 15 -8 Z", "#f7c64a")),
-    g({ class: "cs-flame-core" }, fillPath("M-6 -8 C-7 -24 -2 -30 0 -46 C2 -30 7 -24 6 -8 Z", "#fff0b0")),
-    g({ class: "cs-sparks" }, h("circle", { cx: -18, cy: -122, r: 2.4, fill: "#f7b33c" }), h("circle", { cx: 14, cy: -140, r: 2, fill: "#f7b33c" }), h("circle", { cx: 4, cy: -160, r: 1.6, fill: "#f7b33c" })),
+    h("ellipse", { cx: 0, cy: -4, rx: 46, ry: 12, fill: "#f6b55a", opacity: 0.35 }),
+    g({ class: "cs-flame-outer" }, fillPath(outer, "#ec7d2c"), h("path", { d: outer, ...edge, "stroke-width": 2 }), h("path", { d: "M-20 -30 C-16 -40 -14 -44 -12 -52 M16 -40 C20 -48 20 -56 20 -64", ...edge, "stroke-width": 1, opacity: 0.7 })),
+    g({ class: "cs-flame-mid" }, fillPath(mid, "#f6b73f"), h("path", { d: mid, ...edge, stroke: "#c06a22", "stroke-width": 1.1, opacity: 0.8 })),
+    g({ class: "cs-flame-core" }, fillPath(core, "#fff1b8")),
+    g({ class: "cs-sparks" }, h("circle", { cx: -16, cy: -120, r: 2.2, fill: "#f7b33c" }), h("circle", { cx: 14, cy: -134, r: 1.8, fill: "#f7b33c" }), h("circle", { cx: 4, cy: -152, r: 1.4, fill: "#f7b33c" })),
   );
 }
