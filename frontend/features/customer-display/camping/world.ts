@@ -17,6 +17,7 @@ import {
 } from "./figures";
 import { cloud, flowers, pine, scribbleSun } from "./nature";
 import { PANEL_COUNT, PANEL_W, STAGE_H, cliffFront, panelArt } from "./panels";
+import { povDesk } from "./props";
 import {
   INK,
   LOGO_MARK,
@@ -466,6 +467,7 @@ export function buildSceneHtml(): string {
     `<div class="cs-layer cs-lights-wrap">${lightsTrack()}</div>` +
     rainLayer() +
     `</div>` +
+    `<div class="cs-layer cs-pov"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}">${povDesk(rng(515))}</svg></div>` +
     thanksLayer() +
     doorIntro() +
     `<div class="cs-flash"></div>` +

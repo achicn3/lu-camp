@@ -13,6 +13,9 @@ import {
 } from "react";
 
 import SplitText from "@/components/ui/SplitText";
+import { CheckMark, LedgerStars, PaidStamp } from "@/features/customer-display/checkout/LedgerMarks";
+import { PenHand } from "@/features/customer-display/checkout/PenHand";
+import { type LedgerPhase, useLedgerPen } from "@/features/customer-display/checkout/useLedgerPen";
 import { DoodleCheck } from "@/features/customer-display/DoodleCheck";
 import { CampingScene, type SceneMode } from "@/features/customer-display/CampingScene";
 import { API_BASE_URL, kioskApi } from "@/lib/api";
@@ -573,12 +576,29 @@ function KioskConsole({
   }
 
   const itemCount = cart.data?.snapshot.items.reduce((sum, item) => sum + item.qty, 0) ?? 0;
+  // 購物車被取消：夾板往下收走、鏡頭再拉回營地（減少動態效果時直接消失）
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => true);
+  const currentCart = cart.data ?? null;
+  const [shownCart, setShownCart] = useState<KioskCart | null>(currentCart);
+  const [leavingCart, setLeavingCart] = useState<KioskCart | null>(null);
+  if (shownCart !== currentCart) {
+    setShownCart(currentCart);
+    if (currentCart === null && shownCart !== null && shownCart.snapshot.items.length > 0 && !reducedMotion) {
+      setLeavingCart(shownCart);
+    }
+  }
+  useEffect(() => {
+    if (leavingCart === null) return;
+    const timer = window.setTimeout(() => setLeavingCart(null), 650);
+    return () => window.clearTimeout(timer);
+  }, [leavingCart]);
   // 露營動畫整個顧客螢幕只掛一份（固定在最底層），換畫面時不重掛，結帳才能從當下的動畫接過去。
   const view = currentView();
   return (
     <>
       <CampingScene mode={view.mode} itemCount={itemCount} />
       {view.screen}
+      {leavingCart && <CartScreen cart={leavingCart} streamConnected={streamConnected} leaving />}
     </>
   );
 
@@ -595,7 +615,7 @@ function KioskConsole({
       return { mode: "cart", screen: <CartScreen cart={cart.data} streamConnected={streamConnected} /> };
     }
     if (cart.data?.status === "COMPLETED") {
-      return { mode: "celebrate", screen: <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} /> };
+      return { mode: "paid", screen: <CartScreen cart={cart.data} streamConnected={streamConnected} completedSeconds={completionSeconds} /> };
     }
 
     if (recovering) {
@@ -686,29 +706,6 @@ function KioskConsole({
   }
 }
 
-function CompletedSaleScreen({
-  cart,
-  remainingSeconds,
-}: {
-  cart: KioskCart;
-  remainingSeconds: number;
-}) {
-  return (
-    <main className="kiosk-thanks is-scene">
-      <div className="kiosk-thanks-inner">
-        <DoodleCheck />
-        <h1 className="kiosk-thanks-title">交易已完成</h1>
-        <p className="kiosk-standby-sub">
-          本次金額 ${formatNtd(parseNtd(cart.snapshot.total) ?? 0)}
-        </p>
-        <p className="hint" role="status">
-          謝謝光臨，{remainingSeconds} 秒後自動清除。
-        </p>
-      </div>
-    </main>
-  );
-}
-
 // 簽署完成的顧客畫面（店主裁示取代店員交回鎖）：倒數中自動回待機；若店員後續作業尚未
 // 完成（任務仍為 SIGNED）則不倒數，僅告知稍候，畫面不含任何個資。
 function SignedThanksScreen({ remainingSeconds }: { remainingSeconds: number | null }) {
@@ -728,19 +725,84 @@ function SignedThanksScreen({ remainingSeconds }: { remainingSeconds: number | n
   );
 }
 
+type LedgerRowItem = KioskCart["snapshot"]["items"][number];
+
+/**
+ * 結帳畫面：第一人稱露營手帳（店主 2026-09-27）。背景是動畫世界拉近到營桌、下方一張靠近鏡頭的桌面，
+ * 桌上一塊木夾板與米白紙，前景一隻拿筆的手。每掃一件，手移到那一行寫幾下、字跟著筆尖出現。
+ * 插畫（手、筆、紙、勾勾、印章）與資訊（品名、數量、金額、總額、系統訊息）分開：資訊一律用清楚的 UI 字。
+ */
 function CartScreen({
   cart,
   streamConnected,
+  completedSeconds,
+  leaving = false,
 }: {
   cart: KioskCart;
   streamConnected: boolean;
+  /** 成交完成：還剩幾秒自動清除（有值＝完成畫面）。 */
+  completedSeconds?: number;
+  /** 購物車被取消：夾板往下收走（只在動畫允許時出現）。 */
+  leaving?: boolean;
 }) {
   const { snapshot, changes } = cart;
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => true);
+  const motion = !reducedMotion;
+  const shellRef = useRef<HTMLElement>(null);
+  const handRef = useRef<SVGSVGElement>(null);
+  const checkRef = useRef<SVGPathElement>(null);
   const itemListRef = useRef<HTMLElement>(null);
   const [scrollState, setScrollState] = useState({
     hasAbove: false,
     hasBelow: false,
   });
+  const completed = completedSeconds !== undefined || cart.status === "COMPLETED";
+
+  // 被刪掉的品項：先留在原位劃一條線再收起來（只在動畫允許時；否則直接消失）
+  const [ghosts, setGhosts] = useState<{ item: LedgerRowItem; index: number }[]>([]);
+  const [prevItems, setPrevItems] = useState(snapshot.items);
+  // 付款後又回到可修改狀態＝這次付款沒完成
+  const [prevStatus, setPrevStatus] = useState(cart.status);
+  const [paymentFailed, setPaymentFailed] = useState(false);
+  if (prevItems !== snapshot.items) {
+    const removed = motion
+      ? prevItems
+          .map((item, index) => ({ item, index }))
+          .filter((g) => !snapshot.items.some((n) => n.item_key === g.item.item_key))
+      : [];
+    setPrevItems(snapshot.items);
+    if (removed.length > 0) setGhosts((current) => [...current, ...removed]);
+  }
+  if (prevStatus !== cart.status) {
+    setPrevStatus(cart.status);
+    if (prevStatus === "PROCESSING" && (cart.status === "DRAFT" || cart.status === "FROZEN")) setPaymentFailed(true);
+    if (cart.status === "PROCESSING" || cart.status === "COMPLETED") setPaymentFailed(false);
+  }
+  useEffect(() => {
+    if (ghosts.length === 0) return;
+    const timer = window.setTimeout(() => setGhosts([]), 560);
+    return () => window.clearTimeout(timer);
+  }, [ghosts]);
+  useEffect(() => {
+    if (!paymentFailed) return;
+    const timer = window.setTimeout(() => setPaymentFailed(false), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [paymentFailed]);
+
+  const phase: LedgerPhase = completed
+    ? "paid"
+    : cart.status === "PROCESSING"
+      ? "processing"
+      : cart.status === "FROZEN" || cart.status === "PAYMENT_UNCERTAIN"
+        ? "paying"
+        : "writing";
+  useLedgerPen(
+    { shell: shellRef, hand: handRef, check: checkRef },
+    snapshot.items.map((item) => ({ key: item.item_key, qty: item.qty, amount: item.net_amount })),
+    phase,
+    motion,
+  );
+
   const updateScrollState = useCallback(() => {
     const list = itemListRef.current;
     if (!list) return;
@@ -775,175 +837,229 @@ function CartScreen({
       .map((change) => [change.item_key, change.type]),
   );
   const visibleChanges = changes.filter((change) => change.type !== "ADDED");
+  // 畫面上的行：現有品項，再把剛刪掉的插回原本的位置
+  const rows: { item: LedgerRowItem; index: number; ghost: boolean }[] = snapshot.items.map((item, index) => ({ item, index, ghost: false }));
+  for (const g of [...ghosts].sort((x, y) => x.index - y.index)) {
+    rows.splice(Math.min(g.index, rows.length), 0, { item: g.item, index: g.index, ghost: true });
+  }
+  const title = completed
+    ? "交易已完成"
+    : cart.status === "PROCESSING"
+      ? "付款處理中，請稍候"
+      : cart.status === "PAYMENT_UNCERTAIN"
+        ? "付款確認中，請勿重複付款"
+        : "請核對本次購買內容";
   return (
-    <main className="kiosk-cart-shell is-scene">
-      <header className="kiosk-cart-header">
-        <div>
-          <p className="kiosk-eyebrow">顧客購物明細</p>
-          <h1>
-            {cart.status === "PROCESSING" && (
-              <span
-                className="kiosk-payment-spinner"
-                role="status"
-                aria-label="付款處理中"
-              />
-            )}
-            {cart.status === "PROCESSING"
-              ? "付款處理中，請稍候"
-              : cart.status === "PAYMENT_UNCERTAIN"
-                ? "付款確認中，請勿重複付款"
-                : "請核對本次購買內容"}
-          </h1>
-        </div>
-        <span className={streamConnected ? "kiosk-live is-online" : "kiosk-live"}>
-          <i aria-hidden />
-          {streamConnected ? "即時同步" : "重新連線中"}
-        </span>
-      </header>
-
-      {visibleChanges.length > 0 && (
-        <div className="kiosk-cart-changes" aria-live="polite">
-          {visibleChanges.map((change, index) => (
-            <p
-              key={`${cart.revision}:${change.type}:${change.item_key}:${index}`}
-              className={`kiosk-cart-change is-${change.type.toLowerCase()}`}
-            >
-              <strong>{change.name}</strong>
-              {change.type === "REMOVED" && " 已移除"}
-              {change.type === "DISCOUNT_CHANGED" && "，應付總額已更新"}
-              {change.type === "QUANTITY_CHANGED" && (
-                <>
-                  {" "}
-                  <span>
-                    {change.from_qty} → {change.to_qty}
-                  </span>
-                </>
-              )}
-            </p>
-          ))}
-        </div>
-      )}
-
-      <section
-        ref={itemListRef}
-        className={`kiosk-cart-items${scrollState.hasAbove ? " has-above" : ""}${
-          scrollState.hasAbove || scrollState.hasBelow ? " has-scroll-hint" : ""
-        }`}
-        aria-label="商品明細"
-        onScroll={updateScrollState}
-      >
-        {snapshot.items.map((item, index) => (
-          <article
-            className={`kiosk-cart-item ${
-              changesByItem.get(item.item_key) === "ADDED"
-                ? "is-added"
-                : changesByItem.get(item.item_key) === "QUANTITY_CHANGED"
-                  ? "is-updated"
-                  : ""
-            }`}
-            key={item.item_key}
-          >
+    <main
+      ref={shellRef}
+      className={`kiosk-cart-shell is-ledger${leaving ? " is-leaving" : ""}${paymentFailed ? " is-payment-failed" : ""}`}
+      data-phase={phase}
+      aria-hidden={leaving || undefined}
+    >
+      <div className="ledger-window" aria-hidden="true" />
+      <div className="ledger-board">
+        <svg className="ledger-clip" viewBox="0 0 160 60" aria-hidden="true">
+          <rect x="10" y="18" width="140" height="34" rx="8" fill="#a9adb0" stroke="#33261c" strokeWidth="2.4" />
+          <rect x="22" y="26" width="116" height="10" rx="4" fill="#d9dcde" />
+          <path d="M52 18 C52 2 108 2 108 18" fill="none" stroke="#7f8387" strokeWidth="7" strokeLinecap="round" />
+          <path d="M52 18 C52 2 108 2 108 18" fill="none" stroke="#33261c" strokeWidth="1.8" />
+        </svg>
+        <div className="ledger-paper">
+          <header className="kiosk-cart-header">
             <div>
-              <h2>
-                {item.name}
-                {item.line_kind === "GIFT" && (
-                  <span className="kiosk-cart-gift">贈品</span>
+              <p className="kiosk-eyebrow">顧客購物明細</p>
+              <h1>
+                {cart.status === "PROCESSING" && (
+                  <span
+                    className="kiosk-payment-spinner"
+                    role="status"
+                    aria-label="付款處理中"
+                  />
                 )}
-              </h2>
-              <p className="kiosk-cart-price-detail">
-                {item.line_kind === "GIFT" ? (
-                  <>
-                    <span className="kiosk-cart-original-price">
-                      原價 ${formatNtd(parseNtd(item.original_unit_price ?? "0") ?? 0)}
-                    </span>
-                    <span>本次贈送，不收費</span>
-                  </>
-                ) : item.original_unit_price !== null ? (
-                  <>
-                    <span className="kiosk-cart-original-price">
-                      原價 ${formatNtd(parseNtd(item.original_unit_price) ?? 0)}
-                    </span>
-                    <span>優惠價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
-                    <span className="kiosk-cart-line-discount">
-                      折扣 ${formatNtd(parseNtd(item.discount_amount) ?? 0)}
-                    </span>
-                  </>
-                ) : (
-                  <span>單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
-                )}
-                {/* 臨時折扣：客顯是客人**核對金額**的地方，只顯示活動折扣的話，
-                    客人會看到列出 500 卻收 400，卻沒有任何說明。 */}
-                {parseNtd(item.manual_discount_amount) !== 0 && (
-                  <span className="kiosk-cart-line-discount">
-                    店家折扣 −${formatNtd(parseNtd(item.manual_discount_amount) ?? 0)}
-                  </span>
-                )}
-              </p>
-              {/* 是哪個活動折的（docs/40 §7）：同時有好幾個活動時，客人才知道為什麼便宜。 */}
-              {(snapshot.item_campaigns?.[index]?.length ?? 0) > 0 && (
-                <p className="kiosk-cart-campaigns">
-                  {snapshot.item_campaigns?.[index]?.map((c) => (
-                    <span key={c.name} className="kiosk-cart-campaign">
-                      {c.name}
-                    </span>
-                  ))}
+                {title}
+              </h1>
+            </div>
+            {!completed && (
+              <span className={streamConnected ? "kiosk-live is-online" : "kiosk-live"}>
+                <i aria-hidden />
+                {streamConnected ? "即時同步" : "重新連線中"}
+              </span>
+            )}
+          </header>
+
+          {visibleChanges.length > 0 && !completed && (
+            <div className="kiosk-cart-changes" aria-live="polite">
+              {visibleChanges.map((change, index) => (
+                <p
+                  key={`${cart.revision}:${change.type}:${change.item_key}:${index}`}
+                  className={`kiosk-cart-change is-${change.type.toLowerCase()}`}
+                >
+                  <strong>{change.name}</strong>
+                  {change.type === "REMOVED" && " 已移除"}
+                  {change.type === "DISCOUNT_CHANGED" && "，應付總額已更新"}
+                  {change.type === "QUANTITY_CHANGED" && (
+                    <>
+                      {" "}
+                      <span>
+                        {change.from_qty} → {change.to_qty}
+                      </span>
+                    </>
+                  )}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <section
+            ref={itemListRef}
+            className={`kiosk-cart-items${scrollState.hasAbove ? " has-above" : ""}${
+              scrollState.hasAbove || scrollState.hasBelow ? " has-scroll-hint" : ""
+            }`}
+            aria-label="商品明細"
+            onScroll={updateScrollState}
+          >
+            {rows.map(({ item, index, ghost }) => (
+              <article
+                className={`kiosk-cart-item ${
+                  ghost
+                    ? "is-ghost"
+                    : changesByItem.get(item.item_key) === "ADDED"
+                      ? "is-added"
+                      : changesByItem.get(item.item_key) === "QUANTITY_CHANGED"
+                        ? "is-updated"
+                        : ""
+                }`}
+                key={ghost ? `ghost:${item.item_key}` : item.item_key}
+                data-ledger-key={ghost ? undefined : item.item_key}
+                data-ledger-ghost={ghost ? item.item_key : undefined}
+                aria-hidden={ghost || undefined}
+              >
+                <div>
+                  <h2>
+                    {item.name}
+                    {item.line_kind === "GIFT" && (
+                      <span className="kiosk-cart-gift">贈品</span>
+                    )}
+                  </h2>
+                  <p className="kiosk-cart-price-detail">
+                    {item.line_kind === "GIFT" ? (
+                      <>
+                        <span className="kiosk-cart-original-price">
+                          原價 ${formatNtd(parseNtd(item.original_unit_price ?? "0") ?? 0)}
+                        </span>
+                        <span>本次贈送，不收費</span>
+                      </>
+                    ) : item.original_unit_price !== null ? (
+                      <>
+                        <span className="kiosk-cart-original-price">
+                          原價 ${formatNtd(parseNtd(item.original_unit_price) ?? 0)}
+                        </span>
+                        <span>優惠價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
+                        <span className="kiosk-cart-line-discount">
+                          折扣 ${formatNtd(parseNtd(item.discount_amount) ?? 0)}
+                        </span>
+                      </>
+                    ) : (
+                      <span>單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
+                    )}
+                    {/* 臨時折扣：客顯是客人**核對金額**的地方，只顯示活動折扣的話，
+                        客人會看到列出 500 卻收 400，卻沒有任何說明。 */}
+                    {parseNtd(item.manual_discount_amount) !== 0 && (
+                      <span className="kiosk-cart-line-discount">
+                        店家折扣 −${formatNtd(parseNtd(item.manual_discount_amount) ?? 0)}
+                      </span>
+                    )}
+                  </p>
+                  {/* 是哪個活動折的（docs/40 §7）：同時有好幾個活動時，客人才知道為什麼便宜。 */}
+                  {!ghost && (snapshot.item_campaigns?.[index]?.length ?? 0) > 0 && (
+                    <p className="kiosk-cart-campaigns">
+                      {snapshot.item_campaigns?.[index]?.map((c) => (
+                        <span key={c.name} className="kiosk-cart-campaign">
+                          {c.name}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </div>
+                <span className="kiosk-cart-qty">× {item.qty}</span>
+                {/* 小計認**實付**：line_total 是活動折後的牌價小計，不含臨時折扣。 */}
+                <strong>${formatNtd(parseNtd(item.net_amount) ?? 0)}</strong>
+              </article>
+            ))}
+          </section>
+          {(scrollState.hasAbove || scrollState.hasBelow) && (
+            <p className="kiosk-cart-scroll-hint" aria-live="polite">
+              {scrollState.hasBelow
+                ? scrollState.hasAbove
+                  ? `共 ${snapshot.items.length} 個品項 · 可上下滑動 ↕`
+                  : `共 ${snapshot.items.length} 個品項 · 向下滑查看更多 ↓`
+                : `已顯示全部 ${snapshot.items.length} 個品項 · 向上滑可返回 ↑`}
+            </p>
+          )}
+
+          <footer className="kiosk-cart-total" data-testid="kiosk-total-bar">
+            <svg className="ledger-divider" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M2 7 C80 3 160 9 240 6 C320 3 400 9 480 5 C530 3 570 7 598 6" fill="none" stroke="#5c4838" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <div className="kiosk-cart-meta">
+              {snapshot.member && (
+                <p>
+                  <span>會員</span>
+                  <strong>{snapshot.member.display_name}</strong>
+                </p>
+              )}
+              {snapshot.tenders.length > 0 && (
+                <p>
+                  <span>付款方式</span>
+                  <strong>
+                    {snapshot.tenders.map((tender) => tenderLabel(tender.tender_type)).join("＋")}
+                  </strong>
                 </p>
               )}
             </div>
-            <span className="kiosk-cart-qty">× {item.qty}</span>
-            {/* 小計認**實付**：line_total 是活動折後的牌價小計，不含臨時折扣。 */}
-            <strong>${formatNtd(parseNtd(item.net_amount) ?? 0)}</strong>
-          </article>
-        ))}
-      </section>
-      {(scrollState.hasAbove || scrollState.hasBelow) && (
-        <p className="kiosk-cart-scroll-hint" aria-live="polite">
-          {scrollState.hasBelow
-            ? scrollState.hasAbove
-              ? `共 ${snapshot.items.length} 個品項 · 可上下滑動 ↕`
-              : `共 ${snapshot.items.length} 個品項 · 向下滑查看更多 ↓`
-            : `已顯示全部 ${snapshot.items.length} 個品項 · 向上滑可返回 ↑`}
-        </p>
-      )}
-
-      <footer className="kiosk-cart-total" data-testid="kiosk-total-bar">
-        <div className="kiosk-cart-meta">
-          {snapshot.member && (
-            <p>
-              <span>會員</span>
-              <strong>{snapshot.member.display_name}</strong>
-            </p>
-          )}
-          {snapshot.tenders.length > 0 && (
-            <p>
-              <span>付款方式</span>
-              <strong>
-                {snapshot.tenders.map((tender) => tenderLabel(tender.tender_type)).join("＋")}
-              </strong>
-            </p>
-          )}
-        </div>
-        {(parseNtd(snapshot.discount_total) ?? 0) +
-          (parseNtd(snapshot.manual_discount_total) ?? 0) >
-          0 && (
-          <p className="kiosk-cart-discount">
-            本次共折扣 $
-            {formatNtd(
-              (parseNtd(snapshot.discount_total) ?? 0) +
-                (parseNtd(snapshot.manual_discount_total) ?? 0),
+            {(parseNtd(snapshot.discount_total) ?? 0) +
+              (parseNtd(snapshot.manual_discount_total) ?? 0) >
+              0 && (
+              <p className="kiosk-cart-discount">
+                本次共折扣 $
+                {formatNtd(
+                  (parseNtd(snapshot.discount_total) ?? 0) +
+                    (parseNtd(snapshot.manual_discount_total) ?? 0),
+                )}
+              </p>
             )}
-          </p>
-        )}
-        {(parseNtd(snapshot.gift_retail_value) ?? 0) > 0 && (
-          <p className="kiosk-cart-discount">
-            贈品價值 ${formatNtd(parseNtd(snapshot.gift_retail_value) ?? 0)}（不計入應付）
-          </p>
-        )}
-        <div className="kiosk-cart-grand-total">
-          <span>應付總額</span>
-          <strong>${formatNtd(parseNtd(snapshot.total) ?? 0)}</strong>
+            {(parseNtd(snapshot.gift_retail_value) ?? 0) > 0 && (
+              <p className="kiosk-cart-discount">
+                贈品價值 ${formatNtd(parseNtd(snapshot.gift_retail_value) ?? 0)}（不計入應付）
+              </p>
+            )}
+            <div className="kiosk-cart-grand-total">
+              <span>{completed ? "本次金額" : "應付總額"}</span>
+              <strong>
+                {completed && <CheckMark ref={checkRef} />}
+                ${formatNtd(parseNtd(snapshot.total) ?? 0)}
+              </strong>
+            </div>
+            {paymentFailed && (
+              <p className="ledger-note is-warn" role="status">
+                付款未完成，請重新操作
+              </p>
+            )}
+            {completed && (
+              <p className="ledger-note" role="status">
+                付款完成。謝謝光臨，{completedSeconds ?? 10} 秒後自動清除。
+              </p>
+            )}
+          </footer>
+          {completed && (
+            <>
+              <LedgerStars />
+              <PaidStamp />
+            </>
+          )}
         </div>
-      </footer>
+      </div>
+      <PenHand ref={handRef} />
     </main>
   );
 }

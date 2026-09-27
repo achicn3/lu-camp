@@ -151,12 +151,8 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-cart-transition.png") });
   await page.waitForTimeout(3000);
   await page.screenshot({ path: join(SHOTS, "04-cart.png") });
-  const layout = await page.evaluate(() => {
-    const header = document.querySelector(".kiosk-cart-header").getBoundingClientRect();
-    const items = document.querySelector(".kiosk-cart-items").getBoundingClientRect();
-    return { gap: items.top - header.bottom };
-  });
-  ok("明細上方留一扇窗看得到動畫", layout.gap > 120, `${Math.round(layout.gap)}px`);
+  const layout = await page.evaluate(() => document.querySelector(".ledger-window").getBoundingClientRect().height);
+  ok("手帳上方留一扇窗看得到動畫", layout > 120, `${Math.round(layout)}px`);
   await put([
     { line_type: "SERIALIZED", item_code: code1 },
     { line_type: "SERIALIZED", item_code: code2 },

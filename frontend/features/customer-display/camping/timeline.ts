@@ -9,7 +9,7 @@ import { SIT_POSES } from "./figures";
 import { roadY } from "./panels";
 import { PARALLAX, SPOTS, THANKS_Y } from "./world";
 
-export type SceneMode = "idle" | "cart" | "celebrate" | "hidden";
+export type SceneMode = "idle" | "cart" | "paid" | "celebrate" | "hidden";
 
 export type CampingController = {
   setMode(mode: SceneMode): void;
@@ -41,6 +41,8 @@ const CART_CAM_X = 4000;
 const CART_ZOOM = { scale: 1.3, x: -290, y: -930 };
 /** 成交／簽完：謝謝卡片只佔底部，鏡頭退一點讓畫面鋪滿、天空留給「謝謝光臨」。 */
 const CELEBRATE_ZOOM = { scale: 1.15, x: -150, y: -210 };
+/** 付款完成時「謝謝光臨」的高度（結帳畫面上方那扇窗裡）。 */
+const PAID_THANKS_Y = 205;
 const DOOR_HANDLE = { x: 641, y: 940 };
 /** 手的圖裡，手指握的位置（相對手那張圖的左上角）。 */
 const HAND_GRIP = { x: 54, y: 60 };
@@ -187,6 +189,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tl.set(skyBottom, { attr: { "stop-color": SKY_STOPS.day[1] } }, 0);
     tl.set(tint, TINT.day, 0);
     tl.set(".cs-lightbands", { opacity: LIGHTBANDS.day }, 0);
+    tl.set(".cs-pov", { yPercent: 70, autoAlpha: 0 }, 0);
     tl.set(".cs-skywash", { opacity: WASH.day }, 0);
     tl.set(".cs-balloon", at($(".cs-balloon"), 1150, 330), 0);
     tl.set(".cs-night", { opacity: 0 }, 0);
@@ -335,6 +338,7 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   loop(gsap.to(".cs-flame-mid", { scaleY: 0.86, transformOrigin: "50% 100%", duration: 0.22, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.fromTo(".cs-sparks circle", { y: 0, opacity: 1 }, { y: -40, opacity: 0, duration: 1.4, stagger: 0.45, repeat: -1, ease: "sine.out" }));
   loop(gsap.fromTo(".cs-steam", { y: 4, opacity: 0.1 }, { y: -10, opacity: 0.65, duration: 1.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
+  loop(gsap.fromTo(".cs-pov-steam", { y: 6, opacity: 0.15 }, { y: -12, opacity: 0.6, duration: 2.4, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-sun-rays", { rotation: 360, svgOrigin: "0 0", duration: 60, repeat: -1, ease: "none" }));
   loop(gsap.to(".cs-flag", { skewY: 8, duration: 0.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
   loop(gsap.to(".cs-hammock", { rotation: 3, svgOrigin: "0 0", duration: 2.6, repeat: -1, yoyo: true, ease: "sine.inOut" }));
@@ -383,12 +387,17 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
   let cartLoop: gsap.core.Timeline | null = null;
 
   const zoomFor = (m: SceneMode) => (m === "celebrate" ? CELEBRATE_ZOOM : CART_ZOOM);
+  /** 結帳（cart／paid）才有第一人稱桌面；簽署完成的慶祝看整個營地。 */
+  const usesPov = (m: SceneMode) => m === "cart" || m === "paid";
+  const povTo = (on: boolean, duration: number, delay = 0) =>
+    gsap.to(".cs-pov", { yPercent: on ? 0 : 70, autoAlpha: on ? 1 : 0, duration, delay, ease: on ? "power2.out" : "power2.in", overwrite: true });
 
   const goToTable = (instant: boolean) => {
     transition?.kill();
     const tr = gsap.timeline();
     const d = instant ? 0 : 1;
-    const panDur = instant ? 0 : 1.2 + Math.min(2, Math.abs(cam.x - CART_CAM_X) / 2000);
+    // 店主 2026-09-27：結帳轉場 0.6～1.2 秒，不要讓客人等
+    const panDur = instant ? 0 : 0.5 + Math.min(0.6, Math.abs(cam.x - CART_CAM_X) / 8000);
     tr.to(".cs-door", { autoAlpha: 0, duration: 0.5 * d }, 0);
     tr.to(".cs-flash", { opacity: 0, duration: 0.5 * d }, 0);
     tr.to(cam, { x: CART_CAM_X, duration: panDur, ease: "power2.inOut" }, 0);
@@ -409,7 +418,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tr.to(".cs-tent-body", { scaleY: 1, scaleX: 1, duration: 0.9 * d, ease: "elastic.out(1, 0.5)" }, 0.2 * d);
     tr.to(".cs-tent-shadow", { scaleX: 1, duration: 0.5 * d }, 0.2 * d);
     cupTo(tr, "rest", 0.5 * d, 0);
-    tr.to(zoom, { ...zoomFor(mode), transformOrigin: "0 0", duration: instant ? 0 : 1.6, ease: "power2.inOut" }, instant ? 0 : Math.max(0.2, panDur - 0.9));
+    tr.to(zoom, { ...zoomFor(mode), transformOrigin: "0 0", duration: instant ? 0 : 0.9, ease: "power2.inOut" }, instant ? 0 : Math.max(0.1, panDur - 0.5));
+    if (usesPov(mode)) povTo(true, instant ? 0 : 0.7, instant ? 0 : Math.max(0.2, panDur - 0.3));
     transition = tr;
     atTable = true;
   };
@@ -425,14 +435,14 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     cartLoop = tl;
   };
 
-  const celebrate = () => {
+  const celebrate = (wordY: number, wordScale = 1) => {
     cartLoop?.kill();
     cartLoop = null;
     const tl = gsap.timeline({ delay: reducedMotion ? 0 : 0.6 });
     const d = reducedMotion ? 0 : 1;
     tl.set(".cs-thanks", { opacity: 1 }, 0);
     // y 寫死回原位：上一次慶祝的上下飄可能停在半路，不歸位會越飄越高
-    tl.fromTo(".cs-thanks-word", { scale: 0.3, opacity: 0, y: THANKS_Y, transformOrigin: "50% 50%" }, { scale: 1, opacity: 1, y: THANKS_Y, duration: 0.9 * d, ease: "elastic.out(1, 0.55)" }, 0);
+    tl.fromTo(".cs-thanks-word", { scale: 0.3, opacity: 0, y: wordY, transformOrigin: "50% 50%" }, { scale: wordScale, opacity: 1, y: wordY, duration: 0.9 * d, ease: "elastic.out(1, 0.55)" }, 0);
     tl.fromTo(".cs-thanks-star", { scale: 0, rotation: -90, transformOrigin: "50% 50%" }, { scale: 1, rotation: 0, duration: 0.6 * d, stagger: 0.12 * d, ease: "back.out(2.4)" }, 0.2 * d);
     cupTo(tl, "cheers", 0.6 * d, 0, "back.out(1.8)");
     tl.to(".cs-nod-head", { ...rot(-8), duration: 0.3 * d, yoyo: true, repeat: 3 }, 0.3 * d);
@@ -460,7 +470,8 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     tr.to(".cs-thanks", { opacity: 0, duration: 0.6 * d }, 0);
     cupTo(tr, "rest", 0.6 * d, 0);
     tr.to(".cs-nod-head", { ...rot(0), duration: 0.3 * d }, 0);
-    tr.to(zoom, { scale: 1, x: 0, y: 0, duration: 1.5 * d, ease: "power2.inOut" }, 0.2 * d);
+    tr.to(zoom, { scale: 1, x: 0, y: 0, duration: 1.2 * d, ease: "power2.inOut" }, 0.2 * d);
+    povTo(false, 0.5 * d);
     transition = tr;
     atTable = false;
   };
@@ -480,12 +491,16 @@ export function createCampingController(root: HTMLElement, reducedMotion: boolea
     }
     master.pause();
     if (!atTable) goToTable(reducedMotion || prev === "hidden");
-    else gsap.to(zoom, { ...zoomFor(next), duration: reducedMotion ? 0 : 1.2, ease: "power2.inOut" });
+    else {
+      gsap.to(zoom, { ...zoomFor(next), duration: reducedMotion ? 0 : 1, ease: "power2.inOut" });
+      povTo(usesPov(next), reducedMotion ? 0 : 0.6);
+    }
     if (next === "cart") {
       gsap.to(".cs-thanks", { opacity: 0, duration: reducedMotion ? 0 : 0.4 });
       startCartLoop();
     } else {
-      celebrate();
+      // 付款完成時上方只剩一扇窗，「謝謝光臨」寫高一點，不要蓋到喝咖啡的人
+      celebrate(next === "paid" ? PAID_THANKS_Y : THANKS_Y, next === "paid" ? 0.55 : 1);
     }
   };
 

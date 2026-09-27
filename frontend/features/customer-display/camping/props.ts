@@ -8,7 +8,7 @@ function f(v: number): string {
 }
 
 /** 木紋：沿著木板方向的細波浪線，偶爾一個節疤。 */
-function woodGrain(r: Rng, x0: number, x1: number, y0: number, y1: number, lines: number): string {
+export function woodGrain(r: Rng, x0: number, x1: number, y0: number, y1: number, lines: number): string {
   let d = "";
   for (let i = 0; i < lines; i += 1) {
     const y = y0 + ((i + 0.5) / lines) * (y1 - y0) + (r() - 0.5) * 2;
@@ -228,5 +228,42 @@ export function firePit(r: Rng): string {
     log("M-56 -20 L52 2 L46 14 L-60 -8 Z", [-58, -14]) +
     log("M-8 -8 L30 -44 L38 -38 L0 -2 Z", [34, -42]) +
     inkPath("M-40 12 L-18 -6 M-44 10 l-6 -4", 1.4, { stroke: "#5a3d28" })
+  );
+}
+
+/**
+ * 結帳時「坐在桌前」的第一人稱桌面（畫面座標，1000×1400）：稍微俯視的木頭桌面由下往上滑進來，
+ * 手帳夾板放在上面；右上角一杯冒著蒸氣的咖啡。
+ */
+export function povDesk(r: Rng): string {
+  const top = 520;
+  const rows = 7;
+  let planks = "";
+  const tones = ["#c99a63", "#c3925b", "#cea06a", "#bf8f58"];
+  let y = top;
+  for (let i = 0; i < rows; i += 1) {
+    const hgt = 70 + i * 22;
+    const d = `M-200 ${y} L1200 ${y} L1200 ${y + hgt} L-200 ${y + hgt} Z`;
+    planks += fillPath(d, tones[i % tones.length] ?? "#c99a63");
+    planks += woodGrain(r, -40, 1040, y + 6, y + hgt - 6, 3);
+    planks += h("path", { d: `M-200 ${y + hgt} L1200 ${y + hgt}`, stroke: "#6b4a2e", "stroke-width": 1.6, opacity: 0.8 });
+    y += hgt;
+  }
+  return (
+    planks +
+    h("rect", { x: -200, y: top, width: 1400, height: 60, fill: INK, opacity: 0.12 }) +
+    inkPath(`M-200 ${top} L1200 ${top}`, 3) +
+    fillPath(`M-200 ${top - 18} L1200 ${top - 18} L1200 ${top} L-200 ${top} Z`, "#a8743f") +
+    inkPath(`M-200 ${top - 18} L1200 ${top - 18}`, 2) +
+    // 桌角一杯咖啡（蒸氣會慢慢飄）
+    g(
+      { class: "cs-pov-mug", transform: "translate(905 560)" },
+      h("ellipse", { cx: 0, cy: 40, rx: 46, ry: 9, fill: INK, opacity: 0.28 }),
+      shape("M-36 -30 L36 -30 L32 38 L-32 38 Z", "#f4efe4", 2.4),
+      h("ellipse", { cx: 0, cy: -30, rx: 36, ry: 8, fill: "#5a3620", stroke: INK, "stroke-width": 1.6 }),
+      inkPath("M36 -18 c22 0 22 34 -2 34", 2.2),
+      h("path", { d: "M-24 -20 L-22 30", stroke: "#fff", "stroke-width": 4, opacity: 0.7, "stroke-linecap": "round" }),
+      g({ class: "cs-pov-steam", fill: "none", stroke: INK_SOFT, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.55, filter: "url(#cs-rough)" }, h("path", { d: "M-8 -44 c-12 -18 12 -26 0 -46 c-12 -18 12 -26 0 -44" }), h("path", { d: "M10 -46 c-10 -16 10 -24 0 -40" })),
+    )
   );
 }

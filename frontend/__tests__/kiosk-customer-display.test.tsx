@@ -796,7 +796,8 @@ describe("/kiosk 客顯", () => {
 
     expect(await screen.findByText("交易已完成")).toBeTruthy();
     expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
-    expect(sceneMode()).toBe("celebrate");
+    // 付款完成留在第一人稱手帳：勾勾、印章，背景的人舉杯（paid），不是整片營地的慶祝
+    expect(sceneMode()).toBe("paid");
   });
 
   it("升級後殘留的舊交回鎖不得讓下一張任務要求店員帳密", async () => {
@@ -1063,5 +1064,79 @@ describe("/kiosk 客顯", () => {
     expect(sceneMode()).toBe("cart");
     expect(screen.getByTestId("camping-scene")).toBe(scene);
     vi.useRealTimers();
+  });
+
+  it("付款處理中又回到可修改＝這次付款沒完成：手帳上寫「付款未完成」，不播完成動畫", async () => {
+    window.localStorage.setItem(
+      "lu-camp.kiosk.csrf",
+      "csrf-token-at-least-thirty-two-characters",
+    );
+    let status: "PROCESSING" | "DRAFT" = "PROCESSING";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) {
+          return json({
+            id: 31,
+            status,
+            revision: status === "PROCESSING" ? 5 : 6,
+            snapshot: {
+              content_version: "cart-v1",
+              items: [
+                {
+                  item_key: "CATALOG:9",
+                  line_type: "CATALOG",
+                  name: "手沖濾杯",
+                  qty: 1,
+                  unit_price: "680",
+                  original_unit_price: null,
+                  discount_amount: "0",
+                  line_total: "680",
+                  line_kind: "NORMAL",
+                  manual_discount_amount: "0",
+                  net_amount: "680",
+                },
+              ],
+              total: "680",
+              discount_total: "0",
+              manual_discount_total: "0",
+              gift_retail_value: "0",
+              campaign_name: null,
+              member: null,
+              tenders: [{ tender_type: "LINE_PAY", amount: "680" }],
+            },
+            changes: [],
+            updated_at: new Date().toISOString(),
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: new Date().toISOString() });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText("付款處理中，請稍候")).toBeTruthy();
+    expect(screen.queryByText("付款未完成，請重新操作")).toBeNull();
+
+    status = "DRAFT";
+    await act(async () => {
+      FakeEventSource.instances[0].dispatchEvent(new Event("state"));
+    });
+    expect(await screen.findByText("付款未完成，請重新操作")).toBeTruthy();
+    expect(screen.queryByText("交易已完成")).toBeNull();
+    expect(sceneMode()).toBe("cart");
   });
 });

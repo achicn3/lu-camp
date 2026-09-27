@@ -5341,43 +5341,269 @@ a.btn-ghost {
   z-index: 1;
 }
 
-/* 結帳：上方留一扇窗看動畫（鏡頭拉近到營桌），明細寫在手繪紙卡上 */
-.kiosk-cart-shell.is-scene {
+/* 結帳：第一人稱露營手帳（店主 2026-09-27）。上方一扇窗看營地，下方是靠近鏡頭的桌面（動畫世界畫的），
+   桌上一塊木夾板＋米白紙；插畫只有手、筆、紙、勾勾、印章，品名數量金額一律清楚的 UI 字。 */
+.kiosk-cart-shell.is-ledger {
   position: relative;
   z-index: 1;
-  grid-template-rows: auto minmax(18vh, 0.8fr) auto minmax(0, 2.2fr) auto;
+  display: grid;
+  grid-template-rows: minmax(20vh, 25vh) minmax(0, 1fr);
+  padding: 0 max(14px, 3.5vw) max(18px, env(safe-area-inset-bottom));
+  background: transparent;
+  overflow: hidden;
+}
+.kiosk-cart-shell.is-leaving {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.ledger-window {
+  grid-row: 1;
+}
+.ledger-board {
+  grid-row: 2;
+  position: relative;
+  display: flex;
+  min-height: 0;
+  padding: 26px 14px 14px;
+  border: 2px solid #33261c;
+  border-radius: 16px 18px 14px 20px;
+  background:
+    repeating-linear-gradient(93deg, transparent 0 22px, rgba(90, 58, 30, 0.08) 22px 23px, transparent 23px 57px),
+    linear-gradient(180deg, #c89a64, #b9864f);
+  box-shadow:
+    3px 5px 0 rgba(51, 38, 28, 0.35),
+    0 18px 30px rgba(0, 0, 0, 0.18);
+  transform: rotate(-0.5deg);
+  transition: transform 0.5s ease;
+  animation: ledger-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.25s both;
+}
+.is-ledger[data-phase="paying"] .ledger-board,
+.is-ledger[data-phase="processing"] .ledger-board,
+.is-ledger[data-phase="paid"] .ledger-board {
+  transform: translateY(-2.5vh) rotate(-0.5deg);
+}
+.is-leaving .ledger-board {
+  animation: ledger-out 0.6s cubic-bezier(0.5, 0, 0.8, 0.4) both;
+}
+.ledger-clip {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  z-index: 2;
+  width: 150px;
+  transform: translateX(-50%);
+}
+.ledger-paper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  padding: 20px clamp(16px, 3vw, 28px) 14px;
+  border-radius: 4px 6px 4px 6px;
+  background:
+    repeating-linear-gradient(transparent 0 47px, rgba(111, 143, 174, 0.15) 47px 48px),
+    radial-gradient(120% 80% at 20% 0%, #fdf9f0, #f6efe0);
+  box-shadow:
+    inset 0 0 0 1px rgba(51, 38, 28, 0.14),
+    0 2px 0 rgba(51, 38, 28, 0.25);
+  overflow: hidden;
+}
+.is-payment-failed .ledger-paper {
+  animation: ledger-wiggle 0.45s ease;
+}
+.is-ledger .kiosk-cart-header {
+  padding: 0 0 var(--sp-2);
+}
+.is-ledger .kiosk-cart-header h1 {
+  font-size: clamp(22px, 3.4vw, 34px);
+}
+.is-ledger .kiosk-live {
+  padding: 5px 10px;
+  border-color: rgba(51, 38, 28, 0.2);
   background: transparent;
 }
-.kiosk-cart-shell.is-scene .kiosk-cart-header {
-  margin: var(--sp-4) var(--sp-4) 0;
-  padding: var(--sp-3) var(--sp-5);
-  border: 2px solid #2a2018;
-  border-radius: 16px 20px 14px 22px;
-  background: color-mix(in srgb, #fffaf0 90%, transparent);
-  box-shadow: 3px 4px 0 #2a2018;
+.is-ledger .kiosk-payment-spinner {
+  width: 0.45em;
+  height: 0.45em;
+  border: 0;
+  border-radius: 50%;
+  background: #c9553a;
+  animation: ledger-pulse 1.4s ease-in-out infinite;
 }
-.kiosk-cart-shell.is-scene .kiosk-cart-changes {
-  grid-row: 3;
+.is-ledger .kiosk-cart-changes {
+  margin: 0 0 var(--sp-2);
 }
-.kiosk-cart-shell.is-scene .kiosk-cart-items,
-.kiosk-cart-shell.is-scene .kiosk-cart-scroll-hint {
-  grid-row: 4;
+.is-ledger .kiosk-cart-change {
+  padding: 6px 10px;
+  background: rgba(46, 125, 79, 0.08);
 }
-.kiosk-cart-shell.is-scene .kiosk-cart-items {
-  margin: 0 var(--sp-4);
-  border: 2px solid #2a2018;
-  border-bottom: 0;
-  border-radius: 20px 24px 0 0;
-  background:
-    repeating-linear-gradient(transparent 0 47px, rgba(111, 143, 174, 0.18) 47px 48px),
-    #fbf6ea;
-  box-shadow: 4px 0 0 #2a2018;
+.is-ledger .kiosk-cart-change.is-removed {
+  background: rgba(92, 72, 56, 0.08);
+  color: #6b5a44;
 }
-.kiosk-cart-shell.is-scene .kiosk-cart-total {
-  grid-row: 5;
-  margin: 0 var(--sp-4);
-  border: 2px solid #2a2018;
-  border-top: 2px dashed rgba(255, 255, 255, 0.4);
+.is-ledger .kiosk-cart-items {
+  padding: 0;
+  scroll-padding-top: 8px;
+}
+.is-ledger .kiosk-cart-item {
+  padding: clamp(12px, 2vw, 18px) 0;
+  border-bottom: 1px dashed rgba(92, 72, 56, 0.35);
+}
+.is-ledger .kiosk-cart-item.is-added,
+.is-ledger .kiosk-cart-item.is-updated {
+  animation: none;
+}
+.kiosk-cart-item.is-ghost {
+  position: relative;
+  max-height: 240px;
+  animation: ledger-collapse 0.3s ease 0.26s both;
+}
+.kiosk-cart-item.is-ghost::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: #5c4838;
+  transform-origin: left center;
+  animation: ledger-strike 0.24s ease-out both;
+}
+.is-ledger .kiosk-cart-scroll-hint {
+  background: rgba(251, 246, 234, 0.95);
+}
+.is-ledger .kiosk-cart-total {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2) var(--sp-5);
+  padding: var(--sp-4) 0 0;
+  border: 0;
+  background: transparent;
+  color: #2a2018;
+  box-shadow: none;
+}
+.ledger-divider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 12px;
+}
+.is-ledger .kiosk-cart-meta span,
+.is-ledger .kiosk-cart-grand-total span {
+  color: #6b5a44;
+}
+.is-ledger .kiosk-cart-discount {
+  color: #2e6b4a;
+}
+.is-ledger .kiosk-cart-grand-total strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  color: #2a2018;
+  font-size: clamp(42px, 8vw, 76px);
+}
+.ledger-check {
+  width: 0.8em;
+  height: 0.65em;
+  overflow: visible;
+}
+.ledger-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #5c4838;
+  font-size: var(--text-md);
+  text-align: right;
+}
+.ledger-note.is-warn {
+  color: #9a4a2e;
+  font-weight: 700;
+}
+.ledger-stars {
+  position: absolute;
+  right: 18px;
+  bottom: 96px;
+  width: 92px;
+  overflow: visible;
+}
+.ledger-stamp {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  width: clamp(84px, 13vw, 116px);
+  transform: rotate(-10deg);
+  mix-blend-mode: multiply;
+}
+.ledger-hand {
+  position: absolute;
+  overflow: visible;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  pointer-events: none;
+  will-change: transform;
+  filter: drop-shadow(4px 8px 6px rgba(51, 38, 28, 0.22));
+}
+@keyframes ledger-in {
+  from {
+    transform: translateY(60vh) rotate(4deg);
+  }
+  to {
+    transform: rotate(-0.5deg);
+  }
+}
+@keyframes ledger-out {
+  to {
+    transform: translateY(70vh) rotate(8deg);
+    opacity: 0;
+  }
+}
+@keyframes ledger-wiggle {
+  25% {
+    transform: rotate(-0.6deg);
+  }
+  50% {
+    transform: rotate(0.5deg);
+  }
+  75% {
+    transform: rotate(-0.3deg);
+  }
+}
+@keyframes ledger-strike {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ledger-collapse {
+  to {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+@keyframes ledger-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ledger-board,
+  .is-leaving .ledger-board,
+  .is-payment-failed .ledger-paper,
+  .is-ledger .kiosk-payment-spinner {
+    animation: none;
+  }
+  .ledger-board {
+    transition: none;
+  }
 }
 
 /* 簽署完成／交易完成：紙卡浮在動畫上，勾勾用畫的 */
