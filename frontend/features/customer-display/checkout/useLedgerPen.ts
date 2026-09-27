@@ -20,7 +20,7 @@ const RAPID_MS = 500;
 
 type Refs = {
   shell: RefObject<HTMLElement | null>;
-  hand: RefObject<SVGSVGElement | null>;
+  hand: RefObject<HTMLImageElement | null>;
   check: RefObject<SVGPathElement | null>;
 };
 
@@ -32,7 +32,7 @@ type Callbacks = {
 };
 
 /** 不播動畫時直接把手擺到定位（不經過 GSAP：測試環境量不到 SVG 尺寸）。 */
-function snap(hand: SVGSVGElement, x: number, y: number, rotation = 0): void {
+function snap(hand: HTMLElement, x: number, y: number, rotation = 0): void {
   hand.setAttribute("style", `transform: translate(${x - PEN_TIP.x}px, ${y - PEN_TIP.y}px) rotate(${rotation}deg)`);
 }
 
@@ -216,39 +216,53 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
         continue;
       }
       const r = rectIn(ghost, shell);
-      const strike1 = ghost.querySelector<SVGPathElement>(".ledger-strike-1");
-      const strike2 = ghost.querySelector<SVGPathElement>(".ledger-strike-2");
-      // 兩筆劃線：主要一條從左下斜到右上、略微不直；第二條短一些、角度略不同（行內像素座標）
+      const strike = ghost.querySelector<SVGPathElement>(".ledger-strike-1");
+      const strikeSoft = ghost.querySelector<SVGPathElement>(".ledger-strike-2");
+      // 像鉛筆隨手塗掉：在品名那一段來回畫 4～5 個鋸齒，最後拖一條尾巴（店主 2026-09-27 提供的效果圖）
       const w = r.width;
       const hgt = r.height;
-      const jitter = () => (Math.random() - 0.5) * hgt * 0.06;
-      const p1 = [0.01 * w, 0.64 * hgt, 0.99 * w, 0.32 * hgt];
-      const p2 = [0.14 * w, 0.78 * hgt, 0.8 * w, 0.5 * hgt];
-      const curve = ([x0, y0, x1, y1]: number[]) =>
-        `M${x0} ${y0} C${x0 + (x1 - x0) * 0.3} ${y0 + (y1 - y0) * 0.22 + jitter()} ${x0 + (x1 - x0) * 0.7} ${y0 + (y1 - y0) * 0.8 + jitter()} ${x1} ${y1}`;
-      const svg = strike1?.ownerSVGElement;
+      const x0 = 0.2 * w;
+      const x1 = 0.56 * w;
+      const yMid = 0.36 * hgt;
+      const amp = Math.min(14, hgt * 0.17);
+      const teeth = 5 + Math.floor(Math.random() * 2);
+      const zigEnd = x0 + (x1 - x0) * 0.62;
+      const step = (zigEnd - x0) / teeth;
+      const j = () => (Math.random() - 0.5) * 2.4;
+      // 鋸齒：每一下往右上、再往回拉一點到右下（像手快速來回塗），最後拖一條往右的尾巴
+      let d = `M${x0} ${yMid + amp}`;
+      for (let k = 0; k < teeth; k += 1) {
+        d += ` L${(x0 + step * (k + 0.95) + j()).toFixed(1)} ${(yMid - amp + j()).toFixed(1)}`;
+        d += ` L${(x0 + step * (k + 0.6) + j()).toFixed(1)} ${(yMid + amp + j()).toFixed(1)}`;
+      }
+      const tailStart = x0 + step * (teeth - 0.4);
+      d += ` C${tailStart + 30} ${yMid + amp * 0.2} ${x1 - 40} ${yMid - amp * 0.2} ${x1} ${yMid - amp * 0.35}`;
+      const svg = strike?.ownerSVGElement;
       svg?.setAttribute("viewBox", `0 0 ${w} ${hgt}`);
-      const prep = (path: SVGPathElement | null, coords: number[]) => {
-        if (!path) return;
-        path.setAttribute("d", curve(coords));
-        const len = path.getTotalLength();
+      let len = 0;
+      for (const path of [strike, strikeSoft]) {
+        if (!path) continue;
+        path.setAttribute("d", d);
+        len = path.getTotalLength();
         path.setAttribute("stroke-dasharray", `${len}`);
         path.setAttribute("stroke-dashoffset", `${len}`);
-      };
-      prep(strike1, p1);
-      prep(strike2, p2);
-      const at = (px: number, py: number) => ({ x: r.left + px, y: r.top + py });
-      const a0 = at(p1[0]!, p1[1]!);
-      const a1 = at(p1[2]!, p1[3]!);
-      const b0 = at(p2[0]!, p2[1]!);
-      const b1 = at(p2[2]!, p2[3]!);
+      }
       tl.call(() => cb.current.onPen?.("ITEM_DELETE"));
-      moveTo(tl, a0.x, a0.y, rapid ? 0.12 : 0.22);
-      tl.to(hand, { x: a1.x - PEN_TIP.x, y: a1.y - PEN_TIP.y, duration: rapid ? 0.14 : 0.26, ease: "power1.inOut" });
-      if (strike1) tl.to(strike1, { attr: { "stroke-dashoffset": 0 }, duration: rapid ? 0.14 : 0.26, ease: "power1.inOut" }, "<");
-      moveTo(tl, b0.x, b0.y, 0.09);
-      tl.to(hand, { x: b1.x - PEN_TIP.x, y: b1.y - PEN_TIP.y, duration: rapid ? 0.1 : 0.16, ease: "power1.out" });
-      if (strike2) tl.to(strike2, { attr: { "stroke-dashoffset": 0 }, duration: rapid ? 0.1 : 0.16, ease: "power1.out" }, "<");
+      const start = strike ? strike.getPointAtLength(0) : { x: x0, y: yMid };
+      moveTo(tl, r.left + start.x, r.top + start.y, rapid ? 0.12 : 0.22);
+      if (strike) {
+        const proxy = { t: 0 };
+        tl.to(proxy, {
+          t: 1,
+          duration: rapid ? 0.24 : 0.5,
+          ease: "power1.inOut",
+          onUpdate: () => {
+            const pt = strike.getPointAtLength(len * proxy.t);
+            gsap.set(hand, { x: r.left + pt.x - PEN_TIP.x, y: r.top + pt.y - PEN_TIP.y });
+            for (const path of [strike, strikeSoft]) path?.setAttribute("stroke-dashoffset", `${len * (1 - proxy.t)}`);
+          },
+        });
+      }
       // 字變淡到一半，劃線維持深色
       tl.to(ghost.querySelectorAll(":scope > :not(.ledger-strike)"), { opacity: 0.48, duration: 0.15 });
       // 停一下讓客人看到真的被劃掉，再收起來、下面的行往上補

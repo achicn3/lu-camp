@@ -5331,6 +5331,16 @@ a.btn-ghost {
   box-shadow: 4px 5px 0 #2a2018;
   gap: var(--sp-2);
 }
+.kiosk-standby-title .split-char {
+  display: inline-block;
+  animation: standby-char-rise 0.9s cubic-bezier(0.215, 0.61, 0.355, 1) both;
+}
+@keyframes standby-char-rise {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+}
 .kiosk-standby-card .kiosk-standby-title {
   font-size: clamp(26px, 4.4vw, 40px);
 }
@@ -5473,12 +5483,20 @@ a.btn-ghost {
 }
 .ledger-strike path {
   fill: none;
-  stroke: #3a2a20;
-  stroke-width: 2.4;
   stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 鉛筆石墨：深灰棕、帶顆粒；底下一層略粗略淡，像筆芯的邊 */
+.ledger-strike-1 {
+  stroke: #2f2924;
+  stroke-width: 3.1;
+  filter: url(#cs-pencil-line);
 }
 .ledger-strike-2 {
-  stroke-width: 1.9;
+  stroke: #5a524b;
+  stroke-width: 5.2;
+  opacity: 0.32;
+  transform: translate(0.6px, 0.8px);
 }
 .ledger-old-qty {
   position: absolute;
@@ -5572,7 +5590,8 @@ a.btn-ghost {
 }
 .ledger-hand {
   position: absolute;
-  overflow: visible;
+  width: auto;
+  max-width: none;
   top: 0;
   left: 0;
   z-index: 3;

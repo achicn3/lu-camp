@@ -8,12 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import KioskPage from "@/app/kiosk/page";
 import { STORE_DISPLAY_NAME } from "@/lib/branding";
 
-// 待機店名動畫（React Bits SplitText，靠 gsap）：jsdom 沒有 matchMedia，gsap 一載入就會出錯；
-// 這支測的是顧客螢幕流程，不是動畫——換成直接輸出文字（動畫由 kiosk-standby-animation-smoke 在真瀏覽器驗）。
-vi.mock("@/components/ui/SplitText", () => ({
-  default: ({ text, className }: { text: string; className?: string }) => <h1 className={className}>{text}</h1>,
-}));
-
 // 露營動畫本身在真瀏覽器由 kiosk-camping-scene-smoke 驗；這裡只記下每個畫面交給它的模式，
 // 並確認換畫面時它沒有被重掛（重掛＝動畫從頭播，結帳就接不上當下的畫面）。
 vi.mock("@/features/customer-display/CampingScene", () => ({

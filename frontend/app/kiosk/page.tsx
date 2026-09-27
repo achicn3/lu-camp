@@ -12,7 +12,6 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import SplitText from "@/components/ui/SplitText";
 import { CheckMark, LedgerStars, PaidStamp } from "@/features/customer-display/checkout/LedgerMarks";
 import { PenHand } from "@/features/customer-display/checkout/PenHand";
 import { type PenActivity, ledgerStateFor } from "@/features/customer-display/checkout/ledgerState";
@@ -750,7 +749,7 @@ function CartScreen({
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => true);
   const motion = !reducedMotion;
   const shellRef = useRef<HTMLElement>(null);
-  const handRef = useRef<SVGSVGElement>(null);
+  const handRef = useRef<HTMLImageElement>(null);
   const checkRef = useRef<SVGPathElement>(null);
   const itemListRef = useRef<HTMLElement>(null);
   const [scrollState, setScrollState] = useState({
@@ -1003,10 +1002,10 @@ function CartScreen({
                 <strong>${formatNtd(parseNtd(item.net_amount) ?? 0)}</strong>
                 {ghost && (
                   // 筆劃掉這一行的兩筆：主要一條微斜、第二條短一些角度略不同
-                  // 劃線依這一行的實際大小由筆的動畫畫上去（不拉伸，線寬才一致）
+                  // 鉛筆塗掉的線：依這一行的實際大小由筆的動畫畫上去（兩層：石墨深線＋淡一點的筆觸）
                   <svg className="ledger-strike" aria-hidden="true">
-                    <path className="ledger-strike-1" />
                     <path className="ledger-strike-2" />
+                    <path className="ledger-strike-1" />
                   </svg>
                 )}
               </article>
@@ -1195,7 +1194,7 @@ function prefersReducedMotion(): boolean {
   return typeof window.matchMedia !== "function" || window.matchMedia(REDUCED_MOTION_QUERY).matches;
 }
 
-/** 待機畫面店名：逐字浮現（React Bits SplitText）；系統設定「減少動態效果」時直接顯示文字。 */
+/** 待機畫面店名：逐字浮現；系統設定「減少動態效果」時直接顯示文字。 */
 function StandbyTitle() {
   const reduceMotion = useSyncExternalStore(
     subscribeReducedMotion,
@@ -1203,19 +1202,17 @@ function StandbyTitle() {
     () => true, // 伺服器端先輸出靜態文字，瀏覽器接手後才決定要不要動畫
   );
   if (reduceMotion) return <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>;
+  // 店名逐字浮上來。原本用 React Bits SplitText（GSAP SplitText＋ScrollTrigger），但待機畫面每掛上一次
+  // 就留下一組拆字與 ScrollTrigger 無法回收——客顯整天開著會一直累積（2026-09-27 長時間測試抓到）。
+  // 效果只是一出現就逐字淡入上移，純 CSS 就做得到，不會留任何東西。
   return (
-    <SplitText
-      tag="h1"
-      className="kiosk-standby-title"
-      text={STORE_DISPLAY_NAME}
-      // 店名卡在畫面底部：預設「捲到可視範圍 90% 才開始」永遠不會觸發，改成一出現就播
-      threshold={0}
-      rootMargin="0px"
-      delay={90}
-      duration={0.9}
-      from={{ opacity: 0, y: 32 }}
-      to={{ opacity: 1, y: 0 }}
-    />
+    <h1 className="kiosk-standby-title split-parent" aria-label={STORE_DISPLAY_NAME}>
+      {Array.from(STORE_DISPLAY_NAME).map((ch, i) => (
+        <span key={i} className="split-char" aria-hidden="true" style={{ animationDelay: `${i * 90}ms` }}>
+          {ch}
+        </span>
+      ))}
+    </h1>
   );
 }
 

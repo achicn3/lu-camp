@@ -48,12 +48,12 @@ await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
 await page.fill('input[name="username"]', "dev-kiosk");
 await page.fill('input[name="password"]', "dev-test-123456");
 await page.click('button:has-text("啟用裝置")');
-await page.waitForSelector(".kiosk-pairing-code", { timeout: 8000 });
+await page.locator(".kiosk-pairing-code").waitFor({ timeout: 8000 });
 const code = (await page.textContent(".kiosk-pairing-code"))?.trim();
 const terminal = await api(mgr, "POST", "/api/v1/customer-display/terminals", { installation_id: crypto.randomUUID(), name: `長測 ${RUN}` });
 const terminalId = terminal.json.id;
 await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/pair`, { pairing_code: code });
-await page.waitForSelector(".camping-scene.is-ready", { timeout: 15000 });
+await page.locator(".camping-scene.is-ready").waitFor({ timeout: 15000 });
 const cdp = await page.context().newCDPSession(page);
 await cdp.send("Performance.enable");
 
@@ -62,7 +62,8 @@ async function sample(label) {
   await page.waitForTimeout(300);
   const { metrics } = await cdp.send("Performance.getMetrics");
   const m = Object.fromEntries(metrics.map((x) => [x.name, x.value]));
-  const row = { label, nodes: m.Nodes, listeners: m.JSEventListeners, heapMB: +(m.JSHeapUsedSize / 1048576).toFixed(1), docs: m.Documents };
+  const liveDom = await page.evaluate(() => document.querySelectorAll("*").length);
+  const row = { label, nodes: m.Nodes, liveDom, listeners: m.JSEventListeners, heapMB: +(m.JSHeapUsedSize / 1048576).toFixed(1) };
   console.log(JSON.stringify(row));
   return row;
 }
@@ -87,7 +88,8 @@ for (let i = 1; i <= CYCLES; i += 1) {
   await page.waitForTimeout(STEP_MS);
   const cart = await put([line(productA, 3)]);
   await page.waitForTimeout(STEP_MS * 2);
-  if (i % 2 === 1) {
+  const mode = process.env.SOAK_MODE ?? "mixed";
+  if (mode === "pay" || (mode === "mixed" && i % 2 === 1)) {
     const total = cart.snapshot.total;
     await put([line(productA, 3)], { tenders: [{ tender_type: "CASH", amount: total }] });
     const begun = await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/cart/begin-checkout`, { expected_revision: revision });
@@ -101,19 +103,20 @@ for (let i = 1; i <= CYCLES; i += 1) {
       { "Idempotency-Key": `soak-sale-${RUN}-${i}` },
     );
     if (sale.status !== 201) throw new Error(`sale ${sale.status} ${JSON.stringify(sale.json)}`);
-    await page.waitForSelector('h1:has-text("交易已完成")', { timeout: 15000 });
+    // 用 locator 等：waitForSelector 會回傳元素參照，不釋放就會把被拆掉的畫面一直留在記憶體（假洩漏）
+    await page.locator('h1:has-text("交易已完成")').waitFor({ timeout: 15000 });
     await page.waitForTimeout(1200);
     // 完成畫面約 10 秒後自動清除；長測不等那麼久，直接開下一筆（新購物車會蓋過完成畫面）
   } else {
     await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/cart/cancel`, { expected_revision: revision, reason: "長時間測試" });
-    await page.waitForSelector(".kiosk-standby-title", { timeout: 15000 });
+    await page.locator(".kiosk-standby-title").waitFor({ timeout: 15000 });
     await page.waitForTimeout(400);
   }
-  if (i % 25 === 0) samples.push(await sample(`cycle ${i}`));
+  if (i % Number(process.env.SOAK_SAMPLE ?? 25) === 0) samples.push(await sample(`cycle ${i}`));
 }
 const minutes = ((Date.now() - t0) / 60000).toFixed(1);
 // 最後回到待機再量一次（和開頭同一個畫面比）
-await page.waitForSelector(".kiosk-standby-title", { timeout: 20000 });
+await page.locator(".kiosk-standby-title").waitFor({ timeout: 20000 });
 await page.waitForTimeout(1500);
 const end = await sample("end (idle)");
 const first = samples[1] ?? samples[0];
