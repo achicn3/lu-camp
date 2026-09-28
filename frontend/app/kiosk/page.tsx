@@ -595,7 +595,7 @@ function KioskConsole({
       return { mode: "cart", screen: <CartScreen cart={cart.data} streamConnected={streamConnected} /> };
     }
     if (cart.data?.status === "COMPLETED") {
-      return { mode: "celebrate", screen: <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} /> };
+      return { mode: "paid", screen: <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} /> };
     }
 
     if (recovering) {

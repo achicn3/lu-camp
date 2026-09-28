@@ -5395,3 +5395,7 @@ a.btn-ghost {
   width: 96px;
   height: 96px;
 }
+
+/* 新短片只在背景／閱讀安全區繪製，沿用客顯的既有文件與交易卡片。 */
+.camp-film { background: #f4eedf; }
+.camp-film > canvas { display: block; width: 100%; height: 100%; }

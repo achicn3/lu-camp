@@ -1,8 +1,8 @@
 // 顧客螢幕手繪露營動畫煙霧（店主 2026-09-27）：
-//   待機：先是開門，接著開露營車上山（鏡頭真的在動、沒有 JS 例外）
+//   待機：螢火蟲與營燈故事（畫布真的在動、沒有 JS 例外）
 //   結帳：店員推購物車 → 動畫不關、鏡頭帶到營桌（cart），明細寫在紙卡上；再加一件照常顯示
 //   取消購物車 → 回待機，且是同一份動畫接著播（沒有重掛）
-//   簽署：簽署內容要完整閱讀，動畫藏起來（hidden）；簽完 → 舉杯＋謝謝光臨（celebrate），手繪勾勾畫完
+//   簽署：簽署內容要完整閱讀，動畫藏起來（hidden）；簽完 → 星光連線（celebrate）
 //   減少動態效果：畫面停住不播
 // 需 backend + frontend 已起、已 seed（dev-manager、dev-kiosk）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/kiosk-camping-scene-smoke.mjs
@@ -71,7 +71,7 @@ async function pair(context, mgr) {
 }
 
 const sceneMode = (page) => page.getAttribute(".camping-scene", "data-mode");
-const trackX = (page) => page.$eval(".cs-track", (el) => new DOMMatrix(getComputedStyle(el).transform).m41);
+const filmTime = (page) => page.$eval(".camp-film canvas", (el) => Number(el.dataset.storyTime));
 
 async function drawSignature(page) {
   const canvas = page.locator("canvas.kiosk-sign-canvas");
@@ -98,19 +98,16 @@ try {
   terminalId = paired.terminalId;
 
   // ── 待機 ──
-  await page.waitForSelector(".camping-scene .cs-door-leaf", { timeout: 10000 });
+  await page.waitForSelector(".camp-film canvas", { timeout: 10000 });
   ok("待機鋪滿露營動畫", (await sceneMode(page)) === "idle");
   await page.evaluate(() => {
     document.querySelector(".camping-scene").dataset.smokeMarker = "same-node";
   });
-  await page.waitForTimeout(2300);
-  await page.screenshot({ path: join(SHOTS, "01-door.png") });
-  await page.waitForTimeout(6000);
-  const x1 = await trackX(page);
-  await page.waitForTimeout(3000);
-  const x2 = await trackX(page);
-  ok("開車那段鏡頭真的在往右移", x2 < x1 - 50, `${x1.toFixed(0)} → ${x2.toFixed(0)}`);
-  await page.screenshot({ path: join(SHOTS, "02-drive.png") });
+  const t1 = await filmTime(page);
+  await page.waitForTimeout(1500);
+  const t2 = await filmTime(page);
+  ok("待機故事持續播放", t2 > t1, `${t1} → ${t2}`);
+  await page.screenshot({ path: join(SHOTS, "01-firefly-lantern.png") });
 
   // ── 結帳 ──
   const current = await api(mgr, "GET", "/api/v1/cash-sessions/current");
@@ -137,16 +134,19 @@ try {
     { "Idempotency-Key": `camping-${RUN}` },
   );
   const [code1, code2] = acq.json.item_codes;
-  const put = async (lines) => {
+  const put = async (lines, tenders) => {
     const res = await api(mgr, "PUT", `/api/v1/customer-display/terminals/${terminalId}/cart`, {
       expected_revision: cartRevision,
       lines,
+      tenders,
     });
+    if (res.status !== 200) throw new Error(`cart: ${res.status}`);
     cartRevision = res.json.revision;
+    return res.json;
   };
   await put([{ line_type: "SERIALIZED", item_code: code1 }]);
   await page.locator(".kiosk-cart-item", { hasText: `手沖壺 ${RUN}` }).waitFor({ timeout: 15000 });
-  ok("開始結帳動畫不關，改成營桌鏡頭", (await sceneMode(page)) === "cart");
+  ok("開始結帳保留上方營燈互動", (await sceneMode(page)) === "cart");
   await page.waitForTimeout(1200);
   await page.screenshot({ path: join(SHOTS, "03-cart-transition.png") });
   await page.waitForTimeout(3000);
@@ -157,14 +157,16 @@ try {
     return { gap: items.top - header.bottom };
   });
   ok("明細上方留一扇窗看得到動畫", layout.gap > 120, `${Math.round(layout.gap)}px`);
+  const itemEffect = page.waitForFunction(() => document.querySelector(".camp-film canvas").dataset.effect === "item");
   await put([
     { line_type: "SERIALIZED", item_code: code1 },
     { line_type: "SERIALIZED", item_code: code2 },
   ]);
   await page.locator(".kiosk-cart-item", { hasText: `折疊椅 ${RUN}` }).waitFor({ timeout: 15000 });
-  await page.waitForTimeout(1500);
+  await itemEffect;
+  ok("新增商品觸發螢火蟲回饋", true);
   await page.screenshot({ path: join(SHOTS, "05-cart-two-items.png") });
-  ok("加第二件仍在營桌鏡頭", (await sceneMode(page)) === "cart");
+  ok("加第二件保留購物車情境", (await sceneMode(page)) === "cart");
 
   await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/cart/cancel`, {
     expected_revision: cartRevision,
@@ -178,9 +180,31 @@ try {
     "回待機是同一份動畫接著播（沒有重掛）",
     (await page.$eval(".camping-scene", (el) => el.dataset.smokeMarker)) === "same-node",
   );
-  const z = await page.$eval(".cs-zoom", (el) => new DOMMatrix(getComputedStyle(el).transform).a);
-  ok("鏡頭拉回原本大小", Math.abs(z - 1) < 0.01, `scale=${z.toFixed(2)}`);
+  const resumed = await filmTime(page);
+  await page.waitForTimeout(800);
+  ok("返回待機接著播放", await filmTime(page) > resumed);
   await page.screenshot({ path: join(SHOTS, "06-back-to-idle.png") });
+
+  // 真實測試商品現金結帳，付款動畫只由 COMPLETED 狀態觸發。
+  const paymentLines = [{ line_type: "SERIALIZED", item_code: code1 }];
+  const draft = await put(paymentLines);
+  const tenders = [{ tender_type: "CASH", amount: draft.snapshot.total }];
+  await put(paymentLines, tenders);
+  const checkout = await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminalId}/cart/begin-checkout`, { expected_revision: cartRevision });
+  if (checkout.status !== 200) throw new Error(`begin checkout: ${checkout.status}`);
+  const sale = await api(mgr, "POST", "/api/v1/sales", {
+    lines: [{ line_type: "SERIALIZED", item_code: code1 }],
+    tenders,
+    cart_session_id: checkout.json.id,
+    cart_revision: checkout.json.revision,
+  }, { "Idempotency-Key": `film-payment-${RUN}` });
+  if (sale.status !== 201) throw new Error(`sale: ${sale.status} ${JSON.stringify(sale.json)}`);
+  cartRevision = null;
+  await page.waitForFunction(() => document.querySelector(".camp-film canvas").dataset.filmMode === "paid");
+  ok("真實付款完成觸發專屬動畫", await sceneMode(page) === "paid");
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: join(SHOTS, "06b-paid.png") });
+  await page.waitForSelector(".kiosk-standby-title", { timeout: 20000 });
 
   // ── 簽署 ──
   const contact = await api(mgr, "POST", "/api/v1/contacts", {
@@ -205,18 +229,13 @@ try {
   await drawSignature(page);
   await page.click("button.kiosk-submit");
   await page.waitForSelector('h1:has-text("已完成簽署")', { timeout: 8000 });
-  ok("簽完：舉杯慶祝", (await sceneMode(page)) === "celebrate");
+  ok("簽完：星點連成約定", (await sceneMode(page)) === "celebrate");
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(SHOTS, "07-signed-drawing.png") });
   await page.waitForTimeout(2400);
   const tick = await page.$eval(".doodle-tick", (el) => Number(getComputedStyle(el).strokeDashoffset.replace("px", "")));
   ok("手繪勾勾畫完", Math.abs(tick) < 1, `dashoffset=${tick}`);
-  const thanks = await page.$eval(".cs-thanks", (el) => Number(getComputedStyle(el).opacity));
-  const word = await page.$eval(".cs-thanks-word", (el) => {
-    const r = el.getBoundingClientRect();
-    return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: innerHeight };
-  });
-  ok("天空寫出謝謝光臨（在畫面上半部看得到）", thanks > 0.9 && word.top > 0 && word.bottom < word.h / 2, JSON.stringify(word));
+  ok("簽署完成有獨立於付款的特效", await page.$eval(".camp-film canvas", el => el.dataset.effect === "signed"));
   await page.screenshot({ path: join(SHOTS, "08-signed-celebrate.png") });
   await context.close();
 
@@ -224,9 +243,9 @@ try {
   const calm = await browser.newContext({ viewport: { width: 834, height: 1112 }, reducedMotion: "reduce" });
   const calmPaired = await pair(calm, mgr);
   await calmPaired.page.waitForTimeout(800);
-  const c1 = await trackX(calmPaired.page);
+  const c1 = await filmTime(calmPaired.page);
   await calmPaired.page.waitForTimeout(2000);
-  const c2 = await trackX(calmPaired.page);
+  const c2 = await filmTime(calmPaired.page);
   ok("減少動態效果：畫面停住不播", c1 === c2 && c1 !== 0, `${c1} / ${c2}`);
   await calmPaired.page.screenshot({ path: join(SHOTS, "09-reduced-motion.png") });
   await calm.close();

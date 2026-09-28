@@ -796,7 +796,7 @@ describe("/kiosk 客顯", () => {
 
     expect(await screen.findByText("交易已完成")).toBeTruthy();
     expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
-    expect(sceneMode()).toBe("celebrate");
+    expect(sceneMode()).toBe("paid");
   });
 
   it("升級後殘留的舊交回鎖不得讓下一張任務要求店員帳密", async () => {
