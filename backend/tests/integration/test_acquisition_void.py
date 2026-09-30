@@ -751,3 +751,35 @@ async def test_partial_credit_preserves_remaining_liability_and_rolls_back_when_
     assert final.json()["fully_voided"]
     assert Decimal(final.json()["reversed_credit"]) == remaining
     assert await credit.get_balance(store_id, seller_id) == 0
+
+
+async def test_partial_void_accepts_pending_item_in_partially_listed_acquisition(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
+    items = list(
+        await db_session.scalars(
+            select(SerializedItem)
+            .where(SerializedItem.acquisition_id == acq_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    items[0].status = SerializedItemStatus.PENDING_LISTING
+    await db_session.commit()
+    selected_id, remaining_id = items[0].id, items[1].id
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "退回待整理商品", "item_ids": [selected_id]},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fully_voided"] is False
+    assert resp.json()["reversed_cash"] == "1"
+    await db_session.refresh(items[0])
+    await db_session.refresh(items[1])
+    assert items[0].status == SerializedItemStatus.WRITTEN_OFF
+    assert items[1].id == remaining_id
+    assert items[1].status == SerializedItemStatus.IN_STOCK
+    assert await _void_in(db_session, store_id) == Decimal("1")

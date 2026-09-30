@@ -203,3 +203,33 @@ describe("收購紀錄清單", () => {
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(before));
   });
 });
+
+
+it("含已售商品的收購仍可從紀錄選擇待整理商品作廢", async () => {
+  auth.role = "MANAGER";
+  let submitted: unknown;
+  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+    if (request.url.endsWith("/void-items")) return json([
+      { id: 21, item_code: "I21", name: "待整理帳篷", acquisition_cost: "1000", status: "PENDING_LISTING", voided: false },
+      { id: 22, item_code: "I22", name: "已售睡袋", acquisition_cost: "1000", status: "SOLD", voided: false },
+    ]);
+    if (request.method === "POST") {
+      submitted = await request.json();
+      return json({ acquisition_id: 10, voided_at: "2026-09-30T00:00:00Z", reversed_cash: "1000", reversed_credit: "0", fully_voided: false, item_ids: [21] });
+    }
+    if (request.url.endsWith("/acquisitions/10")) return json(row({ id: 10 }));
+    return json({ total: 1, items: [row({ id: 10, void_block: "HAS_SOLD_ITEMS" })] });
+  }));
+  const user = userEvent.setup();
+  wrap(<AcquisitionRecords />);
+  const button = await screen.findByRole("button", { name: "選品作廢" });
+  await user.click(button);
+  const pending = await screen.findByRole("checkbox", { name: /待整理帳篷/ });
+  expect((screen.getByRole("checkbox", { name: /已售睡袋/ }) as HTMLInputElement).disabled).toBe(true);
+  await user.click(pending);
+  await user.click(screen.getByRole("button", { name: "作廢收購" }));
+  await user.type(screen.getByLabelText("作廢原因"), "只退待整理帳篷");
+  await user.click(screen.getByRole("button", { name: "確認作廢" }));
+  await waitFor(() => expect(submitted).toEqual({ reason: "只退待整理帳篷", item_ids: [21] }));
+  expect(await screen.findByText(/已作廢所選商品/)).toBeTruthy();
+});

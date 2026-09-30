@@ -295,7 +295,7 @@ export function AcquisitionRecords() {
       {selecting !== null && (
         <VoidAcquisitionSection key={selecting} acquisitionId={selecting}
           onClose={() => setSelecting(null)}
-          onVoided={(result) => { setVoidResult(result); void queryClient.invalidateQueries({ queryKey: ["acquisitions"] }); }} />
+          onVoided={() => { void queryClient.invalidateQueries({ queryKey: ["acquisitions"] }); }} />
       )}
 
       {voiding !== null && (

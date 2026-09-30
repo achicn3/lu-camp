@@ -1142,7 +1142,8 @@ class AcquisitionService:
         if selected & already:
             raise AcquisitionAlreadyVoid("所選商品已作廢，不可重複沖回")
         if any(
-            by_id[i].status not in {SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING}
+            by_id[i].status
+            not in {SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING}
             for i in selected
         ):
             raise AcquisitionHasSoldItems("所選商品已售出或已下架，無法作廢")

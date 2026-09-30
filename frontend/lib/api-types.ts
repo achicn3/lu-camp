@@ -4119,6 +4119,14 @@ export interface components {
          * @enum {string}
          */
         AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
+        /**
+         * AcquisitionVoidBlock
+         * @description 收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。
+         *
+         *     清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
+         * @enum {string}
+         */
+        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "PARTIALLY_LISTED" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
         /** AcquisitionVoidItemRead */
         AcquisitionVoidItemRead: {
             /** Acquisition Cost */
@@ -4133,14 +4141,6 @@ export interface components {
             /** Voided */
             voided: boolean;
         };
-        /**
-         * AcquisitionVoidBlock
-         * @description 收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。
-         *
-         *     清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
-         * @enum {string}
-         */
-        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "PARTIALLY_LISTED" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
         /**
          * AcquisitionVoidRequest
          * @description 作廢收購（F6.5）：必填原因（稽核留痕）。
