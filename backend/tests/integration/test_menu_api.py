@@ -343,7 +343,11 @@ async def test_cost_change_is_audited(
             .order_by(AuditLog.id)
         )
     ).all()
-    assert [(log.before["unit_cost"], log.after["unit_cost"]) for log in logs] == [
+    assert all(log.before is not None and log.after is not None for log in logs)
+    assert [
+        (log.before["unit_cost"], log.after["unit_cost"])
+        for log in logs if log.before is not None and log.after is not None
+    ] == [
         ("45", "60"),
         ("60", None),
     ]

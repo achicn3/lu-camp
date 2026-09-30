@@ -65,6 +65,7 @@ async def test_acquisition_tags_the_seller_automatically(db_session: AsyncSessio
     await svc.ensure_seller_role(store_id, contact.id, actor_user_id=clerk_id)
 
     refreshed = await svc.get_contact(store_id, contact.id)
+    assert refreshed is not None
     assert set(refreshed.roles) == {ContactRole.MEMBER.value, ContactRole.SELLER.value}
 
 
@@ -80,6 +81,7 @@ async def test_tagging_twice_is_harmless(db_session: AsyncSession) -> None:
     await svc.ensure_seller_role(store_id, contact.id, actor_user_id=clerk_id)
 
     refreshed = await svc.get_contact(store_id, contact.id)
+    assert refreshed is not None
     assert sorted(refreshed.roles) == sorted([ContactRole.MEMBER.value, ContactRole.SELLER.value])
 
 

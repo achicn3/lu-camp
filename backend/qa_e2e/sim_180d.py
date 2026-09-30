@@ -1043,7 +1043,6 @@ async def _po_step(sim: Sim, day_date: date) -> None:
                 actor_user_id=sim.clerk_id,
                 lines=recv_lines,
                 idempotency_key=sim.key("recv"),
-                request_fingerprint=sim.key("rfp"),
                 invoice=invoice,
             )
             await sim.s.commit()
@@ -1285,7 +1284,6 @@ async def _bootstrap(sim: Sim) -> None:
         actor_user_id=sim.manager_id,
         lines=[ReceiveLineIn(line_id=ln.id, qty=ln.qty) for ln in po_full.lines],
         idempotency_key=sim.key("recv"),
-        request_fingerprint=sim.key("rfp"),
         invoice=None,
     )
     await sim.s.commit()

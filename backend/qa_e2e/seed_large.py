@@ -496,7 +496,6 @@ async def _seed() -> None:
                     actor_user_id=clerk_id,
                     lines=receive_lines,
                     idempotency_key=uuid4().hex,
-                    request_fingerprint=f"seed-{po.id}",
                 )
                 await session.commit()
                 n_recv += 1

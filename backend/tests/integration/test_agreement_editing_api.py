@@ -126,6 +126,8 @@ async def test_save_is_audited(client: httpx.AsyncClient, db_session: AsyncSessi
         select(AuditLog).where(AuditLog.action == "UPDATE_AGREEMENT_TEXT")
     )
     assert log is not None
+    assert log.before is not None
+    assert log.after is not None
     assert log.before["version"] is not None
     assert log.after["title"] == "新標題"
 

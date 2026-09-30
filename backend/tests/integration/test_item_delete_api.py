@@ -253,6 +253,7 @@ async def test_delete_is_audited(client: httpx.AsyncClient, db_session: AsyncSes
         select(AuditLog).where(AuditLog.action == "DELETE_CATALOG_PRODUCT")
     )
     assert log is not None
+    assert log.before is not None
     assert log.before["sku"] == "AUDIT-SKU"
     assert log.before["name"] == "誤建的瓦斯罐"
 
@@ -311,6 +312,7 @@ async def _pending_cart(
     from tests.integration.customer_display_helpers import ensure_paired_customer_display
 
     actor_id = await session.scalar(select(User.id).where(User.store_id == store_id))
+    assert actor_id is not None
     terminal, device = await ensure_paired_customer_display(
         session, store_id=store_id, actor_user_id=actor_id
     )
@@ -337,7 +339,7 @@ async def test_pending_payment_blocks_delete(
     mgr, _, store_id = await _seed(db_session)
     product_id = await _catalog(db_session, store_id, sku="PENDING-SKU")
     menu_id = await _menu(db_session, store_id, name="待補單的拿鐵")
-    payload = {
+    payload: dict[str, object] = {
         "lines": [
             {"line_type": "CATALOG", "catalog_product_id": product_id, "qty": 1},
             {"line_type": "MENU", "menu_item_id": menu_id, "qty": 1},

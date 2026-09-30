@@ -73,11 +73,12 @@ def test_signing_canonical_form_is_representation_independent() -> None:
     客人明明簽了對的金額卻被系統判成「與簽署內容不符，請重新簽」。這不是理論：
     交易總額直接從資料庫讀出來時就是 Decimal('3E+4')（實測 sales.total = 30000）。
     """
-    scientific = SigningService._canonical_affidavit_client_fields(
-        SigningService, {"items": [{"name": "帳篷", "amount": "3E+4"}], "total": "3E+4"}
+    service = SigningService.__new__(SigningService)
+    scientific = service._canonical_affidavit_client_fields(
+        {"items": [{"name": "帳篷", "amount": "3E+4"}], "total": "3E+4"}
     )
-    plain = SigningService._canonical_affidavit_client_fields(
-        SigningService, {"items": [{"name": "帳篷", "amount": "30000"}], "total": "30000"}
+    plain = service._canonical_affidavit_client_fields(
+        {"items": [{"name": "帳篷", "amount": "30000"}], "total": "30000"}
     )
 
     assert scientific == plain
