@@ -5664,3 +5664,10 @@ a.btn-ghost {
   width: 96px;
   height: 96px;
 }
+
+/* 待機車程（露營車無限循環）：一整張 SVG 鋪滿 */
+.camping-drive > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

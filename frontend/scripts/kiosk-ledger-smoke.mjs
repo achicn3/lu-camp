@@ -134,16 +134,41 @@ try {
   const firstRowVisible = await page.$eval("[data-ledger-key]", (el) => getComputedStyle(el).clipPath === "none" || getComputedStyle(el).clipPath === "");
   ok("寫完之後整行清楚可讀（沒有殘留遮罩）", firstRowVisible);
 
-  // ── 連續快速掃描 ──
+  // ── 連續快速掃描：1 秒內再加三件（店主 2026-10-01：要順）──
+  // 每一幀記下手的位置：打斷上一筆時手不能瞬移（一幀移動超過 90px 就算跳）
+  await page.evaluate(() => {
+    window.__hand = [];
+    const t0 = performance.now();
+    const f = () => {
+      const hand = document.querySelector(".ledger-hand");
+      if (hand) {
+        const m = new DOMMatrix(getComputedStyle(hand).transform);
+        window.__hand.push([performance.now() - t0, m.m41, m.m42]);
+      }
+      if (performance.now() - t0 < 2500) requestAnimationFrame(f);
+    };
+    requestAnimationFrame(f);
+  });
   await put([kettle, lamp]);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(250);
   await put([kettle, lamp, chair]);
   await page.waitForTimeout(250);
+  await put([kettle, lamp, chair, cup]);
+  await page.waitForTimeout(150);
   await page.screenshot({ path: join(SHOTS, "03-rapid-writing.png") });
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(2300);
+  const trace = await page.evaluate(() => window.__hand);
+  let maxJump = 0;
+  for (let i = 1; i < trace.length; i += 1) {
+    const [t0, x0, y0] = trace[i - 1];
+    const [t1, x1, y1] = trace[i];
+    const perFrame = Math.hypot(x1 - x0, y1 - y0) / Math.max(1, (t1 - t0) / 16.7);
+    maxJump = Math.max(maxJump, perFrame);
+  }
+  ok("1 秒內連加三件：手一路移過去、沒有瞬移", trace.length > 30 && maxJump < 90, `最大每幀位移 ${maxJump.toFixed(0)}px，${trace.length} 幀`);
   const rows = await page.$$eval("[data-ledger-key]", (els) => els.map((el) => ({ text: el.textContent, clip: getComputedStyle(el).clipPath })));
-  ok("連續掃描三件都顯示、沒有卡在遮罩", rows.length === 3 && rows.every((r) => r.clip === "none" || r.clip === ""), JSON.stringify(rows.map((r) => r.clip)));
-  await page.screenshot({ path: join(SHOTS, "qa03-three-items.png") });
+  ok("連加的四件都寫完、沒有卡在遮罩", rows.length === 4 && rows.every((r) => r.clip === "none" || r.clip === ""), JSON.stringify(rows.map((r) => r.clip)));
+  await page.screenshot({ path: join(SHOTS, "qa03-four-items.png") });
 
   // ── 刪除：筆移過去、劃兩筆、變淡停一下、收起來，總額最後才改 ──
   const totalBefore = await page.textContent(".kiosk-cart-grand-total strong");

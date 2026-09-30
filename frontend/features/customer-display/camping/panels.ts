@@ -1,7 +1,7 @@
-// 地面層的八格場景（每格 1000×1400，靜態不動的部分）。會動的角色另外疊在上面（figures.ts）。
-//   0–2 開露營車上山　3 營地停車卸貨　4 主營地（帳篷＋木棧台營桌，夜晚入帳篷）　5 天幕營位（避雨、串燈、暖爐、營火）　6 雲海　7 傍晚吊床
+// 地面層的七格場景（每格 1000×1400，靜態不動的部分）。會動的角色另外疊在上面（figures.ts）。
+//   0–2 開露營車上山　3 營地停車卸貨　4 主營地（帳篷＋木棧台營桌，夜晚入帳篷）　5 天幕營位（避雨、串燈、暖爐、營火）　6 雲海
 import { cloud, flowers, grassField, pine, stone } from "./nature";
-import { beanBag, campChair, campTable, deck, dripperSet, firePit, kettle, lantern } from "./props";
+import { beanBag, campChair, campTable, deck, dripperSet, firePit, kettle } from "./props";
 import {
   INK,
   doodleText,
@@ -18,7 +18,7 @@ import {
 
 export const PANEL_W = 1000;
 export const STAGE_H = 1400;
-export const PANEL_COUNT = 8;
+export const PANEL_COUNT = 7;
 
 /** 道路中心線高度（世界座標 x）：開車那三格的起伏，露營車沿著它上下顛簸。 */
 export function roadY(x: number): number {
@@ -171,7 +171,6 @@ function coffeePanel(): string {
     deck(r) +
     g({ transform: "translate(330 1250)" }, firePit(r)) +
     campTable(r) +
-    lantern(700, 1004) +
     kettle() +
     dripperSet() +
     beanBag() +
@@ -209,29 +208,15 @@ function cliffBack(): string {
   );
 }
 
-/** 懸崖看雲海（前景）：左右兩片草地，邊緣是岩石；中間的缺口看下去是雲海。流動的雲夾在前後景之間。 */
+/** 連續的前景草地；雲海在護欄後方，散步與回程都走同一條陸地。 */
 export function cliffFront(): string {
-  const r = rng(506);
-  const left = "M-20 1030 C120 1024 300 1036 470 1046 C500 1120 540 1240 600 1420 L-20 1420 Z";
-  const right = "M1020 1036 C960 1036 920 1042 890 1052 C876 1140 862 1260 850 1420 L1020 1420 Z";
-  const rim = (d: string) => fillPath(d, "#9a9383") + h("path", { d, fill: "url(#cs-hatch)", filter: "url(#cs-rough)" });
-  // 崖邊只放幾顆大小不一的石頭，不要排成一串
-  let rocks = "";
-  for (const [t, w] of [[0.05, 16], [0.22, 11], [0.5, 19], [0.8, 13]] as const) rocks += stone(r, 468 + t * 125 + r() * 6, 1060 + t * 330, w);
-  for (const [t, w] of [[0.15, 12], [0.6, 15]] as const) rocks += stone(r, 890 - t * 36, 1072 + t * 320, w);
-  return (
-    // 崖頂草地用和其他格同一套草原底色（裁成左右兩片），格與格接起來才不會有色差
-    h("clipPath", { id: "cs-cliff-grass" }, h("path", { d: `${left} ${right}` })) +
-    g({ "clip-path": "url(#cs-cliff-grass)" }, meadowBase(rng(508), 1036)) +
-    rim("M470 1046 C500 1120 540 1240 600 1420 L560 1420 C510 1260 470 1140 440 1050 Z") +
-    rim("M890 1052 C876 1140 862 1260 850 1420 L880 1420 C890 1260 902 1140 916 1050 Z") +
-    rocks +
-    inkPath(left, 2.8) +
-    inkPath(right, 2.8) +
-    shape("M330 1032 L338 1032 L338 972 L330 972 Z M440 1042 L448 1042 L448 982 L440 982 Z", "#8a5a34", 2) +
-    shape("M326 982 L452 992 L452 1000 L326 990 Z M326 1004 L452 1014 L452 1020 L326 1012 Z", "#b98352", 1.8) +
-    pine(40, 1040, 1.1) +
-    signpost(130, 1042, "露坑", false)
+  return g({ class: "cs-lookout-ground" },
+    meadowBase(rng(508), 1040),
+    fillPath("M-20 1152 Q360 1120 1020 1160 L1020 1200 Q380 1170 -20 1204 Z", "#b5ac89", { opacity: 0.5 }),
+    fence(160, 900, 1080),
+    pine(40, 1080, 1.1),
+    signpost(110, 1100, "露坑", false),
+    frontGrass(rng(510)),
   );
 }
 
@@ -261,26 +246,11 @@ function tarpSitePanel(): string {
   );
 }
 
-/** 傍晚吊床：兩棵松樹之間掛吊床（吊床是角色會晃）。只有吊床、人與天空，不放帳篷（不是過夜的地方）。 */
-function hammockPanel(): string {
-  const r = rng(707);
-  return (
-    meadowBase(r) +
-    pine(250, 1150, 2.2, true) +
-    pine(760, 1150, 2.1, true) +
-    bush(110, 1240, 0.8) +
-    bush(900, 1250, 0.7) +
-    frontGrass(r) +
-    flowers(r, 0, 1000, 1320, 1390, 6)
-  );
-}
-
 /** 第 index 格的靜態內容（區域座標 0–1000）。 */
 export function panelArt(index: number): string {
   if (index <= 2) return drivePanel(index);
   if (index === 3) return campsitePanel();
   if (index === 4) return coffeePanel();
   if (index === 5) return tarpSitePanel();
-  if (index === 6) return cliffBack();
-  return hammockPanel();
+  return cliffBack();
 }

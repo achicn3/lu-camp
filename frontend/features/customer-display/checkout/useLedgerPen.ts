@@ -15,8 +15,8 @@ import { PEN_TIP } from "./PenHand";
 export type LedgerLine = { key: string; qty: number; amount: string };
 export type LedgerPhase = "writing" | "paying" | "paid" | "failed";
 
-/** 兩筆間隔小於這個毫秒數就算連續快速掃描。 */
-const RAPID_MS = 500;
+/** 兩筆間隔小於這個毫秒數就算連續快速掃描（店主 2026-10-01：1 秒內連刷好幾件也要順）。 */
+const RAPID_MS = 1000;
 
 type Refs = {
   shell: RefObject<HTMLElement | null>;
@@ -69,6 +69,8 @@ function rectIn(el: Element, shell: Element): DOMRect {
 export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase, motion: boolean, callbacks: Callbacks): void {
   const prev = useRef<Map<string, LedgerLine> | null>(null);
   const current = useRef<gsap.core.Timeline | null>(null);
+  /** 目前這段動畫裡還沒收起來的刪除行（被打斷時要直接收掉）。 */
+  const pendingGhosts = useRef<string[]>([]);
   const lastAt = useRef(0);
   const cb = useRef(callbacks);
   useLayoutEffect(() => {
@@ -93,14 +95,46 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
     return { x: p.right - 210, y: p.top + p.height * 0.5 };
   };
 
-  const moveTo = (tl: gsap.core.Timeline, x: number, y: number, duration: number, pos?: gsap.Position) =>
-    tl.to(refs.hand.current, { x: x - PEN_TIP.x, y: y - PEN_TIP.y, rotation: 0, duration, ease: "power2.out" }, pos);
-
+  /** 排動畫時追蹤筆「到時候」會在哪裡（同一段裡好幾步，距離要從上一步的終點算）。 */
+  const pen = useRef<{ x: number; y: number } | null>(null);
+  const penNow = () => {
+    const hand = refs.hand.current;
+    if (!hand) return { x: 0, y: 0 };
+    const m = new DOMMatrix(getComputedStyle(hand).transform);
+    return { x: m.m41 + PEN_TIP.x, y: m.m42 + PEN_TIP.y };
+  };
+  /**
+   * 手移到 (x,y)。時間依距離算（最少 duration，最多再加 0.18 秒），頭尾都緩：連續掃描時手要從很遠的地方
+   * 接著移過來，固定的短時間會讓手像瞬移。回傳實際用的秒數。overwrite：新的移動直接接手，不會兩段搶同一隻手。
+   */
+  const moveTo = (tl: gsap.core.Timeline, x: number, y: number, duration: number, pos?: gsap.Position): number => {
+    const from = pen.current ?? penNow();
+    const dist = Math.hypot(x - from.x, y - from.y);
+    const d = Math.min(duration + 0.18, Math.max(duration, dist / 2400));
+    pen.current = { x, y };
+    tl.to(refs.hand.current, { x: x - PEN_TIP.x, y: y - PEN_TIP.y, rotation: 0, duration: d, ease: "power1.inOut", overwrite: "auto" }, pos);
+    return d;
+  };
   /** 打斷目前的動畫：直接跳到結尾（刪除的行會收起、文字都顯示完整）。 */
   const finishCurrent = () => {
     current.current?.progress(1).kill();
     current.current = null;
+    pendingGhosts.current = [];
     clearMarks(refs.shell.current);
+  };
+  /**
+   * 連續掃描時的打斷：不把整段動畫跳到結尾（手會瞬移），只把還沒寫完的字直接露出來、
+   * 還沒收起的刪除行直接收掉，手停在原地，下一筆從手現在的位置接著移過去。
+   */
+  const settleCurrent = () => {
+    const tl = current.current;
+    if (!tl) return;
+    tl.kill();
+    current.current = null;
+    clearMarks(refs.shell.current);
+    const ghosts = pendingGhosts.current;
+    pendingGhosts.current = [];
+    for (const key of ghosts) cb.current.onGhostDone(key);
   };
 
   // 手第一次出現：從右下角滑進來停在休息位置
@@ -148,7 +182,8 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
     const t = performance.now();
     const rapid = t - lastAt.current < RAPID_MS || current.current?.isActive() === true || added.length + amended.length > 1;
     lastAt.current = t;
-    finishCurrent();
+    settleCurrent();
+    pen.current = null;
 
     const tl = gsap.timeline({
       // 剛出現的第一件：等手從右下角滑進來再寫
@@ -159,14 +194,18 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
       },
       onInterrupt: () => clearMarks(shell),
     });
-    const move = rapid ? 0.07 : 0.18;
-    const write = rapid ? 0.15 : 0.34;
+    const move = rapid ? 0.12 : 0.18;
+    const write = rapid ? 0.2 : 0.34;
     const rowOf = (key: string) => shell.querySelector<HTMLElement>(`[data-ledger-key="${CSS.escape(key)}"]`);
-    const writeAcross = (fromX: number, toX: number, y: number, duration: number) => {
+    /** 手移過去、沿著這行寫幾下；回傳筆尖落紙（開始寫）的時間點。 */
+    const writeAcross = (fromX: number, toX: number, y: number, duration: number): number => {
       moveTo(tl, fromX, y, move);
+      const start = tl.duration();
       tl.to(hand, { x: toX - PEN_TIP.x, duration, ease: "none" });
+      pen.current = { x: toX, y };
       const strokes = rapid ? 2 : 3 + Math.floor(Math.random() * 2);
       tl.to(hand, { y: `-=${3 + Math.random() * 2}`, duration: duration / (strokes * 2), yoyo: true, repeat: strokes * 2 - 1, ease: "sine.inOut" }, "<");
+      return start;
     };
 
     for (const line of added) {
@@ -176,8 +215,8 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
       const r = rectIn(row, shell);
       row.style.clipPath = "inset(0 100% 0 0)";
       tl.call(() => cb.current.onPen?.("ITEM_ADD"));
-      const start = tl.duration() + move;
-      writeAcross(r.left + 4, r.right - 8, r.top + r.height * 0.42, write);
+      // 連續掃描時筆只寫前半段（字照樣整行出現），手才不會在一筆之內橫掃整張紙
+      const start = writeAcross(r.left + 4, rapid ? r.left + r.width * 0.45 : r.right - 8, r.top + r.height * 0.42, write);
       tl.fromTo(row, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: write, ease: "none", clearProps: "clipPath" }, start);
       tl.to(hand, { y: "+=10", duration: 0.08, ease: "power1.out" });
     }
@@ -205,6 +244,7 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
       const start = tl.duration() - 0.04;
       const end = amount ? rectIn(amount, shell).right : q.right;
       tl.to(hand, { x: end - PEN_TIP.x, duration: write * 0.7, ease: "none" }, start);
+      pen.current = { x: end, y: q.top + q.height * 0.55 };
       tl.to(hand, { y: "-=4", duration: (write * 0.7) / 4, yoyo: true, repeat: 3, ease: "sine.inOut" }, start);
       tl.fromTo(targets, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: write * 0.7, ease: "none", clearProps: "clipPath" }, start);
     }
@@ -262,12 +302,18 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
             for (const path of [strike, strikeSoft]) path?.setAttribute("stroke-dashoffset", `${len * (1 - proxy.t)}`);
           },
         });
+        const end = strike.getPointAtLength(len);
+        pen.current = { x: r.left + end.x, y: r.top + end.y };
       }
       // 字變淡到一半，劃線維持深色
       tl.to(ghost.querySelectorAll(":scope > :not(.ledger-strike)"), { opacity: 0.48, duration: 0.15 });
       // 停一下讓客人看到真的被劃掉，再收起來、下面的行往上補
       tl.to(ghost, { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0, duration: 0.3, ease: "power2.inOut" }, rapid ? "+=0.2" : "+=0.45");
-      tl.call(() => cb.current.onGhostDone(key));
+      pendingGhosts.current.push(key);
+      tl.call(() => {
+        pendingGhosts.current = pendingGhosts.current.filter((k) => k !== key);
+        cb.current.onGhostDone(key);
+      });
     }
 
     const rest = restPoint();
@@ -284,6 +330,7 @@ export function useLedgerPen(refs: Refs, lines: LedgerLine[], phase: LedgerPhase
     const paper = shell.querySelector<HTMLElement>(".ledger-paper");
     if (!paper || phase === "writing" || phase === "failed") return;
     finishCurrent();
+    pen.current = null;
     const aside = asidePoint();
     if (!motion) {
       snap(hand, aside.x, aside.y);

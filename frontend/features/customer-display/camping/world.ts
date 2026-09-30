@@ -1,5 +1,5 @@
-// 把整個世界組成一段 HTML：天空（固定）、遠山／林線（視差）、地面八格＋角色（跟鏡頭走）、
-// 天色濾色、夜空與燈光、開場的門、紙紋。每個會動的東西各自一個 <div>（瀏覽器可把它當獨立圖層合成），
+// 把整個世界組成一段 HTML：天空（固定）、遠山／林線（視差）、地面七格＋角色（跟鏡頭走）、
+// 天色濾色、夜空與燈光、紙紋。每個會動的東西各自一個 <div>（瀏覽器可把它當獨立圖層合成），
 // 平移時不必重畫手繪濾鏡，平板才跑得動。
 import { DEFS } from "./defs";
 import {
@@ -7,11 +7,8 @@ import {
   camperVan,
   crouchingPerson,
   flame,
-  hammock,
   heater,
   MUG_IN_HAND,
-  CARRY_BOX,
-  CARRY_COOLER,
   tarp,
   tarpBulbs,
   roastingPerson,
@@ -20,9 +17,9 @@ import {
   TENT_BAG,
   tent,
 } from "./figures";
-import { cloud, flowers, pine, scribbleSun } from "./nature";
+import { cloud, pine, scribbleSun } from "./nature";
 import { PANEL_COUNT, PANEL_W, STAGE_H, cliffFront, panelArt } from "./panels";
-import { povDesk } from "./props";
+import { campingWagon, electricPump, ledLantern, powerStation, povDesk } from "./props";
 import {
   INK,
   LOGO_MARK,
@@ -46,7 +43,7 @@ export const CAM_MAX = (PANEL_COUNT - 1) * PANEL_W;
 
 /** 世界座標裡各場景的關鍵位置（x 為世界座標）。 */
 export const SPOTS = {
-  vanStartX: 380,
+  vanStartX: 2760,
   vanParkX: 3380,
   // 帳篷右下角（含營繩營釘）要停在木棧台左緣之前
   tentX: 4180,
@@ -61,9 +58,8 @@ export const SPOTS = {
   /** 雲海（第 6 格）。 */
   cliffX: 6270,
   /** 雲海的流動雲只露在兩片崖之間。 */
-  seaClipX: 6120,
-  seaClipW: 760,
-  hammockX: 7505,
+  seaClipX: 6000,
+  seaClipW: 1000,
 } as const;
 
 type Box = { ox: number; oy: number; w: number; h: number };
@@ -191,9 +187,11 @@ function groundTrack(): string {
     seaClouds += actor(`cs-sea-cloud cs-sea-cloud-${i}`, { ox: 160, oy: 90, w: 320, h: 110 }, g({ opacity: back ? 0.65 : 1 }, cloud(back ? 190 + r() * 40 : 260 + r() * 60, back ? "#f1efea" : "#fdfbf6", back ? "#dedcdc" : "#e9e6df", i + 1)));
   }
   const items =
-    actor("cs-item cs-item-cooler", { ox: 70, oy: 90, w: 140, h: 100 }, shape("M-56 -70 L56 -70 L52 0 L-52 0 Z", "#5fa38a", 2.4, "cs-hatch-fine") + shape("M-60 -84 L60 -84 L60 -68 L-60 -68 Z", "#f3e9d2", 2.2)) +
-    actor("cs-item cs-item-box", { ox: 60, oy: 80, w: 120, h: 90 }, shape("M-44 -60 L44 -60 L44 0 L-44 0 Z", "#c99a63", 2.2) + inkPath("M-44 -40 L44 -40 M0 -60 L0 -40", 1.4)) +
-    actor("cs-item cs-item-lantern", { ox: 30, oy: 70, w: 60, h: 80 }, shape("M-12 -44 L12 -44 L12 -8 L-12 -8 Z", "#f7d67a", 2) + shape("M-14 -8 L14 -8 L14 0 L-14 0 Z", "#3f6b52", 1.8) + inkPath("M-8 -44 C-8 -60 8 -60 8 -44", 2));
+    actor("cs-wagon-actor", { ox: 100, oy: 140, w: 250, h: 160 }, campingWagon()) +
+    actor("cs-pump-actor", { ox: 30, oy: 50, w: 190, h: 90 }, electricPump()) +
+    actor("cs-item cs-power-actor", { ox: 70, oy: 100, w: 170, h: 140 }, powerStation()) +
+    actor("cs-item cs-led-actor", { ox: 100, oy: 100, w: 200, h: 160 }, ledLantern()) +
+    actor("cs-item cs-power-cable", { ox: 0, oy: 0, w: 130, h: 160 }, inkPath("M60 0 C100 0 104 -18 90 -34 L12 -142", 2.2, { stroke: "#394b48" }));
   return (
     `<div class="cs-layer cs-track">${tiles}` +
     `<div class="cs-sea-clip" style="left:${SPOTS.seaClipX}px;width:${SPOTS.seaClipW}px">${seaClouds}</div>` +
@@ -205,14 +203,13 @@ function groundTrack(): string {
     actor("cs-tent-actor", { ox: 320, oy: 420, w: 680, h: 480 }, tent()) +
     actor("cs-fire cs-fire-coffee", { ox: 60, oy: 180, w: 120, h: 200 }, flame()) +
     actor("cs-fire cs-fire-evening", { ox: 60, oy: 180, w: 120, h: 200 }, flame(0.9)) +
-    items +
     actor("cs-van-actor", { ox: 280, oy: 300, w: 560, h: 330 }, camperVan()) +
-    actor("cs-pose cs-walker", { ox: 80, oy: 230, w: 180, h: 260 }, standingPerson("cs-pose-walk", TENT_BAG + MUG_IN_HAND, CARRY_BOX + CARRY_COOLER)) +
+    items +
+    actor("cs-pose cs-walker", { ox: 80, oy: 230, w: 180, h: 260 }, standingPerson("cs-pose-walk", TENT_BAG + MUG_IN_HAND)) +
     actor("cs-pose cs-hammerer", { ox: 100, oy: 190, w: 260, h: 220 }, crouchingPerson()) +
     actor("cs-pose cs-sitter", { ox: 100, oy: 250, w: 220, h: 270 }, sittingPerson()) +
     actor("cs-pose cs-cliffsitter", { ox: 90, oy: 180, w: 200, h: 200 }, backViewPerson()) +
     actor("cs-pose cs-roaster", { ox: 80, oy: 190, w: 300, h: 210 }, roastingPerson()) +
-    actor("cs-pose cs-hammock-actor", { ox: 280, oy: 60, w: 560, h: 220 }, hammock(470)) +
     // 營火的暖光：很淡地染到周圍的草、木棧台、帳篷與人（柔光混合，不是發光）
     actor("cs-fire-ambient", { ox: 340, oy: 260, w: 680, h: 420 }, h("ellipse", { cx: 0, cy: -20, rx: 330, ry: 200, fill: "url(#cs-ambient)" })) +
     // 傍晚營火、暖爐與串燈、夜裡帳篷的暖光：同樣用柔光很淡地染到周圍的草、布、人
@@ -361,150 +358,6 @@ function foregroundLayer(): string {
   return `<div class="cs-layer cs-fg"><svg viewBox="0 0 4600 ${STAGE_H}" width="4600" height="${STAGE_H}">${tufts}</svg></div>`;
 }
 
-/** 櫥窗：玻璃、反光、裡面擺露營用品。 */
-function shopWindow(x: number, y: number, w: number, hgt: number, left: boolean): string {
-  const glass = `M${x} ${y} L${x + w} ${y} L${x + w} ${y + hgt} L${x} ${y + hgt} Z`;
-  const shelfY = y + hgt * 0.62;
-  const goods = left
-    ? // 左窗：小帳篷、營燈（亮著）、手沖壺
-      g({ transform: `translate(${x + w * 0.3} ${shelfY})` }, shape("M-50 0 L0 -80 L50 0 Z", "#dca64a", 2.2), shape("M-12 0 L0 -30 L12 0 Z", "#4a3322", 1.6)) +
-      h("circle", { cx: x + w * 0.72, cy: shelfY - 40, r: 46, fill: "url(#cs-glow)" }) +
-      g({ transform: `translate(${x + w * 0.72} ${shelfY})` }, shape("M-12 -44 L12 -44 L12 -8 L-12 -8 Z", "#f7d67a", 2), shape("M-14 -8 L14 -8 L14 0 L-14 0 Z", "#3f6b52", 1.8), inkPath("M-8 -44 C-8 -60 8 -60 8 -44", 2)) +
-      g({ transform: `translate(${x + w * 0.5} ${y + hgt * 0.3})` }, shape("M-20 20 L20 20 L16 -20 L-16 -20 Z", "#d9dbd6", 2), inkPath("M16 -8 C36 -16 40 -30 48 -36", 2))
-    : // 右窗：一疊杯子、盆栽、咖啡豆罐
-      g({ transform: `translate(${x + w * 0.3} ${shelfY})` }, shape("M-22 0 L22 0 L20 -30 L-20 -30 Z", "#f4efe4", 2), shape("M-22 -30 L22 -30 L20 -60 L-20 -60 Z", "#f4efe4", 2), inkPath("M22 -50 c10 0 10 12 0 12 M22 -20 c10 0 10 12 0 12", 1.8), g({ transform: "translate(0 -18) scale(0.9)" }, h("use", { href: "#cs-mug-mark" }))) +
-      g({ transform: `translate(${x + w * 0.72} ${shelfY})` }, shape("M-24 0 L24 0 L20 -34 L-20 -34 Z", "#c9553a", 2), shape("M0 -34 C-30 -60 -20 -90 0 -96 C20 -90 30 -60 0 -34 Z", "#6f8f4c", 2, "cs-hatch-fine")) +
-      g({ transform: `translate(${x + w * 0.5} ${y + hgt * 0.3})` }, shape("M-18 24 L18 24 L18 -20 L-18 -20 Z", "#8a5a34", 2), shape("M-20 -28 L20 -28 L20 -20 L-20 -20 Z", "#3a2a20", 1.8));
-  return (
-    shape(`M${x - 16} ${y - 16} L${x + w + 16} ${y - 16} L${x + w + 16} ${y + hgt + 16} L${x - 16} ${y + hgt + 16} Z`, "#3f6b52", 2.8) +
-    fillPath(glass, "#fbeed0") +
-    goods +
-    shape(`M${x} ${shelfY} L${x + w} ${shelfY} L${x + w} ${shelfY + 10} L${x} ${shelfY + 10} Z`, "#8a5a34", 1.6) +
-    h("path", { d: `M${x + 20} ${y + 70} L${x + 90} ${y} M${x + 30} ${y + 120} L${x + 150} ${y} M${x + w - 60} ${y + hgt} L${x + w} ${y + hgt - 70}`, stroke: "#fff", "stroke-width": 7, "stroke-linecap": "round", opacity: 0.55 }) +
-    inkPath(glass, 2.4) +
-    shape(`M${x - 24} ${y + hgt + 16} L${x + w + 24} ${y + hgt + 16} L${x + w + 16} ${y + hgt + 30} L${x - 16} ${y + hgt + 30} Z`, "#8a5a34", 2)
-  );
-}
-
-/** 開場：露坑店門口，鏡頭推近，一隻手推開門走進去。門用 CSS 3D 轉開。 */
-function doorIntro(): string {
-  const r = rng(2);
-  let boards = "";
-  for (let y = 0; y < 1400; y += 40) {
-    boards += h("rect", { x: 0, y, width: 1000, height: 40, fill: r() > 0.5 ? "#d8bf97" : "#d2b78d" });
-  }
-  let boardLines = "";
-  for (let y = 40; y < 1400; y += 40) boardLines += `M0 ${y} L1000 ${y} `;
-  for (let i = 0; i < 40; i += 1) {
-    const x = r() * 980;
-    const y = Math.floor(r() * 35) * 40 + 12 + r() * 14;
-    boardLines += `M${x.toFixed(0)} ${y.toFixed(0)} q30 -3 ${(40 + r() * 50).toFixed(0)} 0 `;
-  }
-  let stripes = "";
-  for (let i = 0; i < 12; i += 1) {
-    const x0 = 110 + i * 65;
-    stripes += fillPath(`M${x0} 330 L${x0 + 32.5} 330 L${x0 + 36} 420 L${x0 + 2} 420 Z`, "#3f6b52");
-  }
-  let scallop = "M110 420";
-  for (let i = 0; i < 12; i += 1) scallop += ` q16.25 34 32.5 0 q16.25 34 32.5 0`;
-  const lamp = (x: number) =>
-    h("circle", { cx: x, cy: 560, r: 90, fill: "url(#cs-glow)" }) +
-    shape(`M${x - 18} 540 L${x + 18} 540 L${x + 12} 590 L${x - 12} 590 Z`, "#f7d67a", 2.2) +
-    shape(`M${x - 24} 530 L${x + 24} 530 L${x + 18} 540 L${x - 18} 540 Z M${x - 6} 590 L${x + 6} 590 L${x + 6} 600 L${x - 6} 600 Z`, "#3a3330", 2) +
-    inkPath(`M${x} 530 L${x} 500 L${x - 30} 500`, 2.4);
-  const planter = (x: number, flip: number) =>
-    g(
-      { transform: `translate(${x} 1250) scale(${flip} 1)` },
-      shape("M-80 0 L80 0 L70 90 L-70 90 Z", "#b98352", 2.6, "cs-hatch-fine"),
-      inkPath("M-80 30 L80 30", 1.6),
-      shape("M-60 0 C-80 -60 -40 -110 -10 -90 C0 -140 60 -130 56 -80 C90 -70 80 -10 60 0 Z", "#6f8f4c", 2.4, "cs-hatch-fine"),
-      flowers(rng(40 + x), -60, 60, -90, -10, 7),
-    );
-  const board = "M230 120 L770 120 C784 120 790 128 790 140 L790 280 C790 292 784 300 770 300 L230 300 C216 300 210 292 210 280 L210 140 C210 128 216 120 230 120 Z";
-  const wall =
-    boards +
-    h("path", { d: boardLines, fill: "none", stroke: INK, "stroke-width": 1.2, opacity: 0.35, filter: "url(#cs-rough)" }) +
-    // 掛牌招牌（鏈子吊著）
-    inkPath("M300 60 L300 120 M700 60 L700 120", 2.6, { "stroke-dasharray": "8 5" }) +
-    shape(board, "#8a5a34", 3.2, "cs-hatch-fine") +
-    inkPath("M240 150 q60 -4 120 0 M620 270 q60 3 120 0", 1.2, { opacity: 0.4 }) +
-    brandMark("cs-door-mark", LOGO_MARK, 300, 158, 116, 99, "#fff1d6") +
-    g({ transform: "translate(580 250)" }, doodleText("露坑", { font: "marker", size: 104, fill: "#fff1d6", outline: "#2a1a0c", outlineWidth: 11, drop: 5 })) +
-    // 條紋雨遮
-    fillPath("M110 330 L890 330 L890 420 L110 420 Z", "#f3e9d2") +
-    stripes +
-    fillPath(`${scallop} L890 420 L890 400 L110 400 Z`, "#f3e9d2") +
-    inkPath("M100 330 L900 330 M110 330 L110 420 M890 330 L890 420", 3) +
-    inkPath(scallop, 2.6) +
-    shopWindow(50, 520, 210, 460, true) +
-    shopWindow(740, 520, 210, 460, false) +
-    lamp(280) +
-    lamp(720) +
-    // 門框、門內的光（門轉開後看得到）
-    shape("M300 450 L700 450 L700 1400 L300 1400 Z", "#5a3b24", 3) +
-    // 門口地墊
-    shape("M320 1360 L680 1360 L700 1400 L300 1400 Z", "#c9553a", 2.4, "cs-hatch-fine") +
-    planter(150, 1) +
-    planter(850, -1) +
-    // 黑板立牌
-    g(
-      { transform: "translate(860 1330) rotate(4)" },
-      inkPath("M-60 70 L-40 -120 L40 -120 L60 70", 3),
-      shape("M-50 -110 L50 -110 L44 20 L-44 20 Z", "#2f3a33", 2.6),
-      g({ transform: "translate(0 -46)" }, doodleText("咖啡", { font: "round", size: 42, fill: "#f7f2e6", outline: "#2f3a33", outlineWidth: 2, drop: 0, texture: "none" })),
-      inkPath("M-18 -20 L18 -20 L14 4 L-14 4 Z M18 -14 c8 0 8 10 0 10", 2, { stroke: "#f7f2e6" }),
-    );
-  const doorArt =
-    shape("M0 0 L360 0 L360 930 L0 930 Z", "#b98352", 3) +
-    h("path", { d: "M20 20 L340 20 L340 910 L20 910 Z", fill: "url(#cs-hatch-fine)", opacity: 0.45, filter: "url(#cs-rough)" }) +
-    shape("M50 50 L310 50 L310 400 L50 400 Z", "#fbeed0", 2.6) +
-    h("path", { d: "M70 150 L160 60 M80 230 L230 80", stroke: "#fff", "stroke-width": 8, "stroke-linecap": "round", opacity: 0.6 }) +
-    inkPath("M180 50 L180 400 M50 225 L310 225", 3) +
-    shape("M50 470 L310 470 L310 860 L50 860 Z", "#c99a63", 2.4) +
-    inkPath("M70 490 L290 490 L290 840 L70 840 Z", 1.4, { opacity: 0.6 }) +
-    // 門上掛牌
-    inkPath("M130 300 L180 260 L230 300", 2) +
-    shape("M100 300 L260 300 L260 380 L100 380 Z", "#f3e9d2", 2.4) +
-    g({ transform: "translate(180 362)" }, doodleText("歡迎", { font: "round", size: 52, fill: "#e8674a", outlineWidth: 6, drop: 3, texture: "none" })) +
-    // 門把（拉桿）
-    shape("M300 440 L340 440 L340 500 L300 500 Z", "#e2b24a", 2.2) +
-    shape("M296 462 L346 462 L346 478 L296 478 Z", "#c89a36", 2.2);
-  // 握住門把的手（原點＝門把橫桿中心）：只露四根手指包住橫桿、大拇指從下面扣住、一點手腕與針織袖口，
-  // 袖子往右下延伸出畫面。和結帳那隻手同一種鏽紅羅紋袖口。
-  const SKIN = "#efc9a6";
-  const fingers = [-24, -12, 0, 12]
-    .map((x, i) => `M${x} ${-16 + i} C${x - 1} ${-22 + i} ${x + 11} ${-22 + i} ${x + 11} ${-15 + i} L${x + 11} ${10 - i} C${x + 11} ${16 - i} ${x} ${16 - i} ${x} ${10 - i} Z`)
-    .join(" ");
-  let ribs = "";
-  for (let k = 0; k < 9; k += 1) ribs += `M${52 + k * 7} ${14 - k * 5} l20 26 `;
-  const hand =
-    // 袖子與羅紋袖口
-    fillPath("M56 20 L130 -26 L240 150 L150 210 Z", "#c2643f") +
-    hatchArea("M56 20 L130 -26 L240 150 L150 210 Z", "cs-hatch-fine", 0.8) +
-    fillPath("M40 30 L118 -18 L140 16 L62 64 Z", "#b85a38") +
-    h("clipPath", { id: "cs-door-cuff" }, h("path", { d: "M40 30 L118 -18 L140 16 L62 64 Z" })) +
-    g({ "clip-path": "url(#cs-door-cuff)" }, h("path", { d: ribs, stroke: "#8a3e24", "stroke-width": 1.4, fill: "none", opacity: 0.8 })) +
-    inkPath("M40 30 L118 -18 L140 16 L62 64 Z M62 64 L150 210 M140 16 L240 150", 1.9) +
-    // 手背一小塊＋手腕（藏在袖口下）
-    fillPath("M14 -18 C26 -26 44 -24 58 -8 L66 26 C54 34 38 34 26 22 Z", SKIN) +
-    inkPath("M14 -18 C26 -26 44 -24 58 -8 M66 26 C54 34 38 34 26 22", 1.8) +
-    // 大拇指從橫桿下方扣過來
-    fillPath("M42 20 C30 30 10 30 -2 24 C-10 20 -8 12 0 12 C12 14 24 12 32 6 Z", SKIN) +
-    inkPath("M42 20 C30 30 10 30 -2 24 C-10 20 -8 12 0 12 C12 14 24 12 32 6", 1.6) +
-    // 四根手指包住橫桿（橫桿在手指後面露出左端）
-    fillPath(fingers, SKIN) +
-    h("path", { d: fingers, fill: "none", stroke: INK, "stroke-width": 1.5, "stroke-linejoin": "round", filter: "url(#cs-rough)" }) +
-    inkPath("M-22 -6 l6 0 M-10 -5 l6 0 M2 -4 l6 0 M14 -3 l6 0", 0.9, { opacity: 0.6 }) +
-    h("path", { d: "M-22 -15 q4 -3 7 0 M-10 -14 q4 -3 7 0 M2 -13 q4 -3 7 0 M14 -12 q4 -3 7 0", stroke: "#f6dcc4", "stroke-width": 1.4, fill: "none" });
-  return (
-    `<div class="cs-door"><svg class="cs-door-wall" viewBox="0 0 1000 1400" width="1000" height="1400">${wall}</svg>` +
-    `<div class="cs-door-light"></div>` +
-    `<div class="cs-door-leaf"><svg viewBox="-6 -6 372 942" width="372" height="942">${doorArt}</svg></div>` +
-    `<div class="cs-door-hand"><svg viewBox="-40 -60 280 280" width="280" height="280" overflow="visible">${hand}</svg></div>` +
-    `</div>`
-  );
-}
-
 /** 結帳完成／簽署完成的謝謝（塗鴉泡泡字＋星星），畫在天空位置。 */
 function thanksLayer(): string {
   let stars = "";
@@ -536,7 +389,6 @@ export function buildSceneHtml(): string {
     `</div>` +
     `<div class="cs-layer cs-pov"><svg viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}">${povDesk(rng(515))}</svg></div>` +
     thanksLayer() +
-    doorIntro() +
     `<div class="cs-flash"></div>` +
     `<svg class="cs-paper" viewBox="0 0 ${PANEL_W} ${STAGE_H}" width="${PANEL_W}" height="${STAGE_H}" preserveAspectRatio="none">${h("rect", { width: PANEL_W, height: STAGE_H, fill: "#fff", "fill-opacity": 0.01, filter: "url(#cs-paper)" })}</svg>` +
     `</div>`

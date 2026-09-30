@@ -26,9 +26,7 @@ describe("顧客螢幕露營動畫的畫面內容", () => {
       "cs-sitter",
       "cs-cliffsitter",
       "cs-roaster",
-      "cs-hammock-actor",
       "cs-tent-actor",
-      "cs-door-leaf",
       "cs-thanks-word",
       "cs-cup-arm",
     ]) {

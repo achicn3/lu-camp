@@ -1,5 +1,5 @@
 // 顧客螢幕手繪露營動畫煙霧（店主 2026-09-27）：
-//   待機：先是開門，接著開露營車上山（鏡頭真的在動、沒有 JS 例外）
+//   待機：露營車無限循環（店主 2026-09-30 裁示），路一直往後跑、沒有 JS 例外
 //   結帳：店員推購物車 → 動畫不關、鏡頭帶到營桌（cart），明細寫在紙卡上；再加一件照常顯示
 //   取消購物車 → 回待機，且是同一份動畫接著播（沒有重掛）
 //   簽署：簽署內容要完整閱讀，動畫藏起來（hidden）；簽完 → 舉杯＋謝謝光臨（celebrate），手繪勾勾畫完
@@ -71,7 +71,7 @@ async function pair(context, mgr) {
 }
 
 const sceneMode = (page) => page.getAttribute(".camping-scene", "data-mode");
-const trackX = (page) => page.$eval(".cs-track", (el) => new DOMMatrix(getComputedStyle(el).transform).m41);
+const driveTime = (page) => page.$eval(".camping-scene", (el) => Number(el.dataset.time ?? 0));
 
 async function drawSignature(page) {
   const canvas = page.locator("canvas.kiosk-sign-canvas");
@@ -98,19 +98,16 @@ try {
   terminalId = paired.terminalId;
 
   // ── 待機 ──
-  await page.waitForSelector(".camping-scene .cs-door-leaf", { timeout: 10000 });
+  await page.waitForSelector(".camping-scene #drive", { timeout: 10000 });
   ok("待機鋪滿露營動畫", (await sceneMode(page)) === "idle");
   await page.evaluate(() => {
     document.querySelector(".camping-scene").dataset.smokeMarker = "same-node";
   });
-  await page.waitForTimeout(2300);
-  await page.screenshot({ path: join(SHOTS, "01-door.png") });
-  await page.waitForTimeout(6000);
-  const x1 = await trackX(page);
-  await page.waitForTimeout(3000);
-  const x2 = await trackX(page);
-  ok("開車那段鏡頭真的在往右移", x2 < x1 - 50, `${x1.toFixed(0)} → ${x2.toFixed(0)}`);
-  await page.screenshot({ path: join(SHOTS, "02-drive.png") });
+  const t1 = await driveTime(page);
+  await page.waitForTimeout(2000);
+  const t2 = await driveTime(page);
+  ok("待機是露營車一直往前開", t2 > t1 + 1, `${t1} → ${t2}`);
+  await page.screenshot({ path: join(SHOTS, "01-drive.png") });
 
   // ── 結帳 ──
   const current = await api(mgr, "GET", "/api/v1/cash-sessions/current");
@@ -174,8 +171,7 @@ try {
     "回待機是同一份動畫接著播（沒有重掛）",
     (await page.$eval(".camping-scene", (el) => el.dataset.smokeMarker)) === "same-node",
   );
-  const z = await page.$eval(".cs-zoom", (el) => new DOMMatrix(getComputedStyle(el).transform).a);
-  ok("鏡頭拉回原本大小", Math.abs(z - 1) < 0.01, `scale=${z.toFixed(2)}`);
+  ok("回待機接著開露營車", (await page.locator(".camping-scene #drive").count()) === 1);
   await page.screenshot({ path: join(SHOTS, "06-back-to-idle.png") });
 
   // ── 簽署 ──
@@ -220,10 +216,10 @@ try {
   const calm = await browser.newContext({ viewport: { width: 834, height: 1112 }, reducedMotion: "reduce" });
   const calmPaired = await pair(calm, mgr);
   await calmPaired.page.waitForTimeout(800);
-  const c1 = await trackX(calmPaired.page);
+  const c1 = await driveTime(calmPaired.page);
   await calmPaired.page.waitForTimeout(2000);
-  const c2 = await trackX(calmPaired.page);
-  ok("減少動態效果：畫面停住不播", c1 === c2 && c1 !== 0, `${c1} / ${c2}`);
+  const c2 = await driveTime(calmPaired.page);
+  ok("減少動態效果：畫面停住不播", c1 === c2, `${c1} / ${c2}`);
   await calmPaired.page.screenshot({ path: join(SHOTS, "09-reduced-motion.png") });
   await calm.close();
 

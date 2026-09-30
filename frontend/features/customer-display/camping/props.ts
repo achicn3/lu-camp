@@ -111,9 +111,9 @@ export function kettle(): string {
     inkPath("M754 948 C762 945 778 945 786 948", 0.8) +
     shape("M765 943 C764 936 776 936 775 943 Z", "#8a5a34", 1.3) +
     // 鵝頸壺嘴＋頸圈
-    h("path", { d: "M796 990 C812 986 816 960 824 942 C830 930 840 922 852 918", stroke: "#c4c8c3", "stroke-width": 5, fill: "none", "stroke-linecap": "round" }) +
-    h("path", { d: "M800 986 C812 982 815 962 822 944", stroke: "#eef0ec", "stroke-width": 1, fill: "none", opacity: 0.7 }) +
-    inkPath("M796 986 C810 984 813 960 822 941 C828 929 838 921 852 916 M798 994 C816 990 818 962 826 944 C832 933 842 925 852 921 M852 916 L853 921", 1.5) +
+    h("path", { d: "M796 990 C808 987 809 975 815 966 C820 959 828 955 834 954", stroke: "#c4c8c3", "stroke-width": 5, fill: "none", "stroke-linecap": "round" }) +
+    h("path", { d: "M800 986 C808 983 809 975 814 968", stroke: "#eef0ec", "stroke-width": 1, fill: "none", opacity: 0.7 }) +
+    inkPath("M796 986 C806 984 807 973 813 964 C819 957 827 953 834 952 M798 994 C812 991 813 977 817 968 C822 961 830 957 834 957 M834 952 L835 957", 1.5) +
     shape("M793 984 L801 983 L802 996 L794 997 Z", "#9ea39e", 1.1) +
     // 壺把：纏繩＋兩個固定座
     h("path", { d: "M744 962 C722 962 718 996 742 998", stroke: "#6b4a33", "stroke-width": 6, fill: "none", "stroke-linecap": "round" }) +
@@ -265,5 +265,65 @@ export function povDesk(r: Rng): string {
       h("path", { d: "M-24 -20 L-22 30", stroke: "#fff", "stroke-width": 4, opacity: 0.7, "stroke-linecap": "round" }),
       g({ class: "cs-pov-steam", fill: "none", stroke: INK_SOFT, "stroke-width": 1.8, "stroke-linecap": "round", opacity: 0.55, filter: "url(#cs-rough)" }, h("path", { d: "M-8 -44 c-12 -18 12 -26 0 -46 c-12 -18 12 -26 0 -44" }), h("path", { d: "M10 -46 c-10 -16 10 -24 0 -40" })),
     )
+  );
+}
+
+/** 硬殼保冷箱：厚蓋、扣具與防撞角；原點在底部中央。 */
+export function hardCooler(): string {
+  return g({ class: "cs-hard-cooler" },
+    shape("M-50 -64 L50 -64 L47 0 L-47 0 Z", "#718779", 2.2),
+    shape("M-54 -76 L54 -76 L54 -62 L-54 -62 Z", "#e6dfcc", 2.2),
+    inkPath("M-44 -55 L-42 -8 M44 -55 L42 -8 M-30 -48 L30 -48", 1.2),
+    shape("M-34 -68 h10 v22 h-10 Z M24 -68 h10 v22 h-10 Z", "#34433f", 1.3),
+    inkPath("M-16 -77 v-9 h32 v9", 3),
+  );
+}
+
+/** 折疊推車，握把在右上方，載著同一只保冷箱。 */
+export function campingWagon(): string {
+  return g({ class: "cs-wagon" },
+    shadow(0, 0, 85, 7),
+    g({ transform: "translate(-6 -34) scale(0.85)" }, hardCooler()),
+    shape("M-78 -68 L76 -68 L64 -18 L-66 -18 Z", "#687666", 2.4, "cs-hatch-fine"),
+    inkPath("M-66 -65 L62 -21 M64 -65 L-62 -21 M-78 -70 L78 -70 M70 -38 L113 -103 L131 -103", 4, { stroke: "#394443" }),
+    h("circle", { cx: -52, cy: -7, r: 13, fill: "#34403e", stroke: INK, "stroke-width": 2 }),
+    h("circle", { cx: 52, cy: -7, r: 13, fill: "#34403e", stroke: INK, "stroke-width": 2 }),
+    h("circle", { cx: -52, cy: -7, r: 5, fill: "#b3b7ae" }),
+    h("circle", { cx: 52, cy: -7, r: 5, fill: "#b3b7ae" }),
+  );
+}
+
+/** 可攜式電源，夜間供應充電營燈。 */
+export function powerStation(): string {
+  return g({ class: "cs-power-station" },
+    shadow(0, 2, 45, 6),
+    shape("M-42 -56 Q-42 -64 -34 -64 H34 Q42 -64 42 -56 V-4 Q42 2 34 2 H-34 Q-42 2 -42 -4 Z", "#414e50", 2.2),
+    inkPath("M-24 -64 V-78 H24 V-64", 6, { stroke: "#b5bbae" }),
+    h("rect", { x: -26, y: -48, width: 31, height: 18, rx: 3, fill: "#a8c5b1", stroke: INK, "stroke-width": 1.2 }),
+    inkPath("M-20 -42 h4 v7 h-4 Z M-12 -42 h4 v7 h-4 Z", 1.3),
+    h("circle", { cx: 22, cy: -37, r: 8, fill: "#253538", stroke: "#aab7b2", "stroke-width": 1.5 }),
+    inkPath("M-28 -17 h13 M-28 -10 h13 M0 -16 h6 M0 -10 h6 M18 -16 h12", 2),
+    h("circle", { class: "cs-power-led", cx: 32, cy: -12, r: 2.5, fill: "#b8da87", opacity: 0 }),
+  );
+}
+
+/** 小型電動打氣機與接到帳篷氣嘴的軟管。 */
+export function electricPump(): string {
+  return g({ class: "cs-electric-pump" },
+    inkPath("M18 -10 C62 -8 74 24 120 8", 5, { stroke: "#485454" }),
+    shape("M-18 -26 H18 V0 H-18 Z", "#455558", 2),
+    inkPath("M-10 -27 v-9 h20 v9 M-12 -17 h16 M-12 -10 h16", 2),
+    h("circle", { class: "cs-pump-led", cx: 10, cy: -20, r: 3, fill: "#c6dd91", opacity: 0 }),
+  );
+}
+
+/** 充電營燈：霧面燈罩、金屬頂蓋、折疊提環。 */
+export function ledLantern(): string {
+  return g({ class: "cs-led-lantern" },
+    h("ellipse", { class: "cs-led-glow", cx: 0, cy: -24, rx: 90, ry: 74, fill: "url(#cs-ambient)", opacity: 0 }),
+    shape("M-13 -40 H13 L16 -4 H-16 Z", "#dfdfc8", 1.6),
+    h("path", { class: "cs-led-light", d: "M-11 -36 H11 L13 -7 H-13 Z", fill: "#ffe7a0", opacity: 0 }),
+    shape("M-18 -44 H18 V-37 H-18 Z M-18 -6 H18 V0 H-18 Z", "#455558", 1.6),
+    inkPath("M-10 -44 V-55 Q0 -67 10 -55 V-44", 2),
   );
 }
