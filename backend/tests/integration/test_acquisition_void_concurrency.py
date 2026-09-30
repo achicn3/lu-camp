@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 from decimal import Decimal
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select, text
 
@@ -18,7 +19,7 @@ import app.core.db as app_db
 from app.core.audit import AuditLog
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.acquisition.models import Acquisition
+from app.modules.acquisition.models import Acquisition, AcquisitionVoid
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.cashdrawer.models import CashMovement, CashSession
@@ -50,7 +51,10 @@ async def real_client() -> AsyncGenerator[httpx.AsyncClient]:
         yield c
 
 
-async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient) -> None:
+@pytest.mark.parametrize("select_items", [False, True])
+async def test_concurrent_void_only_one_succeeds(
+    real_client: httpx.AsyncClient, select_items: bool
+) -> None:
     sm = app_db.get_sessionmaker()
     async with sm() as s:
         store = Store(name="併發作廢收購店")
@@ -70,11 +74,12 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
                 contact_id=seller.id,
                 items=[
                     AcquisitionItemIn(
-                        name="帳篷",
+                        name=f"帳篷{i}",
                         grade=Grade.A,
                         listed_price=Decimal("1800"),
                         acquisition_cost=Decimal("1000"),
                     )
+                    for i in range(2 if select_items else 1)
                 ],
             ),
             idempotency_key="acqv-create",
@@ -83,18 +88,26 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
         token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
         await s.commit()
 
+    async with sm() as s:
+        selected_ids = list(
+            await s.scalars(
+                select(SerializedItem.id).where(SerializedItem.acquisition_id == acq_id)
+            )
+        )
+    payload = {"reason": "x", **({"item_ids": selected_ids[:1]} if select_items else {})}
     headers = {"Authorization": f"Bearer {token}"}
     try:
         url = f"/api/v1/acquisitions/{acq_id}/void"
         r1, r2 = await asyncio.gather(
-            real_client.post(url, json={"reason": "x"}, headers=headers),
-            real_client.post(url, json={"reason": "x"}, headers=headers),
+            real_client.post(url, json=payload, headers=headers),
+            real_client.post(url, json=payload, headers=headers),
         )
         assert sorted([r1.status_code, r2.status_code]) == [200, 409]  # 恰一成功、一被擋
 
         async with sm() as s:
             acq = await s.get(Acquisition, acq_id)
-            assert acq is not None and acq.voided_at is not None
+            assert acq is not None
+            assert (acq.voided_at is None) == select_items
             void_in_count = await s.scalar(
                 select(func.count())
                 .select_from(CashMovement)
@@ -117,6 +130,7 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
             await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(delete(AcquisitionVoid).where(AcquisitionVoid.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))

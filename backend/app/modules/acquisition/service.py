@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.core.money import MAX_NTD, format_ntd, round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
-from app.modules.acquisition.models import Acquisition
+from app.modules.acquisition.models import Acquisition, AcquisitionVoid
 from app.modules.acquisition.repository import AcquisitionListFilter, AcquisitionRepository
 from app.modules.acquisition.schemas import (
     AcquisitionCombinedAffidavitRequest,
@@ -34,6 +34,8 @@ from app.modules.acquisition.schemas import (
     AcquisitionReceiptItem,
     AcquisitionReceiptRead,
     AcquisitionResult,
+    AcquisitionVoidItemRead,
+    AcquisitionVoidResult,
 )
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
@@ -1003,8 +1005,14 @@ class AcquisitionService:
         )
 
     async def void_acquisition(
-        self, store_id: int, acquisition_id: int, *, actor_user_id: int, reason: str
-    ) -> Acquisition:
+        self,
+        store_id: int,
+        acquisition_id: int,
+        *,
+        actor_user_id: int,
+        reason: str,
+        item_ids: list[int] | None = None,
+    ) -> AcquisitionVoidResult:
         """作廢收購（manager，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；單交易整筆成立/回滾。
 
         擋下（任一成立即拒，皆先於任何寫入）：已作廢、含已售庫存、付現但無開帳、購物金已花用沖回會負。
@@ -1022,6 +1030,12 @@ class AcquisitionService:
             )
         if acquisition.voided_at is not None:
             raise AcquisitionAlreadyVoid(f"收購 {acquisition_id} 已作廢，不可重複作廢")
+
+        previous = await self._repo.list_voids(store_id, acquisition_id)
+        if item_ids is not None or previous:
+            return await self._void_selected_items(
+                acquisition, previous, item_ids, actor_user_id=actor_user_id, reason=reason
+            )
 
         # 讀層前置擋（清楚錯誤、早於任何寫入）：含已售庫存 → 不可作廢
         if await self._inventory.has_sold_items(store_id, acquisition_id):
@@ -1080,7 +1094,150 @@ class AcquisitionService:
             },
             is_sensitive=True,
         )
-        return acquisition
+        return AcquisitionVoidResult(
+            acquisition_id=acquisition.id,
+            voided_at=acquisition.voided_at,
+            reversed_cash=cash_back,
+            reversed_credit=credit_back,
+        )
+
+    async def void_items(self, store_id: int, acquisition_id: int) -> list[AcquisitionVoidItemRead]:
+        """選品作廢清單；不傳回自由文字原因。"""
+        acquisition = await self._repo.get(store_id, acquisition_id)
+        if acquisition is None:
+            raise AcquisitionNotFound(f"找不到收購 {acquisition_id}")
+        records = await self._repo.list_voids(store_id, acquisition_id)
+        voided = {i for record in records for i in record.item_ids}
+        return [
+            AcquisitionVoidItemRead(
+                id=item.id,
+                item_code=item.item_code,
+                name=item.name,
+                acquisition_cost=item.acquisition_cost or Decimal(0),
+                status=item.status,
+                voided=acquisition.voided_at is not None or item.id in voided,
+            )
+            for item in await self._inventory.acquisition_items_for_void(store_id, acquisition_id)
+        ]
+
+    async def _void_selected_items(
+        self,
+        acquisition: Acquisition,
+        previous: list[AcquisitionVoid],
+        item_ids: list[int] | None,
+        *,
+        actor_user_id: int,
+        reason: str,
+    ) -> AcquisitionVoidResult:
+        """在收購列鎖內按累計成本分攤，差額沖回確保最後一筆收齊整數尾差。"""
+        if acquisition.type != AcquisitionType.BUYOUT:
+            raise AcquisitionVoidUnsupported("選品作廢僅適用買斷序號商品；散裝批請整批作廢")
+        store_id, acquisition_id = acquisition.store_id, acquisition.id
+        items = await self._inventory.acquisition_items_for_void(store_id, acquisition_id)
+        already = {i for record in previous for i in record.item_ids}
+        by_id = {item.id: item for item in items}
+        selected = set(item_ids) if item_ids is not None else set(by_id) - already
+        if not selected or not selected <= set(by_id):
+            raise AcquisitionVoidUnsupported("請選擇本收購單的商品")
+        if selected & already:
+            raise AcquisitionAlreadyVoid("所選商品已作廢，不可重複沖回")
+        if any(
+            by_id[i].status not in {SerializedItemStatus.IN_STOCK, SerializedItemStatus.PENDING_LISTING}
+            for i in selected
+        ):
+            raise AcquisitionHasSoldItems("所選商品已售出或已下架，無法作廢")
+        original_cash = acquisition.payout_cash_amount or Decimal(0)
+        original_equivalent = acquisition.payout_credit_cash_equivalent or Decimal(0)
+        original_total = original_cash + original_equivalent
+        cost = sum((by_id[i].acquisition_cost or Decimal(0) for i in selected), Decimal(0))
+        prior_cost = sum((v.reversed_cost for v in previous), Decimal(0))
+        cumulative_cost = prior_cost + cost
+        if cumulative_cost > original_total:
+            raise AcquisitionVoidUnsupported("收購成本與原始撥款不一致，無法作廢")
+        cash_target = (
+            round_ntd(original_cash * cumulative_cost / original_total)
+            if original_total
+            else Decimal(0)
+        )
+        cash_back = cash_target - sum((v.reversed_cash for v in previous), Decimal(0))
+        equivalent_back = cost - cash_back
+        granted = await self._storecredit.acquisition_credit_amount(store_id, acquisition_id)
+        credit_target = (
+            round_ntd(granted * (cumulative_cost - cash_target) / original_equivalent)
+            if original_equivalent
+            else Decimal(0)
+        )
+        credit_back = credit_target - sum((v.reversed_credit for v in previous), Decimal(0))
+        if cash_back > 0 and await self._cash.get_current_session(store_id) is None:
+            raise NoOpenCashSession("作廢付現收購需先開帳")
+        await self._inventory.void_acquisition_inventory(
+            store_id, acquisition_id, item_ids=selected
+        )
+        record = await self._repo.add_void(
+            AcquisitionVoid(
+                store_id=store_id,
+                acquisition_id=acquisition_id,
+                item_ids=sorted(selected),
+                reversed_cost=cost,
+                reversed_cash=cash_back,
+                reversed_credit_equivalent=equivalent_back,
+                reversed_credit=credit_back,
+                reason=reason.strip(),
+                created_by=actor_user_id,
+            )
+        )
+        if cash_back > 0:
+            await self._cash.record_movement(
+                store_id,
+                CashMovementType.ACQUISITION_VOID_IN,
+                cash_back,
+                actor_user_id=actor_user_id,
+                ref_type="acquisition_void",
+                ref_id=acquisition_id,
+            )
+        if credit_back > 0:
+            try:
+                await self._storecredit.reverse_for_acquisition_void(
+                    store_id,
+                    acquisition_id,
+                    created_by=actor_user_id,
+                    amount=credit_back,
+                    cash_equivalent=equivalent_back,
+                    acquisition_void_id=record.id,
+                )
+            except InsufficientStoreCredit as exc:
+                raise AcquisitionCreditSpent("購物金餘額不足以沖回所選商品，無法作廢") from exc
+        fully_voided = selected | already == set(by_id)
+        if fully_voided:
+            acquisition.voided_at = record.created_at
+            acquisition.voided_by = actor_user_id
+            acquisition.void_reason = reason.strip()
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="VOID_ACQUISITION",
+            entity_type="acquisition",
+            entity_id=str(acquisition_id),
+            before={"voided_item_ids": sorted(already)},
+            after={
+                "void_id": record.id,
+                "item_ids": sorted(selected),
+                "fully_voided": fully_voided,
+                "reversed_cash": str(cash_back),
+                "reversed_credit": str(credit_back),
+            },
+            is_sensitive=True,
+        )
+        return AcquisitionVoidResult(
+            acquisition_id=acquisition_id,
+            voided_at=record.created_at,
+            reversed_cash=cash_back,
+            reversed_credit=credit_back,
+            fully_voided=fully_voided,
+            item_ids=sorted(selected),
+        )
 
     async def _validate_categories(self, store_id: int, data: AcquisitionCreate) -> None:
         """檢查所有帶入的 category_id 屬本店（不屬→422）；FK 不分店，須在 service 守。"""

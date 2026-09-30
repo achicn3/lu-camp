@@ -135,6 +135,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/acquisitions/{acquisition_id}/void-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Void Items
+         * @description 管理者選品作廢清單。
+         */
+        get: operations["listAcquisitionVoidItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agreements": {
         parameters: {
             query?: never;
@@ -4099,6 +4119,20 @@ export interface components {
          * @enum {string}
          */
         AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
+        /** AcquisitionVoidItemRead */
+        AcquisitionVoidItemRead: {
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Id */
+            id: number;
+            /** Item Code */
+            item_code: string;
+            /** Name */
+            name: string;
+            status: components["schemas"]["SerializedItemStatus"];
+            /** Voided */
+            voided: boolean;
+        };
         /**
          * AcquisitionVoidBlock
          * @description 收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。
@@ -4112,6 +4146,8 @@ export interface components {
          * @description 作廢收購（F6.5）：必填原因（稽核留痕）。
          */
         AcquisitionVoidRequest: {
+            /** Item Ids */
+            item_ids?: number[] | null;
             /** Reason */
             reason: string;
         };
@@ -4122,6 +4158,13 @@ export interface components {
         AcquisitionVoidResult: {
             /** Acquisition Id */
             acquisition_id: number;
+            /**
+             * Fully Voided
+             * @default true
+             */
+            fully_voided: boolean;
+            /** Item Ids */
+            item_ids?: number[];
             /** Reversed Cash */
             reversed_cash: string;
             /** Reversed Credit */
@@ -9678,7 +9721,7 @@ export interface components {
         /** TerminalUnpairRequest */
         TerminalUnpairRequest: {
             /** Reason */
-            reason: string;
+            reason?: string | null;
         };
         /**
          * TokenResponse
@@ -10047,6 +10090,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionVoidResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listAcquisitionVoidItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionVoidItemRead"][];
                 };
             };
             /** @description Validation Error */

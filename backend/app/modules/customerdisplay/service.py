@@ -660,7 +660,7 @@ class CustomerDisplayService:
         store_id: int,
         terminal_id: int,
         *,
-        reason: str,
+        reason: str | None = None,
         actor_user_id: int,
     ) -> PosTerminal:
         """解除長期配對但保留歷史列與稽核；不刪裝置、不重建櫃檯。"""
@@ -685,7 +685,10 @@ class CustomerDisplayService:
             entity_type="pos_terminal",
             entity_id=str(terminal_id),
             before={"kiosk_device_id": before_device_id},
-            after={"kiosk_device_id": None, "reason": reason.strip()},
+            after={
+                "kiosk_device_id": None,
+                **({"reason": reason.strip()} if reason and reason.strip() else {}),
+            },
         )
         return terminal
 

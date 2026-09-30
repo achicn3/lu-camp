@@ -261,14 +261,14 @@ describe("POS 顧客螢幕同步", () => {
     expect(await screen.findByText(/顧客螢幕離線/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "解除配對" }));
-    await user.type(screen.getByLabelText("解除配對原因"), "換裝置");
+    expect(screen.queryByLabelText("解除配對原因")).toBeNull();
     await user.click(screen.getByRole("button", { name: "確認解除配對" }));
 
-    await waitFor(() => expect(unpairBody).toEqual({ reason: "換裝置" }));
+    await waitFor(() => expect(unpairBody).toEqual({}));
     expect(await screen.findByText("顧客螢幕尚未配對")).toBeTruthy();
   });
 
-  it("解除配對失敗要出聲，且取消會清掉已輸入的原因", async () => {
+  it("解除配對失敗要出聲，且仍可取消", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -319,7 +319,7 @@ describe("POS 顧客螢幕同步", () => {
 
     // 失敗必須看得見：靜默失敗會讓店員一直按、以為是平板的問題。
     await user.click(screen.getByRole("button", { name: "解除配對" }));
-    await user.type(screen.getByLabelText("解除配對原因"), "換裝置");
+    expect(screen.queryByLabelText("解除配對原因")).toBeNull();
     await user.click(screen.getByRole("button", { name: "確認解除配對" }));
     expect(
       await screen.findByText("此 POS 櫃檯目前沒有配對顧客螢幕"),
@@ -327,13 +327,13 @@ describe("POS 顧客螢幕同步", () => {
     // 失敗後仍留在已配對畫面，不得假裝已解除。
     expect(screen.getByText(/顧客螢幕已連線/)).toBeTruthy();
 
-    // 取消要真的清掉原因，否則下次打開會看到上一次的殘留字串。
+    // 取消會收起確認區，重新打開仍不用填原因。
     await user.click(screen.getByRole("button", { name: "取消" }));
     await user.click(screen.getByRole("button", { name: "解除配對" }));
-    expect(screen.getByLabelText("解除配對原因")).toHaveProperty("value", "");
+    expect(screen.queryByLabelText("解除配對原因")).toBeNull();
   });
 
-  it("沒填原因時不得送出解除配對（後端 reason 必填，送出去只會白跑一趟 422）", async () => {
+  it("解除配對不需填原因，但確認前仍可取消", async () => {
     const unpairCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -382,14 +382,10 @@ describe("POS 顧客螢幕同步", () => {
     expect(await screen.findByText(/顧客螢幕已連線/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "解除配對" }));
-    const submit = screen.getByRole("button", { name: "確認解除配對" });
-    expect(submit).toHaveProperty("disabled", true);
-    // 只打空白也不算填了原因（後端 min_length=1，trim 後為空會 422）。
-    await user.type(screen.getByLabelText("解除配對原因"), "   ");
-    expect(screen.getByRole("button", { name: "確認解除配對" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(screen.queryByLabelText("解除配對原因")).toBeNull();
+    expect(screen.getByRole("button", { name: "確認解除配對" })).toHaveProperty("disabled", false);
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("button", { name: "確認解除配對" })).toBeNull();
     expect(unpairCalls).toEqual([]);
   });
 

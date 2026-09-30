@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import KioskPage from "@/app/kiosk/page";
@@ -60,14 +60,14 @@ class FakeEventSource extends EventTarget {
   close = vi.fn();
 }
 
-function renderPage() {
+function renderPage(strict = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return { ...render(<KioskPage />, { wrapper: Wrapper }), client };
+  return { ...render(strict ? <StrictMode><KioskPage /></StrictMode> : <KioskPage />, { wrapper: Wrapper }), client };
 }
 
 beforeEach(() => {
@@ -924,6 +924,28 @@ describe("/kiosk 客顯", () => {
     expect(screen.queryByText("已完成簽署")).toBeNull();
   });
 
+  it("StrictMode 重掛只產生一組配對碼，避免互相作廢", async () => {
+    window.localStorage.setItem("lu-camp.kiosk.csrf", "csrf-token-at-least-thirty-two-characters");
+    const pending: ((response: Response) => void)[] = [];
+    const device = { device_id: 8, label: "收銀台客顯", paired_terminal: null, pairing_code: null, pairing_code_expires_at: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input);
+      if (request.url.endsWith("/api/v1/kiosk/device")) return json(device);
+      if (request.url.endsWith("/api/v1/kiosk/pairing-codes")) {
+        return new Promise<Response>((resolve) => pending.push(resolve));
+      }
+      throw new Error(`unexpected request ${request.url}`);
+    }));
+    renderPage(true);
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+    const requests = pending.length;
+    await act(async () => {
+      for (const resolve of pending) resolve(json({ ...device, pairing_code: "913247", pairing_code_expires_at: new Date(Date.now() + 300_000).toISOString() }));
+    });
+    expect(await screen.findByText("913247")).toBeTruthy();
+    expect(requests).toBe(1);
+  });
+
   it("配對被解除後自行回到配對畫面，不會卡在待機或斷線提示", async () => {
     // 店員在櫃檯按「解除配對」（平板遺失、改配到收購櫃檯）後，平板上的 SSE 會收到 403
     // 而永久關閉（EventSource 規格：非 200 不重連）。若裝置狀態在配對後就停止輪詢，
@@ -942,12 +964,14 @@ describe("/kiosk 客顯", () => {
           return json({
             device_id: 8,
             label: "收銀台客顯",
-            pairing_code: paired ? null : "913247",
-            pairing_code_expires_at: paired
-              ? null
-              : new Date(Date.now() + 5 * 60_000).toISOString(),
+            pairing_code: null,
+            pairing_code_expires_at: null,
             paired_terminal: paired ? { id: 3, name: "主櫃檯" } : null,
           });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/pairing-codes")) {
+          return json({ device_id: 8, label: "收銀台客顯", paired_terminal: null,
+            pairing_code: "913247", pairing_code_expires_at: new Date(Date.now() + 5 * 60_000).toISOString() });
         }
         // 購物車端點不要求配對，解除配對後照樣回 200/null——畫面因此**不會**出現任何
         // 錯誤，只會安靜地停在待機。任務端點才會 403。

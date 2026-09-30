@@ -1938,6 +1938,11 @@ class InventoryService:
             SerializedItemStatus.PENDING_LISTING in statuses
             and SerializedItemStatus.IN_STOCK in statuses
         )
+    async def acquisition_items_for_void(
+        self, store_id: int, acquisition_id: int
+    ) -> list[SerializedItem]:
+        """取得同店收購的全部買斷品，供選品作廢。"""
+        return await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
 
     async def has_sold_items(self, store_id: int, acquisition_id: int) -> bool:
         """該收購入庫的庫存是否已有任一售出/動用（read-only，作廢前置擋下用，F6.5）。
@@ -1955,7 +1960,9 @@ class InventoryService:
             for lot in lots
         )
 
-    async def void_acquisition_inventory(self, store_id: int, acquisition_id: int) -> None:
+    async def void_acquisition_inventory(
+        self, store_id: int, acquisition_id: int, *, item_ids: set[int] | None = None
+    ) -> None:
         """作廢收購：將該收購入庫的序號品/散裝批全部退場（WRITTEN_OFF＋出庫帳）。
 
         以原子條件式轉移為併發後盾——任一品在前置檢查後才被售出，轉移失敗即丟
@@ -1964,6 +1971,8 @@ class InventoryService:
         """
         items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
         for it in items:
+            if item_ids is not None and it.id not in item_ids:
+                continue
             # 待整理（排隊收購已付款、還沒上架）也是沒賣出的件，一樣可退場。
             from_status = (
                 it.status
@@ -1987,6 +1996,8 @@ class InventoryService:
                 ref_id=acquisition_id,
                 serialized_item_id=it.id,
             )
+        if item_ids is not None:
+            return
         lots = await self._repo.list_owned_bulk_lots_for_void(store_id, acquisition_id)
         for lot in lots:
             if not await self._repo.write_off_bulk_lot(lot.id):

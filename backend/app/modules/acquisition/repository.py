@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.acquisition.models import Acquisition
+from app.modules.acquisition.models import Acquisition, AcquisitionVoid
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.shared.enums import AcquisitionType, PayoutMethod
 
@@ -31,6 +31,23 @@ class AcquisitionRepository:
         self._session.add(acquisition)
         await self._session.flush()
         return acquisition
+
+    async def list_voids(self, store_id: int, acquisition_id: int) -> list[AcquisitionVoid]:
+        return list(
+            await self._session.scalars(
+                select(AcquisitionVoid)
+                .where(
+                    AcquisitionVoid.store_id == store_id,
+                    AcquisitionVoid.acquisition_id == acquisition_id,
+                )
+                .order_by(AcquisitionVoid.id)
+            )
+        )
+
+    async def add_void(self, record: AcquisitionVoid) -> AcquisitionVoid:
+        self._session.add(record)
+        await self._session.flush()
+        return record
 
     async def get_by_idempotency_key(
         self, store_id: int, idempotency_key: str, *, for_update: bool = False

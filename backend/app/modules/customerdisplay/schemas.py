@@ -92,7 +92,7 @@ class TerminalPairRequest(BaseModel):
 
 
 class TerminalUnpairRequest(BaseModel):
-    reason: str = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=200)
 
 
 class CartLineRequest(BaseModel):

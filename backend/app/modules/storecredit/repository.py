@@ -236,7 +236,7 @@ class StoreCreditRepository:
         stmt = (
             select(
                 StoreCreditLedger.contact_id,
-                StoreCreditLedger.signed_amount,
+                self._remaining_amount(),
                 StoreCreditLedger.created_at,
             )
             .where(
@@ -258,7 +258,7 @@ class StoreCreditRepository:
         stmt = (
             select(
                 StoreCreditLedger.contact_id,
-                func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
+                func.coalesce(func.sum(self._remaining_amount()), 0),
             )
             .where(
                 StoreCreditLedger.store_id == store_id,
@@ -281,10 +281,29 @@ class StoreCreditRepository:
     # ── SC-5b §5B 指標查詢（read-only；docs/16 §5B）──
 
     @staticmethod
-    def _not_reversed() -> ColumnElement[bool]:
-        """「該帳本列未被任何沖正列指向」的相關子查詢條件（沖正後原列不再代表有效負債/兌付）。"""
+    def _remaining_amount() -> ColumnElement[Decimal]:
         rev = aliased(StoreCreditLedger)
-        return ~select(rev.id).where(rev.reversal_of_id == StoreCreditLedger.id).exists()
+        reversed_sum = (
+            select(func.coalesce(func.sum(rev.signed_amount), 0))
+            .where(rev.reversal_of_id == StoreCreditLedger.id)
+            .scalar_subquery()
+        )
+        return StoreCreditLedger.signed_amount + reversed_sum
+
+    @staticmethod
+    def _remaining_equivalent() -> ColumnElement[Decimal]:
+        rev = aliased(StoreCreditLedger)
+        reversed_sum = (
+            select(func.coalesce(func.sum(rev.cash_equivalent), 0))
+            .where(rev.reversal_of_id == StoreCreditLedger.id)
+            .scalar_subquery()
+        )
+        return func.coalesce(StoreCreditLedger.cash_equivalent, 0) + reversed_sum
+
+    @staticmethod
+    def _not_reversed() -> ColumnElement[bool]:
+        """保留尚未全額沖回的分錄；部分作廢只扣除已沖回金額。"""
+        return StoreCreditRepository._remaining_amount() != 0
 
     async def credit_premium_components(
         self, store_id: int, date_from: datetime, date_to: datetime
@@ -295,8 +314,8 @@ class StoreCreditRepository:
         （Codex SC-5b P2）。
         """
         stmt = select(
-            func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
-            func.coalesce(func.sum(StoreCreditLedger.cash_equivalent), 0),
+            func.coalesce(func.sum(self._remaining_amount()), 0),
+            func.coalesce(func.sum(self._remaining_equivalent()), 0),
         ).where(
             StoreCreditLedger.store_id == store_id,
             StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
@@ -384,7 +403,7 @@ class StoreCreditRepository:
         stmt = (
             select(
                 StoreCreditLedger.contact_id,
-                StoreCreditLedger.signed_amount,
+                self._remaining_amount(),
                 StoreCreditLedger.created_at,
             )
             .where(

@@ -18,8 +18,10 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
+    func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -109,6 +111,34 @@ class Acquisition(Base, TimestampMixin):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     voided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     void_reason: Mapped[str | None] = mapped_column(String(500))
+
+
+class AcquisitionVoid(Base):
+    """每次選品作廢的沖回快照；原始收購金額保持不變。"""
+
+    __tablename__ = "acquisition_voids"
+    __table_args__ = (
+        CheckConstraint(
+            "reversed_cost >= 0 AND reversed_cash >= 0 AND reversed_credit >= 0 "
+            "AND reversed_credit_equivalent >= 0",
+            name="ck_acquisition_voids_nonneg",
+        ),
+        CheckConstraint(
+            "reversed_cash + reversed_credit_equivalent = reversed_cost",
+            name="ck_acquisition_voids_split",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    acquisition_id: Mapped[int] = mapped_column(ForeignKey("acquisitions.id"), index=True)
+    item_ids: Mapped[list[int]] = mapped_column(JSONB)
+    reversed_cost: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    reversed_cash: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    reversed_credit_equivalent: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    reversed_credit: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    reason: Mapped[str] = mapped_column(String(500))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # credit 腿 ↔ 帳本綁定（Codex SC-2 第十六輪 medium、第十七/十八輪 P1）：收購頭與

@@ -25,6 +25,7 @@ from app.shared.enums import (
     BulkAcquisitionBasis,
     Grade,
     PayoutMethod,
+    SerializedItemStatus,
 )
 
 # 金額：輸出序列化為字串；輸入可吃字串或數字（Pydantic 轉 Decimal）。
@@ -229,12 +230,27 @@ class AcquisitionCombinedResult(BaseModel):
     """依序：買斷一張、散裝每堆一張。"""
 
     results: list[AcquisitionResult]
+class AcquisitionVoidItemRead(BaseModel):
+    id: int
+    item_code: str
+    name: str
+    acquisition_cost: NTDAmount
+    status: SerializedItemStatus
+    voided: bool
 
 
 class AcquisitionVoidRequest(BaseModel):
     """作廢收購（F6.5）：必填原因（稽核留痕）。"""
 
     reason: str = Field(min_length=1, max_length=500)
+    item_ids: list[Annotated[int, Field(gt=0)]] | None = Field(default=None, min_length=1)
+
+    @field_validator("item_ids")
+    @classmethod
+    def _unique_items(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("商品不可重複選取")
+        return value
 
     @field_validator("reason")
     @classmethod
@@ -253,6 +269,8 @@ class AcquisitionVoidResult(BaseModel):
     voided_at: datetime
     reversed_cash: NTDAmount
     reversed_credit: NTDAmount
+    fully_voided: bool = True
+    item_ids: list[int] = Field(default_factory=list)
 
 
 class AcquisitionReceiptItem(BaseModel):

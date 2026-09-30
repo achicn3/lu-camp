@@ -98,6 +98,7 @@ class StoreCreditService:
         reversal_of_id: int | None = None,
         reason: str | None = None,
         idempotency_key: str | None = None,
+        acquisition_void_id: int | None = None,
     ) -> tuple[StoreCreditLedger, bool]:
         """寫入一筆分錄；回 (分錄, 是否新插入)——冪等重放回 (原列, False)，
         呼叫端據此避免重複副作用（如稽核）。"""
@@ -141,6 +142,7 @@ class StoreCreditService:
             reversal_of_id=reversal_of_id,
             fingerprint=fingerprint,
             idempotency_key=idempotency_key,
+            acquisition_void_id=acquisition_void_id,
         )
         if replay is not None:
             return replay, False
@@ -178,6 +180,7 @@ class StoreCreditService:
                         source_type=source_type,
                         source_id=source_id,
                         reversal_of_id=reversal_of_id,
+                        acquisition_void_id=acquisition_void_id,
                         fingerprint=fingerprint,
                         idempotency_key=idempotency_key,
                         reason=reason,
@@ -193,6 +196,7 @@ class StoreCreditService:
                 reversal_of_id=reversal_of_id,
                 fingerprint=fingerprint,
                 idempotency_key=idempotency_key,
+                acquisition_void_id=acquisition_void_id,
             )
             if replay is not None:
                 return replay, False
@@ -213,6 +217,7 @@ class StoreCreditService:
         reversal_of_id: int | None,
         fingerprint: str,
         idempotency_key: str | None,
+        acquisition_void_id: int | None = None,
     ) -> StoreCreditLedger | None:
         """鎖內冪等判定：同來源同指紋 → 回原列；同來源/同沖正對象但內容不同 → 409。"""
         if idempotency_key is not None:
@@ -221,6 +226,8 @@ class StoreCreditService:
                 if existing_key.fingerprint == fingerprint:
                     return existing_key
                 raise StoreCreditConflict(f"冪等鍵 {idempotency_key} 已用於不同內容的校正")
+        if acquisition_void_id is not None:
+            return None  # 選品作廢由 event 唯一鍵及上方 idempotency_key 防重。
         if reversal_of_id is not None:
             existing_reversal = await self._repo.find_reversal_of(store_id, reversal_of_id)
             if existing_reversal is not None:
@@ -418,8 +425,22 @@ class StoreCreditService:
             created_by=created_by,
         )
 
+    async def acquisition_credit_amount(self, store_id: int, acquisition_id: int) -> Decimal:
+        """原始收購實發購物金（含當時溢價）。"""
+        entry = await self._repo.find_by_source(
+            store_id, StoreCreditSourceType.ACQUISITION, acquisition_id, StoreCreditEntryType.CREDIT
+        )
+        return Decimal(entry.signed_amount) if entry is not None else Decimal(0)
+
     async def reverse_for_acquisition_void(
-        self, store_id: int, acquisition_id: int, *, created_by: int
+        self,
+        store_id: int,
+        acquisition_id: int,
+        *,
+        created_by: int,
+        amount: Decimal | None = None,
+        cash_equivalent: Decimal | None = None,
+        acquisition_void_id: int | None = None,
     ) -> StoreCreditLedger | None:
         """作廢收購時沖回該筆的購物金入帳（CREDIT/ACQUISITION → REVERSAL/ACQUISITION_ROLLBACK）。
 
@@ -435,6 +456,23 @@ class StoreCreditService:
         )
         if credit is None:
             return None
+        if acquisition_void_id is not None:
+            if amount is None or amount <= 0 or cash_equivalent is None:
+                raise StoreCreditConflict("選品作廢須提供正數沖回金額與現金等值")
+            entry, _ = await self._write_entry(
+                store_id,
+                credit.contact_id,
+                entry_type=StoreCreditEntryType.REVERSAL,
+                signed_amount=-amount,
+                source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+                source_id=acquisition_id,
+                created_by=created_by,
+                cash_equivalent=-cash_equivalent,
+                reversal_of_id=credit.id,
+                acquisition_void_id=acquisition_void_id,
+                idempotency_key=f"acquisition-void:{acquisition_void_id}",
+            )
+            return entry
         return await self.reverse(
             store_id,
             credit.id,

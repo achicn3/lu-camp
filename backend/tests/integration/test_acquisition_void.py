@@ -577,3 +577,177 @@ async def test_voided_credit_excluded_from_liability_aging(
     seller_lots = [amt for c, amt, _ in await repo.positive_lots(store_id) if c == seller_id]
     assert psum.get(seller_id) == balance  # consumed=0：Σ正向==餘額（已排除作廢入帳）
     assert len(seller_lots) == 1  # 只剩未作廢那筆發出列
+
+
+async def test_partial_void_keeps_unselected_and_reconciles_split(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    payload = {
+        "type": "BUYOUT",
+        "contact_id": seller_id,
+        "payout_method": "SPLIT",
+        "payout_split_cash": "2",
+        "items": [
+            {"name": f"item{i}", "grade": "A", "acquisition_cost": "1", "listed_price": "2"}
+            for i in range(3)
+        ],
+    }
+    created = await client.post("/api/v1/acquisitions", json=payload, headers=_auth(clerk))
+    assert created.status_code == 201, created.text
+    acq_id = created.json()["acquisition_id"]
+    items = list(
+        await db_session.scalars(
+            select(SerializedItem)
+            .where(SerializedItem.acquisition_id == acq_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    credit_before = await StoreCreditService(db_session).get_balance(store_id, seller_id)
+    for index, item in enumerate(items):
+        await db_session.refresh(item)
+        resp = await client.post(
+            f"/api/v1/acquisitions/{acq_id}/void",
+            json={"reason": "部分退回", "item_ids": [item.id]},
+            headers=_auth(mgr),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["fully_voided"] == (index == 2)
+        await db_session.refresh(item)
+        assert item.status == SerializedItemStatus.WRITTEN_OFF
+        for remaining in items[index + 1 :]:
+            await db_session.refresh(remaining)
+            assert remaining.status == SerializedItemStatus.IN_STOCK
+        if index == 0:
+            duplicate = await client.post(
+                f"/api/v1/acquisitions/{acq_id}/void",
+                json={"reason": "重複", "item_ids": [item.id]},
+                headers=_auth(mgr),
+            )
+            assert duplicate.status_code == 409
+    assert await _void_in(db_session, store_id) == Decimal("2")
+    assert await StoreCreditService(db_session).get_balance(store_id, seller_id) == 0
+    assert credit_before > 0
+
+
+async def test_partial_void_allows_unsold_sibling_and_rejects_foreign_item(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
+    items = list(
+        await db_session.scalars(
+            select(SerializedItem)
+            .where(SerializedItem.acquisition_id == acq_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    await InventoryService(db_session).sell_serialized_item(items[0].id)
+    await db_session.commit()
+    unsold_id = items[1].id
+    invalid = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "錯誤品項", "item_ids": [999999]},
+        headers=_auth(mgr),
+    )
+    assert invalid.status_code == 422
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "只退未售", "item_ids": [unsold_id]},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reversed_cash"] == "1"
+    assert resp.json()["fully_voided"] is False
+    assert await _void_in(db_session, store_id) == Decimal("1")
+
+
+async def test_partial_credit_preserves_remaining_liability_and_rolls_back_when_spent(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    clerk, mgr, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    created = await client.post(
+        "/api/v1/acquisitions",
+        headers=_auth(clerk),
+        json={
+            "type": "BUYOUT",
+            "contact_id": seller_id,
+            "payout_method": "STORE_CREDIT",
+            "items": [
+                {
+                    "name": f"item{i}",
+                    "grade": "A",
+                    "acquisition_cost": "1000",
+                    "listed_price": "1500",
+                }
+                for i in range(2)
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    acq_id = created.json()["acquisition_id"]
+    rows = await client.get(f"/api/v1/acquisitions/{acq_id}/void-items", headers=_auth(mgr))
+    assert rows.status_code == 200
+    first_id, second_id = [item["id"] for item in rows.json()]
+    credit = StoreCreditService(db_session)
+    before = await credit.get_balance(store_id, seller_id)
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        headers=_auth(mgr),
+        json={"reason": "先退一件", "item_ids": [first_id]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert Decimal(resp.json()["reversed_credit"]) == before / 2
+    remaining = await credit.get_balance(store_id, seller_id)
+    repo = StoreCreditRepository(db_session)
+    assert (await repo.positive_sum_by_contact(store_id))[seller_id] == remaining
+    assert [
+        amount for contact, amount, _ in await repo.credit_lots(store_id) if contact == seller_id
+    ] == [remaining]
+    assert [
+        amount for contact, amount, _ in await repo.positive_lots(store_id) if contact == seller_id
+    ] == [remaining]
+    lo, hi = datetime.now(UTC) - timedelta(days=1), datetime.now(UTC) + timedelta(days=1)
+    assert await repo.credit_premium_components(store_id, lo, hi) == (remaining, Decimal("1000"))
+    # 額度已花用：任何庫存退場、作廢紀錄、扣款必須一起回滾。
+    await credit.adjust(
+        store_id,
+        seller_id,
+        amount=-remaining,
+        reason="測試模擬已花用",
+        created_by=await _clerk_id(db_session, store_id),
+        idempotency_key="partial-credit-spent",
+    )
+    await db_session.commit()
+    blocked = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        headers=_auth(mgr),
+        json={"reason": "餘額不足", "item_ids": [second_id]},
+    )
+    assert blocked.status_code == 409, blocked.text
+    rows = (
+        await client.get(f"/api/v1/acquisitions/{acq_id}/void-items", headers=_auth(mgr))
+    ).json()
+    assert next(item for item in rows if item["id"] == second_id)["status"] == "IN_STOCK"
+    assert not next(item for item in rows if item["id"] == second_id)["voided"]
+    assert await credit.get_balance(store_id, seller_id) == 0
+    await credit.adjust(
+        store_id,
+        seller_id,
+        amount=remaining,
+        reason="測試補回",
+        created_by=await _clerk_id(db_session, store_id),
+        idempotency_key="partial-credit-restore",
+    )
+    await db_session.commit()
+    # 舊客戶端的整單作廢只能沖回剩餘品項，不能再沖第一件。
+    final = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", headers=_auth(mgr), json={"reason": "其餘全退"}
+    )
+    assert final.status_code == 200, final.text
+    assert final.json()["fully_voided"]
+    assert Decimal(final.json()["reversed_credit"]) == remaining
+    assert await credit.get_balance(store_id, seller_id) == 0

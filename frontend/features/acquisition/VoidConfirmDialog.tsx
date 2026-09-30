@@ -12,10 +12,12 @@ type VoidResult = components["schemas"]["AcquisitionVoidResult"];
 
 export function VoidConfirmDialog({
   acquisitionId,
+  itemIds,
   onClose,
   onVoided,
 }: {
   acquisitionId: number;
+  itemIds?: number[];
   onClose: () => void;
   onVoided: (result: VoidResult) => void;
 }) {
@@ -29,7 +31,7 @@ export function VoidConfirmDialog({
         "/api/v1/acquisitions/{acquisition_id}/void",
         {
           params: { path: { acquisition_id: acquisitionId } },
-          body: { reason: reason.trim() },
+          body: { reason: reason.trim(), ...(itemIds ? { item_ids: itemIds } : {}) },
         },
       );
       if (!data) throw new Error(voidErrorMessage(response.status, errorDetail(apiErr)));
@@ -49,8 +51,9 @@ export function VoidConfirmDialog({
   return (
     <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="作廢收購確認">
       <div className="card pos-dialog acq-void-dialog">
-        <h2>作廢收購單 #{acquisitionId}？</h2>
-        <p className="hint">作廢會把庫存、現金與購物金都退回原狀，並留下紀錄，且無法還原。請填寫原因。</p>
+        <h2>{itemIds ? "作廢所選商品；收購單" : "作廢整張收購單"} #{acquisitionId}？</h2>
+        {itemIds && <p>本次作廢 {itemIds.length} 件商品，其餘商品保留。</p>}
+        <p className="hint">作廢會將{itemIds ? "所選" : "整張收購的"}庫存退場，按原付款比例沖回現金與購物金（含原溢價），並留下紀錄，且無法還原。請填寫原因。</p>
         <label className="field">
           <span className="field-label">作廢原因</span>
           <textarea
@@ -74,7 +77,7 @@ export function VoidConfirmDialog({
           <button
             type="button"
             className="btn-danger"
-            disabled={!reasonValid || voidMut.isPending}
+            disabled={!reasonValid || voidMut.isPending || itemIds?.length === 0}
             onClick={() => {
               setError(null);
               voidMut.mutate();

@@ -2021,7 +2021,7 @@ export default function AcquisitionPage() {
               className="btn-danger acq-void-after-create"
               onClick={() => setVoidTarget(result.acquisitionId)}
             >
-              這筆有誤？作廢收購
+              這筆有誤？作廢整張收購
             </button>
           )}
           {voidedNote !== null && <p className="form-error">{voidedNote}</p>}

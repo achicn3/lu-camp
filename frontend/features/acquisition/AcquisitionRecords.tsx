@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { ACQ_TYPE_LABEL, VOID_BLOCK_LABEL } from "@/features/acquisition/labels";
 import { errorDetail } from "@/features/acquisition/void";
+import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { Pagination } from "@/features/common/Pagination";
 import { exclusiveEnd, startOfDay } from "@/features/reports/reports";
@@ -75,6 +76,7 @@ export function AcquisitionRecords() {
   // 賣方搜尋（提交式）：輸入框與已提交值分開，避免每次按鍵都打 API。
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
+  const [selecting, setSelecting] = useState<number | null>(null);
   const [voiding, setVoiding] = useState<number | null>(null);
   const [voidResult, setVoidResult] = useState<VoidResult | null>(null);
 
@@ -192,7 +194,7 @@ export function AcquisitionRecords() {
       {voidResult !== null && (
         <div className="form-success acq-void-result" role="status">
           <p>
-            已作廢收購單 #{voidResult.acquisition_id}。退回現金{" "}
+            {voidResult.fully_voided === false ? "已作廢所選商品，其餘商品保留；收購單" : "已作廢收購單"} #{voidResult.acquisition_id}。退回現金{" "}
             <strong className="money">{ntd(voidResult.reversed_cash)}</strong>、沖回購物金{" "}
             <strong className="money">{ntd(voidResult.reversed_credit)}</strong>。
           </p>
@@ -263,6 +265,9 @@ export function AcquisitionRecords() {
                         >
                           作廢
                         </button>
+                        {row.type === "BUYOUT" && !row.voided_at && (
+                          <button type="button" className="btn-secondary" onClick={() => { setVoidResult(null); setSelecting(row.id); }}>選品作廢</button>
+                        )}
                         {row.void_block !== null && row.void_block !== "ALREADY_VOIDED" && (
                           <span className="row-sub">{VOID_BLOCK_LABEL[row.void_block]}</span>
                         )}
@@ -285,6 +290,12 @@ export function AcquisitionRecords() {
           unit="張"
           onPage={setPage}
         />
+      )}
+
+      {selecting !== null && (
+        <VoidAcquisitionSection key={selecting} acquisitionId={selecting}
+          onClose={() => setSelecting(null)}
+          onVoided={(result) => { setVoidResult(result); void queryClient.invalidateQueries({ queryKey: ["acquisitions"] }); }} />
       )}
 
       {voiding !== null && (

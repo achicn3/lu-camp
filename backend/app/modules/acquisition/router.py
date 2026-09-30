@@ -5,7 +5,6 @@
 """
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -23,6 +22,7 @@ from app.modules.acquisition.schemas import (
     AcquisitionRead,
     AcquisitionReceiptRead,
     AcquisitionResult,
+    AcquisitionVoidItemRead,
     AcquisitionVoidRequest,
     AcquisitionVoidResult,
 )
@@ -299,7 +299,11 @@ async def void_acquisition(
     svc = AcquisitionService(session)
     try:
         acquisition = await svc.void_acquisition(
-            user.store_id, acquisition_id, actor_user_id=user.id, reason=payload.reason
+            user.store_id,
+            acquisition_id,
+            actor_user_id=user.id,
+            reason=payload.reason,
+            item_ids=payload.item_ids,
         )
     except DomainError as exc:
         await session.rollback()
@@ -308,10 +312,19 @@ async def void_acquisition(
         await session.rollback()
         raise
     await session.commit()
-    assert acquisition.voided_at is not None  # void_acquisition 成功必已設
-    return AcquisitionVoidResult(
-        acquisition_id=acquisition.id,
-        voided_at=acquisition.voided_at,
-        reversed_cash=acquisition.payout_cash_amount or Decimal(0),
-        reversed_credit=acquisition.payout_credit_cash_equivalent or Decimal(0),
-    )
+    return acquisition
+
+
+@router.get(
+    "/{acquisition_id}/void-items",
+    response_model=list[AcquisitionVoidItemRead],
+    operation_id="listAcquisitionVoidItems",
+)
+async def list_void_items(
+    acquisition_id: int, session: SessionDep, user: ManagerDep
+) -> list[AcquisitionVoidItemRead]:
+    """管理者選品作廢清單。"""
+    try:
+        return await AcquisitionService(session).void_items(user.store_id, acquisition_id)
+    except DomainError as exc:
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc

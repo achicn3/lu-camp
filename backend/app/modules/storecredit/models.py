@@ -48,20 +48,28 @@ class StoreCreditLedger(Base):
     __table_args__ = (
         # 冪等（I-5，沿 D-2）：同來源同類型只能有一筆；MANUAL 因 source_id NULL 不受限
         # （人工校正以 audit_log＋reason 留痕）。
-        UniqueConstraint(
+        Index(
+            "uq_store_credit_ledger_source",
             "store_id",
             "source_type",
             "source_id",
             "entry_type",
-            name="uq_store_credit_ledger_source",
+            unique=True,
+            postgresql_where=text("acquisition_void_id IS NULL"),
         ),
-        # 一列只能被沖正一次（adversarial review high）：不同 source 重複沖同一列
-        # 會重複退/扣款。部分唯一索引（NULL 不受限）。
+        UniqueConstraint("acquisition_void_id", name="uq_scl_acquisition_void"),
+        CheckConstraint(
+            "acquisition_void_id IS NULL OR (entry_type = 'REVERSAL' "
+            "AND source_type = 'ACQUISITION_ROLLBACK')",
+            name="ck_scl_acquisition_void_source",
+        ),
+        # 整筆沖正仍只能一次；選品沖正改按 acquisition_void_id 防重，
+        # trigger 守累計上限，允許同一收購入帳分次沖回。
         Index(
             "uq_store_credit_ledger_reversal_of",
             "reversal_of_id",
             unique=True,
-            postgresql_where=text("reversal_of_id IS NOT NULL"),
+            postgresql_where=text("reversal_of_id IS NOT NULL AND acquisition_void_id IS NULL"),
         ),
         # DB 層租戶配對（adversarial medium）：contact 必須屬於同一 store——
         # 服務層檢查之外的持久層保證，杜絕回填/直插造成跨店帳。
@@ -165,6 +173,7 @@ class StoreCreditLedger(Base):
     premium_rate_applied: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))  # CREDIT 必填
     source_type: Mapped[StoreCreditSourceType] = mapped_column(_enum_col(StoreCreditSourceType))
     source_id: Mapped[int | None] = mapped_column()
+    acquisition_void_id: Mapped[int | None] = mapped_column(ForeignKey("acquisition_voids.id"))
     reversal_of_id: Mapped[int | None] = mapped_column()  # 租戶綁定複合自參考 FK 見 __table_args__
     fingerprint: Mapped[str] = mapped_column(String(64))  # 內容 sha256（冪等比對）
     idempotency_key: Mapped[str | None] = mapped_column(String(80))  # MANUAL 校正用
@@ -246,6 +255,8 @@ FOR EACH ROW EXECUTE FUNCTION store_credit_ledger_immutable()
 CREATE OR REPLACE FUNCTION store_credit_reversal_guard() RETURNS trigger AS $$
 DECLARE
   original RECORD;
+  reversal_record RECORD;
+  reversed NUMERIC;
 BEGIN
   IF NEW.reversal_of_id IS NULL THEN
     RETURN NEW;
@@ -255,7 +266,26 @@ BEGIN
   IF original.entry_type = 'REVERSAL' THEN
     RAISE EXCEPTION '沖正列不可再被沖正';
   END IF;
-  IF NEW.signed_amount <> -original.signed_amount THEN
+  IF NEW.acquisition_void_id IS NOT NULL THEN
+    SELECT v.*, a.contact_id INTO reversal_record FROM acquisition_voids v
+      JOIN acquisitions a ON a.id = v.acquisition_id AND a.store_id = v.store_id
+      WHERE v.id = NEW.acquisition_void_id;
+    IF NOT FOUND OR reversal_record.store_id <> NEW.store_id
+       OR reversal_record.contact_id <> NEW.contact_id
+       OR reversal_record.acquisition_id <> NEW.source_id
+       OR reversal_record.reversed_credit <> -NEW.signed_amount
+       OR -reversal_record.reversed_credit_equivalent IS DISTINCT FROM NEW.cash_equivalent THEN
+      RAISE EXCEPTION '選品作廢沖回分錄與作廢紀錄不一致';
+    END IF;
+    PERFORM 1 FROM store_credit_accounts WHERE store_id = NEW.store_id
+      AND contact_id = NEW.contact_id FOR UPDATE;
+    SELECT COALESCE(-SUM(signed_amount), 0) INTO reversed
+      FROM store_credit_ledger WHERE reversal_of_id = NEW.reversal_of_id;
+    IF NEW.signed_amount >= 0 OR reversed - NEW.signed_amount > original.signed_amount THEN
+      RAISE EXCEPTION '選品作廢累計沖回不可超過原購物金';
+    END IF;
+  ELSIF EXISTS (SELECT 1 FROM store_credit_ledger WHERE reversal_of_id = NEW.reversal_of_id)
+        OR NEW.signed_amount <> -original.signed_amount THEN
     RAISE EXCEPTION '沖正金額必須為原列負值';
   END IF;
   IF NEW.source_type = 'SALE_VOID'

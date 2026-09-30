@@ -1387,7 +1387,8 @@ class SalesService:
         # 發票資訊（docs/24）：帶統編＝B2B；有載具或捐贈 → 不印證明聯（print_mark=False）。
         # 零元單（整單贈品）不開發票：發票總額有 `total > 0` 的 DB CHECK，且沒有銷售額
         # 就沒有可開立的憑證。銷售本身仍完整記錄，invoice_status 維持 NOT_ISSUED。
-        if settings.einvoice_enabled and total > 0:
+        # 全額購物金依門市規則不開票；成交總額與扣款仍完整保留。
+        if settings.einvoice_enabled and total > 0 and store_credit_amount < total:
             info = invoice_info if invoice_info is not None else InvoiceInfoInput()
             # LINE Pay 帶回客人綁定的載具時自動採用——**但只在店員三欄都沒填時**
             # （2026-09-06 裁示）。統編/載具/捐贈碼至多擇一，店員已經選過的是客人明確

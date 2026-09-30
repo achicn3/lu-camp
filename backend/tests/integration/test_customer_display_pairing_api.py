@@ -12,8 +12,10 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.security import encode_access_token, hash_password
@@ -393,7 +395,9 @@ async def test_relogin_same_installation_reuses_device_and_rotates_cookie(
     assert second_cookie is not None and second_cookie != first_cookie
 
 
+@pytest.mark.parametrize("payload", [{}, {"reason": "更換顧客平板"}])
 async def test_staff_can_unpair_and_kiosk_can_issue_a_fresh_code(
+    payload: dict[str, str],
     client: httpx.AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -423,10 +427,17 @@ async def test_staff_can_unpair_and_kiosk_can_issue_a_fresh_code(
     unpaired = await client.post(
         f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
         headers=_staff_auth(seeded.manager_token),
-        json={"reason": "更換顧客平板"},
+        json=payload,
     )
     assert unpaired.status_code == 200, unpaired.text
     assert unpaired.json()["paired_kiosk"] is None
+    audit = await db_session.scalar(select(AuditLog).where(
+        AuditLog.store_id == seeded.store_id, AuditLog.action == "UNPAIR_CUSTOMER_DISPLAY",
+        AuditLog.entity_id == str(terminal_id),
+    ))
+    assert audit is not None and audit.actor_user_id is not None
+    assert audit.before == {"kiosk_device_id": kiosk["device_id"]}
+    assert audit.after == {"kiosk_device_id": None, **payload}
 
     fresh = await client.post(
         "/api/v1/kiosk/pairing-codes",

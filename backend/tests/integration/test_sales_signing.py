@@ -19,9 +19,11 @@ from app.modules.contacts.models import Contact
 from app.modules.customerdisplay.models import CartSession
 from app.modules.customerdisplay.schemas import CartUpsertRequest
 from app.modules.customerdisplay.service import CustomerDisplayService
+from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
 from app.modules.inventory.models import CatalogProduct
 from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale
+from app.modules.settings.models import StoreSettings
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.signing.models import SignatureTask, SignatureTaskEvent
@@ -703,3 +705,39 @@ async def test_checkout_cannot_change_table_after_the_cart_was_signed(
     )
     assert resp.status_code == 422, resp.text
     assert "桌號" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "credit,cash,invoice_status", [("300", None, "NOT_ISSUED"), ("200", "100", "PENDING_ISSUE")]
+)
+async def test_full_credit_skips_invoice_but_keeps_sale(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    credit: str,
+    cash: str | None,
+    invoice_status: str,
+) -> None:
+    token, store_id, clerk_id, member_id, product_id = await _seed(db_session)
+    db_session.add(StoreSettings(store_id=store_id, einvoice_enabled=True))
+    await db_session.flush()
+    payload = _base_payload(product_id, member_id, credit=credit, cash=cash)
+    payload["expected_einvoice_enabled"] = True
+    context = await _signed(db_session, store_id=store_id, clerk_id=clerk_id, payload=payload)
+    response = await client.post(
+        "/api/v1/sales", json=_with_context(payload, context), headers=_auth(token)
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["total"] == "300"
+    assert response.json()["invoice_status"] == invoice_status
+    invoices = list(await db_session.scalars(select(Invoice).where(Invoice.store_id == store_id)))
+    queues = list(
+        await db_session.scalars(
+            select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.store_id == store_id)
+        )
+    )
+    assert len(invoices) == len(queues) == (0 if cash is None else 1)
+    if invoices:
+        assert invoices[0].total == Decimal("300")
+    assert await StoreCreditService(db_session).get_balance(store_id, member_id) == Decimal(
+        "2000"
+    ) - Decimal(credit)

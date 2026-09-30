@@ -148,7 +148,7 @@ export default function KioskPage() {
     },
   });
 
-  if (csrf === null || device.isError) {
+  if (csrf === null || device.error?.message === "AUTH_REQUIRED") {
     return (
       <KioskLogin
         initialError={
@@ -159,7 +159,7 @@ export default function KioskPage() {
       />
     );
   }
-  if (!device.data) return <Standby message="正在確認裝置身分…" />;
+  if (!device.data) return <Standby message={device.isError ? "連線中斷，正在重新連線…" : "正在確認裝置身分…"} />;
   if (device.data.paired_terminal === null) {
     return <PairingScreen device={device.data} csrf={csrf} />;
   }
@@ -271,19 +271,43 @@ function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) 
     return () => window.clearTimeout(timer);
   }, [pairingCode, pairingCodeExpiresAt]);
 
-  async function refreshCode() {
-    setError(null);
-    const { data } = await kioskApi.POST("/api/v1/kiosk/pairing-codes", {
-      headers: { "X-CSRF-Token": csrf },
-    });
-    if (data) {
-      setPairingCode(data.pairing_code);
-      setPairingCodeExpiresAt(data.pairing_code_expires_at);
-      queryClient.setQueryData(["kiosk", "device"], data);
-    } else {
-      setError("無法取得新配對碼，請確認店內網路。");
+  useEffect(() => {
+    if (pairingCode !== null) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    async function refreshCode() {
+      try {
+        // StrictMode 或短暫重掛共用同一個在途請求，避免兩組碼互相作廢。
+        const { data, response } = await queryClient.fetchQuery({
+          queryKey: ["kiosk", "pairing-code", device.device_id],
+          staleTime: 0,
+          retry: false,
+          queryFn: () => kioskApi.POST("/api/v1/kiosk/pairing-codes", {
+            headers: { "X-CSRF-Token": csrf },
+          }),
+        });
+        if (cancelled) return;
+        if (data) {
+          setError(null);
+          setPairingCode(data.pairing_code);
+          setPairingCodeExpiresAt(data.pairing_code_expires_at);
+          queryClient.setQueryData(["kiosk", "device"], data);
+          return;
+        }
+        if (response.status === 401 || response.status === 409) {
+          void queryClient.invalidateQueries({ queryKey: ["kiosk", "device"] });
+        }
+      } catch {
+        // 暫時離線時保留裝置身分，稍後自動重試。
+      }
+      if (!cancelled) {
+        setError("正在等待連線，連線恢復後會自動取得配對碼。");
+        timer = window.setTimeout(() => void refreshCode(), 5_000);
+      }
     }
-  }
+    void refreshCode();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [pairingCode, csrf, queryClient, device.device_id]);
 
   return (
     <main className="kiosk-pairing">
@@ -296,18 +320,14 @@ function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) 
             {pairingCode}
           </output>
         ) : (
-          <button type="button" className="btn-primary" onClick={refreshCode}>
-            取得配對碼
-          </button>
+          <p role="status">正在取得配對碼…</p>
         )}
         {error && (
           <p role="alert" className="form-error">
             {error}
           </p>
         )}
-        <button type="button" className="btn-ghost" onClick={refreshCode}>
-          重新產生配對碼
-        </button>
+
       </section>
     </main>
   );
@@ -348,7 +368,10 @@ function KioskConsole({
     };
     source.addEventListener("open", reload);
     source.addEventListener("state", reload);
-    source.addEventListener("error", () => setStreamConnected(false));
+    source.addEventListener("error", () => {
+      setStreamConnected(false);
+      void queryClient.invalidateQueries({ queryKey: ["kiosk", "device"] });
+    });
     return () => source.close();
   }, [queryClient]);
 
@@ -365,8 +388,9 @@ function KioskConsole({
         await queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
       }
     }
-    void report();
-    const timer = window.setInterval(() => void report(), 15_000);
+    const heartbeat = () => void report().catch(() => setStreamConnected(false));
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 15_000);
     return () => window.clearInterval(timer);
   }, [cart.data?.id, cart.data?.revision, csrf, queryClient]);
 
