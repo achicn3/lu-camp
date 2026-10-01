@@ -4,6 +4,7 @@
 金額為含稅整數元（§6）：unit_price 必須為正整數元；選項 price_delta 為 0 以上整數元。
 """
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -23,6 +24,7 @@ from app.modules.menu.models import (
     MenuOptionGroup,
     MenuStockAdjustment,
 )
+from app.modules.menu.photos import process_photo
 from app.modules.menu.repository import MenuRepository
 from app.shared.enums import MenuStockAdjustReason, MenuStockTarget
 from app.shared.exceptions import (
@@ -42,6 +44,7 @@ SALE_LINE_DESCRIPTION_MAX: Final = 300
 
 # 區分「未提供（不變）」與「明確設為 None（清空）」——目前僅 category 需要清空語意。
 _UNSET: Final = object()
+_PHOTO_KEY: Final = re.compile(r"[0-9a-f]{64}")
 
 
 def _validate_price(unit_price: Decimal) -> None:
@@ -221,6 +224,62 @@ class MenuService:
             },
         )
         return item
+
+    async def set_item_photo(
+        self, store_id: int, item_id: int, data: bytes, *, actor_user_id: int
+    ) -> MenuItem:
+        """上傳品項照片（docs/44 §3.4）：轉 WebP、去 EXIF、依內容雜湊去重，換照片寫稽核。
+
+        不合格的檔案丟 `MenuPhotoInvalid`，品項不動。
+        """
+        item = await self._repo.get_for_update(store_id, item_id)
+        if item is None or item.archived_at is not None:
+            raise MenuItemNotFound(f"找不到菜單品項 {item_id}")
+        photo = process_photo(data)
+        await self._repo.save_photo(
+            store_id,
+            sha256=photo.sha256,
+            content=photo.content,
+            width=photo.width,
+            height=photo.height,
+        )
+        await self._change_photo(store_id, item, photo.sha256, actor_user_id)
+        return item
+
+    async def clear_item_photo(
+        self, store_id: int, item_id: int, *, actor_user_id: int
+    ) -> MenuItem:
+        """移除品項照片（照片本身保留，已發佈的線上菜單可能還在引用）。"""
+        item = await self._repo.get_for_update(store_id, item_id)
+        if item is None or item.archived_at is not None:
+            raise MenuItemNotFound(f"找不到菜單品項 {item_id}")
+        await self._change_photo(store_id, item, None, actor_user_id)
+        return item
+
+    async def _change_photo(
+        self, store_id: int, item: MenuItem, sha256: str | None, actor_user_id: int
+    ) -> None:
+        before = item.photo_sha256
+        if before == sha256:
+            return
+        item.photo_sha256 = sha256
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_MENU_ITEM_PHOTO",
+            entity_type="menu_item",
+            entity_id=str(item.id),
+            before={"photo_sha256": before},
+            after={"photo_sha256": sha256},
+        )
+
+    async def photo_content(self, sha256: str) -> bytes | None:
+        """公開讀取照片（線上菜單、POS 磚）。雜湊格式不對直接當找不到。"""
+        if _PHOTO_KEY.fullmatch(sha256) is None:
+            return None
+        return await self._repo.photo_content(sha256)
 
     async def update_menu_item(
         self,

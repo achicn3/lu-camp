@@ -1434,6 +1434,21 @@
         "title": "BackupTrigger",
         "type": "string"
       },
+      "Body_uploadMenuItemPhoto": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "JPEG／PNG／WebP／HEIC，10 MB 以內",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_uploadMenuItemPhoto",
+        "type": "object"
+      },
       "BrandCreate": {
         "description": "品牌建立（查無即建；同名 get_or_create 冪等）。",
         "properties": {
@@ -11052,6 +11067,17 @@
             "title": "Option Groups",
             "type": "array"
           },
+          "photo_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Sha256"
+          },
           "remaining": {
             "anyOf": [
               {
@@ -11100,6 +11126,7 @@
           "category",
           "category_id",
           "description",
+          "photo_sha256",
           "is_available",
           "sort_order",
           "daily_limited",
@@ -26310,6 +26337,109 @@
         ]
       }
     },
+    "/api/v1/menu-items/{item_id}/photo": {
+      "delete": {
+        "operationId": "removeMenuItemPhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Menu Item Photo",
+        "tags": [
+          "menu"
+        ]
+      },
+      "post": {
+        "description": "上傳／更換品項照片：後端轉成 WebP、長邊 1200、去掉 EXIF（含 GPS）。",
+        "operationId": "uploadMenuItemPhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_uploadMenuItemPhoto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Menu Item Photo",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
     "/api/v1/menu-option-groups": {
       "get": {
         "operationId": "listMenuOptionGroups",
@@ -26640,6 +26770,45 @@
           }
         ],
         "summary": "Update Menu Option",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/menu-photos/{photo_sha256}.webp": {
+      "get": {
+        "description": "菜單照片（**不需登入**）：`<img>` 帶不了 Bearer，照片本來就要公開在線上菜單；\n網址是內容雜湊，猜不到也列舉不了，內容永不改變所以可以長期快取。",
+        "operationId": "getMenuPhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "photo_sha256",
+            "required": true,
+            "schema": {
+              "title": "Photo Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Menu Photo",
         "tags": [
           "menu"
         ]

@@ -2573,6 +2573,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/menu-items/{item_id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Menu Item Photo
+         * @description 上傳／更換品項照片：後端轉成 WebP、長邊 1200、去掉 EXIF（含 GPS）。
+         */
+        post: operations["uploadMenuItemPhoto"];
+        /** Remove Menu Item Photo */
+        delete: operations["removeMenuItemPhoto"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/menu-option-groups": {
         parameters: {
             query?: never;
@@ -2642,6 +2663,27 @@ export interface paths {
         head?: never;
         /** Update Menu Option */
         patch: operations["updateMenuOption"];
+        trace?: never;
+    };
+    "/api/v1/menu-photos/{photo_sha256}.webp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Menu Photo
+         * @description 菜單照片（**不需登入**）：`<img>` 帶不了 Bearer，照片本來就要公開在線上菜單；
+         *     網址是內容雜湊，猜不到也列舉不了，內容永不改變所以可以長期快取。
+         */
+        get: operations["getMenuPhoto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/opening-check/items": {
@@ -4518,6 +4560,14 @@ export interface components {
          * @enum {string}
          */
         BackupTrigger: "SCHEDULED" | "MANUAL";
+        /** Body_uploadMenuItemPhoto */
+        Body_uploadMenuItemPhoto: {
+            /**
+             * File
+             * @description JPEG／PNG／WebP／HEIC，10 MB 以內
+             */
+            file: string;
+        };
         /**
          * BrandCreate
          * @description 品牌建立（查無即建；同名 get_or_create 冪等）。
@@ -8051,6 +8101,8 @@ export interface components {
             name: string;
             /** Option Groups */
             option_groups: components["schemas"]["MenuOptionGroupRead"][];
+            /** Photo Sha256 */
+            photo_sha256: string | null;
             /** Remaining */
             remaining: number | null;
             /** Sort Order */
@@ -15390,6 +15442,72 @@ export interface operations {
             };
         };
     };
+    uploadMenuItemPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_uploadMenuItemPhoto"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    removeMenuItemPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listMenuOptionGroups: {
         parameters: {
             query?: never;
@@ -15597,6 +15715,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MenuOptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getMenuPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                photo_sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/webp": unknown;
                 };
             };
             /** @description Validation Error */

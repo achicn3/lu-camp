@@ -8,6 +8,7 @@ import { type FormEvent, useState } from "react";
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
+import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -293,6 +294,9 @@ function MenuItemRow({
 
   return (
     <tr>
+      <td>
+        <MenuPhotoCell item={item} onChanged={onChanged} />
+      </td>
       <td>{item.name}</td>
       <td>{item.category ?? "—"}</td>
       <td>
@@ -514,6 +518,7 @@ export default function MenuPage() {
           <table className="inv-table">
             <thead>
               <tr>
+                <th>照片</th>
                 <th>品名</th>
                 <th>分類</th>
                 <th>售價</th>

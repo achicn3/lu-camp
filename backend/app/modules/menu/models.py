@@ -21,9 +21,12 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
+    LargeBinary,
     Numeric,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -50,10 +53,37 @@ class MenuCategory(Base, TimestampMixin):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class MenuPhoto(Base, TimestampMixin):
+    """菜單照片（docs/44 §3.4）：已轉成 WebP、去掉 EXIF 的成品，以內容雜湊去重。
+
+    存在資料庫（店主 2026-10-02 裁示）：每晚備份到 R2 與還原演練自動涵蓋，換機不掉照片。
+    只增不刪——品項換照片後，舊照片可能仍被已發佈的線上菜單快照引用。
+    """
+
+    __tablename__ = "menu_photos"
+    __table_args__ = (
+        UniqueConstraint("store_id", "sha256", name="uq_menu_photos_store_sha256"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="ck_menu_photos_sha256_hex"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    width: Mapped[int] = mapped_column()
+    height: Mapped[int] = mapped_column()
+
+
 class MenuItem(Base, TimestampMixin):
     __tablename__ = "menu_items"
     __table_args__ = (
         CheckConstraint("stock_qty IS NULL OR stock_qty >= 0", name="ck_menu_items_stock_nonneg"),
+        # 照片要是同一家店的（複合外鍵，不能指到別店的照片）。
+        ForeignKeyConstraint(
+            ["store_id", "photo_sha256"],
+            ["menu_photos.store_id", "menu_photos.sha256"],
+            name="fk_menu_items_photo",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -68,6 +98,8 @@ class MenuItem(Base, TimestampMixin):
     category_id: Mapped[int | None] = mapped_column(ForeignKey("menu_categories.id"), index=True)
     # 給客人看的介紹（風味、份量…）；線上點餐與 POS 共用。
     description: Mapped[str | None] = mapped_column(String(500))
+    # 照片（docs/44 §3.4）：`menu_photos` 的內容雜湊；沒照片＝null。
+    photo_sha256: Mapped[str | None] = mapped_column(String(64))
     # POS 是否可點（上架/停售切換，不影響歷史）。
     is_available: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     # 每日限量（docs/44 §3.7）：勾了就每天開店歸零，要填當天份數才能賣；沒勾＝不限量。

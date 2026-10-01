@@ -8,12 +8,13 @@
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.menu.models import MenuItem
+from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.menu.schemas import (
     DailyStockAdjustRequest,
     DailyStockEntryRead,
@@ -40,6 +41,7 @@ from app.shared.exceptions import (
     ItemDeleteBlocked,
     MenuEntryNotFound,
     MenuItemNotFound,
+    MenuPhotoInvalid,
     MenuStockConflict,
     SaleLineInvalid,
 )
@@ -139,6 +141,76 @@ async def update_menu_item(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return await _read_item(session, item)
+
+
+# ── 照片（docs/44 §3.4）──
+
+_PHOTO_CACHE = "public, max-age=31536000, immutable"
+
+
+@router.post("/{item_id}/photo", response_model=MenuItemRead, operation_id="uploadMenuItemPhoto")
+async def upload_menu_item_photo(
+    item_id: int,
+    session: SessionDep,
+    user: ManagerDep,
+    file: Annotated[UploadFile, File(description="JPEG／PNG／WebP／HEIC，10 MB 以內")],
+) -> MenuItemRead:
+    """上傳／更換品項照片：後端轉成 WebP、長邊 1200、去掉 EXIF（含 GPS）。"""
+    # 只讀到上限＋1：超過就知道太大，不必把整個檔案讀進記憶體。
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="照片超過 10 MB，請先縮小再上傳",
+        )
+    try:
+        item = await MenuService(session).set_item_photo(
+            user.store_id, item_id, data, actor_user_id=user.id
+        )
+    except MenuItemNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MenuPhotoInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return await _read_item(session, item)
+
+
+@router.delete("/{item_id}/photo", response_model=MenuItemRead, operation_id="removeMenuItemPhoto")
+async def remove_menu_item_photo(
+    item_id: int, session: SessionDep, user: ManagerDep
+) -> MenuItemRead:
+    try:
+        item = await MenuService(session).clear_item_photo(
+            user.store_id, item_id, actor_user_id=user.id
+        )
+    except MenuItemNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return await _read_item(session, item)
+
+
+@entries_router.get(
+    "/menu-photos/{photo_sha256}.webp",
+    operation_id="getMenuPhoto",
+    response_class=Response,
+    responses={200: {"content": {"image/webp": {}}}},
+)
+async def get_menu_photo(photo_sha256: str, session: SessionDep) -> Response:
+    """菜單照片（**不需登入**）：`<img>` 帶不了 Bearer，照片本來就要公開在線上菜單；
+    網址是內容雜湊，猜不到也列舉不了，內容永不改變所以可以長期快取。"""
+    content = await MenuService(session).photo_content(photo_sha256)
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到照片")
+    return Response(
+        content=content,
+        media_type="image/webp",
+        headers={"Cache-Control": _PHOTO_CACHE, "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.delete("/{item_id}", response_model=MenuItemRead, operation_id="archiveMenuItem")

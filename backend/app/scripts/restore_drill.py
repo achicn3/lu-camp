@@ -182,6 +182,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "餐飲-份數調整（筆數／加減合計）",
         "SELECT count(*)::text || '/' || COALESCE(SUM(delta),0)::text FROM menu_stock_adjustments",
     ),
+    # 菜單照片（docs/44 §3.4）：存在資料庫裡，比對內容雜湊才知道圖檔本身有沒有完整還原。
+    (
+        "餐飲-照片（張數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(md5(content), ',' ORDER BY store_id, sha256)), '-') "
+        "FROM menu_photos",
+    ),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
     ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),

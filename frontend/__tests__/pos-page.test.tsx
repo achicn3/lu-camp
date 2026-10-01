@@ -295,7 +295,7 @@ describe("/pos 結帳頁", () => {
 
   it("每日限量的餐飲磚：顯示剩幾份；售完或今天沒填就不能點", async () => {
     const MENU = [
-      { id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, daily_limited: false, remaining: null, option_groups: [] },
+      { id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, daily_limited: false, remaining: null, option_groups: [], photo_sha256: "b".repeat(64) },
       { id: 6, store_id: 1, name: "戚風", unit_price: "90", category: "甜點", is_available: true, sort_order: 1, daily_limited: true, remaining: 2, stock_set_today: true, option_groups: [] },
       { id: 7, store_id: 1, name: "司康", unit_price: "80", category: "甜點", is_available: true, sort_order: 2, daily_limited: true, remaining: 0, stock_set_today: true, option_groups: [] },
       { id: 8, store_id: 1, name: "瑪德蓮", unit_price: "60", category: "甜點", is_available: true, sort_order: 3, daily_limited: true, remaining: 0, stock_set_today: false, option_groups: [] },
@@ -319,6 +319,11 @@ describe("/pos 結帳頁", () => {
     expect((unset as HTMLButtonElement).disabled).toBe(true);
     const coffee = screen.getByRole("button", { name: /手沖-耶加/ });
     expect(coffee.textContent).not.toContain("剩");
+    // 有照片的磚顯示照片（docs/44 §3.4）；沒照片的不放空圖。
+    expect(coffee.querySelector("img")?.getAttribute("src")).toMatch(
+      new RegExp(`/api/v1/menu-photos/${"b".repeat(64)}\\.webp$`),
+    );
+    expect(cake.querySelector("img")).toBeNull();
   });
 
   it("掃描序號品加入購物車、總額更新、現金結帳→完成＋列印對話框", async () => {

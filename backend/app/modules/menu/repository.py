@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import ColumnElement, case, delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.menu.models import (
@@ -13,6 +14,7 @@ from app.modules.menu.models import (
     MenuItemOptionGroup,
     MenuOption,
     MenuOptionGroup,
+    MenuPhoto,
     MenuStockAdjustment,
 )
 from app.shared.enums import MenuStockAdjustReason
@@ -33,6 +35,23 @@ class MenuRepository:
         self._session.add(row)
         await self._session.flush()
         return row
+
+    async def save_photo(
+        self, store_id: int, *, sha256: str, content: bytes, width: int, height: int
+    ) -> None:
+        """存照片；同店同雜湊已存在就不動（同一張照片同時上傳兩次也不會撞唯一鍵）。"""
+        await self._session.execute(
+            insert(MenuPhoto)
+            .values(store_id=store_id, sha256=sha256, content=content, width=width, height=height)
+            .on_conflict_do_nothing(constraint="uq_menu_photos_store_sha256")
+        )
+
+    async def photo_content(self, sha256: str) -> bytes | None:
+        """依雜湊取照片內容。雜湊即內容，不同店同雜湊的內容必然相同，取任一筆即可。"""
+        content: bytes | None = await self._session.scalar(
+            select(MenuPhoto.content).where(MenuPhoto.sha256 == sha256).limit(1)
+        )
+        return content
 
     async def get(self, store_id: int, item_id: int) -> MenuItem | None:
         """取單一品項（含已封存；供管理/結帳解析）。"""

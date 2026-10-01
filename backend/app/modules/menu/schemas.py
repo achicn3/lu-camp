@@ -254,6 +254,8 @@ class MenuItemRead(BaseModel):
     category: str | None
     category_id: int | None
     description: str | None
+    # 照片內容雜湊；圖檔在 `GET /menu-photos/{photo_sha256}.webp`（不需登入）。沒照片＝null。
+    photo_sha256: str | None
     is_available: bool
     sort_order: int
     daily_limited: bool
@@ -275,6 +277,7 @@ class MenuItemRead(BaseModel):
             category=detail.category.name if detail.category is not None else None,
             category_id=detail.category.id if detail.category is not None else None,
             description=item.description,
+            photo_sha256=item.photo_sha256,
             is_available=item.is_available,
             sort_order=item.sort_order,
             daily_limited=item.daily_limited,

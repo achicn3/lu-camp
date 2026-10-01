@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { offerDisplay, targetSummary } from "@/features/campaigns/campaigns";
+import { menuPhotoUrl } from "@/features/menu/menuPhoto";
 import { MemberPanel } from "@/features/pos/MemberPanel";
 import {
   PosCustomerDisplay,
@@ -1224,6 +1225,15 @@ function MenuPanel({
               onClick={() => setSelected(item)}
               disabled={disabled || soldOut}
             >
+              {typeof item.photo_sha256 === "string" && (
+                // eslint-disable-next-line @next/next/no-img-element -- 後端已轉好 WebP，不經 next/image 最佳化
+                <img
+                  className="pos-menu-tile-photo"
+                  src={menuPhotoUrl(item.photo_sha256)}
+                  alt=""
+                  loading="lazy"
+                />
+              )}
               <span className="pos-menu-tile-name">{item.name}</span>
               <span className="pos-menu-tile-price">
                 <Money value={parseNtd(item.unit_price) ?? 0} />

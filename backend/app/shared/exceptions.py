@@ -319,6 +319,10 @@ class DuplicateMenuEntry(DomainError):
     """菜單分類／選項群組／同群組選項名稱重複。"""
 
 
+class MenuPhotoInvalid(DomainError):
+    """菜單照片不是可接受的圖片（格式不支援、檔案損壞、超過大小或像素上限）。"""
+
+
 class InvoiceNotFound(DomainError):
     """指定的發票不存在（或不屬於本店）。"""
 

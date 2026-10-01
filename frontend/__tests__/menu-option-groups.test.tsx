@@ -257,6 +257,7 @@ describe("品項的選項與介紹", () => {
     category: "咖啡",
     category_id: 1,
     description: null,
+    photo_sha256: null,
     is_available: true,
     sort_order: 0,
     daily_limited: false,

@@ -172,14 +172,14 @@ describe("/menu 餐飲菜單管理頁", () => {
     stubFetch((url) => (url.includes("/menu-items") ? json(ITEMS) : null));
     renderPage("MANAGER");
     expect(await screen.findByText("手沖-耶加")).toBeTruthy();
-    // 欄位順序：品名｜分類｜售價｜成本｜預估毛利率｜狀態｜操作
+    // 欄位順序：照片｜品名｜分類｜售價｜成本｜預估毛利率｜狀態｜操作
     const row = screen.getByText("手沖-耶加").closest("tr")!;
-    expect(row.cells[3].textContent).toContain("60");
+    expect(row.cells[4].textContent).toContain("60");
     // 售價 180 含稅、成本 60：未稅實得 171 − 手續費 4 = 167 → 毛利率 (167−60)/167 = 64%
-    expect(row.cells[4].textContent).toBe("64%");
+    expect(row.cells[5].textContent).toBe("64%");
     const noCost = screen.getByText("季節限定").closest("tr")!;
-    expect(noCost.cells[3].textContent).toContain("未填");
-    expect(noCost.cells[4].textContent).toBe("—");  // 成本未知就不編造毛利率
+    expect(noCost.cells[4].textContent).toContain("未填");
+    expect(noCost.cells[5].textContent).toBe("—");  // 成本未知就不編造毛利率
   });
 
   it("建立品項：填成本＋毛利率自動帶出建議售價，並把成本一起送出", async () => {
@@ -222,7 +222,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     );
     // 但既有品項的預估毛利率不可用 0 費率硬算（會高估店家收益）
     const row = screen.getByText("手沖-耶加").closest("tr")!;
-    expect(row.cells[4].textContent).toBe("—");
+    expect(row.cells[5].textContent).toBe("—");
   });
 
   it("沒填成本就不送 unit_cost（留 null＝成本未知，不可當 0）", async () => {
