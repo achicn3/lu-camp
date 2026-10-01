@@ -84,6 +84,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("收購-單數", "SELECT count(*) FROM acquisitions"),
     ("收購-付現合計", "SELECT COALESCE(SUM(total_cash_paid),0) FROM acquisitions"),
     ("收購-作廢筆數", "SELECT count(*) FROM acquisitions WHERE voided_at IS NOT NULL"),
+    ("收購-選品作廢筆數", "SELECT count(*) FROM acquisition_voids"),
+    (
+        "收購-選品作廢沖回雜湊",
+        "SELECT md5(COALESCE(string_agg(acquisition_id || ':' || item_ids::text || ':'"
+        " || reversed_cash || ':' || reversed_credit, ',' ORDER BY id),'')) FROM acquisition_voids",
+    ),
     ("庫存-品牌數", "SELECT count(*) FROM brands"),
     ("庫存-分類數", "SELECT count(*) FROM categories"),
     ("庫存-型號數", "SELECT count(*) FROM product_models"),

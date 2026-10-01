@@ -156,11 +156,11 @@ try {
   ok("顯示序號條碼", await page.locator("text=序號條碼").isVisible());
   await page.screenshot({ path: `${SHOTS}/02-buyout-done.png` });
 
-  // 7) F6.5：管理者作廢剛建立的收購（這筆有誤？作廢收購 → 填原因 → 二次確認）
+  // 7) F6.5：管理者作廢剛建立的收購（這筆有誤？作廢整張收購 → 填原因 → 二次確認）
   const orderText = (await page.locator(".acq-result").textContent()) ?? "";
   const orderId = orderText.match(/#(\d+)/)?.[1] ?? "";
   ok("取得收購單號", orderId !== "", `#${orderId}`);
-  await page.click('button:has-text("這筆有誤？作廢收購")');
+  await page.click('button:has-text("這筆有誤？作廢整張收購")');
   await page.waitForSelector('[role="dialog"][aria-label="作廢收購確認"]');
   ok("作廢確認對話框跳出", true);
   await page.fill('textarea[aria-label="作廢原因"]', "煙霧測試誤建，作廢");

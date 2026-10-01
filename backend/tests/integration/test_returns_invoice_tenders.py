@@ -184,13 +184,10 @@ def _tenders(customer_return: object) -> list[tuple[TenderType, Decimal]]:
 # ── A1：純購物金 ─────────────────────────────────────────────────────────────
 
 
-async def test_store_credit_full_return_voids_invoice_and_restores_credit(
-    db_session: AsyncSession, tmp_path: Path
+async def test_store_credit_full_return_without_invoice_restores_credit(
+    db_session: AsyncSession,
 ) -> None:
-    """購物金付款整筆退：發票作廢（全額）、購物金全額回補、抽屜不動。
-
-    發票金額是商品含稅總額，與「客人是用購物金付的」無關——作廢的是整張發票。
-    """
+    """全額購物金付款整筆退：該筆不開發票（ADR-026），購物金全額回補、抽屜不動。"""
     store_id, clerk_id, member_id = await _seed(db_session)
     code = await _item(db_session, store_id, f"SC-{store_id}", "1000")
     credit = StoreCreditService(db_session)
@@ -223,7 +220,8 @@ async def test_store_credit_full_return_voids_invoice_and_restores_credit(
         cart_session_id=signed.cart_session_id,
         cart_revision=signed.cart_revision,
     )
-    invoice = await _issue(db_session, store_id, sale.id, tmp_path)
+    assert sale.invoice_status is SaleInvoiceStatus.NOT_ISSUED
+    assert await EInvoiceService(db_session).get_invoice_for_sale(store_id, sale.id) is None
     assert await credit.get_balance(store_id, member_id) == Decimal("0")
     sale_lines = await SalesService(db_session).get_lines(sale.id)
     cash_before = await db_session.scalar(
@@ -250,9 +248,6 @@ async def test_store_credit_full_return_voids_invoice_and_restores_credit(
 
     assert _tenders(customer_return) == [(TenderType.STORE_CREDIT, Decimal("1000"))]
     assert await credit.get_balance(store_id, member_id) == Decimal("1000")
-    await db_session.refresh(invoice)
-    assert invoice.status is InvoiceStatus.VOID_PENDING
-    assert invoice.void_reason is InvoiceVoidReason.FULL_RETURN
     refreshed = await SalesService(db_session).get_sale(store_id, sale.id)
     assert refreshed is not None and refreshed.status is SaleStatus.RETURNED
     # 購物金退款不進錢櫃
