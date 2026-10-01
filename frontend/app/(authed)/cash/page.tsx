@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { parseAmountInput } from "@/features/cash/money-input";
+import { type DailyStockEntry, useDailyStock } from "@/features/menu/DailyStockPanel";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -271,24 +272,68 @@ function AdjustmentHistory({ sessionId }: { sessionId: number }) {
   );
 }
 
+function stockKey(entry: DailyStockEntry): string {
+  return `${entry.kind}-${entry.id}`;
+}
+
+/** 關帳時的報廢結果（docs/49 F4）：記到的、沒記到的（附原因）。 */
+interface LeftoverWasteResult {
+  wasted: string[];
+  failed: string[];
+}
+
+/**
+ * 每日限量的剩餘份數隔天會自動歸零：沒記成報廢的就默默消失，報廢統計會偏低。
+ * 關帳時逐項用既有的「減少份數」記成報廢——它是原子操作、不會扣到負數，
+ * 回應遺失後重送也只會被「已經是 0」擋下，不會重複報廢。
+ */
+async function wasteLeftovers(entries: DailyStockEntry[]): Promise<LeftoverWasteResult> {
+  const result: LeftoverWasteResult = { wasted: [], failed: [] };
+  for (const entry of entries) {
+    try {
+      const { data, error } = await api.POST(
+        "/api/v1/menu-daily-stock/{kind}/{target_id}/adjust",
+        {
+          params: { path: { kind: entry.kind, target_id: entry.id } },
+          body: { delta: -entry.remaining, reason: "WASTE" },
+        },
+      );
+      if (data) result.wasted.push(`${entry.label} ${entry.remaining} 份`);
+      else result.failed.push(`${entry.label}（${extractDetail(error) ?? "記錄失敗"}）`);
+    } catch {
+      result.failed.push(`${entry.label}（連線失敗）`);
+    }
+  }
+  return result;
+}
+
 function CloseCard({
   sessionId,
   onClosed,
 }: {
   sessionId: number;
-  onClosed: (closed: CashSession) => void;
+  onClosed: (closed: CashSession, waste: LeftoverWasteResult) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 每日限量今天還有剩的（docs/49 F4）：預設全勾報廢；明天還能賣的取消勾選即可。不擋關帳。
+  const dailyStock = useDailyStock();
+  const leftovers = (dailyStock.data ?? []).filter(
+    (entry) => entry.set_today && entry.remaining > 0,
+  );
+  const [keep, setKeep] = useState<Set<string>>(new Set());
   const mutation = useMutation({
     mutationFn: async (counted: number) => {
+      const waste = await wasteLeftovers(
+        leftovers.filter((entry) => !keep.has(stockKey(entry))),
+      );
       const { data, error: apiError } = await api.POST("/api/v1/cash-sessions/{session_id}/close", {
         params: { path: { session_id: sessionId } },
         body: { counted_amount: String(counted) },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "結帳失敗");
-      return data;
+      return { closed: data, waste };
     },
-    onSuccess: onClosed,
+    onSuccess: ({ closed, waste }) => onClosed(closed, waste),
     onError: (err: Error) => setError(err.message),
   });
 
@@ -307,6 +352,37 @@ function CloseCard({
   return (
     <form className="card" onSubmit={onSubmit}>
       <h2>結帳</h2>
+      {leftovers.length > 0 && (
+        <fieldset className="cash-leftovers">
+          <legend>今日餐點還有剩（每日限量明天會歸零）</legend>
+          <p className="hint">
+            勾選的會在結帳時記成報廢；明天還能賣的請取消勾選，明天開店填份數時把它算進去。
+          </p>
+          {leftovers.map((entry) => {
+            const key = stockKey(entry);
+            return (
+              <label key={key} className="field field-toggle">
+                <input
+                  type="checkbox"
+                  checked={!keep.has(key)}
+                  aria-label={`${entry.label} 剩 ${entry.remaining} 份，記成報廢`}
+                  onChange={(e) =>
+                    setKeep((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                />
+                <span className="field-label">
+                  {entry.label} 剩 {entry.remaining} 份 → 報廢
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+      )}
       <label className="field">
         <span className="field-label">實點金額</span>
         <input name="counted_amount" inputMode="numeric" required />
@@ -323,7 +399,15 @@ function CloseCard({
   );
 }
 
-function ClosedSummary({ closed, onReopen }: { closed: CashSession; onReopen: () => void }) {
+function ClosedSummary({
+  closed,
+  onReopen,
+  waste,
+}: {
+  closed: CashSession;
+  onReopen: () => void;
+  waste: LeftoverWasteResult | null;
+}) {
   const varianceValue = closed.variance === null ? null : parseNtd(closed.variance);
   return (
     <div className="card">
@@ -351,6 +435,14 @@ function ClosedSummary({ closed, onReopen }: { closed: CashSession; onReopen: ()
       {varianceValue !== null && varianceValue !== 0 && (
         <p className="form-error">現金差異非零，已留紀錄；請依門市流程查核。</p>
       )}
+      {waste !== null && waste.wasted.length > 0 && (
+        <p className="hint">已記成報廢：{waste.wasted.join("、")}</p>
+      )}
+      {waste !== null && waste.failed.length > 0 && (
+        <p role="alert" className="form-error">
+          這幾項沒記成報廢，請到開店前檢查頁確認份數：{waste.failed.join("、")}
+        </p>
+      )}
       <button type="button" className="btn-primary" onClick={onReopen}>
         重新開帳
       </button>
@@ -369,6 +461,7 @@ function extractDetail(error: unknown): string | null {
 export default function CashPage() {
   const queryClient = useQueryClient();
   const [closedResult, setClosedResult] = useState<CashSession | null>(null);
+  const [wasteResult, setWasteResult] = useState<LeftoverWasteResult | null>(null);
   const session = decodeSession();
   const current = useQuery({
     queryKey: ["cash-session", "current"],
@@ -397,6 +490,7 @@ export default function CashPage() {
         <h1 className="page-title">現金對帳</h1>
         <ClosedSummary
           closed={closedResult}
+          waste={wasteResult}
           onReopen={() => {
             setClosedResult(null);
             refresh();
@@ -435,7 +529,12 @@ export default function CashPage() {
           <AdjustmentHistory sessionId={open.id} />
           <CloseCard
             sessionId={open.id}
-            onClosed={(closed) => {
+            onClosed={(closed, waste) => {
+              setWasteResult(waste);
+              // 份數變了：開店檢查、POS 磚、菜單頁都要重讀。
+              for (const key of [["menu-daily-stock"], ["menu-items"], ["opening-check"]]) {
+                void queryClient.invalidateQueries({ queryKey: key });
+              }
               // 同步失效快取：避免導航離開再回來時，殘留的 OPEN session 快取
               // 讓使用者對「已關帳的錢櫃」看到/操作結帳與調整控制（Codex P2）。
               setClosedResult(closed);

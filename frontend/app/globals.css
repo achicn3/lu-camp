@@ -5814,3 +5814,24 @@ a.btn-ghost {
   padding-left: var(--sp-5, 24px);
   color: var(--ink-soft);
 }
+
+/* 關帳提醒剩餘份數（docs/49 F4）：每項一行、留點間距，勾選框不要貼著說明文字。 */
+.cash-leftovers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.cash-leftovers legend {
+  padding: 0 var(--sp-2);
+  font-weight: 600;
+}
+.cash-leftovers .hint {
+  margin: 0 0 var(--sp-1);
+}
+.cash-leftovers .field-toggle {
+  margin: 0;
+}

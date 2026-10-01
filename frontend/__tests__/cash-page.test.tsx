@@ -153,6 +153,75 @@ describe("/cash", () => {
     expect(screen.getByText("-100")).toBeDefined(); // 差異
   });
 
+  it("關帳提醒（docs/49 F4）：每日限量還有剩的預設全勾報廢，先記報廢再結帳；取消勾選的不動", async () => {
+    loginAs("CLERK");
+    const calls: { url: string; body: string }[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
+      if (url.includes("/menu-daily-stock") && init?.method === "GET") {
+        return json([
+          { kind: "item", id: 3, label: "戚風", remaining: 2, set_today: true },
+          { kind: "item", id: 4, label: "司康", remaining: 1, set_today: true },
+          { kind: "item", id: 5, label: "布朗尼", remaining: 0, set_today: true },
+        ]);
+      }
+      if (url.includes("/adjust") && init?.method === "POST") {
+        calls.push({ url, body: String(init.body) });
+        return json({ kind: "item", id: 3, label: "戚風", remaining: 0, set_today: true });
+      }
+      if (url.includes("/cash-sessions/9/close") && init?.method === "POST") {
+        calls.push({ url, body: String(init.body) });
+        return json({
+          ...OPEN_SESSION,
+          status: "CLOSED",
+          counted_amount: "5200",
+          expected_amount: "5200",
+          variance: "0",
+        });
+      }
+      return null;
+    });
+    renderPage();
+    const cake = await screen.findByLabelText("戚風 剩 2 份，記成報廢");
+    expect((cake as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByLabelText(/布朗尼/)).toBeNull(); // 賣完的不列
+    await userEvent.click(screen.getByLabelText("司康 剩 1 份，記成報廢")); // 明天還能賣
+    await userEvent.type(screen.getByLabelText("實點金額"), "5200");
+    await userEvent.click(screen.getByRole("button", { name: "結帳" }));
+    expect(await screen.findByText("已結帳")).toBeDefined();
+    expect(calls.map((c) => c.url.replace(/^.*\/api\/v1/, ""))).toEqual([
+      "/menu-daily-stock/item/3/adjust",
+      "/cash-sessions/9/close",
+    ]);
+    expect(JSON.parse(calls[0].body)).toEqual({ delta: -2, reason: "WASTE" });
+    expect(screen.getByText("已記成報廢：戚風 2 份")).toBeDefined();
+  });
+
+  it("關帳時報廢失敗不擋結帳，但要講明哪幾項沒記到", async () => {
+    loginAs("CLERK");
+    stubFetch((url, init) => {
+      if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
+      if (url.includes("/menu-daily-stock") && init?.method === "GET") {
+        return json([{ kind: "item", id: 3, label: "戚風", remaining: 2, set_today: true }]);
+      }
+      if (url.includes("/adjust") && init?.method === "POST") {
+        return json({ detail: "「戚風」現在剩 1 份，不能再減 2 份" }, 409);
+      }
+      if (url.includes("/cash-sessions/9/close") && init?.method === "POST") {
+        return json({ ...OPEN_SESSION, status: "CLOSED", counted_amount: "0", expected_amount: "0", variance: "0" });
+      }
+      return null;
+    });
+    renderPage();
+    await screen.findByLabelText("戚風 剩 2 份，記成報廢");
+    await userEvent.type(screen.getByLabelText("實點金額"), "0");
+    await userEvent.click(screen.getByRole("button", { name: "結帳" }));
+    expect(await screen.findByText("已結帳")).toBeDefined();
+    expect(
+      screen.getByText("這幾項沒記成報廢，請到開店前檢查頁確認份數：戚風（「戚風」現在剩 1 份，不能再減 2 份）"),
+    ).toBeDefined();
+  });
+
   it("結帳成功後快取即失效：重新開帳顯示開帳表單、不殘留 OPEN 狀態", async () => {
     loginAs("CLERK");
     let closed = false;
