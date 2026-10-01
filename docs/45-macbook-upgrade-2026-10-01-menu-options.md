@@ -25,11 +25,7 @@
 ## 3. 驗證（每一項都回報結果）
 
 1. 跑 docs/43 §4 開頭那段 `curl`／`launchctl` 檢查：三個 `state` 都是 `running`、兩個 http 都是 `200`。
-2. 確認舊分類有轉過去（應列出店裡原本的分類名稱，例如「咖啡」）：
-   ```bash
-   set -a; source .env; set +a
-   psql "${DATABASE_URL/+asyncpg/}" -c "SELECT name FROM menu_categories ORDER BY id"
-   ```
+2. 請**店主**打開「餐飲菜單」頁，確認每個品項的分類欄位跟升級前一樣（舊分類已自動轉成分類表）。
 3. 請**店主**在 POS 點一杯餐飲結帳（可以點完再作廢），確認照常能結帳、收據品名正常。
 
 ## 4. 出問題怎麼退
