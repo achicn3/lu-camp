@@ -248,12 +248,15 @@ describe("/cash", () => {
     expect(screen.queryByText("開帳中")).toBeNull();
   });
 
-  it("MANAGER 看得到手動調整並可送出；含事由", async () => {
+  it("店長：補入／取出現金——選方向填正數，看得到目前應有與調整後，送出帶正負號", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];
     const idempotencyKeys: string[] = [];
     stubFetch((url, init) => {
       if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
+      if (url.includes("/cash-sessions/9/expected")) {
+        return json({ session_id: 9, expected: "1300", manual_adjust_total: "300" });
+      }
       if (url.includes("/movements") && init?.method === "POST") {
         bodies.push(String(init.body));
         const headers = new Headers(init.headers);
@@ -264,16 +267,49 @@ describe("/cash", () => {
       return null;
     });
     renderPage();
-    const amount = await screen.findByLabelText("調整金額（可負）");
-    await userEvent.type(amount, "-200");
-    await userEvent.type(screen.getByLabelText("事由"), "找錯錢回沖");
-    await userEvent.click(screen.getByRole("button", { name: "送出調整" }));
+    expect(await screen.findByText("補入／取出現金")).toBeDefined();
+    expect(await screen.findByText("目前應有現金 $1,300")).toBeDefined();
+    await userEvent.click(screen.getByRole("radio", { name: "取出現金" }));
+    await userEvent.type(screen.getByLabelText("金額"), "200");
+    await userEvent.click(screen.getByRole("button", { name: "存銀行" }));
+    expect(screen.getByText("調整後應有現金 $1,100")).toBeDefined();
+    await userEvent.click(screen.getByRole("button", { name: "送出" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     const parsed = JSON.parse(bodies[0]) as Record<string, unknown>;
     expect(parsed.type).toBe("MANUAL_ADJUST");
     expect(parsed.amount).toBe("-200");
-    expect(parsed.note).toBe("找錯錢回沖");
+    expect(parsed.note).toBe("存銀行");
     expect(idempotencyKeys[0]).not.toBe("");
+    expect(await screen.findByText("已記錄：取出 $200（存銀行）")).toBeDefined();
+  });
+
+  it("店長：放入現金送正數；沒選方向不能送出、金額只收正整數", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
+      if (url.includes("/cash-sessions/9/expected")) {
+        return json({ session_id: 9, expected: "1000", manual_adjust_total: "0" });
+      }
+      if (url.includes("/movements") && init?.method === "POST") {
+        bodies.push(String(init.body));
+        return json({ id: 1, session_id: 9, store_id: 1, type: "MANUAL_ADJUST" }, 201);
+      }
+      if (url.includes("/movements")) return json([]);
+      return null;
+    });
+    renderPage();
+    await screen.findByText("目前應有現金 $1,000");
+    await userEvent.type(screen.getByLabelText("金額"), "300");
+    await userEvent.type(screen.getByLabelText("原因"), "補零錢");
+    await userEvent.click(screen.getByRole("button", { name: "送出" }));
+    expect(await screen.findByText("請選擇放入或取出")).toBeDefined();
+    expect(bodies).toHaveLength(0);
+    await userEvent.click(screen.getByRole("radio", { name: "放入現金" }));
+    expect(screen.getByText("調整後應有現金 $1,300")).toBeDefined();
+    await userEvent.click(screen.getByRole("button", { name: "送出" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(JSON.parse(bodies[0]).amount).toBe("300");
   });
 
   it("開帳中顯示手動調整清單，包含正負金額與事由", async () => {

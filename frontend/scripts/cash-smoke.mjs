@@ -89,16 +89,17 @@ try {
   await page.goto(`${BASE}/cash`, { waitUntil: "networkidle" });
 
   const note = `回應遺失重試-${Date.now()}`;
-  await page.getByLabel("調整金額（可負）").fill("137");
-  await page.getByLabel("事由").fill(note);
-  await page.getByRole("button", { name: "送出調整" }).click();
+  await page.getByRole("radio", { name: "放入現金" }).check();
+  await page.getByLabel("金額", { exact: true }).fill("137");
+  await page.getByLabel("原因", { exact: true }).fill(note);
+  await page.getByRole("button", { name: "送出", exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "回應在網路中遺失" }).waitFor();
   ok("第一次已入帳但畫面收到失敗", true);
   await page.screenshot({ path: join(SHOTS, "01-response-lost.png"), fullPage: true });
 
   // 表單保留原金額與事由，使用者直接再點一次。
-  await page.getByRole("button", { name: "送出調整" }).click();
-  await page.getByText("已調整", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "送出", exact: true }).click();
+  await page.getByText(/^已記錄：放入 \$137/).waitFor();
   ok("使用者可直接重試並成功收斂", true);
 
   const movements = await apiJson(

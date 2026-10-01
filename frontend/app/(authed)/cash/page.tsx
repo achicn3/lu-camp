@@ -6,7 +6,6 @@ import {
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
-  useRef,
   useState,
 } from "react";
 
@@ -123,15 +122,44 @@ function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
   );
 }
 
+// 補入／取出現金（2026-10-01 改版，原「現金手動調整」）。
+//
+// 金額是**加減**到「應有現金」上，不是把應有現金改成這個數字——原本的「調整金額（可負）」
+// 要自己打負號、也看不出是累加，店主反映不好用。改成：先選放入或取出、金額只填正數、
+// 送出前顯示「目前應有 → 調整後」。送出的仍是同一種異動（MANUAL_ADJUST，正＝放入、負＝取出），
+// 回應遺失時「以原金額與原因重試」的防重複保護不變。
+const ADJUST_REASONS = ["補零錢", "存銀行", "付小額雜支"] as const;
+
+type AdjustDirection = "IN" | "OUT";
+
 function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const [direction, setDirection] = useState<AdjustDirection | null>(null);
+  const [amountText, setAmountText] = useState("");
+  const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
+  const [done, setDone] = useState<string | null>(null);
+  // 目前應有現金（僅店長可讀；店員結帳要先數錢再比對，不在店員畫面顯示）。
+  const expected = useQuery({
+    queryKey: ["cash-session", sessionId, "expected"],
+    queryFn: async () => {
+      const { data, error: apiError } = await api.GET(
+        "/api/v1/cash-sessions/{session_id}/expected",
+        { params: { path: { session_id: sessionId } } },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取應有現金失敗");
+      return data;
+    },
+  });
+  const amount = parseAmountInput(amountText);
+  const signed = amount === null || direction === null ? null : direction === "IN" ? amount : -amount;
+  const expectedNow = expected.data ? parseNtd(expected.data.expected) : null;
+
   const mutation = useMutation({
     mutationFn: async (input: { amount: number; note: string }) => {
       const pending = loadPendingCashAdjustment(sessionId);
       if (pending != null && (pending.amount !== input.amount || pending.note !== input.note)) {
-        throw new Error("上一筆現金調整狀態未確認，請以原金額與事由重試或先查核本班調整紀錄");
+        throw new Error("上一筆現金調整狀態未確認，請以原金額與原因重試或先查核本班紀錄");
       }
       const entry = pending ?? { key: newIdempotencyKey(), ...input };
       if (pending == null) savePendingCashAdjustment(sessionId, entry);
@@ -149,14 +177,19 @@ function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => vo
         if (canDiscardIdempotencyKey(response.status)) {
           clearPendingCashAdjustment(sessionId);
         }
-        throw new Error(extractDetail(apiError) ?? "調整失敗");
+        throw new Error(extractDetail(apiError) ?? "記錄失敗");
       }
       clearPendingCashAdjustment(sessionId);
-      return data;
+      return input;
     },
-    onSuccess: () => {
-      setDone(true);
-      formRef.current?.reset();
+    onSuccess: (input) => {
+      setDone(
+        `已記錄：${input.amount > 0 ? "放入" : "取出"} $${formatNtd(Math.abs(input.amount))}（${input.note}）`,
+      );
+      setDirection(null);
+      setAmountText("");
+      setNote("");
+      void queryClient.invalidateQueries({ queryKey: ["cash-session", sessionId, "expected"] });
       onDone();
     },
     onError: (err: Error) => setError(err.message),
@@ -165,41 +198,82 @@ function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => vo
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setDone(false);
-    const form = new FormData(event.currentTarget);
-    const amount = parseAmountInput(String(form.get("amount")), { allowNegative: true });
-    if (amount === null) {
-      setError("請輸入非零整數金額");
+    setDone(null);
+    if (direction === null) {
+      setError("請選擇放入或取出");
       return;
     }
-    const note = String(form.get("note")).trim();
-    if (!note) {
+    if (amount === null) {
+      setError("請輸入金額（正整數）");
+      return;
+    }
+    const trimmed = note.trim();
+    if (!trimmed) {
       setError("請填寫原因（會留下紀錄）");
       return;
     }
-    mutation.mutate({ amount, note });
+    mutation.mutate({ amount: direction === "IN" ? amount : -amount, note: trimmed });
   }
 
   return (
-    <form ref={formRef} className="card" onSubmit={onSubmit}>
-      <h2>現金手動調整</h2>
-      <p className="hint">敏感操作將寫入稽核（誰/何時/金額/事由）。</p>
+    <form className="card cash-adjust" onSubmit={onSubmit}>
+      <h2>補入／取出現金</h2>
+      <p className="hint">
+        金額會<b>加到或扣掉</b>「應有現金」，不是把應有現金改成這個數字。每筆都會留下紀錄（誰、何時、金額、原因）。
+      </p>
+      {expectedNow !== null && (
+        <p className="cash-adjust-expected">目前應有現金 ${formatNtd(expectedNow)}</p>
+      )}
+      <div className="cash-adjust-direction" role="radiogroup" aria-label="放入或取出">
+        {(
+          [
+            ["IN", "放入現金"],
+            ["OUT", "取出現金"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} className={`cash-adjust-choice${direction === value ? " is-on" : ""}`}>
+            <input
+              type="radio"
+              name="direction"
+              value={value}
+              checked={direction === value}
+              onChange={() => setDirection(value)}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
       <label className="field">
-        <span className="field-label">調整金額（可負）</span>
-        <input name="amount" inputMode="numeric" required />
+        <span className="field-label">金額</span>
+        <input
+          name="amount"
+          inputMode="numeric"
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+        />
       </label>
+      <div className="cash-adjust-reasons">
+        {ADJUST_REASONS.map((reason) => (
+          <button key={reason} type="button" className="btn-ghost" onClick={() => setNote(reason)}>
+            {reason}
+          </button>
+        ))}
+      </div>
       <label className="field">
-        <span className="field-label">事由</span>
-        <input name="note" required />
+        <span className="field-label">原因</span>
+        <input name="note" value={note} onChange={(e) => setNote(e.target.value)} />
       </label>
+      {expectedNow !== null && signed !== null && (
+        <p className="cash-adjust-after">調整後應有現金 ${formatNtd(expectedNow + signed)}</p>
+      )}
       {error !== null && (
         <p role="alert" className="form-error">
           {error}
         </p>
       )}
-      {done && <p className="form-success">已調整</p>}
+      {done !== null && <p className="form-success">{done}</p>}
       <button type="submit" className="btn-primary" disabled={mutation.isPending}>
-        送出調整
+        送出
       </button>
     </form>
   );

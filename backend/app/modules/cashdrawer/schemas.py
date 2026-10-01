@@ -82,6 +82,17 @@ class CashMovementCreateRequest(BaseModel):
         return value
 
 
+class CashExpectedRead(BaseModel):
+    """開帳中「目前應有現金」（僅店長）：補入／取出現金畫面顯示「目前應有 → 調整後」。
+
+    與關帳同一公式即時重算；`manual_adjust_total` 是本班補入／取出的累計（正＝放入、負＝取出）。
+    """
+
+    session_id: int
+    expected: NTDAmount
+    manual_adjust_total: NTDAmount
+
+
 class CashSessionRead(BaseModel):
     """現金班別輸出。"""
 

@@ -5835,3 +5835,39 @@ a.btn-ghost {
 .cash-leftovers .field-toggle {
   margin: 0;
 }
+
+/* 補入／取出現金（2026-10-01 改版）：方向二選一要大、要一眼看出選了哪個。 */
+.cash-adjust-expected,
+.cash-adjust-after {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cash-adjust-after {
+  color: var(--accent);
+}
+.cash-adjust-direction {
+  display: flex;
+  gap: var(--sp-2);
+}
+.cash-adjust-choice {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cash-adjust-choice.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.cash-adjust-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}

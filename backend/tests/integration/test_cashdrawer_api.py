@@ -452,3 +452,38 @@ async def test_close_rejects_variance_above_numeric_limit_and_stays_open(
     current = await client.get("/api/v1/cash-sessions/current", headers=_auth(token))
     assert current.json()["id"] == session_id
     assert current.json()["status"] == "OPEN"
+
+
+async def test_expected_cash_is_shown_to_manager_only(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """補入／取出現金畫面要讓店長看「目前應有 → 調整後」（2026-10-01 改版）。
+
+    只給店長：結帳是店員先數錢再比對，店員先看到應有金額會被數字牽著走。
+    """
+    token = await _seed_token(db_session)
+    opened = await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "1000"}, headers=_auth(token)
+    )
+    session_id = opened.json()["id"]
+    manager_token = await _seed_manager(db_session, token)
+    await client.post(
+        f"/api/v1/cash-sessions/{session_id}/movements",
+        json={"type": "MANUAL_ADJUST", "amount": "300", "note": "補零錢"},
+        headers=_auth(manager_token, idem="exp-1"),
+    )
+    resp = await client.get(
+        f"/api/v1/cash-sessions/{session_id}/expected", headers=_auth(manager_token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "session_id": session_id,
+        "expected": "1300",
+        "manual_adjust_total": "300",
+    }
+    clerk = await client.get(f"/api/v1/cash-sessions/{session_id}/expected", headers=_auth(token))
+    assert clerk.status_code == 403
+    missing = await client.get(
+        "/api/v1/cash-sessions/999999/expected", headers=_auth(manager_token)
+    )
+    assert missing.status_code == 404

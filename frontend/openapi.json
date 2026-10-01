@@ -3643,6 +3643,30 @@
         "title": "CartUpsertRequest",
         "type": "object"
       },
+      "CashExpectedRead": {
+        "description": "開帳中「目前應有現金」（僅店長）：補入／取出現金畫面顯示「目前應有 → 調整後」。\n\n與關帳同一公式即時重算；`manual_adjust_total` 是本班補入／取出的累計（正＝放入、負＝取出）。",
+        "properties": {
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "manual_adjust_total": {
+            "title": "Manual Adjust Total",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "expected",
+          "manual_adjust_total"
+        ],
+        "title": "CashExpectedRead",
+        "type": "object"
+      },
       "CashMovementCreateRequest": {
         "description": "記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。",
         "properties": {
@@ -20224,6 +20248,54 @@
           }
         ],
         "summary": "Close Cash Session",
+        "tags": [
+          "cashdrawer"
+        ]
+      }
+    },
+    "/api/v1/cash-sessions/{session_id}/expected": {
+      "get": {
+        "description": "目前應有現金（**僅店長**）。店員結帳是先數錢再比對，先看到應有金額會被數字牽著走。",
+        "operationId": "getCashSessionExpected",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashExpectedRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Cash Session Expected",
         "tags": [
           "cashdrawer"
         ]

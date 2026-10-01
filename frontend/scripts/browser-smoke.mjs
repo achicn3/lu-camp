@@ -52,11 +52,12 @@ try {
   await page.screenshot({ path: `${SHOTS}/05-cash-open.png` });
 
   // 5) MANAGER 手動調整（含事由）
-  ok("MANAGER 看得到手動調整", await page.locator('label:has-text("調整金額（可負）")').isVisible());
-  await page.fill('input[name="amount"]', "-150");
+  ok("MANAGER 看得到補入／取出現金", await page.locator('h2:has-text("補入／取出現金")').isVisible());
+  await page.check('input[name="direction"][value="OUT"]');
+  await page.fill('input[name="amount"]', "150");
   await page.fill('input[name="note"]', "瀏覽器實測：找錯錢回沖");
-  await page.click('button:has-text("送出調整")');
-  await page.waitForSelector("text=已調整");
+  await page.click('form.cash-adjust button[type="submit"]');
+  await page.waitForSelector("text=已記錄：取出 $150");
   ok("手動調整成功", true);
   await page.screenshot({ path: `${SHOTS}/06-cash-adjust.png` });
 
@@ -89,7 +90,7 @@ try {
   await page.fill('input[name="opening_float"]', "1000");
   await page.click('button:has-text("開帳")');
   await page.waitForSelector("text=開帳中");
-  const adjustVisible = await page.locator('label:has-text("調整金額（可負）")').isVisible();
+  const adjustVisible = await page.locator('h2:has-text("補入／取出現金")').isVisible();
   ok("CLERK 看不到手動調整", !adjustVisible);
   await page.screenshot({ path: `${SHOTS}/08-cash-clerk.png` });
   // 收尾：把 session 關掉以免殘留開帳

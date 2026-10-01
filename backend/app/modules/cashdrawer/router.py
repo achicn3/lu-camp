@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.cashdrawer.schemas import (
+    CashExpectedRead,
     CashMovementCreateRequest,
     CashMovementRead,
     CashSessionCloseRequest,
@@ -58,6 +59,29 @@ async def get_current_cash_session(
 ) -> CashSessionRead | None:
     cs = await CashDrawerService(session).get_current_session(user.store_id)
     return CashSessionRead.from_model(cs) if cs is not None else None
+
+
+@router.get(
+    "/{session_id}/expected",
+    response_model=CashExpectedRead,
+    operation_id="getCashSessionExpected",
+)
+async def get_cash_session_expected(
+    session_id: int,
+    session: SessionDep,
+    user: ManagerDep,
+) -> CashExpectedRead:
+    """目前應有現金（**僅店長**）。店員結帳是先數錢再比對，先看到應有金額會被數字牽著走。"""
+    svc = CashDrawerService(session)
+    cash_session = await svc.get_session(user.store_id, session_id)
+    if cash_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到現金班別")
+    breakdown = await svc.session_breakdown(cash_session)
+    return CashExpectedRead(
+        session_id=cash_session.id,
+        expected=breakdown.expected,
+        manual_adjust_total=breakdown.manual_adjust_total,
+    )
 
 
 @router.get(

@@ -809,6 +809,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cash-sessions/{session_id}/expected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cash Session Expected
+         * @description 目前應有現金（**僅店長**）。店員結帳是先數錢再比對，先看到應有金額會被數字牽著走。
+         */
+        get: operations["getCashSessionExpected"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cash-sessions/{session_id}/movements": {
         parameters: {
             query?: never;
@@ -5261,6 +5281,20 @@ export interface components {
             table_no?: string | null;
             /** Tenders */
             tenders?: components["schemas"]["CartTenderRequest"][] | null;
+        };
+        /**
+         * CashExpectedRead
+         * @description 開帳中「目前應有現金」（僅店長）：補入／取出現金畫面顯示「目前應有 → 調整後」。
+         *
+         *     與關帳同一公式即時重算；`manual_adjust_total` 是本班補入／取出的累計（正＝放入、負＝取出）。
+         */
+        CashExpectedRead: {
+            /** Expected */
+            expected: string;
+            /** Manual Adjust Total */
+            manual_adjust_total: string;
+            /** Session Id */
+            session_id: number;
         };
         /**
          * CashMovementCreateRequest
@@ -11895,6 +11929,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCashSessionExpected: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashExpectedRead"];
                 };
             };
             /** @description Validation Error */
