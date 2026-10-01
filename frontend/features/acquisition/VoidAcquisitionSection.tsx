@@ -5,7 +5,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ACQ_TYPE_LABEL, PAYOUT_LABEL } from "@/features/acquisition/labels";
-import { canVoid, errorDetail, voidBlockReason } from "@/features/acquisition/void";
+import {
+  canVoid,
+  errorDetail,
+  isVoidableItemStatus,
+  voidBlockReason,
+} from "@/features/acquisition/void";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -13,9 +18,6 @@ import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type VoidResult = components["schemas"]["AcquisitionVoidResult"];
-
-// 還能作廢的商品狀態（與後端 _void_selected_items 同口徑）：已售出／已下架的不能勾。
-const VOIDABLE_ITEM_STATUSES: ReadonlySet<string> = new Set(["IN_STOCK", "PENDING_LISTING"]);
 
 function ntd(value: string | null): string {
   if (value === null) return "—";
@@ -70,7 +72,7 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, prese
       return data;
     },
   });
-  const selectableIds = (itemsQuery.data ?? []).filter((item) => !item.voided && VOIDABLE_ITEM_STATUSES.has(item.status)).map((item) => item.id);
+  const selectableIds = (itemsQuery.data ?? []).filter((item) => !item.voided && isVoidableItemStatus(item.status)).map((item) => item.id);
   const selected =
     selectedIds === null ? selectableIds : selectedIds.filter((id) => selectableIds.includes(id));
 
@@ -183,7 +185,7 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, prese
                   disabled={!selectableIds.includes(item.id)}
                   onChange={(event) => setSelectedIds(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />
                 <span>{item.name} · {item.item_code} · 收購價 {ntd(item.acquisition_cost)}
-                {item.voided ? " · 已作廢" : !VOIDABLE_ITEM_STATUSES.has(item.status) ? " · 已售出或下架，不可作廢" : ""}</span>
+                {item.voided ? " · 已作廢" : !isVoidableItemStatus(item.status) ? " · 已售出或下架，不可作廢" : ""}</span>
               </label>)}
             </fieldset>
           )}

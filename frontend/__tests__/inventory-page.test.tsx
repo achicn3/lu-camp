@@ -911,3 +911,85 @@ it("編輯：全新售價（原價）可以改，也可以清空", async () => {
     expect(await screen.findByRole("button", { name: "恢復上架" })).toBeTruthy();
   });
 });
+
+describe("庫存明細：作廢這件（只退這一件，同一張收購單的其他商品不受影響）", () => {
+  const BUYOUT_DETAIL = {
+    ...DETAIL,
+    ownership_type: "OWNED",
+    commission_pct: null,
+    acquisition_cost: "1000",
+    acquisition_id: 55,
+    acquisition_type: "BUYOUT",
+    source: { contact_id: 7, name: "賣方乙", phone: "0911222333", kind: "SELLER" },
+  };
+
+  function stubDetail(detail: Record<string, unknown>) {
+    const posted: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : null;
+        const url = request?.url ?? String(input);
+        if (request?.method === "POST" && url.includes("/acquisitions/55/void")) {
+          posted.push({ url, body: await request.json() });
+          return json({
+            acquisition_id: 55,
+            voided_at: "2026-10-02T00:00:00Z",
+            reversed_cash: "1000",
+            reversed_credit: "0",
+            fully_voided: false,
+            item_ids: [1],
+          });
+        }
+        if (url.includes("/serialized-items/") && url.includes("/detail")) return json(detail);
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    return posted;
+  }
+
+  async function openDetail() {
+    loginManager();
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "詳細" }));
+    return screen.findByRole("dialog", { name: "商品明細" });
+  }
+
+  it("買斷、還沒賣出：講清楚屬於哪張收購單，只作廢這一件並顯示退回金額", async () => {
+    const posted = stubDetail(BUYOUT_DETAIL);
+    const modal = await openDetail();
+
+    expect(await within(modal).findByText(/收購單 #55/)).toBeTruthy();
+    expect(modal.textContent).toContain("其他商品不受影響");
+    await userEvent.click(within(modal).getByRole("button", { name: "作廢這件" }));
+    const confirm = await screen.findByRole("dialog", { name: "作廢收購確認" });
+    expect(confirm.textContent).toContain("本次作廢 1 件商品");
+    await userEvent.type(within(confirm).getByLabelText("作廢原因"), "賣方反悔");
+    await userEvent.click(within(confirm).getByRole("button", { name: "確認作廢" }));
+
+    await waitFor(() =>
+      expect(posted).toEqual([
+        { url: expect.stringContaining("/acquisitions/55/void"), body: { reason: "賣方反悔", item_ids: [1] } },
+      ]),
+    );
+    expect(await within(modal).findByText(/已作廢這件/)).toBeTruthy();
+    expect(modal.textContent).toContain("1,000");
+  });
+
+  it("寄售商品沒有作廢這件（寄售走寄售退貨）", async () => {
+    stubDetail(DETAIL);
+    const modal = await openDetail();
+    await within(modal).findByText(/寄售人甲/);
+    expect(within(modal).queryByRole("button", { name: "作廢這件" })).toBeNull();
+  });
+
+  it("已賣出的商品沒有作廢這件", async () => {
+    stubDetail({ ...BUYOUT_DETAIL, status: "SOLD", sold_date: "2026-09-30T00:00:00Z", sold_price: "1800" });
+    const modal = await openDetail();
+    await within(modal).findByText(/賣方乙/);
+    expect(within(modal).queryByRole("button", { name: "作廢這件" })).toBeNull();
+  });
+});

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { canVoid, recordVoidHint, recordVoidMode, voidErrorMessage } from "@/features/acquisition/void";
+import {
+  canVoid,
+  canVoidSingleItem,
+  recordVoidHint,
+  recordVoidMode,
+  voidErrorMessage,
+} from "@/features/acquisition/void";
 
 describe("canVoid", () => {
   it("買斷/散裝未作廢 → 可作廢", () => {
@@ -59,5 +65,30 @@ describe("收購紀錄的作廢鈕（一顆鈕，依類型與擋下原因決定�
     expect(hint("BUYOUT", "NO_OPEN_CASH_SESSION")).toBe("要退回現金，請先開帳");
     expect(hint("BUYOUT", "ALREADY_VOIDED")).toBeNull();
     expect(hint("BUYOUT", null)).toBeNull();
+  });
+});
+
+describe("庫存明細的「作廢這件」", () => {
+  const item = (over: Record<string, unknown> = {}) =>
+    ({
+      ownership_type: "OWNED",
+      acquisition_type: "BUYOUT",
+      acquisition_id: 55,
+      status: "IN_STOCK",
+      ...over,
+    }) as Parameters<typeof canVoidSingleItem>[0];
+
+  it("買斷、在架或待整理 → 可作廢這件", () => {
+    expect(canVoidSingleItem(item())).toBe(true);
+    expect(canVoidSingleItem(item({ status: "PENDING_LISTING" }))).toBe(true);
+  });
+  it("已賣出／已作廢 → 不行", () => {
+    expect(canVoidSingleItem(item({ status: "SOLD" }))).toBe(false);
+    expect(canVoidSingleItem(item({ status: "WRITTEN_OFF" }))).toBe(false);
+  });
+  it("寄售、散裝、沒有收購單 → 不行（寄售走寄售退貨；散裝只能整張作廢）", () => {
+    expect(canVoidSingleItem(item({ ownership_type: "CONSIGNMENT", acquisition_type: "CONSIGNMENT" }))).toBe(false);
+    expect(canVoidSingleItem(item({ acquisition_type: "BULK_LOT" }))).toBe(false);
+    expect(canVoidSingleItem(item({ acquisition_id: null, acquisition_type: null }))).toBe(false);
   });
 });

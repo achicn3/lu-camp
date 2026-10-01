@@ -10,6 +10,29 @@ type RecordRow = Pick<
   "type" | "voided_at" | "void_block"
 >;
 type VoidBlock = NonNullable<RecordRow["void_block"]>;
+type SingleItemFields = Pick<
+  components["schemas"]["SerializedItemDetailRead"],
+  "ownership_type" | "acquisition_type" | "acquisition_id" | "status"
+>;
+
+// 還能作廢的商品狀態（與後端 _void_selected_items 同口徑）：已售出／已下架的不能作廢。
+const VOIDABLE_ITEM_STATUSES: ReadonlySet<string> = new Set(["IN_STOCK", "PENDING_LISTING"]);
+
+export function isVoidableItemStatus(status: string): boolean {
+  return VOIDABLE_ITEM_STATUSES.has(status);
+}
+
+/** 這件商品屬於某張買斷收購（店家自有），可以單獨作廢退回——不論現在還能不能作廢。 */
+export function isBuyoutItem(item: Omit<SingleItemFields, "status">): boolean {
+  return (
+    item.ownership_type === "OWNED" && item.acquisition_type === "BUYOUT" && item.acquisition_id !== null
+  );
+}
+
+/** 庫存明細的「作廢這件」：買斷且還沒賣出。寄售走寄售退貨；散裝只能整張作廢（後端也擋）。 */
+export function canVoidSingleItem(item: SingleItemFields): boolean {
+  return isBuyoutItem(item) && isVoidableItemStatus(item.status);
+}
 
 /**
  * 收購紀錄上那一顆「作廢」鈕按下去做什麼（店主 2026-10-02：不再另分「選品作廢」）。

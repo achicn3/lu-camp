@@ -9,6 +9,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 
 import { marginPct } from "@/features/acquisition/pricing";
+import { isBuyoutItem } from "@/features/acquisition/void";
+import { VoidSingleItemSection } from "@/features/acquisition/VoidSingleItemSection";
 import {
   NOTE_MAX_LENGTH,
   type Badge,
@@ -873,6 +875,9 @@ function ItemDetailModal({
               note={d.note}
               detailQueryKey={["serialized-detail", itemId]}
             />
+            {d.acquisition_id !== null && isBuyoutItem(d) && (
+              <VoidSingleItemSection item={d} acquisitionId={d.acquisition_id} />
+            )}
             <h4 className="inv-detail-subtitle">歷史紀錄</h4>
             {d.history.length === 0 ? (
               <p className="hint">尚無異動紀錄。</p>

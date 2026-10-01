@@ -2120,6 +2120,15 @@ a.btn-ghost {
 .inv-detail-subtitle {
   margin: var(--sp-2) 0 var(--sp-1);
 }
+/* 庫存明細「作廢這件」：與上方欄位、下方歷史分隔開，避免誤以為是一般編輯。 */
+.inv-void-item {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.inv-void-item .btn-danger {
+  margin-top: var(--sp-2);
+}
 .inv-detail-table {
   font-size: var(--text-sm);
   margin-bottom: var(--sp-2);
