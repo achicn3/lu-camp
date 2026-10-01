@@ -382,3 +382,49 @@ def test_fingerprint_without_resellable_keeps_old_shape() -> None:
     ).hexdigest()
     assert _return_fingerprint(7, {3: 1}, "r") == old
     assert _return_fingerprint(7, {3: 1}, "r", frozenset({3})) != old
+
+
+def test_refund_allocation_any_order_adds_up_exactly() -> None:
+    """餐點／二手任意交錯分次退（Codex 對抗審查 E3 #1 的驗證）：每一步不超退任何付款渠道，
+    退完時購物金恰好退回購物金付款、現金恰好退回現金付款
+    （購物金 400＋現金 900；二手 1000、餐點 300）。"""
+    import itertools
+
+    from app.modules.sales.models import SaleTender
+    from app.shared.enums import PaymentMethod
+
+    tenders = [
+        SaleTender(tender_type=TenderType.STORE_CREDIT, amount=Decimal(400)),
+        SaleTender(tender_type=TenderType.CASH, amount=Decimal(900)),
+    ]
+    steps = [
+        ("food", Decimal(100)),
+        ("food", Decimal(200)),
+        ("other", Decimal(250)),
+        ("other", Decimal(750)),
+    ]
+    for order in itertools.permutations(steps):
+        food = other = Decimal(0)
+        paid: dict[TenderType, Decimal] = {
+            TenderType.STORE_CREDIT: Decimal(0),
+            TenderType.CASH: Decimal(0),
+        }
+        for kind, amount in order:
+            legs = ReturnsService._refund_allocations(
+                PaymentMethod.MIXED,
+                tenders,
+                previous_food=food,
+                previous_other=other,
+                refund_food=amount if kind == "food" else Decimal(0),
+                refund_other=amount if kind == "other" else Decimal(0),
+            )
+            assert sum((v for _, v in legs), Decimal(0)) == amount
+            for tender, value in legs:
+                paid[tender] += value
+            assert paid[TenderType.STORE_CREDIT] <= 400 and paid[TenderType.CASH] <= 900
+            if kind == "food":
+                food += amount
+                assert all(t is TenderType.CASH for t, _ in legs)  # 餐點永不退成購物金
+            else:
+                other += amount
+        assert paid == {TenderType.STORE_CREDIT: Decimal(400), TenderType.CASH: Decimal(900)}
