@@ -487,3 +487,24 @@ async def test_expected_cash_is_shown_to_manager_only(
         "/api/v1/cash-sessions/999999/expected", headers=_auth(manager_token)
     )
     assert missing.status_code == 404
+
+
+async def test_expected_cash_refuses_closed_session(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已結帳的班別沒有「目前應有」：回 409，不回結帳當下的舊數字（Codex 對抗審查）。"""
+    token = await _seed_token(db_session)
+    opened = await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "1000"}, headers=_auth(token)
+    )
+    session_id = opened.json()["id"]
+    await client.post(
+        f"/api/v1/cash-sessions/{session_id}/close",
+        json={"counted_amount": "1000"},
+        headers=_auth(token),
+    )
+    manager_token = await _seed_manager(db_session, token)
+    resp = await client.get(
+        f"/api/v1/cash-sessions/{session_id}/expected", headers=_auth(manager_token)
+    )
+    assert resp.status_code == 409

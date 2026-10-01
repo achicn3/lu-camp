@@ -128,7 +128,7 @@ function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
 // 要自己打負號、也看不出是累加，店主反映不好用。改成：先選放入或取出、金額只填正數、
 // 送出前顯示「目前應有 → 調整後」。送出的仍是同一種異動（MANUAL_ADJUST，正＝放入、負＝取出），
 // 回應遺失時「以原金額與原因重試」的防重複保護不變。
-const ADJUST_REASONS = ["補零錢", "存銀行", "付小額雜支"] as const;
+const ADJUST_REASONS = ["補零錢", "存銀行", "飯錢", "付小額雜支"] as const;
 
 type AdjustDirection = "IN" | "OUT";
 

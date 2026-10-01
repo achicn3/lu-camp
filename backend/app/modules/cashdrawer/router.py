@@ -19,6 +19,7 @@ from app.modules.cashdrawer.schemas import (
     CashSessionRead,
 )
 from app.modules.cashdrawer.service import CashDrawerService
+from app.shared.enums import CashSessionStatus
 from app.shared.exceptions import (
     CashAmountOutOfRange,
     CashSessionAlreadyClosed,
@@ -76,6 +77,9 @@ async def get_cash_session_expected(
     cash_session = await svc.get_session(user.store_id, session_id)
     if cash_session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到現金班別")
+    # 已結帳的班別沒有「目前應有」：回結帳當下的數字會被當成現況（Codex 對抗審查）。
+    if cash_session.status is not CashSessionStatus.OPEN:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="這個班別已經結帳")
     breakdown = await svc.session_breakdown(cash_session)
     return CashExpectedRead(
         session_id=cash_session.id,

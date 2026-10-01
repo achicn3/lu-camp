@@ -271,6 +271,7 @@ describe("/cash", () => {
     expect(await screen.findByText("目前應有現金 $1,300")).toBeDefined();
     await userEvent.click(screen.getByRole("radio", { name: "取出現金" }));
     await userEvent.type(screen.getByLabelText("金額"), "200");
+    expect(screen.getByRole("button", { name: "飯錢" })).toBeDefined(); // 店主要的常用原因
     await userEvent.click(screen.getByRole("button", { name: "存銀行" }));
     expect(screen.getByText("調整後應有現金 $1,100")).toBeDefined();
     await userEvent.click(screen.getByRole("button", { name: "送出" }));
