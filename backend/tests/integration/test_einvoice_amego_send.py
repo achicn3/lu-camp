@@ -6,6 +6,7 @@
 invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 """
 
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -19,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
-from app.modules.einvoice.amego import AmegoClient, AmegoTransport, allowance_number
-from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
+from app.modules.einvoice.amego import AmegoClient, AmegoTransport
+from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.models import CatalogProduct
 from app.modules.inventory.service import InventoryService
@@ -150,27 +151,6 @@ def _allowance_exists_now() -> dict[str, object]:
     return {"code": 0, "msg": "", "data": _allowance_data(create_date=_now_epoch())}
 
 
-def test_allowance_number_stays_unique_within_amego_16_char_limit() -> None:
-    first = allowance_number(store_id=2_147_483_647, allowance_id=2_147_483_646)
-    second = allowance_number(store_id=2_147_483_647, allowance_id=2_147_483_647)
-    assert len(first) <= 16
-    assert len(second) <= 16
-    assert first != second
-    # 既有短編號保持原格式，已認領／已上傳資料不因版本升級換號。
-    assert allowance_number(store_id=1, allowance_id=9) == "L1-9"
-
-
-@pytest.mark.parametrize(
-    ("store_id", "allowance_id"),
-    [(0, 1), (-1, 1), (1, 0), (1, -1), (2_147_483_648, 1), (1, 2_147_483_648)],
-)
-def test_allowance_number_rejects_ids_outside_database_integer_range(
-    store_id: int, allowance_id: int
-) -> None:
-    with pytest.raises(ValueError):
-        allowance_number(store_id=store_id, allowance_id=allowance_id)
-
-
 def _issue_ok_transport() -> _ScriptedTransport:
     """開立成功的標準回放：對帳先行（查無）→ f0401 成功。"""
     return _ScriptedTransport(dict(_QUERY_NOT_FOUND), dict(_F0401_OK))
@@ -246,7 +226,7 @@ async def test_send_f0401_success_issues_invoice(db_session: AsyncSession) -> No
     import json as _json
 
     data = _json.loads(form["data"])
-    assert data["OrderId"] == f"S{store_id}-{sale_id}"
+    assert data["OrderId"] == invoice.platform_order_id  # 送的是存下來的編號，不是重新推導
     assert data["BuyerIdentifier"] == "0000000000"
     assert data["SalesAmount"] == 1050
     assert data["TaxAmount"] == 0
@@ -470,6 +450,16 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
     # 折讓金額為未稅口徑：1050 → 未稅 1000 / 稅 50
     assert entry["TaxAmount"] == 50
     assert entry["TotalAmount"] == 1000
+    # 折讓單號是建立時存下來的隨機編號（不由流水號推導），核可後寫回 allowance_no
+    allowance = await db_session.scalar(select(InvoiceAllowance))
+    assert allowance is not None
+    assert re.fullmatch(rf"L{store_id}-[23456789A-HJ-NP-Z]+", allowance.platform_number)
+    assert len(allowance.platform_number) == 16
+    assert entry["AllowanceNumber"] == allowance.platform_number
+    query = _json.loads(transport.calls[0][1]["data"])
+    assert allowance.platform_number in query.values()
+    await db_session.refresh(allowance)
+    assert allowance.allowance_no == allowance.platform_number
     sale = await sales.get_sale(store_id, sale_id)
     assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ALLOWANCE
 
@@ -1228,16 +1218,17 @@ async def test_reconcile_rejects_collided_record_instead_of_marking_success(
     assert sale_id > 0
 
 
-async def test_reconcile_rejects_same_amount_collision_by_create_time(
+async def test_same_amount_collision_is_caught_by_create_time(
     db_session: AsyncSession,
 ) -> None:
-    """**同額**撞號也必須擋下（Codex 對抗審查）：金額只是碰撞篩選、不是身分證明。
+    """**同額**撞號也必須認出來（Codex 對抗審查）：金額只是碰撞篩選、不是身分證明。
 
     固定售價的門市很容易出現同額交易；還原後 sale_id 倒退重用 order_id 時，
     平台上那筆歷史紀錄金額可能剛好相同。唯一能分辨的是「它建於本訊息誕生之前」。
+    認出後同樣換新編號送出，**不會**把那張同額舊發票補記成本筆。
     """
     store_id, clerk_id, code = await _seed(db_session)
-    await _checkout(db_session, store_id, clerk_id, code)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
 
@@ -1246,7 +1237,7 @@ async def test_reconcile_rejects_same_amount_collision_by_create_time(
             "code": 0,
             "msg": "",
             "data": {
-                "invoice_number": "AB00001111",
+                "invoice_number": "ZZ99990000",
                 "invoice_type": "C0401",
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
@@ -1255,15 +1246,17 @@ async def test_reconcile_rejects_same_amount_collision_by_create_time(
                 "total_amount": 1050,  # ← 與本地**完全同額**，金額比對擋不住
                 "create_date": int((datetime.now(tz=UTC) - timedelta(days=3)).timestamp()),
             },
-        }
+        },
+        dict(_QUERY_NOT_FOUND),
+        dict(_F0401_OK),
     )
-    with pytest.raises(AmegoTransportError):
-        await svc.send_via_amego(store_id, queue_id, client=_client(stale))
+    item = await svc.send_via_amego(store_id, queue_id, client=_client(stale))
 
-    item = next(i for i in await svc.list_queue(store_id) if i.id == queue_id)
-    assert item.status is UploadStatus.PENDING
-    assert item.last_error is not None and "還原前的舊資料" in item.last_error
-    assert len(stale.calls) == 1  # 未送出 F0401
+    assert item.status is UploadStatus.UPLOADED
+    assert stale.calls[2][0].endswith("/json/f0401")  # 換號後真的送出
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None
+    assert invoice.invoice_no == "AB00001111"  # 不是那張同額舊發票 ZZ99990000
 
 
 async def test_allowance_reconcile_rejects_same_amount_same_invoice_collision(

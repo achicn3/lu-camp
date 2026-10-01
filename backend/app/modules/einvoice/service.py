@@ -31,8 +31,6 @@ from app.modules.einvoice.amego import (
     AmegoClient,
     AmegoIssueResult,
     HttpxAmegoTransport,
-    allowance_number,
-    amego_order_id,
     build_allowance_query_data,
     build_f0401_data,
     build_f0501_data,
@@ -49,12 +47,14 @@ from app.modules.einvoice.amego import (
 from app.modules.einvoice.dropper import EInvoiceDropper
 from app.modules.einvoice.models import (
     INVOICE_AUDIT_ENTITY,
+    ROTATE_ORDER_ID_AUDIT_ACTION,
     VOID_INVOICE_AUDIT_ACTION,
     EInvoiceResultEvent,
     EInvoiceUploadQueue,
     Invoice,
     InvoiceAllowance,
 )
+from app.modules.einvoice.platform_ids import rotated_platform_order_id
 from app.modules.einvoice.repository import EInvoiceRepository
 from app.modules.einvoice.serializer import InvoiceXmlSerializer
 from app.modules.store.service import StoreService
@@ -69,6 +69,7 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     AllowanceExceedsInvoice,
+    AmegoIdentifierCollision,
     AmegoIssueFailed,
     AmegoTransportError,
     DuplicateAllowanceForReturn,
@@ -349,15 +350,19 @@ class EInvoiceService:
         if any(_may_have_reached_platform(item) for item in issue_items):
             # **延遲取得客戶端**：從未送出過的單（例如電子發票剛啟用就故障）不必被憑證卡住。
             client = await client_factory()
-            order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
             query_resp = await client.call(
-                "/json/invoice_query", build_invoice_query_data(order_id=order_id)
+                "/json/invoice_query",
+                build_invoice_query_data(order_id=invoice.platform_order_id),
             )
-            existing_on_platform = parse_query_issued(
-                query_resp,
-                expect_total=Decimal(invoice.total),
-                expect_not_before=invoice.created_at,
-            )
+            try:
+                existing_on_platform = parse_query_issued(
+                    query_resp,
+                    expect_total=Decimal(invoice.total),
+                    expect_not_before=invoice.created_at,
+                )
+            except AmegoIdentifierCollision:
+                # 該編號底下是別筆的舊紀錄＝本筆從未在平台成立（平台 OrderId 唯一），同查無。
+                existing_on_platform = None
             if existing_on_platform is not None:
                 raise ManualInvoiceNotRegisterable(
                     f"平台上已經有這筆交易的發票（{existing_on_platform.invoice_no}），"
@@ -943,16 +948,39 @@ class EInvoiceService:
             # 訊息。每次上送前先查平台實態：已套用 → 補記成功、絕不重送；**明確未套用**才送
             # （曖昧查詢回應由解析層拋 AmegoTransportError 擋下）。多一次查詢換確定性（單店）。
             if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
-                order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
+                issuing = await self._repo.get_invoice(store_id, locked.invoice_id or 0)
+                if issuing is None:
+                    raise EInvoiceDropError(f"佇列 {queue_id} 的開立目標發票不存在（需人工對帳）")
+                order_id = issuing.platform_order_id
                 _assert_payload_targets(payload, "OrderId", order_id, ctx="f0401")
                 query_resp = await client.call(
                     "/json/invoice_query", build_invoice_query_data(order_id=order_id)
                 )
-                recovered = parse_query_issued(
-                    query_resp,
-                    expect_total=_payload_total(payload),
-                    expect_not_before=locked.created_at,
-                )
+                try:
+                    recovered = parse_query_issued(
+                        query_resp,
+                        expect_total=_payload_total(payload),
+                        expect_not_before=locked.created_at,
+                    )
+                except AmegoIdentifierCollision:
+                    # **撞號自動處理**（2026-10-01，店主：盡量不要人工介入發票）：平台證實這個
+                    # OrderId 底下是別筆（資料庫重建前的舊紀錄）。平台 OrderId 唯一，所以本筆
+                    # 從未在平台成立——等同查無：已作廢的交易走下方「查無＋已作廢 → 取消開立」；
+                    # 未作廢就換新編號、再以新編號對帳先行一次。新編號若又撞（實際上不會）
+                    # 直接往外拋、維持待對帳，不在此循環換號。
+                    recovered = None
+                    if issuing.status not in (InvoiceStatus.VOID_PENDING, InvoiceStatus.VOID):
+                        payload, order_id = await self._rotate_order_id(
+                            store_id, locked, issuing, payload
+                        )
+                        query_resp = await client.call(
+                            "/json/invoice_query", build_invoice_query_data(order_id=order_id)
+                        )
+                        recovered = parse_query_issued(
+                            query_resp,
+                            expect_total=_payload_total(payload),
+                            expect_not_before=locked.created_at,
+                        )
                 if recovered is not None:
                     return await self._record_amego_outcome(
                         store_id,
@@ -973,7 +1001,10 @@ class EInvoiceService:
                     InvoiceStatus.VOID,
                 ):
                     locked.status = UploadStatus.CANCELLED
-                    locked.last_error = "平台查無且發票已作廢——取消開立（不重送 F0401）"
+                    locked.last_error = (
+                        "平台查無本筆（或該編號底下是別筆舊紀錄）且發票已作廢"
+                        "——取消開立（不重送 F0401）"
+                    )
                     if issue_target.status is InvoiceStatus.VOID_PENDING:
                         issue_target.status = InvoiceStatus.VOID
                         from app.modules.sales.service import SalesService
@@ -1005,17 +1036,15 @@ class EInvoiceService:
                             issue_result=None,
                         )
             elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
+                sending = await self._session.get(InvoiceAllowance, locked.allowance_id)
+                if sending is None or sending.store_id != store_id:
+                    raise EInvoiceDropError(f"佇列 {queue_id} 的折讓目標不存在（需人工對帳）")
                 _assert_payload_targets(
-                    payload,
-                    "AllowanceNumber",
-                    allowance_number(store_id=store_id, allowance_id=locked.allowance_id),
-                    ctx="g0401",
+                    payload, "AllowanceNumber", sending.platform_number, ctx="g0401"
                 )
                 query_resp = await client.call(
                     "/json/allowance_query",
-                    build_allowance_query_data(
-                        number=allowance_number(store_id=store_id, allowance_id=locked.allowance_id)
-                    ),
+                    build_allowance_query_data(number=sending.platform_number),
                 )
                 sent_net, sent_tax, sent_original_no = _payload_allowance_identity(payload)
                 if parse_query_allowance_exists(
@@ -1097,6 +1126,47 @@ class EInvoiceService:
             delivery_attempt=claim_attempts,
             issue_result=issue_result,
         )
+
+    async def _rotate_order_id(
+        self,
+        store_id: int,
+        item: EInvoiceUploadQueue,
+        invoice: Invoice,
+        payload: object,
+    ) -> tuple[object, str]:
+        """撞號的開立換新 OrderId：發票、凍結 payload 與 checksum 同一交易內一起換。
+
+        新編號由（舊編號、發票 id、建立時間）推導、**不重抽亂數**：從換號前的備份還原後再撞一次，
+        會算回同一個編號、查到本筆而補記，不會開出第二張（見 `rotated_platform_order_id`）。
+
+        呼叫端已驗過凍結 payload 的 checksum 與 OrderId（`send_via_amego`），這裡只改編號；
+        變更隨送出前的 posted_at commit（或 `_note_blocked`）一併落庫，兩者不會一半新一半舊。
+        回 (新 payload, 新 OrderId)；稽核記系統自動處理（actor 為 None）。
+        """
+        old_order_id = invoice.platform_order_id
+        new_order_id = rotated_platform_order_id(
+            store_id=store_id,
+            sale_id=invoice.sale_id,
+            invoice_id=invoice.id,
+            previous_order_id=old_order_id,
+            invoice_created_at=invoice.created_at,
+        )
+        _payload_first(payload, ctx="f0401")["OrderId"] = new_order_id
+        data_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        item.amego_payload = data_json
+        item.xml_sha256 = hashlib.sha256(data_json.encode("utf-8")).hexdigest()
+        invoice.platform_order_id = new_order_id
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=None,
+            action=ROTATE_ORDER_ID_AUDIT_ACTION,
+            entity_type=INVOICE_AUDIT_ENTITY,
+            entity_id=str(invoice.id),
+            before={"platform_order_id": old_order_id},
+            after={"platform_order_id": new_order_id},
+        )
+        return payload, new_order_id
 
     async def _note_blocked(self, store_id: int, queue_id: int, reason: str) -> None:
         """記下「本次為何不能上送」，**不改狀態**（維持 PENDING 待人工對帳）。
@@ -1181,9 +1251,7 @@ class EInvoiceService:
         if success and item.action is EInvoiceAction.ALLOWANCE and item.allowance_id is not None:
             allowance = await self._session.get(InvoiceAllowance, item.allowance_id)
             if allowance is not None and allowance.allowance_no is None:
-                allowance.allowance_no = allowance_number(
-                    store_id=store_id, allowance_id=allowance.id
-                )
+                allowance.allowance_no = allowance.platform_number
         await self._session.commit()
         await self._session.refresh(item)
         return item
@@ -1229,7 +1297,7 @@ class EInvoiceService:
         resp = await client.call(
             "/json/invoice_print",
             build_invoice_print_data(
-                order_id=amego_order_id(store_id=store_id, sale_id=sale_id),
+                order_id=invoice.platform_order_id,
                 printer_type=AMEGO_PRINTER_TYPE_TM_T82III,
                 # **一律印正本、不加註「補印」**（店主 2026-08-29 裁示）。
                 # 要點 §26 的註記本意是讓重複那張不能再兌獎，拿掉後避免重複兌領的責任
@@ -1361,7 +1429,7 @@ class EInvoiceService:
                 else allowance.created_at.replace(tzinfo=UTC)
             )
             return build_g0401_data(
-                number=allowance_number(store_id=store_id, allowance_id=allowance.id),
+                number=allowance.platform_number,
                 allowance_date=allowance_created.astimezone(_TAIPEI_TZ).date(),
                 invoice=invoice,
                 net=Decimal(allowance.net),
@@ -1390,11 +1458,7 @@ class EInvoiceService:
         lines = await SalesService(self._session).get_lines(invoice.sale_id)
         # 金額/稅率一律用發票**落地快照**（invoice.net/tax/tax_rate），不讀活 settings
         # （結帳後改稅率不得改變申報內容，Codex 第九輪）。
-        return build_f0401_data(
-            invoice,
-            lines,
-            order_id=amego_order_id(store_id=store_id, sale_id=invoice.sale_id),
-        )
+        return build_f0401_data(invoice, lines, order_id=invoice.platform_order_id)
 
     async def retry(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue:
         """把 FAILED 佇列列轉回 PENDING（attempts+1），供重新拋檔/上傳。

@@ -25,7 +25,11 @@ from app.core.money import round_ntd
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
 from app.shared.enums import InvoiceType, SaleLineKind
-from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError
+from app.shared.exceptions import (
+    AmegoIdentifierCollision,
+    AmegoNotConfigured,
+    AmegoTransportError,
+)
 
 # MIG 課稅別（doc：1 應稅／2 零稅率／3 免稅）。本店僅應稅品項。
 _TAX_TYPE_TAXABLE = 1
@@ -35,12 +39,6 @@ _B2C_BUYER_NAME = "消費者"
 _DESCRIPTION_MAX = 256
 _HTTP_TIMEOUT_SECONDS = 15.0
 _AMEGO_MAX_DECIMAL_PLACES = Decimal("0.0000001")
-
-
-def amego_order_id(*, store_id: int, sale_id: int) -> str:
-    """OrderId（唯一、≤40 字）：由 (store, sale) 確定性導出——重試恆同號，
-    Amego 端「OrderId 不可重複」即天然防同一銷售重複開立。"""
-    return f"S{store_id}-{sale_id}"
 
 
 def sign_form(data_json: str, timestamp: int, app_key: str) -> str:
@@ -148,42 +146,6 @@ def build_f0501_data(invoice_number: str) -> list[dict[str, str]]:
 
 # 折讓單種類（doc）：114-01-01 起經雙方合意之退回/折讓，賣方應開立並依限上傳 → 恆用 2。
 _ALLOWANCE_TYPE_SELLER = 2
-_MAX_DATABASE_INTEGER_ID = 2_147_483_647
-_BASE36_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-
-def _base36(value: int) -> str:
-    """Encode a non-negative integer without padding."""
-    if value == 0:
-        return "0"
-    digits: list[str] = []
-    while value:
-        value, remainder = divmod(value, 36)
-        digits.append(_BASE36_ALPHABET[remainder])
-    return "".join(reversed(digits))
-
-
-def allowance_number(*, store_id: int, allowance_id: int) -> str:
-    """自編折讓單號（唯一、≤16 字）：由 (store, allowance) 確定性導出。
-
-    短 ID 保留既有可讀格式，避免已建立但尚待重送的折讓在部署後換號。超過
-    光貿 16 字限制時，將兩個 PostgreSQL signed-int ID 無碰撞地封裝後轉 base36；
-    ``LX`` 前綴與短格式的 ``L<數字>-<數字>`` 命名空間互斥。
-    """
-    if not 0 < store_id <= _MAX_DATABASE_INTEGER_ID:
-        raise ValueError("store_id 超出可編碼範圍")
-    if not 0 < allowance_id <= _MAX_DATABASE_INTEGER_ID:
-        raise ValueError("allowance_id 超出可編碼範圍")
-
-    readable = f"L{store_id}-{allowance_id}"
-    if len(readable) <= 16:
-        return readable
-
-    packed = (store_id << 32) | allowance_id
-    compact = f"LX{_base36(packed)}"
-    if len(compact) > 16:  # defensive: signed-int IDs currently fit in 15 chars
-        raise ValueError("折讓單號超過光貿 16 字限制")
-    return compact
 
 
 def build_g0401_data(
@@ -365,6 +327,18 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
 _CLOCK_TOLERANCE_SECONDS = 120
 
 
+def _predates_message(data: dict[str, object], not_before: datetime) -> bool:
+    """平台紀錄**確實**建於本訊息誕生之前（逾時鐘容忍值）＝不可能是本筆。
+
+    這是唯一可據以自動換號的撞號證據（code-reviewer M1）：缺欄或型別不明一律回 False，
+    交由 `_assert_created_after` 照舊 fail closed。
+    """
+    raw = data.get("create_date")
+    if type(raw) is not int:  # bool 是 int 子類，但 JSON true/false 不會是合理秒數
+        return False
+    return raw < int(not_before.timestamp()) - _CLOCK_TOLERANCE_SECONDS
+
+
 def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx: str) -> None:
     """平台紀錄的建檔時間不得早於這則稅務訊息誕生的時點，否則**不可能是本筆**。
 
@@ -382,10 +356,9 @@ def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx:
         )
     # **先在整數 epoch 域比較**：datetime.fromtimestamp() 對超大整數會拋 OverflowError/OSError，
     # 那不是 AmegoTransportError，會讓請求變成 500 且 last_error 一片空白（Codex 第二輪）。
-    lower = int(not_before.timestamp()) - _CLOCK_TOLERANCE_SECONDS
     upper = int(datetime.now(tz=UTC).timestamp()) + _CLOCK_TOLERANCE_SECONDS
-    if raw < lower:
-        raise AmegoTransportError(
+    if _predates_message(data, not_before):
+        raise AmegoIdentifierCollision(
             f"{ctx} 查到的紀錄建檔時間 {raw} 早於本訊息的 {int(not_before.timestamp())}"
             "——該紀錄是還原前的舊資料（識別碼重號），待人工對帳"
         )
@@ -472,12 +445,15 @@ def parse_query_issued(
         issued_time = datetime.strptime(raw_time, "%H:%M:%S").strftime("%H:%M:%S")
     except ValueError as exc:
         raise AmegoTransportError("invoice_query 回應欄位不合法（日期/時間），待對帳") from exc
-    _assert_same_record(
-        _platform_amount(data, "total_amount", ctx="invoice_query"),
-        expect_total,
-        ctx="invoice_query",
-        label="含稅總額",
-    )
+    platform_total = _platform_amount(data, "total_amount", ctx="invoice_query")
+    # 金額不符**且**建於本訊息之前＝證實是別筆（撞號）。只有金額不符不算：可能是本筆、只是
+    # 平台金額口徑不同，自動換號會重複開立（code-reviewer M1），交 _assert_same_record 照舊擋下。
+    if platform_total != expect_total and _predates_message(data, expect_not_before):
+        raise AmegoIdentifierCollision(
+            f"invoice_query 查到的含稅總額 {platform_total} 與本地 {expect_total} 不符、"
+            "且建檔早於本訊息——該紀錄是別筆的舊資料（識別碼重號）"
+        )
+    _assert_same_record(platform_total, expect_total, ctx="invoice_query", label="含稅總額")
     _assert_created_after(data, expect_not_before, ctx="invoice_query")
     _assert_platform_status_ok(data, ctx="invoice_query")
     # **頂層動作型別必須是開立**：C0501（已作廢）／C0701（已註銷）代表原發票已不成立，

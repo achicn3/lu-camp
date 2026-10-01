@@ -509,6 +509,40 @@ async def test_register_allowed_when_the_platform_says_not_found(
     assert row.status is UploadStatus.CANCELLED
 
 
+async def test_register_allowed_when_the_id_belongs_to_another_old_record(
+    db_session: AsyncSession,
+) -> None:
+    """編號底下是別筆的舊紀錄（建於本筆之前、金額不符）＝本筆從未在平台成立，與查無同樣可登記。
+
+    平台 OrderId 唯一：別筆占著這個編號，本筆就不可能也在平台上。卡著不讓登記只會逼人工。
+    """
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _posted_pending_invoice(db_session, store_id, sale_id)
+    client, _ = _amego(
+        {
+            "code": 0,
+            "data": {
+                "invoice_number": "FX27312200",
+                "random_number": "1234",
+                "invoice_date": "20260918",
+                "invoice_time": "17:46:26",
+                "total_amount": 11,  # ← 資料庫重建前的別筆測試發票
+                "create_date": 1_789_725_986,  # 2026-09-18，早於本筆
+                "invoice_status": 99,
+                "invoice_type": "C0401",
+            },
+        }
+    )
+    result = await _register(db_session, store_id, sale_id, client)
+    assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+    assert result.invoice_no == "ZA10029999"  # 登記的是紙本號碼，絕不是平台上別筆的號碼
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    assert row.status is UploadStatus.CANCELLED
+
+
 async def test_register_fails_closed_when_the_platform_answer_is_ambiguous(
     db_session: AsyncSession,
 ) -> None:

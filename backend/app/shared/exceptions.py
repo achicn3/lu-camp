@@ -464,6 +464,14 @@ class AmegoTransportError(DomainError):
     """
 
 
+class AmegoIdentifierCollision(AmegoTransportError):
+    """對帳查到的平台紀錄**證實不是本筆**（金額不符或建於本訊息之前）：識別碼被別筆占用。
+
+    仍是 AmegoTransportError 的子類——未特別處理的呼叫端照舊 fail closed；開立送出流程
+    則把它和「回應曖昧」分開：前者證實本筆從未在平台成立、可自動換號，後者不行。
+    """
+
+
 class AmegoIssueFailed(DomainError):
     """Amego 明確拒絕本次上送（code≠0）：佇列已轉 FAILED、留 last_error 可重試。
 

@@ -13,6 +13,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -31,9 +32,14 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+from app.modules.einvoice.platform_ids import (
+    new_platform_allowance_number,
+    new_platform_order_id,
+)
 from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
@@ -53,6 +59,25 @@ def _enum_col(enum_cls: type) -> Enum:
 # 只靠註解維繫的話，哪天改了字串，月報的紙本作廢那一段會靜默變空而且沒有測試會紅。
 VOID_INVOICE_AUDIT_ACTION = "VOID_INVOICE"
 INVOICE_AUDIT_ENTITY = "invoice"
+# 撞號自動換 OrderId 的稽核 action（service 寫入、測試比對同一個常數）。
+ROTATE_ORDER_ID_AUDIT_ACTION = "ROTATE_EINVOICE_ORDER_ID"
+
+
+# 平台識別碼在**插入當下**產生（見 platform_ids）：放在欄位 default 而非只在 service 指派，
+# 任何建立發票／折讓的路徑都不會漏掉，也不會有「先建列、事後才補編號」的空窗。
+def _insert_params(context: DefaultExecutionContext) -> dict[str, Any]:
+    # SQLAlchemy 2.0 的 get_current_parameters 本身沒有型別註記（回傳本列的插入參數 dict）。
+    params: dict[str, Any] = context.get_current_parameters()  # type: ignore[no-untyped-call]
+    return params
+
+
+def _default_platform_order_id(context: DefaultExecutionContext) -> str:
+    params = _insert_params(context)
+    return new_platform_order_id(store_id=params["store_id"], sale_id=params["sale_id"])
+
+
+def _default_platform_allowance_number(context: DefaultExecutionContext) -> str:
+    return new_platform_allowance_number(store_id=_insert_params(context)["store_id"])
 
 
 class Invoice(Base, TimestampMixin):
@@ -104,12 +129,19 @@ class Invoice(Base, TimestampMixin):
             "(status IN ('VOID', 'VOID_PENDING')) = (void_reason IS NOT NULL)",
             name="ck_invoices_void_reason_matches_status",
         ),
+        # 送 Amego 的 OrderId 同店唯一（平台端同賣方不可重複）。
+        UniqueConstraint(
+            "store_id", "platform_order_id", name="uq_invoices_store_platform_order_id"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     sale_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     invoice_type: Mapped[InvoiceType] = mapped_column(_enum_col(InvoiceType))
+    # 送 Amego 的 OrderId：建立時隨機產生並持久化，送出／對帳／補印一律讀這欄（platform_ids）。
+    # 撞號時送出流程自動換新編號（EInvoiceService._rotate_order_id）。
+    platform_order_id: Mapped[str] = mapped_column(String(40), default=_default_platform_order_id)
     invoice_no: Mapped[str | None] = mapped_column(String(16))  # 字軌+號碼；配號 deferred
     invoice_date: Mapped[date | None] = mapped_column(Date)  # 開立日；序列化以民國年輸出
     invoice_time: Mapped[str | None] = mapped_column(String(8))  # 開立時間 HH:MM:SS（F0401 必填）
@@ -193,6 +225,9 @@ class InvoiceAllowance(Base, TimestampMixin):
         CheckConstraint("total > 0", name="ck_invoice_allowances_total_positive"),
         CheckConstraint("net >= 0 AND tax >= 0", name="ck_invoice_allowances_amounts_nonneg"),
         CheckConstraint("net + tax = total", name="ck_invoice_allowances_net_tax_total"),
+        UniqueConstraint(
+            "store_id", "platform_number", name="uq_invoice_allowances_store_platform_number"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -200,6 +235,10 @@ class InvoiceAllowance(Base, TimestampMixin):
     invoice_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     return_id: Mapped[int | None] = mapped_column()  # 退貨單參照（無 FK，避免跨模組耦合）
     allowance_no: Mapped[str | None] = mapped_column(String(16))  # 折讓證明單號；配號 deferred
+    # 送 Amego 的折讓單號：建立時隨機產生並持久化（platform_ids）；核可後寫回 allowance_no。
+    platform_number: Mapped[str] = mapped_column(
+        String(16), default=_default_platform_allowance_number
+    )
     net: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))

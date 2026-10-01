@@ -242,7 +242,10 @@ def _guard_environment(database_url: str) -> None:
 async def bump_platform_id_sequences(session: AsyncSession, base: int) -> None:
     """把 `sales` 與 `invoice_allowances` 的 id 序列推到一個高起點。
 
-    **這關係到真的送上 Amego 時會不會撞號。** 平台單號是由本地 id 確定性導出的
+    2026-10-01 起平台單號改為建立時隨機產生（`platform_ids`），已不由本地 id 導出；
+    推高序列保留為額外保險。
+
+    **原本這關係到真的送上 Amego 時會不會撞號。** 平台單號曾由本地 id 確定性導出
     （`OrderId = S{store}-{sale}`、折讓 `L{store}-{allowance}`），而測試環境是
     **官方公開共用帳號**——`S1-1`、`S1-14`、`S1-20`、`S1-50` 這些早就被別人（和我們
     先前的測試）用掉了。從 1 開始編號，一上傳就是一整片「OrderId 重複」。

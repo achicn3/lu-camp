@@ -21,7 +21,6 @@ from app.modules.einvoice.amego import (
     AMEGO_PRINTER_LANG_BIG5,
     AMEGO_PRINTER_TYPE_TM_T82III,
     AmegoClient,
-    amego_order_id,
     build_f0401_data,
     build_f0501_data,
     build_invoice_print_data,
@@ -96,11 +95,6 @@ def test_sign_form_md5_of_data_time_key() -> None:
     data = '{"OrderId":"S1-7"}'
     expected = hashlib.md5(f"{data}1700000000unit-test-app-key".encode()).hexdigest()
     assert sign_form(data, 1700000000, "unit-test-app-key") == expected
-
-
-def test_order_id_deterministic_per_sale() -> None:
-    assert amego_order_id(store_id=1, sale_id=7) == "S1-7"
-    assert amego_order_id(store_id=12, sale_id=3456) == "S12-3456"
 
 
 def test_f0401_b2c_amounts_tax_zero() -> None:

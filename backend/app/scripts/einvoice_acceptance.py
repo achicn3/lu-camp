@@ -7,9 +7,9 @@
 
 業務動作一律走**真 HTTP API**（與店員操作同一條路），只有平台查證直呼 client。
 
-**號碼會真的被消耗。** `OrderId = S{store}-{sale}` 是確定性導出的：同一筆銷售一旦開立
-就永遠不能再開第二張。重跑必須用新的 sale，不能重用舊的。每次執行都把佔用的號段
-寫進證據鏈，供日後避開。
+**號碼會真的被消耗。** OrderId 於發票建立時隨機產生並存在 `invoices.platform_order_id`
+（如 `S1-5-K7M2QX9A`）：同一筆銷售一旦開立就永遠不能再開第二張。平台查證一律讀存下來的
+編號，不可再由 sale_id 推導。每次執行都把佔用的編號寫進證據鏈。
 
 執行（backend 需已啟動並指向測試統編的資料庫）：
 
@@ -179,6 +179,15 @@ async def _issue(api: Api, sale_id: int) -> tuple[int, Any]:
     return await api.call("POST", f"/api/v1/einvoice/sales/{sale_id}/issue")
 
 
+async def _order_id_for_sale(sale_id: int) -> str:
+    """該銷售發票**存下來的** OrderId（建立時隨機產生，不可再由 sale_id 推導）。"""
+    async with get_sessionmaker()() as session:
+        order_id = await session.scalar(
+            text("SELECT platform_order_id FROM invoices WHERE sale_id = :s"), {"s": sale_id}
+        )
+    return str(order_id or "")
+
+
 async def _platform_invoice_by_order(store_id: int, order_id: str) -> dict[str, Any]:
     async with get_sessionmaker()() as session:
         client = await _make_client(session, store_id)
@@ -257,7 +266,7 @@ async def run(
         sale = await _sell(api, codes, f"pe-{run_tag}-{slug}", invoice)
         status, data = await _issue(api, sale["id"])
         ok = status == 200 and bool(data.get("invoice_no"))
-        ev.order_ids.append(f"S{store_id}-{sale['id']}")
+        ev.order_ids.append(await _order_id_for_sale(sale["id"]))
         issued[label] = {"sale": sale, "invoice": data if ok else None}
         ev.add(
             f"1. 開立－{label}",
@@ -280,7 +289,7 @@ async def run(
 
     # ── 3. 對帳先行：以 order_id 查得到、金額相符 ────────────────────
     if first["invoice"]:
-        oid = f"S{store_id}-{first['sale']['id']}"
+        oid = await _order_id_for_sale(first["sale"]["id"])
         found = await _platform_invoice_by_order(store_id, oid)
         same = str(found.get("invoice_number") or "") == str(first["invoice"]["invoice_no"])
         amount_ok = Decimal(str(found.get("total_amount", "-1"))) == Decimal(
@@ -388,7 +397,7 @@ async def run(
         if queued:
             _s, sent = await api.call("POST", f"/api/v1/einvoice/queue/{queued['id']}/send")
         number = void_target["invoice"]["invoice_no"]
-        found = await _platform_invoice_by_order(store_id, f"S{store_id}-{sale_id}")
+        found = await _platform_invoice_by_order(store_id, await _order_id_for_sale(sale_id))
         # **平台受理但尚在處理的作廢，頂層仍是 C0401**，待作廢掛在 `wait[]`
         # （產品原始碼已記載此實測行為）。只看頂層會誤判成沒作廢。
         wait = found.get("wait")
@@ -516,7 +525,7 @@ async def run(
         },
     )
     q = await _queue_for_sale(paper_sale["id"], "ISSUE")
-    plat = await _platform_invoice_by_order(store_id, f"S{store_id}-{paper_sale['id']}")
+    plat = await _platform_invoice_by_order(store_id, await _order_id_for_sale(paper_sale["id"]))
     # 平台查無＝code 為「查無資料」或無號碼
     absent = not plat.get("invoice_number")
     ev.add(
@@ -538,7 +547,7 @@ async def run(
                 text("SELECT status FROM invoices WHERE sale_id = :s"), {"s": void_sale["id"]}
             )
         ).first()
-    ev.order_ids.append(f"S{store_id}-{void_sale['id']}")
+    ev.order_ids.append(await _order_id_for_sale(void_sale["id"]))
     result_9 = ev.add(
         "9. 銷售作廢－連動發票進入作廢",
         st_issue == 200
