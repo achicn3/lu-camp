@@ -105,6 +105,8 @@ class MenuSelection:
     description: str
     options_snapshot: list[dict[str, object]]
     options: list[MenuOption]
+    # 一份的成本（docs/49 §3）：品項成本＋Σ 選項成本（沒填的選項算 0）；品項沒填成本＝未知。
+    unit_cost: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -473,6 +475,12 @@ class MenuService:
             description=_line_description(item.name, picked_names),
             options_snapshot=snapshot,
             options=chosen_options,
+            unit_cost=(
+                None
+                if item.unit_cost is None
+                else item.unit_cost
+                + sum((o.unit_cost or Decimal(0) for o in chosen_options), Decimal(0))
+            ),
         )
 
     # ── 每日限量（docs/44 §3.7）──
@@ -897,12 +905,18 @@ class MenuService:
         is_available: bool | None = None,
         sort_order: int | None = None,
         daily_limited: bool | None = None,
+        # 成本沿用 _UNSET 慣例：沒提供＝不變，明確給 None＝清空。
+        unit_cost: Decimal | None | object = _UNSET,
         actor_user_id: int,
     ) -> MenuOption:
         option = await self._repo.get_option(store_id, option_id, for_update=True)
         if option is None:
             raise MenuEntryNotFound(f"找不到選項 {option_id}")
         before_delta = option.price_delta
+        before_cost = option.unit_cost
+        if unit_cost is not _UNSET:
+            _validate_cost(unit_cost)  # type: ignore[arg-type]
+            option.unit_cost = unit_cost  # type: ignore[assignment]
         if name is not None and name != option.name:
             if await self._repo.option_name_exists(option.group_id, name, exclude_id=option_id):
                 raise DuplicateMenuEntry(f"同群組已有選項：{name}")
@@ -916,6 +930,21 @@ class MenuService:
             option.sort_order = sort_order
         await self._set_daily_limited(store_id, option, daily_limited, actor_user_id, "menu_option")
         await self._session.flush()
+        if unit_cost is not _UNSET and unit_cost != before_cost:
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="UPDATE_MENU_OPTION_COST",
+                entity_type="menu_option",
+                entity_id=str(option_id),
+                before={"unit_cost": None if before_cost is None else format_ntd(before_cost)},
+                after={
+                    "unit_cost": None
+                    if unit_cost is None
+                    else format_ntd(unit_cost)  # type: ignore[arg-type]
+                },
+            )
         if price_delta is not None and price_delta != before_delta:
             await write_audit_log(
                 self._session,

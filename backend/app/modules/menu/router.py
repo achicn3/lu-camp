@@ -410,6 +410,8 @@ async def update_menu_option(
             sort_order=body.sort_order,
             daily_limited=body.daily_limited,
             actor_user_id=user.id,
+            # 成本：明確送 null＝清空，沒送＝不變（同品項成本的做法）。
+            **({"unit_cost": body.unit_cost} if "unit_cost" in body.model_fields_set else {}),
         )
     except _MenuErrors as exc:
         await session.rollback()

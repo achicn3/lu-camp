@@ -3613,7 +3613,7 @@ class SalesService:
                 **self._line_amounts(
                     disc,
                     qty=line.qty,
-                    cost=None if item.unit_cost is None else item.unit_cost * line.qty,
+                    cost=None if selection.unit_cost is None else selection.unit_cost * line.qty,
                 ),
             )
         )

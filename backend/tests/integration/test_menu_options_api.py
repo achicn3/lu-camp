@@ -361,3 +361,23 @@ async def test_item_description_round_trips(
         f"/api/v1/menu-items/{item_id}", json={"description": None}, headers=_auth(mgr)
     )
     assert resp.json()["description"] is None
+
+
+async def test_option_cost_via_api_set_and_clear(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """選項成本（docs/49 F1）：PATCH 可設、明確送 null 可清空、沒送不動。"""
+    _, mgr = await _seed(db_session)
+    group = await _group(client, mgr, "奶", [("燕麥奶", "20")])
+    options = group["options"]
+    assert isinstance(options, list)
+    url = f"/api/v1/menu-options/{options[0]['id']}"
+    resp = await client.patch(url, json={"unit_cost": "8"}, headers=_auth(mgr))
+    assert resp.json()["unit_cost"] == "8"
+    resp = await client.patch(url, json={"price_delta": "25"}, headers=_auth(mgr))
+    assert resp.json()["unit_cost"] == "8"
+    resp = await client.patch(url, json={"unit_cost": None}, headers=_auth(mgr))
+    assert resp.json()["unit_cost"] is None
+    assert (
+        await client.patch(url, json={"unit_cost": "1.5"}, headers=_auth(mgr))
+    ).status_code == 422

@@ -8099,6 +8099,8 @@ export interface components {
             remaining: number | null;
             /** Sort Order */
             sort_order: number;
+            /** Unit Cost */
+            unit_cost?: string | null;
         };
         /** MenuOptionUpdateRequest */
         MenuOptionUpdateRequest: {
@@ -8112,6 +8114,8 @@ export interface components {
             price_delta?: number | string | null;
             /** Sort Order */
             sort_order?: number | null;
+            /** Unit Cost */
+            unit_cost?: number | string | null;
         };
         /**
          * MenuStockAdjustReason

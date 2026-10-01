@@ -130,6 +130,8 @@ class MenuOption(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(50))
     # 加價（含稅整數元）；0＝不加價。
     price_delta: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 選項成本（docs/49 F1，例：燕麥奶多 8 元）；可空＝沒有額外材料，結帳時視為 0。
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     # 單一選項停售（例：某支豆子用完）。
     is_available: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     # 每日限量（docs/44 §3.7）：勾了就每天開店歸零，要填當天份數才能賣；沒勾＝不限量。

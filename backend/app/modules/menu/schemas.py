@@ -112,6 +112,8 @@ class MenuOptionRead(BaseModel):
     group_id: int
     name: str
     price_delta: NTDAmount
+    # 選項成本（docs/49 F1）；null＝沒有額外材料。
+    unit_cost: NTDAmountOpt = None
     is_available: bool
     sort_order: int
     daily_limited: bool
@@ -125,6 +127,7 @@ class MenuOptionRead(BaseModel):
             group_id=option.group_id,
             name=option.name,
             price_delta=option.price_delta,
+            unit_cost=option.unit_cost,
             is_available=option.is_available,
             sort_order=option.sort_order,
             daily_limited=option.daily_limited,
@@ -169,11 +172,23 @@ class MenuOptionUpdateRequest(BaseModel):
     is_available: bool | None = None
     sort_order: int | None = None
     daily_limited: bool | None = None
+    # 明確給 null＝清空成本（回到「沒有額外材料」）；沒送＝不變。
+    unit_cost: Decimal | None = Field(default=None, ge=0)
 
     @field_validator("price_delta")
     @classmethod
     def _valid_delta(cls, value: Decimal | None) -> Decimal | None:
         return None if value is None else _valid_price_delta(value)
+
+    @field_validator("unit_cost")
+    @classmethod
+    def _valid_cost(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        if value != value.to_integral_value():
+            raise ValueError("成本必須為整數元")
+        ensure_ntd_fits_numeric_12(value, field="成本")
+        return value
 
 
 def _check_bounds(min_select: int, max_select: int) -> None:

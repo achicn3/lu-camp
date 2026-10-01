@@ -11363,6 +11363,17 @@
           "sort_order": {
             "title": "Sort Order",
             "type": "integer"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
           }
         },
         "required": [
@@ -11440,6 +11451,22 @@
               }
             ],
             "title": "Sort Order"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
           }
         },
         "title": "MenuOptionUpdateRequest",
