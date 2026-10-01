@@ -44,6 +44,7 @@ function row(over: Record<string, unknown> = {}) {
 
 const ROWS = [
   row(),
+  row({ id: 13, type: "BULK_LOT", item_count: 1, item_names: ["營釘一批"] }),
   row({ id: 11, type: "CONSIGNMENT", void_block: "CONSIGNMENT", item_count: 1, item_names: ["寄賣椅"], payout_cash_amount: null, total_cash_paid: null }),
   row({ id: 10, void_block: "HAS_SOLD_ITEMS" }),
   row({ id: 9, void_block: "CREDIT_SPENT", payout_method: "STORE_CREDIT", payout_cash_amount: null, payout_credit_cash_equivalent: "1100" }),
@@ -62,6 +63,14 @@ function stub({ total = ROWS.length, items = ROWS }: { total?: number; items?: u
       const url = request?.url ?? String(input);
       const method = request?.method ?? "GET";
       requests.push({ url, method });
+      if (url.endsWith("/void-items")) {
+        return json([
+          { id: 31, item_code: "I31", name: "營燈", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+          { id: 32, item_code: "I32", name: "睡袋", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+          { id: 33, item_code: "I33", name: "爐頭", acquisition_cost: "1000", status: "SOLD", voided: false },
+        ]);
+      }
+      if (/\/acquisitions\/\d+$/.test(url)) return json(row());
       if (url.includes("/void")) {
         return json({
           acquisition_id: 12,
@@ -126,10 +135,17 @@ describe("收購紀錄清單", () => {
 
     const ok = within(rowOf(12)).getByRole("button", { name: "作廢" }) as HTMLButtonElement;
     expect(ok.disabled).toBe(false);
+    // 買斷單已有商品賣出：整張不能作廢，但其餘商品仍可逐件作廢 → 鈕可按、講清楚只能作廢其餘
+    const partial = rowOf(10);
+    expect((within(partial).getByRole("button", { name: "作廢" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(partial.textContent).toContain("已賣出的商品不能作廢，其餘可勾選作廢");
+    // 購物金已被用掉：整張沖不回，但只作廢幾件可能沖得回 → 鈕可按、講清楚
+    const credit = rowOf(9);
+    expect((within(credit).getByRole("button", { name: "作廢" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(credit.textContent).toContain("購物金已被用掉");
+    expect(screen.queryByRole("button", { name: "選品作廢" })).toBeNull(); // 只有一顆作廢鈕
     const expectations: [number, string][] = [
       [11, "寄售"],
-      [10, "已有商品賣出"],
-      [9, "購物金已被用掉"],
       [8, "先開帳"],
       [7, "已作廢"],
     ];
@@ -141,22 +157,43 @@ describe("收購紀錄清單", () => {
     }
   });
 
-  it("按作廢 → 填原因確認 → 顯示結果並重新整理清單", async () => {
+  it("散裝單按作廢 → 整張作廢：填原因確認 → 顯示結果並重新整理清單", async () => {
     auth.role = "MANAGER";
     stub();
     const user = userEvent.setup();
     wrap(<AcquisitionRecords />);
-    await waitFor(() => rowOf(12));
+    await waitFor(() => rowOf(13));
     const before = listCalls().length;
 
-    await user.click(within(rowOf(12)).getByRole("button", { name: "作廢" }));
+    await user.click(within(rowOf(13)).getByRole("button", { name: "作廢" }));
     const dialog = await screen.findByRole("dialog", { name: "作廢收購確認" });
     await user.type(within(dialog).getByLabelText("作廢原因"), "登錄錯誤");
     await user.click(within(dialog).getByRole("button", { name: "確認作廢" }));
 
     expect(await screen.findByText(/已作廢收購單 #12/)).toBeTruthy();
-    expect(requests.some((r) => r.method === "POST" && r.url.includes("/acquisitions/12/void"))).toBe(true);
+    expect(requests.some((r) => r.method === "POST" && r.url.includes("/acquisitions/13/void"))).toBe(true);
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(before));
+  });
+
+  it("買斷單按作廢 → 跳出商品勾選視窗，預設勾好所有可作廢的商品（等於整張作廢）", async () => {
+    auth.role = "MANAGER";
+    stub();
+    const user = userEvent.setup();
+    wrap(<AcquisitionRecords />);
+    await waitFor(() => rowOf(12));
+
+    await user.click(within(rowOf(12)).getByRole("button", { name: "作廢" }));
+    const dialog = await screen.findByRole("dialog", { name: "作廢收購 #12" });
+    const lamp = (await within(dialog).findByRole("checkbox", { name: /營燈/ })) as HTMLInputElement;
+    const bag = within(dialog).getByRole("checkbox", { name: /睡袋/ }) as HTMLInputElement;
+    const sold = within(dialog).getByRole("checkbox", { name: /爐頭/ }) as HTMLInputElement;
+    expect(lamp.checked && bag.checked).toBe(true);
+    expect(sold.checked || !sold.disabled).toBe(false); // 已售的不勾、也勾不了
+
+    await user.click(bag); // 睡袋留下
+    await user.click(within(dialog).getByRole("button", { name: "作廢收購" }));
+    const confirm = await screen.findByRole("dialog", { name: "作廢收購確認" });
+    expect(confirm.textContent).toContain("本次作廢 1 件商品");
   });
 
   it("篩選：類型、狀態、賣方搜尋都會帶到查詢", async () => {
@@ -222,14 +259,110 @@ it("含已售商品的收購仍可從紀錄選擇待整理商品作廢", async (
   }));
   const user = userEvent.setup();
   wrap(<AcquisitionRecords />);
-  const button = await screen.findByRole("button", { name: "選品作廢" });
+  const button = await screen.findByRole("button", { name: "作廢" });
   await user.click(button);
-  const pending = await screen.findByRole("checkbox", { name: /待整理帳篷/ });
+  const pending = (await screen.findByRole("checkbox", { name: /待整理帳篷/ })) as HTMLInputElement;
   expect((screen.getByRole("checkbox", { name: /已售睡袋/ }) as HTMLInputElement).disabled).toBe(true);
-  await user.click(pending);
+  expect(pending.checked).toBe(true); // 預設勾好可作廢的
   await user.click(screen.getByRole("button", { name: "作廢收購" }));
   await user.type(screen.getByLabelText("作廢原因"), "只退待整理帳篷");
   await user.click(screen.getByRole("button", { name: "確認作廢" }));
   await waitFor(() => expect(submitted).toEqual({ reason: "只退待整理帳篷", item_ids: [21] }));
   expect(await screen.findByText(/已作廢所選商品/)).toBeTruthy();
+});
+
+it("作廢的商品勾選以對話視窗開在畫面上（不是加在清單最底下讓人看不到），可關閉", async () => {
+  // 2026-10-02 正式機：清單有幾十列時，選品作廢區塊被加在翻頁列下方、在可視範圍外，
+  // 店長按了像是沒反應（log 顯示連點 #255、#254、#253，每次商品其實都已載入）。
+  auth.role = "MANAGER";
+  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+    if (request.url.endsWith("/void-items")) return json([
+      { id: 21, item_code: "I21", name: "待整理帳篷", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+    ]);
+    if (request.url.endsWith("/acquisitions/10")) return json(row({ id: 10 }));
+    return json({ total: 1, items: [row({ id: 10 })] });
+  }));
+  const user = userEvent.setup();
+  wrap(<AcquisitionRecords />);
+  await user.click(await screen.findByRole("button", { name: "作廢" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "作廢收購 #10" });
+  expect(dialog.getAttribute("aria-modal")).toBe("true");
+  expect(await within(dialog).findByRole("checkbox", { name: /待整理帳篷/ })).toBeTruthy();
+
+  await user.click(within(dialog).getByRole("button", { name: "關閉" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "作廢收購 #10" })).toBeNull());
+
+  await user.click(screen.getByRole("button", { name: "作廢" }));
+  await screen.findByRole("dialog", { name: "作廢收購 #10" });
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "作廢收購 #10" })).toBeNull());
+});
+
+function voidFlowStub(listRow: Record<string, unknown>, voidItems: unknown[]) {
+  const posted: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+    if (request.url.endsWith("/void-items")) return json(voidItems);
+    if (request.method === "POST") {
+      const body = (await request.json()) as { item_ids: number[] };
+      posted.push(body);
+      return json({ acquisition_id: 12, voided_at: "2026-10-02T00:00:00Z", reversed_cash: "2000", reversed_credit: "0", fully_voided: true, item_ids: body.item_ids });
+    }
+    if (/\/acquisitions\/\d+$/.test(request.url)) return json(row(listRow));
+    return json({ total: 1, items: [row(listRow)] });
+  }));
+  return posted;
+}
+
+const TWO_IN_STOCK = [
+  { id: 31, item_code: "I31", name: "營燈", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+  { id: 32, item_code: "I32", name: "睡袋", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+];
+
+it("買斷單全勾直接送出＝整張作廢：帶上所有可作廢商品", async () => {
+  auth.role = "MANAGER";
+  const posted = voidFlowStub({}, TWO_IN_STOCK);
+  const user = userEvent.setup();
+  wrap(<AcquisitionRecords />);
+  await user.click(await screen.findByRole("button", { name: "作廢" }));
+  const dialog = await screen.findByRole("dialog", { name: "作廢收購 #12" });
+  await within(dialog).findByRole("checkbox", { name: /營燈/ });
+  await user.click(within(dialog).getByRole("button", { name: "作廢收購" }));
+  await user.type(screen.getByLabelText("作廢原因"), "整張登錄錯誤");
+  await user.click(screen.getByRole("button", { name: "確認作廢" }));
+
+  await waitFor(() => expect(posted).toEqual([{ reason: "整張登錄錯誤", item_ids: [31, 32] }]));
+  expect(await within(dialog).findByText(/已作廢收購單 #12/)).toBeTruthy();
+});
+
+it("確認視窗開著時按 Esc 不會把外層勾選視窗整個關掉（已勾的與原因不會丟）", async () => {
+  auth.role = "MANAGER";
+  voidFlowStub({}, TWO_IN_STOCK);
+  const user = userEvent.setup();
+  wrap(<AcquisitionRecords />);
+  await user.click(await screen.findByRole("button", { name: "作廢" }));
+  const dialog = await screen.findByRole("dialog", { name: "作廢收購 #12" });
+  await within(dialog).findByRole("checkbox", { name: /營燈/ });
+  await user.click(within(dialog).getByRole("button", { name: "作廢收購" }));
+  await screen.findByRole("dialog", { name: "作廢收購確認" });
+
+  await user.keyboard("{Escape}");
+
+  expect(screen.getByRole("dialog", { name: "作廢收購 #12" })).toBeTruthy();
+});
+
+it("已上架一部分的買斷單：能只作廢幾件，但不預設全勾（不能整批作廢）", async () => {
+  auth.role = "MANAGER";
+  voidFlowStub({ void_block: "PARTIALLY_LISTED" }, [
+    { id: 31, item_code: "I31", name: "營燈", acquisition_cost: "1000", status: "PENDING_LISTING", voided: false },
+    { id: 32, item_code: "I32", name: "睡袋", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
+  ]);
+  const user = userEvent.setup();
+  wrap(<AcquisitionRecords />);
+  expect((await screen.findByText(/不能整批作廢/)).textContent).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "作廢" }));
+  const dialog = await screen.findByRole("dialog", { name: "作廢收購 #12" });
+  const lamp = (await within(dialog).findByRole("checkbox", { name: /營燈/ })) as HTMLInputElement;
+  expect(lamp.checked).toBe(false);
+  expect((within(dialog).getByRole("button", { name: "作廢收購" }) as HTMLButtonElement).disabled).toBe(true);
 });

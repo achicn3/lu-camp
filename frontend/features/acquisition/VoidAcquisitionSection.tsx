@@ -14,22 +14,30 @@ import { formatNtd, parseNtd } from "@/lib/money";
 
 type VoidResult = components["schemas"]["AcquisitionVoidResult"];
 
+// 還能作廢的商品狀態（與後端 _void_selected_items 同口徑）：已售出／已下架的不能勾。
+const VOIDABLE_ITEM_STATUSES: ReadonlySet<string> = new Set(["IN_STOCK", "PENDING_LISTING"]);
+
 function ntd(value: string | null): string {
   if (value === null) return "—";
   return formatNtd(parseNtd(value) ?? 0);
 }
 
-export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
+export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, preselectAll = false }: {
   acquisitionId?: number;
   onVoided?: (result: VoidResult) => void;
   onClose?: () => void;
+  /** 一開始就勾好所有可作廢的商品（收購紀錄的「作廢」＝預設整張，取消勾選的保留）。 */
+  preselectAll?: boolean;
 } = {}) {
   const queryClient = useQueryClient();
   const [idInput, setIdInput] = useState("");
   const [queryId, setQueryId] = useState<number | null>(acquisitionId ?? null);
   const [inputError, setInputError] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // null＝「全部可作廢的」（preselectAll 的初始狀態；商品清單載入前無從列舉 id）。
+  const [selectedIds, setSelectedIds] = useState<number[] | null>(preselectAll ? null : []);
+  // 確認視窗開著時送出的商品＝**打開那一刻**勾的（null＝沒開）。直接傳即時勾選的話，背景重新整理
+  // 讓某件不再可作廢時，送出件數會在店長沒看到的情況下改變。
+  const [confirmIds, setConfirmIds] = useState<number[] | null>(null);
   const [voidResult, setVoidResult] = useState<VoidResult | null>(null);
 
   const acqQuery = useQuery({
@@ -62,8 +70,9 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
       return data;
     },
   });
-  const selectableIds = (itemsQuery.data ?? []).filter((item) => !item.voided && ["IN_STOCK", "PENDING_LISTING"].includes(item.status)).map((item) => item.id);
-  const selected = selectedIds.filter((id) => selectableIds.includes(id));
+  const selectableIds = (itemsQuery.data ?? []).filter((item) => !item.voided && VOIDABLE_ITEM_STATUSES.has(item.status)).map((item) => item.id);
+  const selected =
+    selectedIds === null ? selectableIds : selectedIds.filter((id) => selectableIds.includes(id));
 
   function onLookup() {
     // 作廢屬破壞性操作、以輸入單號為鍵：拒絕部分解析（如 "12abc"→12 會誤指他單），
@@ -86,7 +95,10 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
   return (
     <div className="card acq-void-section">
       <h2>作廢收購（限管理者）</h2>
-      <p className="hint">輸入收購單號，勾選要作廢的商品。現金與購物金按原付款比例沖回，購物金含原溢價；散裝收購以整批作廢。</p>
+      <p className="hint">
+        {acquisitionId === undefined ? "輸入收購單號，" : ""}
+        勾選要作廢的商品（沒勾的保留）。現金與購物金按原付款比例沖回，購物金含原溢價；散裝收購以整批作廢。
+      </p>
       {acquisitionId === undefined && <form
         className="acq-void-lookup"
         onSubmit={(e) => {
@@ -108,7 +120,7 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
         </button>
       </form>}
 
-      {onClose && <button type="button" className="btn-ghost" onClick={onClose}>關閉選品作廢</button>}
+      {onClose && <button type="button" className="btn-ghost" onClick={onClose}>關閉</button>}
 
       {inputError !== null && (
         <p role="alert" className="form-error">
@@ -171,12 +183,12 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
                   disabled={!selectableIds.includes(item.id)}
                   onChange={(event) => setSelectedIds(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />
                 <span>{item.name} · {item.item_code} · 收購價 {ntd(item.acquisition_cost)}
-                {item.voided ? " · 已作廢" : !["IN_STOCK", "PENDING_LISTING"].includes(item.status) ? " · 已售出或下架，不可作廢" : ""}</span>
+                {item.voided ? " · 已作廢" : !VOIDABLE_ITEM_STATUSES.has(item.status) ? " · 已售出或下架，不可作廢" : ""}</span>
               </label>)}
             </fieldset>
           )}
           {canVoid(acq) && (
-            <button type="button" className="btn-danger" onClick={() => setDialogOpen(true)}
+            <button type="button" className="btn-danger" onClick={() => setConfirmIds(selected)}
               disabled={acq.type === "BUYOUT" && (itemsQuery.isFetching || selected.length === 0)}>
               作廢收購
             </button>
@@ -196,13 +208,13 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose }: {
         </div>
       )}
 
-      {dialogOpen && acq !== null && (
+      {confirmIds !== null && acq !== null && (
         <VoidConfirmDialog
           acquisitionId={acq.id}
-          itemIds={acq.type === "BUYOUT" ? selected : undefined}
-          onClose={() => setDialogOpen(false)}
+          itemIds={acq.type === "BUYOUT" ? confirmIds : undefined}
+          onClose={() => setConfirmIds(null)}
           onVoided={(result) => {
-            setDialogOpen(false);
+            setConfirmIds(null);
             setVoidResult(result);
             onVoided?.(result);
             setSelectedIds([]);

@@ -783,3 +783,74 @@ async def test_partial_void_accepts_pending_item_in_partially_listed_acquisition
     assert items[1].id == remaining_id
     assert items[1].status == SerializedItemStatus.IN_STOCK
     assert await _void_in(db_session, store_id) == Decimal("1")
+
+
+async def test_selecting_every_item_of_partially_listed_acquisition_is_still_whole_void(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """docs/42 §10-2 店主裁示：已上架一部分的批次不能整批作廢。
+
+    逐件作廢若把整批全勾，效果就是整批作廢——不能拿它繞過（收購紀錄 2026-10-02 起「作廢」鈕
+    預設全勾，這條防線必須在後端）。只作廢其中幾件照常可以。
+    """
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
+    items = list(
+        await db_session.scalars(
+            select(SerializedItem)
+            .where(SerializedItem.acquisition_id == acq_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    items[0].status = SerializedItemStatus.PENDING_LISTING  # 另一件已上架（IN_STOCK）
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "全退", "item_ids": [items[0].id, items[1].id]},
+        headers=_auth(mgr),
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert "上架一部分" in resp.json()["detail"]
+    await db_session.refresh(items[0])
+    await db_session.refresh(items[1])
+    assert items[0].status == SerializedItemStatus.PENDING_LISTING
+    assert items[1].status == SerializedItemStatus.IN_STOCK
+    assert await _void_in(db_session, store_id) == Decimal(0)
+
+
+async def test_whole_void_after_partial_void_respects_partially_listed_rule(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """先作廢過一件後，「整張作廢」會改走逐件路徑沖回剩餘品項——同樣不得作廢已上架一部分的批次。"""
+    clerk, mgr, _store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 3)
+    items = list(
+        await db_session.scalars(
+            select(SerializedItem)
+            .where(SerializedItem.acquisition_id == acq_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    items[0].status = SerializedItemStatus.PENDING_LISTING
+    items[1].status = SerializedItemStatus.PENDING_LISTING  # items[2] 已上架
+    await db_session.commit()
+    first = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "先退一件", "item_ids": [items[0].id]},
+        headers=_auth(mgr),
+    )
+    assert first.status_code == 200, first.text
+
+    rest = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "其餘全退"}, headers=_auth(mgr)
+    )
+
+    assert rest.status_code == 409, rest.text
+    await db_session.refresh(items[1])
+    await db_session.refresh(items[2])
+    assert items[1].status == SerializedItemStatus.PENDING_LISTING
+    assert items[2].status == SerializedItemStatus.IN_STOCK

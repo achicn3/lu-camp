@@ -1,9 +1,46 @@
 // F6.5 作廢收購（void）前端純邏輯：可作廢預檢與錯誤訊息對應（單一真實來源、可單測）。
 // 後端為最終權威（限 MANAGER、對稱反轉、各種衝突回 409/422）；此處僅做 UX 預檢與訊息呈現。
+import { BUYOUT_ITEM_VOID_HINT, VOID_BLOCK_LABEL } from "@/features/acquisition/labels";
 import type { components } from "@/lib/api-types";
 
 type AcquisitionRead = components["schemas"]["AcquisitionRead"];
 type VoidableFields = Pick<AcquisitionRead, "voided_at" | "type">;
+type RecordRow = Pick<
+  components["schemas"]["AcquisitionListItem"],
+  "type" | "voided_at" | "void_block"
+>;
+type VoidBlock = NonNullable<RecordRow["void_block"]>;
+
+/**
+ * 收購紀錄上那一顆「作廢」鈕按下去做什麼（店主 2026-10-02：不再另分「選品作廢」）。
+ * - SELECT_ALL：買斷單，開商品勾選視窗並預設全勾（＝整張作廢，取消勾選的保留）。
+ * - SELECT_SOME：買斷單，整張不行但只作廢幾件可能可以——開視窗但**不預設全勾**：
+ *   已上架一部分（docs/42 §10-2 不能整批作廢，後端擋全勾）、購物金已被用掉（整張沖不回）。
+ * - WHOLE：散裝單，整張作廢。
+ * - null：不能作廢（鈕反灰）。後端作廢端點仍是最終權威。
+ */
+export type RecordVoidMode = "SELECT_ALL" | "SELECT_SOME" | "WHOLE" | null;
+
+const SELECT_SOME_BLOCKS: ReadonlySet<VoidBlock> = new Set(["PARTIALLY_LISTED", "CREDIT_SPENT"]);
+
+export function recordVoidMode(row: RecordRow): RecordVoidMode {
+  const block = row.void_block;
+  if (row.type === "BUYOUT") {
+    if (row.voided_at !== null) return null;
+    if (block === null || block === "HAS_SOLD_ITEMS") return "SELECT_ALL"; // 已售的本來就勾不了
+    return SELECT_SOME_BLOCKS.has(block) ? "SELECT_SOME" : null;
+  }
+  return block === null ? "WHOLE" : null;
+}
+
+/** 作廢鈕旁的說明：買斷單講清楚還能怎麼作廢；已作廢的單狀態欄已寫明，不重複。 */
+export function recordVoidHint(row: RecordRow): string | null {
+  const block = row.void_block;
+  if (block === null || block === "ALREADY_VOIDED") return null;
+  const itemHints: Partial<Record<VoidBlock, string>> = BUYOUT_ITEM_VOID_HINT;
+  const itemHint = row.type === "BUYOUT" ? itemHints[block] : undefined;
+  return itemHint ?? VOID_BLOCK_LABEL[block];
+}
 
 /** 前端預檢：未作廢且非寄售才顯示作廢入口（has-sold／credit-spent 無法前端判定，交後端回 409）。 */
 export function canVoid(acq: VoidableFields): boolean {

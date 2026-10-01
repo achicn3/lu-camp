@@ -1,4 +1,4 @@
-// 真 backend + Postgres：選品作廢、客顯解除後自動取碼並重新配對。
+// 真 backend + Postgres：收購紀錄的「作廢」（買斷單勾選商品）、客顯解除後自動取碼並重新配對。
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -29,13 +29,30 @@ try {
     { name: "測試帳篷", grade: "A", acquisition_cost: "1000", listed_price: "1800" },
     { name: "測試睡袋", grade: "A", acquisition_cost: "800", listed_price: "1200" },
   ] });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  // 清單要夠長：2026-10-02 的 bug 是勾選區塊被加在清單最底下、落在可視範圍外，按了像沒反應。
+  for (let i = 0; i < 12; i++) {
+    await api("/acquisitions", "POST", { type: "BUYOUT", contact_id: member.id, items: [
+      { name: `墊底帳篷${i}`, grade: "A", acquisition_cost: "100", listed_price: "200" },
+    ] });
+  }
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.addInitScript((value) => localStorage.setItem("lu-camp.access-token", value), token);
   await skipOpeningCheckRedirect(page, BASE);
   await page.goto(`${BASE}/acquisition/records`);
-  await page.getByText(`#${created.acquisition_id}`, { exact: true }).locator("..").getByRole("button", { name: "選品作廢", exact: true }).click();
-  await page.getByRole("checkbox", { name: /測試帳篷/ }).check();
+  const row = page.getByText(`#${created.acquisition_id}`, { exact: true }).locator("..");
+  await row.scrollIntoViewIfNeeded();
+  assert.equal(await row.getByRole("button", { name: "選品作廢", exact: true }).count(), 0, "只剩一顆作廢鈕");
+  await row.getByRole("button", { name: "作廢", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: `作廢收購 #${created.acquisition_id}` });
+  await dialog.waitFor();
+  const tent = dialog.getByRole("checkbox", { name: /測試帳篷/ });
+  await tent.waitFor();
+  const box = await dialog.locator(".acq-void-section").boundingBox();
+  assert(box && box.y >= 0 && box.y < 800, `作廢視窗要在可視範圍內，實際 y=${box?.y}`);
+  assert.equal(await tent.isChecked(), true, "預設勾好可作廢的商品");
+  await page.screenshot({ path: `${SHOTS}/00-void-dialog-in-view.png` });
+  await dialog.getByRole("checkbox", { name: /測試睡袋/ }).uncheck(); // 睡袋留下
   await page.getByRole("button", { name: "作廢收購", exact: true }).click();
   await page.getByText("本次作廢 1 件商品，其餘商品保留。").waitFor();
   await page.getByLabel("作廢原因", { exact: true }).fill("只退帳篷");
@@ -52,7 +69,7 @@ try {
   await page.getByRole("button", { name: "確認作廢", exact: true }).click();
   await page.getByText(`已作廢收購單 #${created.acquisition_id}。`, { exact: true }).waitFor();
   assert.notEqual((await api(`/acquisitions/${created.acquisition_id}`)).voided_at, null);
-  console.log("PASS 選品作廢、剩餘商品保留、最後全單作廢");
+  console.log("PASS 作廢視窗在可視範圍、預設全勾、取消勾選的保留、最後全單作廢");
 
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
   const kiosk = await context.newPage();

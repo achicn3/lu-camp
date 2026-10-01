@@ -1,13 +1,19 @@
 "use client";
 // 收購紀錄清單（2026-09-23 裁示）：新到舊、可篩選與翻頁；店員也能看，作廢鈕限管理者。
 // 能不能作廢由後端 void_block 事先算好（口徑與作廢端點一致）——不能作廢的單按鈕反灰並講原因，
-// 店長不必按下去才被拒絕。作廢本身沿用 VoidConfirmDialog（填原因、二次確認；後端是最終權威）。
+// 店長不必按下去才被拒絕。每列只有一顆「作廢」（2026-10-02 裁示）：買斷單跳出商品勾選視窗
+// （預設全勾＝整張），散裝單直接整張；最後都經 VoidConfirmDialog 填原因、二次確認（後端是最終權威）。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
-import { ACQ_TYPE_LABEL, VOID_BLOCK_LABEL } from "@/features/acquisition/labels";
-import { errorDetail } from "@/features/acquisition/void";
-import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
+import { ACQ_TYPE_LABEL } from "@/features/acquisition/labels";
+import {
+  errorDetail,
+  recordVoidHint,
+  recordVoidMode,
+  type RecordVoidMode,
+} from "@/features/acquisition/void";
+import { SelectVoidDialog } from "@/features/acquisition/SelectVoidDialog";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { Pagination } from "@/features/common/Pagination";
 import { exclusiveEnd, startOfDay } from "@/features/reports/reports";
@@ -65,6 +71,33 @@ function payoutText(row: Row): string {
   return parts.length > 0 ? parts.join("＋") : "—";
 }
 
+/** 每列一顆「作廢」：依 recordVoidMode 決定能不能按、按下去開哪種視窗，旁邊講清楚原因。 */
+function RecordVoidCell({
+  row,
+  onVoid,
+}: {
+  row: Row;
+  onVoid: (mode: Exclude<RecordVoidMode, null>) => void;
+}) {
+  const mode = recordVoidMode(row);
+  const hint = recordVoidHint(row);
+  return (
+    <div className="acq-records-void">
+      <button
+        type="button"
+        className="btn-danger"
+        disabled={mode === null}
+        onClick={() => {
+          if (mode !== null) onVoid(mode);
+        }}
+      >
+        作廢
+      </button>
+      {hint !== null && <span className="row-sub">{hint}</span>}
+    </div>
+  );
+}
+
 export function AcquisitionRecords() {
   const queryClient = useQueryClient();
   const isManager = decodeSession()?.role === "MANAGER";
@@ -76,7 +109,10 @@ export function AcquisitionRecords() {
   // 賣方搜尋（提交式）：輸入框與已提交值分開，避免每次按鍵都打 API。
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
-  const [selecting, setSelecting] = useState<number | null>(null);
+  // 買斷單作廢的商品勾選視窗：哪一張、要不要預設全勾（見 recordVoidMode）。
+  const [selecting, setSelecting] = useState<{ id: number; preselectAll: boolean } | null>(null);
+  // 穩定的參照：對話視窗的 Esc 監聽以它為依賴，每次重繪都換新函式會反覆掛卸監聽。
+  const closeSelecting = useCallback(() => setSelecting(null), []);
   const [voiding, setVoiding] = useState<number | null>(null);
   const [voidResult, setVoidResult] = useState<VoidResult | null>(null);
 
@@ -253,25 +289,14 @@ export function AcquisitionRecords() {
                   </td>
                   {isManager && (
                     <td>
-                      <div className="acq-records-void">
-                        <button
-                          type="button"
-                          className="btn-danger"
-                          disabled={row.void_block !== null}
-                          onClick={() => {
-                            setVoidResult(null);
-                            setVoiding(row.id);
-                          }}
-                        >
-                          作廢
-                        </button>
-                        {row.type === "BUYOUT" && !row.voided_at && (
-                          <button type="button" className="btn-secondary" onClick={() => { setVoidResult(null); setSelecting(row.id); }}>選品作廢</button>
-                        )}
-                        {row.void_block !== null && row.void_block !== "ALREADY_VOIDED" && (
-                          <span className="row-sub">{VOID_BLOCK_LABEL[row.void_block]}</span>
-                        )}
-                      </div>
+                      <RecordVoidCell
+                        row={row}
+                        onVoid={(mode) => {
+                          setVoidResult(null);
+                          if (mode === "WHOLE") setVoiding(row.id);
+                          else setSelecting({ id: row.id, preselectAll: mode === "SELECT_ALL" });
+                        }}
+                      />
                     </td>
                   )}
                 </tr>
@@ -293,9 +318,15 @@ export function AcquisitionRecords() {
       )}
 
       {selecting !== null && (
-        <VoidAcquisitionSection key={selecting} acquisitionId={selecting}
-          onClose={() => setSelecting(null)}
-          onVoided={() => { void queryClient.invalidateQueries({ queryKey: ["acquisitions"] }); }} />
+        <SelectVoidDialog
+          key={selecting.id}
+          acquisitionId={selecting.id}
+          preselectAll={selecting.preselectAll}
+          onClose={closeSelecting}
+          onVoided={() => {
+            void queryClient.invalidateQueries({ queryKey: ["acquisitions"] });
+          }}
+        />
       )}
 
       {voiding !== null && (

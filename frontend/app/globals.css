@@ -2572,6 +2572,17 @@ a.btn-ghost {
 .acq-void-section {
   margin-top: var(--sp-6);
 }
+/* 收購紀錄買斷單的作廢（勾選商品）對話視窗：商品多時在視窗內捲動，不撐出畫面。 */
+.acq-select-void-dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 2 * var(--sp-4));
+  max-height: calc(100dvh - 2 * var(--sp-4)); /* 手機網址列伸縮時以實際可視高度為準 */
+  overflow-y: auto;
+  outline: none;
+}
+.acq-select-void-dialog .acq-void-section {
+  margin-top: 0;
+}
 .acq-void-lookup {
   display: flex;
   align-items: flex-end;

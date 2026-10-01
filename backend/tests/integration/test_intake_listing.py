@@ -350,3 +350,36 @@ async def test_acquisition_records_show_how_many_are_still_waiting(
     buyout_id, bulk_id = sorted(batch["acquisition_ids"])
     assert waiting[buyout_id] == 1  # 2 張椅子上架了 1 張
     assert waiting[bulk_id] == 10
+
+
+async def test_records_still_say_partly_listed_after_voiding_one_piece(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢掉的件轉 WRITTEN_OFF，會讓清單的「已動用」成立；原因若因此報成「已有商品賣出」，
+    前端就會預設全勾（＝整批作廢），送出必被擋（code-reviewer，2026-10-02）。
+    已上架一部分要優先回報：什麼都沒賣出，真正的限制是「不能整批作廢」。
+    """
+    ctx = await _ctx(db_session, client)
+    batch = await _confirmed_batch(client, ctx, [_line(qty=3), BULK], [3, 10])
+    paid = (await _pay(client, ctx, batch["id"])).json()
+    category_id = await _category(db_session, ctx)
+    chairs = [i for i in await _items(client, ctx, paid["id"]) if i["kind"] == "SERIALIZED"]
+    await _listing(
+        client,
+        ctx,
+        paid["id"],
+        [{"kind": "SERIALIZED", "id": chairs[0]["id"], "category_id": category_id}],
+        publish=True,
+    )
+    buyout_id = min(paid["acquisition_ids"])
+    voided = await client.post(
+        f"/api/v1/acquisitions/{buyout_id}/void",
+        json={"reason": "退一件待整理的", "item_ids": [chairs[1]["id"]]},
+        headers=ctx.auth,
+    )
+    assert voided.status_code == 200, voided.text
+
+    rows = (await client.get("/api/v1/acquisitions", headers=ctx.auth)).json()["items"]
+    row = next(r for r in rows if r["id"] == buyout_id)
+
+    assert row["void_block"] == "PARTIALLY_LISTED"

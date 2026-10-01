@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canVoid, voidErrorMessage } from "@/features/acquisition/void";
+import { canVoid, recordVoidHint, recordVoidMode, voidErrorMessage } from "@/features/acquisition/void";
 
 describe("canVoid", () => {
   it("買斷/散裝未作廢 → 可作廢", () => {
@@ -27,5 +27,38 @@ describe("voidErrorMessage", () => {
   });
   it("未知 status → 通用失敗訊息", () => {
     expect(voidErrorMessage(500, null)).toMatch(/失敗/);
+  });
+});
+
+describe("收購紀錄的作廢鈕（一顆鈕，依類型與擋下原因決定行為）", () => {
+  type Mode = ReturnType<typeof recordVoidMode>;
+  const cases: [string, string | null, string | null, Mode][] = [
+    // [類型, void_block, voided_at, 預期模式]
+    ["BUYOUT", null, null, "SELECT_ALL"],
+    ["BUYOUT", "HAS_SOLD_ITEMS", null, "SELECT_ALL"], // 已售的勾不了，其餘預設全勾
+    ["BUYOUT", "PARTIALLY_LISTED", null, "SELECT_SOME"], // 不能整批 → 不預設全勾
+    ["BUYOUT", "CREDIT_SPENT", null, "SELECT_SOME"], // 整張沖不回，只作廢幾件可能可以
+    ["BUYOUT", "NO_OPEN_CASH_SESSION", null, null],
+    ["BUYOUT", "ALREADY_VOIDED", "2026-10-01T00:00:00Z", null],
+    ["BULK_LOT", null, null, "WHOLE"],
+    ["BULK_LOT", "HAS_SOLD_ITEMS", null, null],
+    ["BULK_LOT", "NO_OPEN_CASH_SESSION", null, null],
+    ["CONSIGNMENT", "CONSIGNMENT", null, null],
+  ];
+  it.each(cases)("%s／%s／voided=%s → %s", (type, block, voidedAt, mode) => {
+    const row = { type, void_block: block, voided_at: voidedAt } as Parameters<typeof recordVoidMode>[0];
+    expect(recordVoidMode(row)).toBe(mode);
+  });
+
+  it("說明文字：買斷單講清楚還能怎麼作廢；已作廢不重複講", () => {
+    const hint = (type: string, block: string | null) =>
+      recordVoidHint({ type, void_block: block, voided_at: null } as Parameters<typeof recordVoidHint>[0]);
+    expect(hint("BUYOUT", "HAS_SOLD_ITEMS")).toBe("已賣出的商品不能作廢，其餘可勾選作廢");
+    expect(hint("BUYOUT", "PARTIALLY_LISTED")).toContain("不能整批作廢");
+    expect(hint("BUYOUT", "CREDIT_SPENT")).toContain("購物金已被用掉");
+    expect(hint("BULK_LOT", "HAS_SOLD_ITEMS")).toBe("已有商品賣出或報廢，不能作廢");
+    expect(hint("BUYOUT", "NO_OPEN_CASH_SESSION")).toBe("要退回現金，請先開帳");
+    expect(hint("BUYOUT", "ALREADY_VOIDED")).toBeNull();
+    expect(hint("BUYOUT", null)).toBeNull();
   });
 });
