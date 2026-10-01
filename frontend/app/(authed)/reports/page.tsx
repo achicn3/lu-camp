@@ -706,6 +706,11 @@ function DineInPanel() {
         ⚠️ 內用與外帶的客單價<b>不可直接比較</b>：外帶不累點、不折扣、不可用購物金，
         計價條件本就不同。
       </p>
+      {/* docs/39 §3.5：退款歸回原本那組（不是退款當天），所以舊期間的數字會隨退款更新。 */}
+      <p className="hint rpt-dine-in-basis">
+        金額已<b>扣除退款</b>，退款算回原本那一組（不是退款當天）；餐點全退光的那組不算一組。
+        所以之後有人退款時，以前期間的數字會跟著更新。
+      </p>
 
       <DownloadButtons onDownload={handleDownload} />
 

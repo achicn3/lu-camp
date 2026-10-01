@@ -406,7 +406,13 @@ class ReturnsRepository:
         rows = await self._session.execute(
             select(SaleLine.sale_id, func.coalesce(food, 0), func.sum(ReturnLine.refund_amount))
             .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
-            .where(ReturnLine.store_id == store_id, SaleLine.sale_id.in_(sale_ids))
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                ReturnLine.store_id == store_id,
+                SaleLine.sale_id.in_(sale_ids),
+                # 與報表母體同口徑（Codex 對抗審查 E1）：作廢單不算。
+                Sale.status != SaleStatus.VOIDED,
+            )
             .group_by(SaleLine.sale_id)
         )
         return {int(sid): (Decimal(f), Decimal(t)) for sid, f, t in rows}

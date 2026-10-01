@@ -311,3 +311,18 @@ async def test_dine_in_report_nets_food_refunds(db_session: AsyncSession) -> Non
     assert await takeout() == (1, Decimal(150), Decimal(1150))
     await _return(db_session, m, [ReturnLineInput(m.latte_line, 1)], "dine-2")
     assert (await takeout())[0] == 0  # 餐點全退光：這組不算
+
+
+async def test_refunds_by_sale_ignores_voided_sales(db_session: AsyncSession) -> None:
+    """退款統計與報表母體同口徑：作廢單排除（實務上有退貨的單不能作廢，此為防線）。"""
+    m = await _mixed_sale(db_session)
+    await _return(db_session, m, [ReturnLineInput(m.latte_line, 1)], "vd")
+    returns = ReturnsService(db_session)
+    assert await returns.refunds_by_sale(m.store_id, [m.sale_id]) == {
+        m.sale_id: (Decimal(150), Decimal(150))
+    }
+    sale = await db_session.get(Sale, m.sale_id)
+    assert sale is not None
+    sale.status = SaleStatus.VOIDED
+    await db_session.flush()
+    assert await returns.refunds_by_sale(m.store_id, [m.sale_id]) == {}
