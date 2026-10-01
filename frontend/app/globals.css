@@ -1128,6 +1128,23 @@ a.btn-ghost {
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }
+/* 每日限量（docs/44 §3.7）：剩幾份／售完。售完的磚要一眼看得出點不了。 */
+.pos-menu-tile-stock {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+.pos-menu-tile-soldout {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pos-menu-tile-soldout .pos-menu-tile-stock {
+  color: var(--danger);
+}
+.pos-menu-tile:disabled:hover {
+  border-color: var(--border);
+  box-shadow: none;
+}
 .pos-qty-dialog {
   max-width: 360px;
   width: 100%;
@@ -5709,4 +5726,45 @@ a.btn-ghost {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* 今日餐點數量面板（開店檢查頁，docs/44 §3.7） */
+.daily-stock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.daily-stock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+.daily-stock-row:first-child {
+  border-top: none;
+}
+.daily-stock-name {
+  min-width: 0;
+}
+.daily-stock-actions,
+.daily-stock-reason {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.daily-stock-input {
+  width: 5.5em;
+  font-variant-numeric: tabular-nums;
+}
+.menu-daily-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
 }

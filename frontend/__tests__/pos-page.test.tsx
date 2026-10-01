@@ -188,6 +188,34 @@ describe("/pos 結帳頁", () => {
     );
   });
 
+  it("每日限量的餐飲磚：顯示剩幾份；售完或今天沒填就不能點", async () => {
+    const MENU = [
+      { id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, daily_limited: false, remaining: null },
+      { id: 6, store_id: 1, name: "戚風", unit_price: "90", category: "甜點", is_available: true, sort_order: 1, daily_limited: true, remaining: 2, stock_set_today: true },
+      { id: 7, store_id: 1, name: "司康", unit_price: "80", category: "甜點", is_available: true, sort_order: 2, daily_limited: true, remaining: 0, stock_set_today: true },
+      { id: 8, store_id: 1, name: "瑪德蓮", unit_price: "60", category: "甜點", is_available: true, sort_order: 3, daily_limited: true, remaining: 0, stock_set_today: false },
+    ];
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json(MENU);
+      return null;
+    });
+    renderPage();
+    const cake = await screen.findByRole("button", { name: /戚風/ });
+    expect(cake.textContent).toContain("剩 2 份");
+    expect((cake as HTMLButtonElement).disabled).toBe(false);
+    const scone = screen.getByRole("button", { name: /司康/ });
+    expect(scone.textContent).toContain("售完");
+    expect((scone as HTMLButtonElement).disabled).toBe(true);
+    // 0 份但今天還沒填：講清楚是「沒填」，不是賣完——否則店員以為甜點賣光了。
+    const unset = screen.getByRole("button", { name: /瑪德蓮/ });
+    expect(unset.textContent).toContain("今天未填份數");
+    expect((unset as HTMLButtonElement).disabled).toBe(true);
+    const coffee = screen.getByRole("button", { name: /手沖-耶加/ });
+    expect(coffee.textContent).not.toContain("剩");
+  });
+
   it("掃描序號品加入購物車、總額更新、現金結帳→完成＋列印對話框", async () => {
     let saleBody = "";
     let drawerCalls = 0;

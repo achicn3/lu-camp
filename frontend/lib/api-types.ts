@@ -7941,6 +7941,8 @@ export interface components {
             remaining: number | null;
             /** Sort Order */
             sort_order: number;
+            /** Stock Set Today */
+            stock_set_today: boolean;
             /** Store Id */
             store_id: number;
             /** Unit Cost */

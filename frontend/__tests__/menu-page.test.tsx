@@ -127,6 +127,29 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(JSON.parse(patched).is_available).toBe(false);
   });
 
+  it("勾「每日限量」：PATCH daily_limited=true；已限量的顯示今天剩幾份", async () => {
+    let patched = "";
+    const items = [
+      ITEMS[0],
+      { ...ITEMS[1], name: "戚風", is_available: true, daily_limited: true, remaining: 3, stock_set_today: true },
+    ];
+    stubFetch((url, method, body) => {
+      if (url.includes("/menu-items/1") && method === "PATCH") {
+        patched = body;
+        return json({ ...ITEMS[0], daily_limited: true, remaining: 0 });
+      }
+      if (url.includes("/menu-items")) return json(items);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await screen.findByText("手沖-耶加");
+    expect(screen.getByText("今天剩 3 份")).toBeTruthy();
+    await user.click(screen.getByLabelText("手沖-耶加 每日限量"));
+    await waitFor(() => expect(patched).not.toBe(""));
+    expect(JSON.parse(patched)).toEqual({ daily_limited: true });
+  });
+
   it("清單顯示成本與毛利率；沒填成本顯示未填", async () => {
     stubFetch((url) => (url.includes("/menu-items") ? json(ITEMS) : null));
     renderPage("MANAGER");

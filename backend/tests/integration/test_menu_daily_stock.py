@@ -160,6 +160,9 @@ async def test_limited_item_is_sold_out_until_set_today(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     c = await _seed(db_session)
+    item = (await client.get("/api/v1/menu-items", headers=_h(c.clerk))).json()
+    cake = next(i for i in item if i["id"] == c.cake)
+    assert (cake["remaining"], cake["stock_set_today"]) == (0, False)  # POS 據此顯示「未填」
     resp = await _sell(client, c, [_cake(c)], "s1")
     assert resp.status_code == 409, resp.text
     assert "還沒設定數量" in resp.json()["detail"]

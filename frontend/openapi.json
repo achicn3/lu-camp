@@ -10907,6 +10907,10 @@
             "title": "Sort Order",
             "type": "integer"
           },
+          "stock_set_today": {
+            "title": "Stock Set Today",
+            "type": "boolean"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -10940,6 +10944,7 @@
           "sort_order",
           "daily_limited",
           "remaining",
+          "stock_set_today",
           "option_groups"
         ],
         "title": "MenuItemRead",

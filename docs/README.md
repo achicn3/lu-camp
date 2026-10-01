@@ -43,6 +43,7 @@
 - [MacBook 正式機：升級到 2026-09-26 版（給正式機上的 AI 照做）](./43-macbook-upgrade-2026-09-26.md)
 - [線上掃碼點餐（Cloudflare）＋彈性菜單（規格草案）](./44-online-ordering.md)
 - [MacBook 正式機：升級到 2026-10-01 版（彈性菜單後端）](./45-macbook-upgrade-2026-10-01-menu-options.md)
+- [MacBook 正式機：升級到 2026-10-01 版（餐飲每日限量）](./46-macbook-upgrade-2026-10-01-daily-stock.md)
 
 ## 評估與後續實作
 

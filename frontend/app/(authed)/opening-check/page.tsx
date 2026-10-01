@@ -9,11 +9,15 @@
 //   - 自動：系統判定（今日已開帳、各裝置連線），店員**不能**用手打勾，否則只是儀式。
 //   - 手動：店主自訂的事項，看過按確認。
 //
+// 今日餐點數量（docs/44 §3.7）：每日限量的餐點每天開店歸零，在這頁直接填份數；營業中
+// 補貨／報廢也回這頁加減，所以份數面板在填完後仍然留著。
+//
 // 裝置狀態直接問 hardware-agent（與列印同一條路，代理就在店內電腦上），不經後端；
 // 但「今天略過哪一台」存後端，否則換一台裝置又要重按。
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { DailyStockPanel, useDailyStock } from "@/features/menu/DailyStockPanel";
 import {
   deviceKey,
   devicePasses,
@@ -99,6 +103,8 @@ export default function OpeningCheckPage() {
   // 狀態與「算不算完成」與導覽列共用同一份判斷，免得頁面說沒做完、選單說做完了。
   const { today, deviceList, devicesUnknown, skipped, allClear } =
     useOpeningCheckStatus(true);
+  const dailyStock = useDailyStock();
+  const stockEntries = dailyStock.data ?? [];
 
   const skip = useMutation({
     mutationFn: async ({ key, skipped }: { key: string; skipped: boolean }) => {
@@ -158,6 +164,22 @@ export default function OpeningCheckPage() {
               : "還沒開帳，收現、收購付款都會被擋下",
       href: "/cash",
       actionLabel: stale ? "去結帳" : "去開帳",
+    });
+  }
+  const menuPending = data?.menu_stock_pending ?? 0;
+  if (data !== undefined && (menuPending > 0 || stockEntries.length > 0)) {
+    autoRows.push({
+      key: "menu_stock",
+      label: "今日餐點數量",
+      state: menuPending === 0 ? "pass" : skipped.has("menu_stock") ? "skipped" : "fail",
+      hint:
+        menuPending === 0
+          ? "每日限量的餐點都填好份數了；營業中補貨或報廢在下方加減"
+          : skipped.has("menu_stock")
+            ? "今天略過——沒填份數的餐點今天賣不了"
+            : `還有 ${menuPending} 項沒填。每日限量的餐點每天開店歸零，要先填份數才能賣`,
+      href: "#daily-stock",
+      actionLabel: "去填份數",
     });
   }
   for (const device of deviceList ?? []) {
@@ -244,6 +266,17 @@ export default function OpeningCheckPage() {
         </ul>
         {today.isPending && <p className="hint">載入中…</p>}
       </div>
+
+      {stockEntries.length > 0 && (
+        <div className="card" id="daily-stock">
+          <h2>填今日份數</h2>
+          <p className="hint">
+            勾了「每日限量」的餐點每天開店自動歸零（＝售完），在這裡填今天做了幾份；填 0
+            也算填過。營業中剛做好按 +1，壞掉或報廢按 −1 並選原因。
+          </p>
+          <DailyStockPanel entries={stockEntries} />
+        </div>
+      )}
 
       <div className="card">
         <h2>今日確認事項</h2>

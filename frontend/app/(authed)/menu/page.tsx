@@ -370,6 +370,25 @@ function MenuItemRow({
         </span>
       </td>
       <td>
+        {/* 每日限量（docs/44 §3.7）：勾了就每天開店歸零，店員在開店檢查填份數才能賣。 */}
+        <label className="menu-daily-limit">
+          <input
+            type="checkbox"
+            checked={item.daily_limited ?? false}
+            aria-label={`${item.name} 每日限量`}
+            disabled={patch.isPending}
+            onChange={(e) => patch.mutate({ daily_limited: e.target.checked })}
+          />
+          {!item.daily_limited
+            ? "不限量"
+            : !item.stock_set_today
+              ? "今天未填份數"
+              : item.remaining === 0
+                ? "今天售完"
+                : `今天剩 ${item.remaining} 份`}
+        </label>
+      </td>
+      <td>
         <div className="menu-row-actions">
           <button
             type="button"
@@ -470,6 +489,7 @@ export default function MenuPage() {
                 <th>成本</th>
                 <th>預估毛利率</th>
                 <th>狀態</th>
+                <th>每日限量</th>
                 <th>操作</th>
               </tr>
             </thead>

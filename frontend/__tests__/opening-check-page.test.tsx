@@ -194,4 +194,50 @@ describe("/opening-check 開店前檢查", () => {
     await waitFor(() => expect(posted).not.toBe(""));
     expect(JSON.parse(posted)).toEqual({ key: "cash_session", skipped: false });
   });
+
+  it("有每日限量品項還沒填：列出「今日餐點數量」並可直接在這裡填", async () => {
+    stubFetch((url) => {
+      if (url.includes("/devices/status")) return json({ devices: [DEVICES.devices[1]] });
+      if (url.includes("/menu-daily-stock")) {
+        return json([{ kind: "item", id: 3, label: "戚風", remaining: 0, set_today: false }]);
+      }
+      if (url.includes("/opening-check/today")) {
+        return json({ ...TODAY, cash_session_open: true, items: [], menu_stock_pending: 1 });
+      }
+      return null;
+    });
+    renderPage();
+    const row = (await screen.findByText("今日餐點數量")).closest("li")!;
+    expect(within(row).getByText("待處理")).toBeTruthy();
+    expect(within(row).getByText(/還有 1 項沒填/)).toBeTruthy();
+    expect(await screen.findByLabelText("戚風 今日份數")).toBeTruthy();
+  });
+
+  it("都填好了：今日餐點數量顯示正常（面板留著供營業中加減）", async () => {
+    stubFetch((url) => {
+      if (url.includes("/devices/status")) return json({ devices: [DEVICES.devices[1]] });
+      if (url.includes("/menu-daily-stock")) {
+        return json([{ kind: "item", id: 3, label: "戚風", remaining: 6, set_today: true }]);
+      }
+      if (url.includes("/opening-check/today")) {
+        return json({ ...TODAY, cash_session_open: true, items: [], menu_stock_pending: 0 });
+      }
+      return null;
+    });
+    renderPage();
+    const row = (await screen.findByText("今日餐點數量")).closest("li")!;
+    expect(within(row).getByText("正常")).toBeTruthy();
+  });
+
+  it("沒有任何每日限量品項：不出現這一列", async () => {
+    stubFetch((url) => {
+      if (url.includes("/devices/status")) return json({ devices: [DEVICES.devices[1]] });
+      if (url.includes("/menu-daily-stock")) return json([]);
+      if (url.includes("/opening-check/today")) return json(TODAY);
+      return null;
+    });
+    renderPage();
+    await screen.findByText("今日已開帳");
+    expect(screen.queryByText("今日餐點數量")).toBeNull();
+  });
 });

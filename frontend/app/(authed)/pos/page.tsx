@@ -1058,20 +1058,33 @@ function MenuPanel({
     <div className="pos-menu">
       <h2 className="pos-menu-title">餐飲菜單</h2>
       <div className="pos-menu-tiles">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="pos-menu-tile"
-            onClick={() => setSelected(item)}
-            disabled={disabled}
-          >
-            <span className="pos-menu-tile-name">{item.name}</span>
-            <span className="pos-menu-tile-price">
-              <Money value={parseNtd(item.unit_price) ?? 0} />
-            </span>
-          </button>
-        ))}
+        {items.map((item) => {
+          // 每日限量（docs/44 §3.7）：0＝今天售完或還沒填份數；最後還是以後端扣量為準。
+          const soldOut = item.daily_limited === true && item.remaining === 0;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`pos-menu-tile${soldOut ? " pos-menu-tile-soldout" : ""}`}
+              onClick={() => setSelected(item)}
+              disabled={disabled || soldOut}
+            >
+              <span className="pos-menu-tile-name">{item.name}</span>
+              <span className="pos-menu-tile-price">
+                <Money value={parseNtd(item.unit_price) ?? 0} />
+              </span>
+              {item.daily_limited === true && (
+                <span className="pos-menu-tile-stock">
+                  {!soldOut
+                    ? `剩 ${item.remaining} 份`
+                    : item.stock_set_today
+                      ? "售完"
+                      : "今天未填份數"}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       {selected !== null && (
         <QuantityDialog item={selected} onAdd={add} onCancel={() => setSelected(null)} />
@@ -1827,6 +1840,8 @@ export default function PosPage() {
       return;
     }
     clearPersistedIdemKey("pos-checkout");
+    // 每日限量的份數剛被扣掉，磚上的「剩 N 份」要跟著更新。
+    void queryClient.invalidateQueries({ queryKey: ["menu-items"] });
     setCompleted(sale);
     setCompletedCampaign(cart.snapshot.campaign_name ?? null);
     setCompletedSignature(

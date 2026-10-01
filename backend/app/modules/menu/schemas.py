@@ -244,6 +244,8 @@ class MenuItemRead(BaseModel):
     daily_limited: bool
     # 今天還能賣幾份；不限量＝null（0＝今天售完或還沒填）。
     remaining: int | None
+    # 今天填過份數沒有：0 份時 POS 才分得出「售完」還是「還沒填」。
+    stock_set_today: bool
     option_groups: list[MenuOptionGroupRead]
 
     @classmethod
@@ -262,6 +264,7 @@ class MenuItemRead(BaseModel):
             sort_order=item.sort_order,
             daily_limited=item.daily_limited,
             remaining=remaining_today(item, today()),
+            stock_set_today=item.stock_day == today(),
             option_groups=[MenuOptionGroupRead.from_detail(g) for g in detail.option_groups],
         )
 
