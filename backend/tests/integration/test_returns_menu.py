@@ -344,3 +344,41 @@ async def test_preview_tells_where_the_money_goes(db_session: AsyncSession) -> N
         (TenderType.STORE_CREDIT, Decimal(400)),
         (TenderType.CASH, Decimal(600)),
     ]
+
+
+async def test_retry_with_changed_resellable_is_rejected_not_silently_replayed(
+    db_session: AsyncSession,
+) -> None:
+    """回應遺失後改了「還能賣」再重試：不可默默回原單（份數會跟店員以為的不同），要明確擋下。"""
+    import pytest
+
+    from app.shared.exceptions import IdempotencyKeyConflict
+
+    m = await _mixed_sale(db_session, daily_limited=True)
+    first = await _return(
+        db_session, m, [ReturnLineInput(m.latte_line, 1, resellable=True)], "same-key"
+    )
+    again = await _return(
+        db_session, m, [ReturnLineInput(m.latte_line, 1, resellable=True)], "same-key"
+    )
+    assert again.id == first.id  # type: ignore[attr-defined]
+    with pytest.raises(IdempotencyKeyConflict):
+        await _return(db_session, m, [ReturnLineInput(m.latte_line, 1)], "same-key")
+
+
+def test_fingerprint_without_resellable_keeps_old_shape() -> None:
+    """沒勾還能賣：指紋與加欄位前完全相同（部署前送出、回應遺失的重送照樣認得）。"""
+    import hashlib
+    import json
+
+    from app.modules.returns.service import _return_fingerprint
+
+    old = hashlib.sha256(
+        json.dumps(
+            {"sale_id": 7, "reason": "r", "lines": [{"sale_line_id": 3, "qty": 1}]},
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert _return_fingerprint(7, {3: 1}, "r") == old
+    assert _return_fingerprint(7, {3: 1}, "r", frozenset({3})) != old

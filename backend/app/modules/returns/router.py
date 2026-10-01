@@ -112,6 +112,9 @@ async def create_return(
                 sale_id=payload.sale_id,
                 requested=requested,
                 reason=payload.reason.strip(),
+                resellable=frozenset(
+                    line.sale_line_id for line in payload.lines if line.resellable
+                ),
             )
         except IdempotencyKeyConflict as conflict:
             raise HTTPException(

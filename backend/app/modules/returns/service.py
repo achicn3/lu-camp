@@ -94,9 +94,19 @@ def _gift_return_cost(
     )
 
 
-def _return_fingerprint(sale_id: int, requested: dict[int, int], reason: str) -> str:
-    """退貨請求的穩定 sha256（sale + 明細 + 原因）；同 key 重送時比對請求是否相同。"""
-    canonical = {
+def _return_fingerprint(
+    sale_id: int,
+    requested: dict[int, int],
+    reason: str,
+    resellable: frozenset[int] = frozenset(),
+) -> str:
+    """退貨請求的穩定 sha256（sale + 明細 + 原因）；同 key 重送時比對請求是否相同。
+
+    「這份還能賣」（docs/47）會改變份數，必須納入：否則回應遺失後改了勾選再重試，會被當成
+    同一筆而默默回原單（Codex 對抗審查 E2）。**沒勾時不放這個鍵**，指紋維持加欄位前的形狀，
+    部署前送出、回應遺失的重送照樣認得。
+    """
+    canonical: dict[str, object] = {
         "sale_id": sale_id,
         "reason": reason,
         "lines": sorted(
@@ -104,6 +114,8 @@ def _return_fingerprint(sale_id: int, requested: dict[int, int], reason: str) ->
             key=lambda d: d["sale_line_id"],
         ),
     }
+    if resellable:
+        canonical["resellable"] = sorted(resellable)
     payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -566,6 +578,7 @@ class ReturnsService:
         sale_id: int,
         requested: dict[int, int],
         reason: str,
+        resellable: frozenset[int] = frozenset(),
     ) -> CustomerReturn | None:
         """同 key 且請求相符 → 回原退貨單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
@@ -574,7 +587,9 @@ class ReturnsService:
         existing = await self._repo.get_by_idempotency_key(store_id, idempotency_key)
         if existing is None:
             return None
-        if existing.idempotency_fingerprint != _return_fingerprint(sale_id, requested, reason):
+        if existing.idempotency_fingerprint != _return_fingerprint(
+            sale_id, requested, reason, resellable
+        ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的退貨內容（return {existing.id}）"
             )
@@ -612,7 +627,7 @@ class ReturnsService:
         if clean_reason == "":
             raise ReturnLineInvalid("退貨原因不可空白")
         requested = self._normalize_lines(lines)
-        resellable = {line.sale_line_id for line in lines if line.resellable}
+        resellable = frozenset(line.sale_line_id for line in lines if line.resellable)
 
         # idempotent replay：同 key 內容相同 → 回原單、不再退現；內容不同 → 拒絕。
         replay = await self.find_idempotent_replay(
@@ -621,6 +636,7 @@ class ReturnsService:
             sale_id=sale_id,
             requested=requested,
             reason=clean_reason,
+            resellable=resellable,
         )
         if replay is not None:
             return replay
@@ -765,7 +781,9 @@ class ReturnsService:
                 reason=clean_reason,
                 clerk_user_id=actor_user_id,
                 idempotency_key=idempotency_key,
-                idempotency_fingerprint=_return_fingerprint(sale.id, requested, clean_reason),
+                idempotency_fingerprint=_return_fingerprint(
+                    sale.id, requested, clean_reason, resellable
+                ),
             )
         )
         await sales_service.mark_bundle_groups_returned(
