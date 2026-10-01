@@ -26,8 +26,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 const ITEMS = [
-  { id: 1, store_id: 1, name: "手沖-耶加", unit_price: "180", unit_cost: "60", category: "咖啡", is_available: true, sort_order: 0 },
-  { id: 2, store_id: 1, name: "季節限定", unit_price: "200", unit_cost: null, category: null, is_available: false, sort_order: 1 },
+  { id: 1, store_id: 1, name: "手沖-耶加", unit_price: "180", unit_cost: "60", category: "咖啡", is_available: true, sort_order: 0, option_groups: [] },
+  { id: 2, store_id: 1, name: "季節限定", unit_price: "200", unit_cost: null, category: null, is_available: false, sort_order: 1, option_groups: [] },
 ];
 
 // 建議售價要用店內設定的稅率/手續費，不可寫死（CLAUDE.md §7.9）。
@@ -86,6 +86,24 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(await screen.findByText("手沖-耶加")).toBeTruthy();
     expect(screen.getByText("可售", { selector: ".inv-badge" })).toBeTruthy();
     expect(screen.getByText("停售", { selector: ".inv-badge" })).toBeTruthy();
+  });
+
+  it("選項欄列出掛的群組；下方有選項群組管理；點設定開選項與介紹", async () => {
+    const group = { id: 3, name: "溫度", min_select: 1, max_select: 1, sort_order: 0, options: [] };
+    stubFetch((url) => {
+      if (url.includes("/menu-items")) return json([{ ...ITEMS[0], option_groups: [group] }, ITEMS[1]]);
+      if (url.includes("/menu-option-groups")) return json([group]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    expect(await screen.findByText("沒有選項")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "溫度" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "手沖-耶加 選項與介紹" }));
+    const dialog = await screen.findByRole("dialog", { name: /手沖-耶加/ });
+    expect(
+      (await within(dialog).findByRole("checkbox", { name: /溫度/ }) as HTMLInputElement).checked,
+    ).toBe(true);
   });
 
   it("建立品項：POST 後刷新清單", async () => {

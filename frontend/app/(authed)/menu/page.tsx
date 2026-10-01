@@ -1,11 +1,14 @@
 "use client";
 // /menu 餐飲菜單管理頁（MANAGER 專用）：品項清單（含停售）＋ 建立 ＋ 改名改價/上下架/封存。
-// 純呈現：金額為整數元字串，走 OpenAPI 生成 client（禁手刻型別）。餐飲不扣庫存、不折活動。
+// 純呈現：金額為整數元字串，走 OpenAPI 生成 client（禁手刻型別）。
+// 下方「選項群組」管理溫度／加購等選項；品項列「選項」欄設定要掛哪些群組與介紹（O2）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
+import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
+import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -217,6 +220,7 @@ function MenuItemRow({
   const [price, setPrice] = useState(item.unit_price);
   const [editingCost, setEditingCost] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editingOptions, setEditingOptions] = useState(false);
   const [cost, setCost] = useState(item.unit_cost ?? "");
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -365,6 +369,33 @@ function MenuItemRow({
       </td>
       <td>{margin === null ? "—" : `${margin}%`}</td>
       <td>
+        <span className="menu-price-cell">
+          <span className={item.option_groups.length === 0 ? "hint" : undefined}>
+            {item.option_groups.length === 0
+              ? "沒有選項"
+              : item.option_groups.map((g) => g.name).join("、")}
+          </span>
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-label={`${item.name} 選項與介紹`}
+            onClick={() => setEditingOptions(true)}
+          >
+            設定
+          </button>
+        </span>
+        {editingOptions && (
+          <MenuItemOptionsDialog
+            item={item}
+            onDone={() => {
+              setEditingOptions(false);
+              onChanged();
+            }}
+            onCancel={() => setEditingOptions(false)}
+          />
+        )}
+      </td>
+      <td>
         <span className={`inv-badge inv-tone-${item.is_available ? "ok" : "muted"}`}>
           {item.is_available ? "可售" : "停售"}
         </span>
@@ -488,6 +519,7 @@ export default function MenuPage() {
                 <th>售價</th>
                 <th>成本</th>
                 <th>預估毛利率</th>
+                <th>選項</th>
                 <th>狀態</th>
                 <th>每日限量</th>
                 <th>操作</th>
@@ -509,6 +541,7 @@ export default function MenuPage() {
           )}
         </div>
       </div>
+      <OptionGroupsSection />
     </section>
   );
 }

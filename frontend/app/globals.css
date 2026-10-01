@@ -5943,3 +5943,78 @@ a.btn-ghost {
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
+
+/* 餐飲選項群組管理（docs/44 §3.2；O2） */
+.menu-option-section {
+  margin-top: var(--sp-6);
+}
+.menu-option-section .card {
+  max-width: 820px;
+  margin-bottom: var(--sp-4);
+}
+.menu-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.menu-group-head h3 {
+  margin: 0;
+}
+.menu-group-head .menu-row-actions {
+  margin-left: auto;
+}
+.menu-group-rules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.menu-group-rules .field {
+  width: 120px;
+}
+.menu-option-add {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.menu-option-add input {
+  flex: 1;
+}
+.menu-option-create h3 {
+  margin-top: 0;
+}
+.menu-option-create textarea,
+.menu-item-options-dialog textarea {
+  width: 100%;
+  font: inherit;
+}
+.menu-item-options-dialog {
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.menu-item-group-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-4);
+  display: grid;
+  gap: var(--sp-2);
+}
+.menu-item-group-list .hint {
+  margin-left: var(--sp-2);
+}
+.menu-item-group-order {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
