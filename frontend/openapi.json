@@ -13410,6 +13410,21 @@
             ],
             "title": "Menu Item Id"
           },
+          "menu_options_snapshot": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Options Snapshot"
+          },
           "net_amount": {
             "default": "0",
             "title": "Net Amount",

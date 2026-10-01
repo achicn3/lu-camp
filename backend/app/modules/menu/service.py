@@ -96,8 +96,14 @@ class MenuSelection:
     options_snapshot: list[dict[str, object]]
 
 
-def _line_description(name: str, option_names: Sequence[str]) -> str:
-    text = name if not option_names else f"{name}（{'、'.join(option_names)}）"
+def _line_description(name: str, picked: Sequence[tuple[str, str]]) -> str:
+    """品名＋選項。平常只列選項名（短，收據好讀）；所選選項有同名時（甜度「正常」、
+    冰量「正常」），撞名的那幾項改成「群組名＋選項名」，否則分不出哪個是哪個。"""
+    counts: dict[str, int] = {}
+    for _, option in picked:
+        counts[option] = counts.get(option, 0) + 1
+    labels = [option if counts[option] == 1 else f"{group}{option}" for group, option in picked]
+    text = name if not labels else f"{name}（{'、'.join(labels)}）"
     if len(text) <= SALE_LINE_DESCRIPTION_MAX:
         return text
     return text[: SALE_LINE_DESCRIPTION_MAX - 1] + "…"
@@ -339,7 +345,7 @@ class MenuService:
         if not chosen <= known:
             raise SaleLineInvalid(f"「{item.name}」沒有這個選項，請重新選擇")
         unit_price = item.unit_price
-        names: list[str] = []
+        picked_names: list[tuple[str, str]] = []
         snapshot: list[dict[str, object]] = []
         for detail in details:
             group = detail.group
@@ -354,7 +360,7 @@ class MenuService:
                 if not option.is_available:
                     raise MenuItemUnavailable(f"「{option.name}」目前停售")
                 unit_price += option.price_delta
-                names.append(option.name)
+                picked_names.append((group.name, option.name))
                 snapshot.append(
                     {
                         "group_id": group.id,
@@ -366,7 +372,7 @@ class MenuService:
                 )
         return MenuSelection(
             unit_price=unit_price,
-            description=_line_description(item.name, names),
+            description=_line_description(item.name, picked_names),
             options_snapshot=snapshot,
         )
 

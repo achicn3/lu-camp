@@ -8834,6 +8834,10 @@ export interface components {
             manual_discount_amount: string;
             /** Menu Item Id */
             menu_item_id: number | null;
+            /** Menu Options Snapshot */
+            menu_options_snapshot?: {
+                [key: string]: unknown;
+            }[] | null;
             /**
              * Net Amount
              * @default 0

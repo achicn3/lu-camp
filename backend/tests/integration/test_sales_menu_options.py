@@ -55,6 +55,7 @@ class _Menu:
         self.store_id = 0
         self.token = ""
         self.latte = 0
+        self.clerk_id = 0
         self.opt: dict[str, int] = {}
 
 
@@ -101,6 +102,7 @@ async def _seed(session: AsyncSession) -> _Menu:
     m.store_id = store.id
     m.token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
     m.latte = latte.id
+    m.clerk_id = clerk.id
     for detail in (temp, milk, extra):
         for o in detail.options:
             m.opt[o.name] = o.id
@@ -344,3 +346,49 @@ def test_line_fingerprint_with_options_is_order_independent() -> None:
     b = SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=7, menu_option_ids=(1, 3))
     assert _line_fingerprint(a) == _line_fingerprint(b)
     assert _line_fingerprint(a)["menu_option_ids"] == [1, 3]
+
+
+async def test_same_option_name_in_two_groups_is_disambiguated(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """甜度、冰量都有「正常」：只在撞名時把群組名稱帶進品名，其餘維持短格式。"""
+    m = await _seed(db_session)
+    svc = MenuService(db_session)
+    tea = await svc.create_menu_item(
+        m.store_id, name="綠茶", unit_price=Decimal(50), actor_user_id=m.clerk_id
+    )
+    sugar = await svc.create_option_group(
+        m.store_id,
+        name="甜度",
+        min_select=1,
+        max_select=1,
+        options=[("正常", Decimal(0)), ("微糖", Decimal(0))],
+        actor_user_id=m.clerk_id,
+    )
+    ice = await svc.create_option_group(
+        m.store_id,
+        name="冰量",
+        min_select=1,
+        max_select=1,
+        options=[("正常", Decimal(0)), ("少冰", Decimal(0))],
+        actor_user_id=m.clerk_id,
+    )
+    await svc.set_item_option_groups(
+        m.store_id, tea.id, [sugar.group.id, ice.group.id], actor_user_id=m.clerk_id
+    )
+    normal_sugar = sugar.options[0].id
+    normal_ice, less_ice = ice.options[0].id, ice.options[1].id
+
+    resp = await _sell(
+        client,
+        m,
+        [_line(tea.id, [normal_sugar, normal_ice]), _line(tea.id, [normal_sugar, less_ice])],
+        "dup-name",
+    )
+    assert resp.status_code == 201, resp.text
+    assert [ln["description"] for ln in resp.json()["lines"]] == [
+        "綠茶（甜度正常、冰量正常）",
+        "綠茶（正常、少冰）",
+    ]
+    snap = resp.json()["lines"][0]["menu_options_snapshot"]
+    assert [(o["group"], o["option"]) for o in snap] == [("甜度", "正常"), ("冰量", "正常")]

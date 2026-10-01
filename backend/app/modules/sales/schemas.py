@@ -476,6 +476,8 @@ class SaleLineRead(BaseModel):
     menu_item_id: int | None
     bulk_basket_id: int | None = None
     description: str
+    # 餐飲選項快照（docs/44 §3.2）：沒選項＝null。
+    menu_options_snapshot: list[dict[str, object]] | None = None
     qty: int
     unit_price: NTDAmount
     line_total: NTDAmount
