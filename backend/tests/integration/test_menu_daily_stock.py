@@ -22,7 +22,7 @@ from app.core.security import encode_access_token
 from app.core.time import store_date, utc_now
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
-from app.modules.menu.models import MenuItem, MenuOption
+from app.modules.menu.models import MenuItem, MenuOption, MenuStockAdjustment
 from app.modules.menu.service import MenuService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -131,11 +131,18 @@ async def _set(
 
 
 async def _adjust(
-    client: httpx.AsyncClient, c: _Ctx, kind: str, target: int, delta: int
+    client: httpx.AsyncClient,
+    c: _Ctx,
+    kind: str,
+    target: int,
+    delta: int,
+    reason: str | None = None,
 ) -> httpx.Response:
+    if reason is None:
+        reason = "RESTOCK" if delta > 0 else "WASTE"
     return await client.post(
         f"/api/v1/menu-daily-stock/{kind}/{target}/adjust",
-        json={"delta": delta},
+        json={"delta": delta, "reason": reason},
         headers=_h(c.clerk),
     )
 
@@ -355,12 +362,20 @@ async def test_void_after_the_day_changed_does_not_put_back(
     c = await _seed(db_session)
     svc = MenuService(db_session)
     yesterday = store_date(utc_now()) - timedelta(days=1)
-    cake = await db_session.get(MenuItem, c.cake)
-    assert cake is not None
     await svc.set_daily_stock(
         c.store_id, "item", c.cake, qty=4, expected_remaining=0, actor_user_id=c.mgr_id
     )
-    await svc.restore_daily_stock(c.store_id, cake, (), qty=2, sold_day=yesterday)
+    cake = await db_session.get(MenuItem, c.cake)
+    assert cake is not None
+    consumed: list[dict[str, object]] = [
+        {
+            "kind": "item",
+            "id": c.cake,
+            "generation": cake.stock_generation,
+            "day": yesterday.isoformat(),
+        }
+    ]
+    await svc.restore_daily_stock(c.store_id, consumed, qty=2)
     assert await svc.remaining(c.store_id, "item", c.cake) == 4
 
 
@@ -420,3 +435,91 @@ async def test_option_archived_is_not_listed(
     await MenuService(db_session).archive_option(c.store_id, c.geisha)
     rows = await _remaining(client, c)
     assert ("option", c.geisha) not in rows
+
+
+# ── 作廢加回的前提（Codex 對抗審查 O1c）＋ 調整原因 ──
+
+
+async def _void(client: httpx.AsyncClient, c: _Ctx, sale_id: int) -> None:
+    resp = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_h(c.mgr))
+    assert resp.status_code == 200, resp.text
+
+
+async def test_void_after_a_recount_does_not_put_back(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """賣出後店員按了「改成」＝實際數過、數字已反映現況；之後作廢不能再加回（會多算）。"""
+    c = await _seed(db_session)
+    await _set(client, c, "item", c.cake, 5, expected=0)
+    sale = await _sell(client, c, [_cake(c, 2)], "rc1")
+    assert sale.status_code == 201, sale.text
+    await _set(client, c, "item", c.cake, 10, expected=3)  # 店員數過：現在有 10 份
+    await _void(client, c, sale.json()["id"])
+    assert (await _remaining(client, c))[("item", c.cake)] == 10
+
+
+async def test_void_after_only_adjustments_still_puts_back(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """賣出後只有 +1／−1（不是重數），作廢照樣加回。"""
+    c = await _seed(db_session)
+    await _set(client, c, "item", c.cake, 5, expected=0)
+    sale = await _sell(client, c, [_cake(c, 2)], "ad1")
+    await _adjust(client, c, "item", c.cake, 4)  # 3 → 7
+    await _adjust(client, c, "item", c.cake, -1, "WASTE")  # 7 → 6
+    await _void(client, c, sale.json()["id"])
+    assert (await _remaining(client, c))[("item", c.cake)] == 8
+
+
+async def test_void_after_limit_toggled_does_not_put_back(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    c = await _seed(db_session)
+    await _set(client, c, "item", c.cake, 5, expected=0)
+    sale = await _sell(client, c, [_cake(c, 2)], "tg1")
+    for flag in (False, True):
+        resp = await client.patch(
+            f"/api/v1/menu-items/{c.cake}", json={"daily_limited": flag}, headers=_h(c.mgr)
+        )
+        assert resp.status_code == 200
+    await _set(client, c, "item", c.cake, 10, expected=0)
+    await _void(client, c, sale.json()["id"])
+    assert (await _remaining(client, c))[("item", c.cake)] == 10
+
+
+async def test_decrease_requires_a_reason(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    c = await _seed(db_session)
+    await _set(client, c, "item", c.cake, 5, expected=0)
+    resp = await client.post(
+        f"/api/v1/menu-daily-stock/item/{c.cake}/adjust",
+        json={"delta": -1},
+        headers=_h(c.clerk),
+    )
+    assert resp.status_code == 422
+    restock_as_decrease = await _adjust(client, c, "item", c.cake, -1, "RESTOCK")
+    assert restock_as_decrease.status_code == 422
+
+
+async def test_adjustments_are_recorded_with_reason_for_waste_stats(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    c = await _seed(db_session)
+    await _set(client, c, "item", c.cake, 5, expected=0)
+    await _adjust(client, c, "item", c.cake, 3)
+    await _adjust(client, c, "item", c.cake, -2, "WASTE")
+    await _adjust(client, c, "item", c.cake, -1, "CORRECTION")
+    rows = (
+        await db_session.scalars(
+            select(MenuStockAdjustment)
+            .where(MenuStockAdjustment.store_id == c.store_id)
+            .order_by(MenuStockAdjustment.id)
+        )
+    ).all()
+    assert [(r.target_kind, r.target_id, r.delta, r.reason) for r in rows] == [
+        ("item", c.cake, 3, "RESTOCK"),
+        ("item", c.cake, -2, "WASTE"),
+        ("item", c.cake, -1, "CORRECTION"),
+    ]
+    assert all(r.business_date == store_date(utc_now()) for r in rows)

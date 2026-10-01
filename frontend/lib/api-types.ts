@@ -5923,6 +5923,7 @@ export interface components {
         DailyStockAdjustRequest: {
             /** Delta */
             delta: number;
+            reason?: components["schemas"]["MenuStockAdjustReason"] | null;
         };
         /**
          * DailyStockEntryRead
@@ -8053,6 +8054,12 @@ export interface components {
             /** Sort Order */
             sort_order?: number | null;
         };
+        /**
+         * MenuStockAdjustReason
+         * @description 每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。
+         * @enum {string}
+         */
+        MenuStockAdjustReason: "RESTOCK" | "WASTE" | "CORRECTION";
         /**
          * MenuStockTarget
          * @description 每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。

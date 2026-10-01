@@ -611,3 +611,11 @@ class MenuStockTarget(StrEnum):
 
     ITEM = "item"
     OPTION = "option"
+
+
+class MenuStockAdjustReason(StrEnum):
+    """每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。"""
+
+    RESTOCK = "RESTOCK"  # 補貨／剛做好（只能加）
+    WASTE = "WASTE"  # 報廢：壞掉、做壞、過期（只能減）
+    CORRECTION = "CORRECTION"  # 盤點校正：數字跟實物對不上（只能減；要往上校正請用「改成」）

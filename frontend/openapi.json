@@ -5505,6 +5505,16 @@
             "minimum": -9999.0,
             "title": "Delta",
             "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MenuStockAdjustReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11324,6 +11334,16 @@
         },
         "title": "MenuOptionUpdateRequest",
         "type": "object"
+      },
+      "MenuStockAdjustReason": {
+        "description": "每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。",
+        "enum": [
+          "RESTOCK",
+          "WASTE",
+          "CORRECTION"
+        ],
+        "title": "MenuStockAdjustReason",
+        "type": "string"
       },
       "MenuStockTarget": {
         "description": "每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。\n\n值用小寫，因為它直接出現在網址路徑 `/menu-daily-stock/{kind}/{id}`。",

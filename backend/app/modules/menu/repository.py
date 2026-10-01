@@ -12,6 +12,7 @@ from app.modules.menu.models import (
     MenuItemOptionGroup,
     MenuOption,
     MenuOptionGroup,
+    MenuStockAdjustment,
 )
 
 
@@ -244,8 +245,8 @@ class MenuRepository:
         row_id: int,
         qty: int,
         today: date,
-    ) -> bool:
-        """扣 qty 份；今天沒填或不夠 → False（不動任何資料）。"""
+    ) -> int | None:
+        """扣 qty 份，回傳扣到的份數版本；今天沒填或不夠 → None（不動任何資料）。"""
         result = await self._session.execute(
             update(model)
             .where(
@@ -256,9 +257,10 @@ class MenuRepository:
                 model.stock_qty >= qty,
             )
             .values(stock_qty=model.stock_qty - qty)
-            .returning(model.id)
+            .returning(model.stock_generation)
         )
-        return result.scalar_one_or_none() is not None
+        generation: int | None = result.scalar_one_or_none()
+        return generation
 
     async def add_stock(
         self,
@@ -305,7 +307,7 @@ class MenuRepository:
                 model.daily_limited.is_(True),
                 self._today_qty(model, today) == expected,
             )
-            .values(stock_qty=qty, stock_day=today)
+            .values(stock_qty=qty, stock_day=today, stock_generation=model.stock_generation + 1)
             .returning(model.stock_qty)
         )
         value: int | None = result.scalar_one_or_none()
@@ -317,14 +319,27 @@ class MenuRepository:
         store_id: int,
         row_id: int,
         qty: int,
+        generation: int,
         day: date,
     ) -> None:
-        """作廢加回：只加回同一個營業日的份數（隔天的新一批不受影響）。"""
+        """作廢加回：只加回同一個營業日、且份數版本沒變（賣出後沒人重設過）的份數。
+
+        重設（「改成」或切換每日限量）代表店員實際數過，數字已反映現況，再加回會多算。
+        """
         await self._session.execute(
             update(model)
-            .where(model.store_id == store_id, model.id == row_id, model.stock_day == day)
+            .where(
+                model.store_id == store_id,
+                model.id == row_id,
+                model.stock_day == day,
+                model.stock_generation == generation,
+            )
             .values(stock_qty=model.stock_qty + qty)
         )
+
+    async def add_adjustment(self, row: MenuStockAdjustment) -> None:
+        self._session.add(row)
+        await self._session.flush()
 
     async def list_limited_items(self, store_id: int) -> list[MenuItem]:
         stmt = (

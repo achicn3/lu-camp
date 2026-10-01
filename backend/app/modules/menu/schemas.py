@@ -18,7 +18,7 @@ from app.modules.menu.service import (
     remaining_today,
     today,
 )
-from app.shared.enums import MenuStockTarget
+from app.shared.enums import MenuStockAdjustReason, MenuStockTarget
 
 # 一天的份數上限：防手滑多打幾個 0，正常餐點遠低於此。
 DAILY_STOCK_MAX = 9999
@@ -298,10 +298,15 @@ class DailyStockAdjustRequest(BaseModel):
     """今天的份數加減（剛做好 +4、報廢 −1）。"""
 
     delta: int = Field(ge=-DAILY_STOCK_MAX, le=DAILY_STOCK_MAX)
+    # 加＝補貨（可省略）；減＝報廢或盤點校正（必填，報廢統計靠這個）。
+    reason: MenuStockAdjustReason | None = None
 
-    @field_validator("delta")
-    @classmethod
-    def _nonzero(cls, value: int) -> int:
-        if value == 0:
+    @model_validator(mode="after")
+    def _reason_matches_sign(self) -> "DailyStockAdjustRequest":
+        if self.delta == 0:
             raise ValueError("加減的份數不可為 0")
-        return value
+        if self.delta > 0 and self.reason not in (None, MenuStockAdjustReason.RESTOCK):
+            raise ValueError("增加份數的原因只能是補貨")
+        if self.delta < 0 and self.reason in (None, MenuStockAdjustReason.RESTOCK):
+            raise ValueError("減少份數要選原因：報廢或盤點校正")
+        return self

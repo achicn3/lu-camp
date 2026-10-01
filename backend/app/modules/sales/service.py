@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.audit import write_audit_log
 from app.core.canonical import canonical_json_bytes
 from app.core.money import MAX_NTD, round_ntd, split_tax_inclusive
-from app.core.time import store_date
 from app.modules.campaigns.pricing import CartLine, LinePrice, PromoCampaign, PromoItem, price_cart
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
@@ -630,11 +629,6 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
     if line.menu_option_ids:  # 後加欄位（docs/44）：沒選項就不放，舊請求的指紋不變
         fields["menu_option_ids"] = sorted(line.menu_option_ids)
     return fields
-
-
-def _snapshot_option_ids(snapshot: list[dict[str, object]] | None) -> list[int]:
-    """從明細的選項快照取回選項 ID（作廢加回每日限量份數用）。"""
-    return [int(str(entry["option_id"])) for entry in snapshot or []]
 
 
 _PENDING_LISTING = frozenset({SerializedItemStatus.PENDING_LISTING, BulkLotStatus.PENDING_LISTING})
@@ -2656,17 +2650,11 @@ class SalesService:
                     await self.restore_bulk_line(
                         sale.store_id, line, line.qty, ref_type="sale_void", ref_id=sale.id
                     )
-                elif line.line_type == SaleLineType.MENU and line.menu_item_id is not None:
-                    # 每日限量：同一營業日作廢才加回份數（docs/44 §3.7）。
-                    menu_item = await self._menu.get(sale.store_id, line.menu_item_id)
-                    if menu_item is not None:
-                        await self._menu.restore_daily_stock(
-                            sale.store_id,
-                            menu_item,
-                            _snapshot_option_ids(line.menu_options_snapshot),
-                            qty=line.qty,
-                            sold_day=store_date(sale.created_at),
-                        )
+                elif line.line_type == SaleLineType.MENU and line.menu_stock_consumed:
+                    # 每日限量：同一營業日、份數沒被重設過才加回（docs/44 §3.7）。
+                    await self._menu.restore_daily_stock(
+                        sale.store_id, line.menu_stock_consumed, qty=line.qty
+                    )
         return sale
 
     async def bulk_allocation_costs(
@@ -3534,7 +3522,7 @@ class SalesService:
             raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
         selection = await self._menu.price_selection(store_id, item, line.menu_option_ids, line.qty)
         # 每日限量：原子扣份數（docs/44 §3.7）；不夠就整筆回滾。
-        await self._menu.consume_daily_stock(store_id, item, selection, line.qty)
+        consumed = await self._menu.consume_daily_stock(store_id, item, selection, line.qty)
         disc = _AppliedDiscount.full_price(selection.unit_price, line.qty)
         await self._repo.add_line(
             SaleLine(
@@ -3544,6 +3532,7 @@ class SalesService:
                 menu_item_id=item.id,
                 description=selection.description,
                 menu_options_snapshot=selection.options_snapshot or None,
+                menu_stock_consumed=consumed or None,
                 qty=line.qty,
                 # 成本＝品項成本 × 數量，凍結於此（裁示 2026-09-17）。沒填成本就留 NULL
                 # ＝「成本未知」，報表照既有口徑處理——填 0 會讓毛利看起來是 100%。

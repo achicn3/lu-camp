@@ -52,6 +52,7 @@ async def seeded() -> AsyncGenerator[_Seeded]:
         async with sm() as s:
             for sql in (
                 "DELETE FROM audit_log WHERE store_id = :sid",
+                "DELETE FROM menu_stock_adjustments WHERE store_id = :sid",
                 "DELETE FROM menu_items WHERE store_id = :sid",
                 "DELETE FROM users WHERE store_id = :sid",
                 "DELETE FROM stores WHERE id = :sid",

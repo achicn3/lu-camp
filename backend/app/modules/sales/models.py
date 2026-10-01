@@ -157,6 +157,8 @@ class SaleLine(Base, TimestampMixin):
     # 餐飲選項快照（docs/44 §3.2）：[{group_id, group, option_id, option, price_delta}]；
     # 沒選項＝NULL。日後改選項名稱或加價不影響歷史收據與報表。
     menu_options_snapshot: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
+    # 每日限量扣量紀錄（docs/44 §3.7）：[{kind, id, generation, day}]；作廢只在份數版本沒變時加回。
+    menu_stock_consumed: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
     # 餐飲帶選項時品名會變長（「拿鐵（冰、燕麥奶）」），2026-10-01 由 150 放寬為 300。
     description: Mapped[str] = mapped_column(String(300))
     qty: Mapped[int] = mapped_column()

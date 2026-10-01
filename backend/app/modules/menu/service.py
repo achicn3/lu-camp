@@ -16,9 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.core.money import MAX_NTD, format_ntd
 from app.core.time import store_date, utc_now
-from app.modules.menu.models import MenuCategory, MenuItem, MenuOption, MenuOptionGroup
+from app.modules.menu.models import (
+    MenuCategory,
+    MenuItem,
+    MenuOption,
+    MenuOptionGroup,
+    MenuStockAdjustment,
+)
 from app.modules.menu.repository import MenuRepository
-from app.shared.enums import MenuStockTarget
+from app.shared.enums import MenuStockAdjustReason, MenuStockTarget
 from app.shared.exceptions import (
     DuplicateMenuEntry,
     DuplicateMenuItem,
@@ -129,6 +135,19 @@ def remaining_today(entry: MenuItem | MenuOption, day: date) -> int | None:
 def _short(entry: MenuItem | MenuOption, day: date, qty: int) -> bool:
     left = remaining_today(entry, day)
     return left is not None and left < qty
+
+
+def _adjust_reason(delta: int, reason: MenuStockAdjustReason | str | None) -> MenuStockAdjustReason:
+    """加＝補貨；減＝必須是報廢或盤點校正（往上校正請用「改成」）。"""
+    if delta == 0:
+        raise SaleLineInvalid("加減的份數不可為 0")
+    if delta > 0:
+        if reason not in (None, MenuStockAdjustReason.RESTOCK):
+            raise SaleLineInvalid("增加份數的原因只能是補貨")
+        return MenuStockAdjustReason.RESTOCK
+    if reason is None or MenuStockAdjustReason(reason) is MenuStockAdjustReason.RESTOCK:
+        raise SaleLineInvalid("減少份數要選原因：報廢或盤點校正")
+    return MenuStockAdjustReason(reason)
 
 
 def _shortage_message(name: str, entry: MenuItem | MenuOption, day: date) -> str:
@@ -349,6 +368,7 @@ class MenuService:
         target.daily_limited = daily_limited
         target.stock_qty = None
         target.stock_day = None
+        target.stock_generation += 1
         await write_audit_log(
             self._session,
             store_id=store_id,
@@ -459,34 +479,54 @@ class MenuService:
 
     async def consume_daily_stock(
         self, store_id: int, item: MenuItem, selection: MenuSelection, qty: int
-    ) -> None:
-        """結帳扣份數（原子）；不夠 → InsufficientStock，同一交易的其他扣減會一起回滾。"""
+    ) -> list[dict[str, object]]:
+        """結帳扣份數（原子）；不夠 → InsufficientStock，同一交易的其他扣減會一起回滾。
+
+        回傳扣到的對象與份數版本（存進明細的 `menu_stock_consumed`，作廢加回時核對）。
+        """
         day = today()
-        targets: list[MenuItem | MenuOption] = [item, *selection.options]
-        for entry in targets:
+        consumed: list[dict[str, object]] = []
+        targets: list[tuple[MenuStockTarget, MenuItem | MenuOption]] = [
+            (MenuStockTarget.ITEM, item),
+            *((MenuStockTarget.OPTION, option) for option in selection.options),
+        ]
+        for kind, entry in targets:
             if not entry.daily_limited:
                 continue
-            ok = await self._repo.consume_stock(type(entry), store_id, entry.id, qty, day)
-            if not ok:
-                await self._session.refresh(entry)
-                raise InsufficientStock(_shortage_message(entry.name, entry, day))
+            generation = await self._repo.consume_stock(type(entry), store_id, entry.id, qty, day)
             await self._session.refresh(entry)
+            if generation is None:
+                raise InsufficientStock(_shortage_message(entry.name, entry, day))
+            consumed.append(
+                {
+                    "kind": kind.value,
+                    "id": entry.id,
+                    "generation": generation,
+                    "day": day.isoformat(),
+                }
+            )
+        return consumed
 
     async def restore_daily_stock(
-        self,
-        store_id: int,
-        item: MenuItem,
-        option_ids: Sequence[int],
-        *,
-        qty: int,
-        sold_day: date,
+        self, store_id: int, consumed: Sequence[dict[str, object]], *, qty: int
     ) -> None:
-        """作廢加回份數：只在**同一個營業日**作廢才加回（昨天賣掉的不會變成今天的份數）。"""
-        if sold_day != today():
-            return
-        await self._repo.restore_stock(MenuItem, store_id, item.id, qty, sold_day)
-        for option_id in option_ids:
-            await self._repo.restore_stock(MenuOption, store_id, option_id, qty, sold_day)
+        """作廢加回份數：只在**同一個營業日**、且份數版本沒變（賣出後沒人重設過）才加回。
+
+        昨天賣掉的不會變成今天的份數；賣出後店員按過「改成」＝已實際數過，不再加回。
+        """
+        day = today()
+        for entry in consumed:
+            if str(entry["day"]) != day.isoformat():
+                continue
+            model = MenuItem if entry["kind"] == MenuStockTarget.ITEM.value else MenuOption
+            await self._repo.restore_stock(
+                model,
+                store_id,
+                int(str(entry["id"])),
+                qty,
+                int(str(entry["generation"])),
+                day,
+            )
 
     async def _stock_target(
         self, store_id: int, kind: MenuStockTarget, target_id: int
@@ -571,9 +611,14 @@ class MenuService:
         *,
         delta: int,
         actor_user_id: int,
+        reason: MenuStockAdjustReason | str | None = None,
     ) -> DailyStockEntry:
-        """今天的份數加減（剛做好 +4、報廢 −1）。原子操作，與結帳同時進行也不會算錯。"""
+        """今天的份數加減（剛做好 +4、報廢 −1）。原子操作，與結帳同時進行也不會算錯。
+
+        加：原因固定是補貨（可省略）。減：必須說明是報廢還是盤點校正——報廢統計靠這個。
+        """
         kind = MenuStockTarget(kind)
+        resolved = _adjust_reason(delta, reason)
         target, label = await self._stock_target(store_id, kind, target_id)
         if not target.daily_limited:
             raise MenuStockConflict(f"「{label}」是不限量品項，不需要設定份數")
@@ -583,6 +628,17 @@ class MenuService:
         if result is None:
             now = remaining_today(target, day) or 0
             raise MenuStockConflict(f"「{label}」現在剩 {now} 份，不能再減 {-delta} 份")
+        await self._repo.add_adjustment(
+            MenuStockAdjustment(
+                store_id=store_id,
+                target_kind=kind.value,
+                target_id=target_id,
+                delta=delta,
+                reason=resolved.value,
+                business_date=day,
+                actor_user_id=actor_user_id,
+            )
+        )
         await write_audit_log(
             self._session,
             store_id=store_id,
@@ -591,7 +647,7 @@ class MenuService:
             entity_type=f"menu_{kind.value}",
             entity_id=str(target_id),
             before={"remaining": result - delta},
-            after={"remaining": result, "day": day.isoformat()},
+            after={"remaining": result, "day": day.isoformat(), "reason": resolved.value},
         )
         return self._entry(kind, target, label)
 

@@ -75,6 +75,10 @@ class MenuItem(Base, TimestampMixin):
     daily_limited: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     stock_qty: Mapped[int | None] = mapped_column()
     stock_day: Mapped[date | None] = mapped_column(Date)
+    # 份數版本：每次「直接設定份數」或切換每日限量就 +1。結帳把扣到的版本記在明細上，
+    # 作廢只在版本沒變時加回——重設代表店員實際數過、數字已反映現況，再加回會多算
+    # （Codex 對抗審查 O1c）。用版本號而不是時間比先後，不受交易邊界影響。
+    stock_generation: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     # 封存（軟刪除）：非 NULL 即從 POS/管理清單隱藏，但保留供歷史 sale_line 參照。
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -133,6 +137,10 @@ class MenuOption(Base, TimestampMixin):
     daily_limited: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     stock_qty: Mapped[int | None] = mapped_column()
     stock_day: Mapped[date | None] = mapped_column(Date)
+    # 份數版本：每次「直接設定份數」或切換每日限量就 +1。結帳把扣到的版本記在明細上，
+    # 作廢只在版本沒變時加回——重設代表店員實際數過、數字已反映現況，再加回會多算
+    # （Codex 對抗審查 O1c）。用版本號而不是時間比先後，不受交易邊界影響。
+    stock_generation: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -148,3 +156,29 @@ class MenuItemOptionGroup(Base):
     )
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class MenuStockAdjustment(Base):
+    """每日份數的加減紀錄（補貨／報廢／盤點校正）；報廢統計的來源。只增不改。"""
+
+    __tablename__ = "menu_stock_adjustments"
+    __table_args__ = (
+        CheckConstraint(
+            "(reason = 'RESTOCK' AND delta > 0) "
+            "OR (reason IN ('WASTE','CORRECTION') AND delta < 0)",
+            name="ck_menu_stock_adjustments_reason_sign",
+        ),
+        CheckConstraint("target_kind IN ('item','option')", name="ck_menu_stock_adjustments_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    target_kind: Mapped[str] = mapped_column(String(10))
+    target_id: Mapped[int] = mapped_column()
+    delta: Mapped[int] = mapped_column()
+    reason: Mapped[str] = mapped_column(String(20))
+    business_date: Mapped[date] = mapped_column(Date, index=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )

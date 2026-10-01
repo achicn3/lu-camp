@@ -488,7 +488,12 @@ async def adjust_menu_daily_stock(
 ) -> DailyStockEntryRead:
     try:
         entry = await MenuService(session).adjust_daily_stock(
-            user.store_id, kind, target_id, delta=body.delta, actor_user_id=user.id
+            user.store_id,
+            kind,
+            target_id,
+            delta=body.delta,
+            reason=body.reason,
+            actor_user_id=user.id,
         )
     except _MenuErrors as exc:
         await session.rollback()

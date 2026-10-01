@@ -177,6 +177,11 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT count(*)::text || '/' || COALESCE(SUM(price_delta),0)::text FROM menu_options",
     ),
     ("餐飲-品項掛群組數", "SELECT count(*) FROM menu_item_option_groups"),
+    # 每日限量的補貨／報廢／盤點校正紀錄：報廢統計的唯一來源，弄丟就算不出損耗。
+    (
+        "餐飲-份數調整（筆數／加減合計）",
+        "SELECT count(*)::text || '/' || COALESCE(SUM(delta),0)::text FROM menu_stock_adjustments",
+    ),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
     ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),
