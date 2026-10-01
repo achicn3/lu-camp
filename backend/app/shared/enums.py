@@ -519,6 +519,17 @@ class SignatureTaskKind(StrEnum):
     RETURN_INVOICE_CONSENT = "RETURN_INVOICE_CONSENT"
 
 
+class SignatureConsentMode(StrEnum):
+    """客人怎麼表示同意（docs/47 E3）。
+
+    純餐點退款的發票處置同意可用點選（顧客螢幕按「同意」）；其餘一律手寫簽名。
+    兩者都留存內容雜湊、時間、裝置與證據雜湊；點選同意只是不收簽名圖。
+    """
+
+    SIGNATURE = "SIGNATURE"
+    TAP = "TAP"
+
+
 class SignatureTaskStatus(StrEnum):
     """簽署任務完整狀態機；SIGNED 不是完成，必須再被單據單次 CONSUMED。"""
 

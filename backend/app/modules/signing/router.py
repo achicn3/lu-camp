@@ -75,6 +75,7 @@ def _to_read(
         content=task.content,
         agreement_version=agreement.version if agreement is not None else None,
         chosen_payout=task.chosen_payout,
+        consent_mode=task.consent_mode,
         has_signature=task.signature_image is not None,
         signed_at=task.signed_at,
         voided_at=task.voided_at,
@@ -102,6 +103,7 @@ def _to_kiosk_read(task: SignatureTask, agreement: AgreementVersion | None) -> K
         expires_at=task.expires_at,
         agreement_title=agreement.title if agreement is not None and not sealed else None,
         agreement_body=agreement.body if agreement is not None and not sealed else None,
+        consent_mode=task.consent_mode,
     )
 
 

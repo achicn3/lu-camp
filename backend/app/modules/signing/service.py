@@ -11,7 +11,7 @@ import hashlib
 import zlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from app.modules.sales.models import Sale
@@ -39,7 +39,9 @@ from app.modules.signing.schemas import (
 from app.shared.enums import (
     CartSessionStatus,
     PayoutMethod,
+    SaleLineType,
     SaleStatus,
+    SignatureConsentMode,
     SignatureTaskKind,
     SignatureTaskStatus,
 )
@@ -113,6 +115,9 @@ def _normalize_agreement_text(title: str, body: str) -> tuple[str, str]:
         )
     return clean_title, clean_body
 
+
+# 點選同意的冪等指紋用固定標記代替簽名影像（docs/47 E3）。
+_TAP_MARK: Final = b"TAP_CONSENT"
 
 class SigningService:
     def __init__(self, session: AsyncSession) -> None:
@@ -229,6 +234,10 @@ class SigningService:
         elif data.kind is SignatureTaskKind.RETURN_INVOICE_CONSENT:
             content = await self._canonical_return_consent_content(store_id, data)
 
+        consent_mode = data.consent_mode or SignatureConsentMode.SIGNATURE
+        if consent_mode is SignatureConsentMode.TAP:
+            await self._ensure_tap_consent_allowed(store_id, data)
+
         if data.kind is SignatureTaskKind.STORE_CREDIT_USE:
             raise SignatureTaskConflict("購物金簽署必須從 POS 權威購物車凍結流程建立")
         kiosk_device_id, pos_terminal_id = await self._resolve_kiosk_device(
@@ -270,6 +279,7 @@ class SigningService:
             content=content,
             agreement_version_id=agreement_version_id,
             identity_fingerprint=identity_fingerprint,
+            consent_mode=consent_mode,
             ref_type=data.ref_type,
             ref_id=data.ref_id,
             created_by=created_by,
@@ -288,6 +298,20 @@ class SigningService:
             return task
         except IntegrityError as exc:  # 併發重推：另一筆先建成功（單一待簽唯一索引）
             raise SignatureTaskConflict("簽署任務建立衝突（另一筆同時建立），請重試") from exc
+
+    async def _ensure_tap_consent_allowed(self, store_id: int, data: SignatureTaskCreate) -> None:
+        """點選同意只限「本次全部是餐點」的退貨同意（docs/47 E3，店主裁示）；其餘一律手寫簽名。"""
+        from app.modules.sales.service import SalesService
+
+        if data.kind is not SignatureTaskKind.RETURN_INVOICE_CONSENT or data.ref_id is None:
+            raise SignatureTaskConflict("只有餐點退款的發票同意可以用點選同意，其餘請客人簽名")
+        requested = self._parse_return_consent_lines(data.content.get("lines"))
+        lines = {line.id: line for line in await SalesService(self._session).get_lines(data.ref_id)}
+        if any(
+            lines.get(line_id) is None or lines[line_id].line_type is not SaleLineType.MENU
+            for line_id in requested
+        ):
+            raise SignatureTaskConflict("本次退款含非餐點品項，請客人在顧客螢幕簽名同意")
 
     async def _resolve_kiosk_device(
         self,
@@ -851,7 +875,7 @@ class SigningService:
         task_id: int,
         *,
         device_id: int,
-        signature_image_base64: str,
+        signature_image_base64: str | None,
         chosen_payout: PayoutMethod | None,
         idempotency_key: str | None = None,
     ) -> SignatureTask:
@@ -861,11 +885,20 @@ class SigningService:
         而非 409——手持端「已提交但回應遺失」以同鍵重送即可安全收斂到完成，避免曖昧
         失敗使裝置卡住或恢復輪詢洩漏下一位客人任務（Codex K3 第六輪 high）。
         """
-        image = self._decode_signature(signature_image_base64)
-        # 冪等指紋綁定「鍵＋簽名影像＋撥款選擇」：同鍵但改了影像/撥款的重送不得回放舊結果
-        # （否則遺失 CASH 回應後改送 STORE_CREDIT 會拿到舊 CASH 的 200；Codex K3 第七輪 high）。
+        # 點選同意（docs/47 E3）沒有簽名圖；手寫簽名的任務照舊驗 PNG。是哪一種要等鎖住任務
+        # 後才知道，這裡先解碼有帶的影像（不合格的 PNG 一律在動到任何狀態前擋下）。
+        image = (
+            self._decode_signature(signature_image_base64)
+            if signature_image_base64 is not None
+            else None
+        )
+        # 冪等指紋綁定「鍵＋簽名影像（點選同意為固定標記）＋撥款選擇」：同鍵但改了影像/撥款的
+        # 重送不得回放舊結果（否則遺失 CASH 回應後改送 STORE_CREDIT 會拿到舊 CASH 的 200；
+        # Codex K3 第七輪 high）。
         fingerprint = (
-            self._sign_fingerprint(idempotency_key, image, chosen_payout)
+            self._sign_fingerprint(
+                idempotency_key, image if image is not None else _TAP_MARK, chosen_payout
+            )
             if idempotency_key is not None
             else None
         )
@@ -896,6 +929,11 @@ class SigningService:
                 observed_at=now,
             )
             raise SignatureTaskInvalidated("簽署任務因顧客長時間無操作已逾時")
+        if task.consent_mode is SignatureConsentMode.TAP:
+            if image is not None:
+                raise InvalidSignatureImage("這項同意是點選同意，不收簽名圖")
+        elif image is None:
+            raise InvalidSignatureImage("請先簽名再送出")
         if task.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             if chosen_payout not in (PayoutMethod.CASH, PayoutMethod.STORE_CREDIT):
                 raise InvalidKioskPayout("收購撥款須於現金/購物金中二選一（docs/23 D7）")
@@ -933,7 +971,22 @@ class SigningService:
             await StoreSettingsService(self._session).get_effective_settings(store_id)
         ).signature_png_retention_days
         signed_at = datetime.now(UTC)
-        signature_sha256 = hashlib.sha256(image).hexdigest()
+        # 點選同意沒有簽名圖：以「點選同意＋任務＋裝置＋時間」的雜湊代替，證據鏈其餘不變
+        # （內容雜湊、證據雜湊、簽署時間、裝置事件照樣留存）。
+        signature_sha256 = (
+            hashlib.sha256(image).hexdigest()
+            if image is not None
+            else hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        "consent": SignatureConsentMode.TAP.value,
+                        "task_id": task.id,
+                        "kiosk_device_id": device_id,
+                        "signed_at": signed_at.isoformat(),
+                    }
+                )
+            ).hexdigest()
+        )
         content_sha256 = (
             task.content_sha256 or hashlib.sha256(canonical_json_bytes(task.content)).hexdigest()
         )
@@ -962,7 +1015,11 @@ class SigningService:
             task,
             from_status=SignatureTaskStatus.SIGNING,
             to_status=SignatureTaskStatus.SIGNED,
-            reason_code="SIGNATURE_ACCEPTED",
+            reason_code=(
+                "TAP_CONSENT_ACCEPTED"
+                if task.consent_mode is SignatureConsentMode.TAP
+                else "SIGNATURE_ACCEPTED"
+            ),
             actor_kiosk_device_id=device_id,
         )
         if task.kind is SignatureTaskKind.TRANSACTION_ACK:

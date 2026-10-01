@@ -7551,7 +7551,7 @@ export interface components {
             /** Idempotency Key */
             idempotency_key?: string | null;
             /** Signature Image Base64 */
-            signature_image_base64: string;
+            signature_image_base64?: string | null;
         };
         /** KioskSummary */
         KioskSummary: {
@@ -7578,6 +7578,8 @@ export interface components {
             /** Agreement Title */
             agreement_title: string | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** @default SIGNATURE */
+            consent_mode: components["schemas"]["SignatureConsentMode"];
             /** Content */
             content: {
                 [key: string]: unknown;
@@ -9730,6 +9732,15 @@ export interface components {
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
+        /**
+         * SignatureConsentMode
+         * @description 客人怎麼表示同意（docs/47 E3）。
+         *
+         *     純餐點退款的發票處置同意可用點選（顧客螢幕按「同意」）；其餘一律手寫簽名。
+         *     兩者都留存內容雜湊、時間、裝置與證據雜湊；點選同意只是不收簽名圖。
+         * @enum {string}
+         */
+        SignatureConsentMode: "SIGNATURE" | "TAP";
         /** SignatureRetentionReportItem */
         SignatureRetentionReportItem: {
             kind: components["schemas"]["SignatureTaskKind"];
@@ -9755,6 +9766,7 @@ export interface components {
         };
         /** SignatureTaskCreate */
         SignatureTaskCreate: {
+            consent_mode?: components["schemas"]["SignatureConsentMode"] | null;
             /** Contact Id */
             contact_id?: number | null;
             /** Content */
@@ -9788,6 +9800,8 @@ export interface components {
             /** Bound Sale Id */
             bound_sale_id?: number | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** @default SIGNATURE */
+            consent_mode: components["schemas"]["SignatureConsentMode"];
             /** Consumed At */
             consumed_at: string | null;
             /** Contact Id */

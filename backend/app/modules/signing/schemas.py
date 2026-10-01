@@ -13,7 +13,12 @@ from app.modules.signing.agreements import (
     MAX_AGREEMENT_BODY_CHARS,
     MAX_AGREEMENT_TITLE_CHARS,
 )
-from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
+from app.shared.enums import (
+    PayoutMethod,
+    SignatureConsentMode,
+    SignatureTaskKind,
+    SignatureTaskStatus,
+)
 
 MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
 # base64 膨脹 4/3；schema 先擋（422），服務層解碼前再驗一次（最後防線）
@@ -30,6 +35,8 @@ class SignatureTaskCreate(BaseModel):
     terminal_id: int | None = Field(default=None, ge=1)
     ref_type: str | None = Field(default=None, max_length=30)
     ref_id: int | None = None
+    # 同意方式（docs/47 E3）：TAP 只限純餐點退款的發票處置同意；可空＝手寫簽名。
+    consent_mode: SignatureConsentMode | None = None
 
 
 class SignatureTaskRead(BaseModel):
@@ -43,6 +50,8 @@ class SignatureTaskRead(BaseModel):
     content: dict[str, Any]
     agreement_version: int | None
     chosen_payout: PayoutMethod | None
+    # TAP＝客人在顧客螢幕點選同意（沒有簽名圖，has_signature 為 false 是正常的）。
+    consent_mode: SignatureConsentMode = SignatureConsentMode.SIGNATURE
     has_signature: bool
     signed_at: datetime | None
     voided_at: datetime | None
@@ -73,10 +82,15 @@ class KioskTaskRead(BaseModel):
     expires_at: datetime | None
     agreement_title: str | None
     agreement_body: str | None
+    # TAP：顧客螢幕顯示「同意」按鈕而非簽名板（docs/47 E3）。
+    consent_mode: SignatureConsentMode = SignatureConsentMode.SIGNATURE
 
 
 class KioskSignRequest(BaseModel):
-    signature_image_base64: str = Field(min_length=1, max_length=MAX_SIGNATURE_B64_CHARS)
+    # 點選同意的任務不帶簽名圖（null）；手寫簽名的任務必帶。由 service 依任務的同意方式把關。
+    signature_image_base64: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SIGNATURE_B64_CHARS
+    )
     # AFFIDAVIT 必填且限 CASH/STORE_CREDIT（D7 二選一）；其他任務種類必須不帶。
     chosen_payout: PayoutMethod | None = None
     # 客端每張任務一鍵：回應遺失時以同鍵重送安全回放（idempotent；Codex K3 第六輪）。

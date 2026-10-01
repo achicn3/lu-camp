@@ -9824,15 +9824,19 @@
             "title": "Idempotency Key"
           },
           "signature_image_base64": {
-            "maxLength": 682674,
-            "minLength": 1,
-            "title": "Signature Image Base64",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 682674,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Image Base64"
           }
         },
-        "required": [
-          "signature_image_base64"
-        ],
         "title": "KioskSignRequest",
         "type": "object"
       },
@@ -9923,6 +9927,10 @@
                 "type": "null"
               }
             ]
+          },
+          "consent_mode": {
+            "$ref": "#/components/schemas/SignatureConsentMode",
+            "default": "SIGNATURE"
           },
           "content": {
             "additionalProperties": true,
@@ -15734,6 +15742,15 @@
         "title": "SettingsUpdateRequest",
         "type": "object"
       },
+      "SignatureConsentMode": {
+        "description": "客人怎麼表示同意（docs/47 E3）。\n\n純餐點退款的發票處置同意可用點選（顧客螢幕按「同意」）；其餘一律手寫簽名。\n兩者都留存內容雜湊、時間、裝置與證據雜湊；點選同意只是不收簽名圖。",
+        "enum": [
+          "SIGNATURE",
+          "TAP"
+        ],
+        "title": "SignatureConsentMode",
+        "type": "string"
+      },
       "SignatureRetentionReportItem": {
         "properties": {
           "kind": {
@@ -15776,6 +15793,16 @@
       },
       "SignatureTaskCreate": {
         "properties": {
+          "consent_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignatureConsentMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "contact_id": {
             "anyOf": [
               {
@@ -15915,6 +15942,10 @@
                 "type": "null"
               }
             ]
+          },
+          "consent_mode": {
+            "$ref": "#/components/schemas/SignatureConsentMode",
+            "default": "SIGNATURE"
           },
           "consumed_at": {
             "anyOf": [

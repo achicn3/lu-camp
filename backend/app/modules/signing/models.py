@@ -28,7 +28,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
-from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
+from app.shared.enums import (
+    PayoutMethod,
+    SignatureConsentMode,
+    SignatureTaskKind,
+    SignatureTaskStatus,
+)
 
 
 def _enum_col(enum_cls: type) -> Enum:
@@ -124,6 +129,11 @@ class SignatureTask(Base, TimestampMixin):
             "contact_id IS NOT NULL OR kind = 'RETURN_INVOICE_CONSENT'",
             name="ck_signature_tasks_contact_required",
         ),
+        # 點選同意只限退貨的發票處置同意（docs/47 E3）；切結書、購物金、簽收一律手寫簽名。
+        CheckConstraint(
+            "consent_mode = 'SIGNATURE' OR kind = 'RETURN_INVOICE_CONSENT'",
+            name="ck_signature_tasks_tap_only_return_consent",
+        ),
         UniqueConstraint("id", "store_id", name="uq_signature_tasks_id_store"),
         Index("ix_signature_tasks_store_status", "store_id", "status"),
         Index(
@@ -162,6 +172,12 @@ class SignatureTask(Base, TimestampMixin):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)  # 顯示內容快照
     agreement_version_id: Mapped[int | None] = mapped_column(ForeignKey("agreement_versions.id"))
     chosen_payout: Mapped[PayoutMethod | None] = mapped_column(_enum_col(PayoutMethod))
+    # 同意方式（docs/47 E3）：TAP＝顧客螢幕點「同意」，不收簽名圖（signature_image 為 NULL）。
+    consent_mode: Mapped[SignatureConsentMode] = mapped_column(
+        _enum_col(SignatureConsentMode),
+        default=SignatureConsentMode.SIGNATURE,
+        server_default=SignatureConsentMode.SIGNATURE.value,
+    )
     signature_image: Mapped[bytes | None] = mapped_column(LargeBinary)  # PNG
     signature_sha256: Mapped[str | None] = mapped_column(String(64))
     content_sha256: Mapped[str | None] = mapped_column(String(64))
