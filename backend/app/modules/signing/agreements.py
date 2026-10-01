@@ -331,12 +331,41 @@ AGREEMENT_BODY_V4 = """\
 本人同意以電子方式簽署及保存本次交易文件。
 """
 
+# v5＝**第六條增列（六）商品材質老化及不予上架**（店主 2026-10-01），並在文末「本人確認」加一行；
+# 其餘與 v4 一字不差（`test_v5_only_adds_to_v4` 守著）。
+#
+# 帳篷、天幕常見塗層水解、貼條脫膠：收件時看不出來、寄售途中才發作。寄售品所有權仍屬寄售人，
+# 自然老化本店不負責；嚴重瑕疵得不收、不上架或下架，下架後接第（五）項的取回規則。
+# 免責保留「故意或重大過失」例外——民法第 222 條，預先免除這兩者的約定無效，寫了反而整句站不住。
+_V5_AGING_CLAUSE = """\
+（六）商品材質老化及不予上架
+
+本人瞭解帳篷、天幕、睡袋、防水衣物、背包等商品，常見塗層水解（發黏、異味、剝落）、防水貼條或接縫脫膠、膠合處開裂等材質老化現象；此類現象可能於收件時尚未顯現，亦可能於寄售期間因材料自然老化而發生或加劇。
+
+本店於收件及寄售期間所為之檢查，僅依當時可合理發現之狀況進行初步確認，不保證寄售商品不存在或不會發生前述情形。寄售期間商品因自然老化、材質劣化或其他不可歸責於本店之原因所生之瑕疵、損壞或價值減損，本店不負賠償責任；但本店有故意或重大過失者，不在此限。
+
+本店於收件時或寄售期間，如發現商品有嚴重水解、脫膠、破損、異味、發霉或其他足以影響使用、安全或銷售之瑕疵，得拒絕收件、不予上架，或將已上架之商品下架，並通知本人依本條第（五）項取回；本店對該商品不負銷售義務。
+
+"""
+_V5_AGING_CONFIRM = (
+    "本人確認寄售商品如有嚴重水解、脫膠或其他瑕疵，本店得不予上架或下架，"
+    "且本店對商品自然老化所生之損壞不負賠償責任。\n\n"
+)
+_V4_SPLIT_BEFORE = "本人瞭解讓售與寄售之法律及交易性質不同"
+_V4_CONFIRM_AFTER = (
+    "本人確認商品逾期未取回時，本店得收取寄放費用、不負保管責任，並得依第六條約定處分商品。\n\n"
+)
+AGREEMENT_BODY_V5 = AGREEMENT_BODY_V4.replace(
+    _V4_SPLIT_BEFORE, _V5_AGING_CLAUSE + _V4_SPLIT_BEFORE
+).replace(_V4_CONFIRM_AFTER, _V4_CONFIRM_AFTER + _V5_AGING_CONFIRM)
+
 # 版本號 → (標題, 內文)。改版＝新增條目，不改舊條目。
 AGREEMENT_TEXTS: dict[int, tuple[str, str]] = {
     1: (AGREEMENT_TITLE_V1, AGREEMENT_BODY_V1),
     2: (AGREEMENT_TITLE_V1, AGREEMENT_BODY_V2),
     3: (AGREEMENT_TITLE_V1, AGREEMENT_BODY_V3),
     4: (AGREEMENT_TITLE_V4, AGREEMENT_BODY_V4),
+    5: (AGREEMENT_TITLE_V4, AGREEMENT_BODY_V5),
 }
 
 CURRENT_AGREEMENT_VERSION = max(AGREEMENT_TEXTS)

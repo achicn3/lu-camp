@@ -107,12 +107,42 @@ def test_v3_text_is_frozen() -> None:
     assert len(body) == 819  # 落庫長度；變了就是改到 v3 了
 
 
-def test_v4_is_the_current_version() -> None:
+def test_v5_is_the_current_version() -> None:
     from app.modules.signing.agreements import AGREEMENT_TITLE_V4
 
     title, _body = AGREEMENT_TEXTS[CURRENT_AGREEMENT_VERSION]
-    assert CURRENT_AGREEMENT_VERSION == 4
+    assert CURRENT_AGREEMENT_VERSION == 5
     assert title == AGREEMENT_TITLE_V4
+
+
+def test_v4_text_is_frozen() -> None:
+    """v4 已落庫且已有簽署綁著它——改它不會生效，只會讓程式與資料庫不一致。"""
+    _title, body = AGREEMENT_TEXTS[4]
+    assert "（六）商品材質老化" not in body
+    assert len(body) == 4937  # 落庫長度；變了就是改到 v4 了
+
+
+def test_v5_adds_material_aging_clause_for_consignment() -> None:
+    """店主 2026-10-01：帳篷常見水解、脫膠——寄售期間自然老化不負責，嚴重瑕疵不上架。"""
+    _title, body = AGREEMENT_TEXTS[5]
+    assert "（六）商品材質老化及不予上架" in body
+    assert "水解" in body and "脫膠" in body
+    assert "得拒絕收件、不予上架，或將已上架之商品下架" in body
+    # 全部免責在定型化契約裡站不住（民法第 222 條），自然老化免責仍保留故意重大過失例外
+    assert "本店不負賠償責任；但本店有故意或重大過失者，不在此限" in body
+    assert "本人確認寄售商品如有嚴重水解、脫膠或其他瑕疵" in body
+
+
+def test_v5_only_adds_to_v4() -> None:
+    """v5 只「新增」第六條（六）與一行確認，其餘一字不改——刪掉新增段落要還原成 v4。"""
+    _t4, v4 = AGREEMENT_TEXTS[4]
+    _t5, v5 = AGREEMENT_TEXTS[5]
+    v4_blocks = v4.split("\n\n")
+    v5_blocks = v5.split("\n\n")
+    added = [b for b in v5_blocks if b not in v4_blocks]
+    assert [b for b in v5_blocks if b not in added] == v4_blocks
+    assert added[0] == "（六）商品材質老化及不予上架"
+    assert all("水解" in b or "老化" in b or "上架" in b or "不予" in b for b in added)
 
 
 def test_v4_consignment_math_matches_the_system() -> None:
