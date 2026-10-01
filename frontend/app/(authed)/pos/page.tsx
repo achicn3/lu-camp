@@ -67,7 +67,7 @@ import {
 } from "@/lib/agent";
 import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
-import { showsLinePayCarrierNote } from "@/lib/invoice-carrier-note";
+import { showsLinePayCarrierNote, showsLinePayNoCarrierNote } from "@/lib/invoice-carrier-note";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
@@ -2311,6 +2311,11 @@ export default function PosPage() {
                 <span className="pos-invoice-carrier-note">
                   已使用客人 LINE Pay 綁定的載具 {completedInvoice.carrier_id}
                   ，發票存入載具、未列印。
+                </span>
+              )}
+              {showsLinePayNoCarrierNote(completedInvoice, completed) && (
+                <span className="pos-invoice-carrier-note">
+                  LINE Pay 沒有回傳客人的載具，已改印紙本發票。
                 </span>
               )}
               {completedInvoice != null && invoiceProofPrintable(completedInvoice) && (

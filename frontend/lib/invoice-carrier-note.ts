@@ -24,3 +24,22 @@ export function showsLinePayCarrierNote<T extends Pick<InvoiceRead, "carrier_id"
 ): invoice is T & { carrier_id: string } {
   return invoice != null && invoice.carrier_id != null && clerkCarrierInput === "";
 }
+
+type SaleRead = components["schemas"]["SaleRead"];
+
+/**
+ * 用 LINE Pay 付款、發票卻沒有載具（店員也沒打統編或選捐贈）→ 告訴店員
+ * 「LINE Pay 沒回載具、已印紙本」（店主 2026-10-01）。
+ *
+ * 載具要靠 LINE Pay 的 merchantReference 帶回：沒開通、客人沒綁、或格式不合都會取不到，
+ * 後端一律照常開立並印證明聯。不講原因的話，客人說「我有綁載具啊」時店員無從解釋。
+ */
+export function showsLinePayNoCarrierNote(
+  invoice: Pick<InvoiceRead, "carrier_id" | "buyer_tax_id" | "donate_mark"> | null,
+  sale: Pick<SaleRead, "tenders"> | null,
+): boolean {
+  if (invoice == null || sale == null) return false;
+  const choseOtherwise = invoice.buyer_tax_id != null || invoice.donate_mark;
+  if (invoice.carrier_id != null || choseOtherwise) return false;
+  return sale.tenders.some((t) => t.tender_type === "LINE_PAY");
+}
