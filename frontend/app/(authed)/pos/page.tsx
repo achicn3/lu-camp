@@ -2158,7 +2158,9 @@ export default function PosPage() {
     setNotice(
       result.duplicateSerialized
         ? `${line.description} 已在購物車（序號品不可重複）`
-        : null,
+        : result.cappedAt !== null
+          ? `${line.description} 庫存只剩 ${result.cappedAt} 件，已加到上限`
+          : null,
     );
   }
 

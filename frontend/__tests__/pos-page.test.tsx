@@ -2076,6 +2076,42 @@ describe("/pos 結帳頁", () => {
     expect(screen.getByLabelText("高山瓦斯罐 230g 數量")).toBeTruthy();
   });
 
+  it("庫存只剩 1 件時重複掃描：數量不變，並提示已加到上限", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/bulk-lots/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/catalog-products/by-sku/GAS-230"))
+        return json({
+          id: 77,
+          store_id: 1,
+          sku: "GAS-230",
+          name: "高山瓦斯罐 230g",
+          brand_id: null,
+          unit_price: "120",
+          quantity_on_hand: 1,
+          reorder_point: 0,
+        });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "GAS-230");
+    await waitFor(() => expect(screen.getByText("高山瓦斯罐 230g")).toBeTruthy());
+    expect(screen.queryByText(/已加到上限/)).toBeNull();
+    await scan(user, "GAS-230");
+    await waitFor(() =>
+      expect(screen.getByText("高山瓦斯罐 230g 庫存只剩 1 件，已加到上限")).toBeTruthy(),
+    );
+    const qty = screen.getByLabelText("高山瓦斯罐 230g 數量") as HTMLInputElement;
+    expect(qty.value).toBe("1");
+  });
+
   it("掃販售籃標籤：一籃一行、可調量（ADR-025）", async () => {
     const requested: string[] = [];
     stubFetch((url) => {

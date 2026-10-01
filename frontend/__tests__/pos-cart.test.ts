@@ -53,6 +53,23 @@ describe("cart 純邏輯", () => {
     expect(lines[0].qty).toBe(3); // clamp 到 remaining=3
   });
 
+  // 店主 2026-10-01：庫存只剩 1 件時重複掃描，數量停在上限卻沒任何提示，店員會以為沒掃到。
+  it("合併數量撞到庫存上限 → 回報 cappedAt（沒撞到就是 null）", () => {
+    const first = addLine([], bulk(7, 50, 2));
+    expect(first.cappedAt).toBeNull();
+    const second = addLine(first.lines, bulk(7, 50, 2));
+    expect(second.lines[0].qty).toBe(2);
+    expect(second.cappedAt).toBeNull(); // 剛好加到 2，沒有被截
+    const third = addLine(second.lines, bulk(7, 50, 2));
+    expect(third.lines[0].qty).toBe(2);
+    expect(third.cappedAt).toBe(2);
+  });
+
+  it("序號品重複不算撞上限（另有 duplicateSerialized 提示）", () => {
+    const first = addLine([], serialized("C1", 1800));
+    expect(addLine(first.lines, serialized("C1", 1800)).cappedAt).toBeNull();
+  });
+
   it("setQty 夾在 [1, maxQty]；removeLine 移除", () => {
     const lines = addLine([], bulk(7, 50, 4)).lines;
     expect(setQty(lines, "B:7", 0)[0].qty).toBe(1);

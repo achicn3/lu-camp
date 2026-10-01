@@ -95,21 +95,20 @@ export function cartTotal(lines: CartLine[]): number {
 export function addLine(
   lines: CartLine[],
   incoming: CartLine,
-): { lines: CartLine[]; duplicateSerialized: boolean } {
+): { lines: CartLine[]; duplicateSerialized: boolean; cappedAt: number | null } {
   const existing = lines.find((l) => l.key === incoming.key);
   if (existing) {
     if (incoming.lineType === "SERIALIZED") {
       // 序號品唯一：已在車內不可再加（後端售出即鎖，前端先擋）。
-      return { lines, duplicateSerialized: true };
+      return { lines, duplicateSerialized: true, cappedAt: null };
     }
-    const merged = lines.map((l) =>
-      l.key === incoming.key
-        ? { ...l, qty: clampQty(l.qty + incoming.qty, l.maxQty) }
-        : l,
-    );
-    return { lines: merged, duplicateSerialized: false };
+    const wanted = existing.qty + incoming.qty;
+    const qty = clampQty(wanted, existing.maxQty);
+    const merged = lines.map((l) => (l.key === incoming.key ? { ...l, qty } : l));
+    // 撞到庫存上限要讓畫面講出來：數量停住又沒提示，店員會以為沒掃到而一直重掃（店主 2026-10-01）。
+    return { lines: merged, duplicateSerialized: false, cappedAt: qty < wanted ? qty : null };
   }
-  return { lines: [...lines, incoming], duplicateSerialized: false };
+  return { lines: [...lines, incoming], duplicateSerialized: false, cappedAt: null };
 }
 
 export function removeLine(lines: CartLine[], key: string): CartLine[] {
