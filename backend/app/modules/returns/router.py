@@ -80,7 +80,8 @@ async def create_return(
         )
     svc = ReturnsService(session)
     inputs = [
-        ReturnLineInput(line.sale_line_id, line.qty, bool(line.resellable)) for line in payload.lines
+        ReturnLineInput(line.sale_line_id, line.qty, bool(line.resellable))
+        for line in payload.lines
     ]
     requested = {line.sale_line_id: line.qty for line in payload.lines}
     try:
