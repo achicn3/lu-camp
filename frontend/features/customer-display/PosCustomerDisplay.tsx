@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import type { CartLine } from "@/features/pos/cart";
+import { type CartLine, menuLineKey } from "@/features/pos/cart";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { parseNtd } from "@/lib/money";
@@ -66,10 +66,17 @@ function itemIdentity(item: CartItem): Partial<CartLine> | null {
         : { key: `${giftPrefix}B:${id}`, bulkLotId: id };
     }
     case "MENU": {
-      const id = Number(raw);
-      return Number.isInteger(id) && id > 0
-        ? { key: `${giftPrefix}M:${id}`, menuItemId: id }
-        : null;
+      // 帶選項的鍵是 MENU:{id}:{選項,…}（後端 menu_line_key）；沒選項就是 MENU:{id}。
+      const [idText, optionsText] = raw.split(":");
+      const id = Number(idText);
+      if (!Number.isInteger(id) || id <= 0) return null;
+      const options = optionsText ? optionsText.split(",").map(Number) : [];
+      if (options.some((option) => !Number.isInteger(option) || option <= 0)) return null;
+      return {
+        key: `${giftPrefix}${menuLineKey(id, options)}`,
+        menuItemId: id,
+        ...(options.length > 0 ? { menuOptionIds: options } : {}),
+      };
     }
   }
 }

@@ -28,6 +28,7 @@ import {
   lineTotal,
   linesWithNotes,
   markAsGift,
+  menuLineKey,
   noteAckFingerprint,
   removeLine,
   setQty,
@@ -138,7 +139,7 @@ function payloadLineKey(line: components["schemas"]["StaffCartLineRead"]): strin
   if (line.line_type === "BULK_LOT") {
     return line.bulk_basket_id != null ? `K:${line.bulk_basket_id}` : `B:${line.bulk_lot_id}`;
   }
-  return `MENU-${line.menu_item_id}`;
+  return menuLineKey(line.menu_item_id ?? 0, line.menu_option_ids ?? []);
 }
 
 function ScanBar({
@@ -731,18 +732,90 @@ function ActiveCampaignBanner() {
 }
 
 // 餐飲數量彈窗：點磚後輸入數量（預設 1，可取消），確認後加入購物車。
-function QuantityDialog({
+type MenuOptionGroupRead = components["schemas"]["MenuOptionGroupRead"];
+type MenuOptionRead = components["schemas"]["MenuOptionRead"];
+
+function optionSoldOut(option: MenuOptionRead): boolean {
+  return option.daily_limited && option.remaining === 0;
+}
+
+// 單選且必選（min=max=1）才用 radio；其餘用 checkbox，才能取消、也才能多選。
+function isRadioGroup(group: MenuOptionGroupRead): boolean {
+  return group.min_select === 1 && group.max_select === 1;
+}
+
+// 品名＋選項，與後端 `_line_description` 同規則（撞名才加群組名）。這只是購物車上的暫時顯示，
+// 成交的品名與價格一律以後端為準。
+function menuLineDescription(
+  name: string,
+  picked: readonly { group: string; option: string }[],
+): string {
+  const counts = new Map<string, number>();
+  for (const p of picked) counts.set(p.option, (counts.get(p.option) ?? 0) + 1);
+  const labels = picked.map((p) =>
+    (counts.get(p.option) ?? 0) > 1 ? `${p.group}${p.option}` : p.option,
+  );
+  return labels.length === 0 ? name : `${name}（${labels.join("、")}）`;
+}
+
+function groupHint(group: MenuOptionGroupRead): string {
+  if (group.min_select === 1 && group.max_select === 1) return "必選 1 項";
+  if (group.min_select > 0) return `至少 ${group.min_select} 項，最多 ${group.max_select} 項`;
+  return `可不選，最多 ${group.max_select} 項`;
+}
+
+// 加入餐飲品項：選項（docs/44 §3.2）＋數量。沒有選項群組的品項就只有數量。
+function MenuItemDialog({
   item,
   onAdd,
   onCancel,
 }: {
   item: MenuItemRead;
-  onAdd: (qty: number) => void;
+  onAdd: (line: { optionIds: number[]; description: string; unitPrice: number; qty: number }) => void;
   onCancel: () => void;
 }) {
   const [qty, setQty] = useState("1");
-  const price = parseNtd(item.unit_price) ?? 0;
+  const [chosen, setChosen] = useState<Set<number>>(new Set());
+  const groups = item.option_groups;
   const n = Math.max(1, Math.trunc(parseNtd(qty) ?? 1));
+  const pickedOptions = groups.flatMap((g) =>
+    g.options.filter((o) => chosen.has(o.id)).map((o) => ({ group: g, option: o })),
+  );
+  const price =
+    (parseNtd(item.unit_price) ?? 0) +
+    pickedOptions.reduce((sum, p) => sum + (parseNtd(p.option.price_delta) ?? 0), 0);
+  const missing = groups.filter(
+    (g) => g.options.filter((o) => chosen.has(o.id)).length < g.min_select,
+  );
+
+  function toggle(group: MenuOptionGroupRead, option: MenuOptionRead) {
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (isRadioGroup(group)) {
+        for (const o of group.options) next.delete(o.id);
+        next.add(option.id);
+      } else if (next.has(option.id)) {
+        next.delete(option.id);
+      } else {
+        next.add(option.id);
+      }
+      return next;
+    });
+  }
+
+  function submit() {
+    if (missing.length > 0) return;
+    onAdd({
+      optionIds: pickedOptions.map((p) => p.option.id),
+      description: menuLineDescription(
+        item.name,
+        pickedOptions.map((p) => ({ group: p.group.name, option: p.option.name })),
+      ),
+      unitPrice: price,
+      qty: n,
+    });
+  }
+
   return (
     <div
       className="pos-dialog-backdrop"
@@ -750,8 +823,54 @@ function QuantityDialog({
       aria-modal="true"
       aria-label={`加入 ${item.name}`}
     >
-      <div className="card pos-qty-dialog">
+      <div className="card pos-qty-dialog pos-option-dialog">
         <h2>{item.name}</h2>
+        {item.description && <p className="pos-option-description">{item.description}</p>}
+        {groups.map((group) => {
+          const count = group.options.filter((o) => chosen.has(o.id)).length;
+          const full = !isRadioGroup(group) && count >= group.max_select;
+          return (
+            <fieldset key={group.id} className="pos-option-group">
+              <legend>
+                {group.name} <span className="pos-option-hint">{groupHint(group)}</span>
+              </legend>
+              {group.options.map((option) => {
+                const checked = chosen.has(option.id);
+                const soldOut = optionSoldOut(option);
+                const unavailable = !option.is_available || soldOut;
+                const delta = parseNtd(option.price_delta) ?? 0;
+                return (
+                  <label
+                    key={option.id}
+                    className={`pos-option${unavailable ? " pos-option-unavailable" : ""}`}
+                  >
+                    <input
+                      type={isRadioGroup(group) ? "radio" : "checkbox"}
+                      name={`option-group-${group.id}`}
+                      checked={checked}
+                      disabled={unavailable || (full && !checked)}
+                      onChange={() => toggle(group, option)}
+                    />
+                    <span>{option.name}</span>
+                    {delta !== 0 && (
+                      <span className="pos-option-delta">
+                        {delta > 0 ? "+" : "−"}
+                        {formatNtd(Math.abs(delta))}
+                      </span>
+                    )}
+                    {!option.is_available && <span className="pos-option-flag">停售</span>}
+                    {option.is_available && soldOut && (
+                      <span className="pos-option-flag">售完</span>
+                    )}
+                    {option.is_available && !soldOut && option.daily_limited && (
+                      <span className="pos-option-flag">剩 {option.remaining} 份</span>
+                    )}
+                  </label>
+                );
+              })}
+            </fieldset>
+          );
+        })}
         <p className="pos-qty-dialog-price">
           單價 <Money value={price} />
         </p>
@@ -760,7 +879,7 @@ function QuantityDialog({
           <input
             className="pos-qty"
             inputMode="numeric"
-            autoFocus
+            autoFocus={groups.length === 0}
             value={qty}
             aria-label="數量"
             onChange={(e) => setQty(e.target.value)}
@@ -769,11 +888,19 @@ function QuantityDialog({
         <p className="pos-qty-dialog-subtotal">
           小計 <Money value={price * n} />
         </p>
+        {missing.length > 0 && (
+          <p className="pos-option-missing">還要選：{missing.map((g) => g.name).join("、")}</p>
+        )}
         <div className="pos-dialog-actions">
           <button type="button" className="btn-ghost" onClick={onCancel}>
             取消
           </button>
-          <button type="button" className="btn-primary" onClick={() => onAdd(n)}>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={submit}
+            disabled={missing.length > 0}
+          >
             加入購物車
           </button>
         </div>
@@ -781,6 +908,9 @@ function QuantityDialog({
     </div>
   );
 }
+
+const ALL_CATEGORIES = "全部";
+const NO_CATEGORY = "其他";
 
 // 贈品對話框：選原因（必要時填備註）→ 該列改為贈品（成交 0 元，但照樣出庫）。
 // 送東西一定要說明為什麼——沒有主管核准機制，原因與備註是事後唯一能追的東西。
@@ -1028,6 +1158,7 @@ function MenuPanel({
   disabled?: boolean;
 }) {
   const [selected, setSelected] = useState<MenuItemRead | null>(null);
+  const [tab, setTab] = useState(ALL_CATEGORIES);
   const query = useQuery({
     queryKey: ["menu-items", "available"],
     queryFn: async () => {
@@ -1040,16 +1171,24 @@ function MenuPanel({
   });
   const items = query.data ?? [];
   if (items.length === 0) return null;
+  // 分類分頁：照菜單排序出現的順序；沒分類的歸「其他」。只有一種分類就不顯示分頁。
+  const categories = [...new Set(items.map((i) => i.category ?? NO_CATEGORY))];
+  const showTabs = categories.length > 1;
+  const shown =
+    !showTabs || tab === ALL_CATEGORIES
+      ? items
+      : items.filter((i) => (i.category ?? NO_CATEGORY) === tab);
 
-  function add(qty: number) {
+  function add(picked: { optionIds: number[]; description: string; unitPrice: number; qty: number }) {
     if (selected === null) return;
     onAdd({
-      key: `MENU-${selected.id}`,
+      key: menuLineKey(selected.id, picked.optionIds),
       lineType: "MENU",
-      description: selected.name,
-      unitPrice: parseNtd(selected.unit_price) ?? 0,
-      qty,
+      description: picked.description,
+      unitPrice: picked.unitPrice,
+      qty: picked.qty,
       menuItemId: selected.id,
+      ...(picked.optionIds.length > 0 ? { menuOptionIds: picked.optionIds } : {}),
     });
     setSelected(null);
   }
@@ -1057,8 +1196,24 @@ function MenuPanel({
   return (
     <div className="pos-menu">
       <h2 className="pos-menu-title">餐飲菜單</h2>
+      {showTabs && (
+        <div className="pos-menu-tabs" role="tablist" aria-label="餐飲分類">
+          {[ALL_CATEGORIES, ...categories].map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={tab === name}
+              className={`pos-menu-tab${tab === name ? " pos-menu-tab-active" : ""}`}
+              onClick={() => setTab(name)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="pos-menu-tiles">
-        {items.map((item) => {
+        {shown.map((item) => {
           // 每日限量（docs/44 §3.7）：0＝今天售完或還沒填份數；最後還是以後端扣量為準。
           const soldOut = item.daily_limited === true && item.remaining === 0;
           return (
@@ -1072,6 +1227,7 @@ function MenuPanel({
               <span className="pos-menu-tile-name">{item.name}</span>
               <span className="pos-menu-tile-price">
                 <Money value={parseNtd(item.unit_price) ?? 0} />
+                {item.option_groups.length > 0 && " 起"}
               </span>
               {item.daily_limited === true && (
                 <span className="pos-menu-tile-stock">
@@ -1087,7 +1243,7 @@ function MenuPanel({
         })}
       </div>
       {selected !== null && (
-        <QuantityDialog item={selected} onAdd={add} onCancel={() => setSelected(null)} />
+        <MenuItemDialog item={selected} onAdd={add} onCancel={() => setSelected(null)} />
       )}
     </div>
   );
@@ -1243,6 +1399,9 @@ export default function PosPage() {
               bulkLotId: line.bulk_lot_id ?? undefined,
               bulkBasketId: line.bulk_basket_id ?? undefined,
               menuItemId: line.menu_item_id ?? undefined,
+              ...(line.menu_option_ids && line.menu_option_ids.length > 0
+                ? { menuOptionIds: line.menu_option_ids }
+                : {}),
               lineKind: gift ? "GIFT" : "NORMAL",
               giftReasonId: line.gift_reason_id ?? undefined,
               giftNote: line.gift_note ?? undefined,

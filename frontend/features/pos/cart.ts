@@ -21,6 +21,8 @@ export interface CartLine {
   /** 散裝販售籃（ADR-025）：以籃子售出，後端依先進先出分配到各來源。與 bulkLotId 擇一。 */
   bulkBasketId?: number;
   menuItemId?: number;
+  /** 餐飲選項（docs/44 §3.6）：由小到大排序；同品項不同選項是不同行。 */
+  menuOptionIds?: number[];
   /** bulk 可售上限（remaining_qty），用於數量上限提示；serialized 為 1。 */
   maxQty?: number;
   /** 商業性質：一般銷售或贈品（贈品成交 0 元但照樣扣庫存）。 */
@@ -130,6 +132,15 @@ function clampQty(qty: number, maxQty: number | undefined): number {
   return maxQty !== undefined ? Math.min(floored, maxQty) : floored;
 }
 
+/**
+ * 餐飲行的購物車鍵：點磚、客顯快照還原、店員暫存還原三條路徑**共用這一支**，
+ * 還原後再點同一杯才會合併數量而不是多出一行。沒選項時維持舊形狀 `MENU-{id}`。
+ */
+export function menuLineKey(menuItemId: number, optionIds: readonly number[] = []): string {
+  if (optionIds.length === 0) return `MENU-${menuItemId}`;
+  return `MENU-${menuItemId}-${[...optionIds].sort((a, b) => a - b).join(",")}`;
+}
+
 /** 轉成 POST /sales 的 lines payload。 */
 export function toSaleLines(
   lines: CartLine[],
@@ -149,6 +160,10 @@ export function toSaleLines(
     gift_note: l.giftNote ?? null,
     // 後加欄位：沒勾就不送，購物車快照與冪等指紋維持舊形狀。
     ...(l.promoFree ? { promo_free: true } : {}),
+    // 餐飲選項同理：沒選項不送，舊的購物車與冪等指紋不受影響（後端也是沒選項就不入指紋）。
+    ...(l.menuOptionIds && l.menuOptionIds.length > 0
+      ? { menu_option_ids: [...l.menuOptionIds].sort((a, b) => a - b) }
+      : {}),
   }));
 }
 

@@ -149,7 +149,7 @@ describe("/pos 結帳頁", () => {
   });
 
   it("點餐飲磚→數量彈窗（預設1、可加量）→加入同一購物車、總額更新", async () => {
-    const MENU = [{ id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0 }];
+    const MENU = [{ id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, option_groups: [] }];
     stubFetch((url, method) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
@@ -188,12 +188,117 @@ describe("/pos 結帳頁", () => {
     );
   });
 
+  it("有選項的餐飲：分類分頁、選項視窗（必選才可加入、加價算進單價）、送出帶選項", async () => {
+    const option = (id: number, group: number, name: string, delta: string, extra = {}) => ({
+      id,
+      group_id: group,
+      name,
+      price_delta: delta,
+      unit_cost: null,
+      is_available: true,
+      sort_order: id,
+      daily_limited: false,
+      remaining: null,
+      ...extra,
+    });
+    const MENU = [
+      {
+        id: 5,
+        store_id: 1,
+        name: "拿鐵",
+        unit_price: "150",
+        category: "咖啡",
+        category_id: 1,
+        is_available: true,
+        sort_order: 0,
+        daily_limited: false,
+        remaining: null,
+        option_groups: [
+          {
+            id: 1,
+            name: "溫度",
+            min_select: 1,
+            max_select: 1,
+            sort_order: 0,
+            options: [option(11, 1, "熱", "0"), option(12, 1, "冰", "0")],
+          },
+          {
+            id: 2,
+            name: "加購",
+            min_select: 0,
+            max_select: 2,
+            sort_order: 1,
+            options: [
+              option(21, 2, "燕麥奶", "20"),
+              option(22, 2, "濃縮", "30"),
+              option(23, 2, "香草", "15", { is_available: false }),
+            ],
+          },
+        ],
+      },
+      {
+        id: 6,
+        store_id: 1,
+        name: "戚風",
+        unit_price: "90",
+        category: "甜點",
+        category_id: 2,
+        is_available: true,
+        sort_order: 1,
+        daily_limited: false,
+        remaining: null,
+        option_groups: [],
+      },
+    ];
+    let quoted: unknown = null;
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json(MENU);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        quoted = JSON.parse(body);
+        return json({
+          total: "200",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "200",
+          store_credit_max: "0",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    // 分類分頁：點「甜點」只剩戚風
+    await user.click(await screen.findByRole("tab", { name: "甜點" }));
+    expect(screen.queryByRole("button", { name: /拿鐵/ })).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "咖啡" }));
+    await user.click(await screen.findByRole("button", { name: /拿鐵/ }));
+    const dialog = await screen.findByRole("dialog", { name: /拿鐵/ });
+    const add = within(dialog).getByRole("button", { name: "加入購物車" });
+    expect((add as HTMLButtonElement).disabled).toBe(true); // 溫度必選
+    await user.click(within(dialog).getByRole("radio", { name: /冰/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /燕麥奶/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /濃縮/ }));
+    expect(
+      (within(dialog).getByRole("checkbox", { name: /香草/ }) as HTMLInputElement).disabled,
+    ).toBe(true); // 停售
+    // 150 + 20 + 30
+    expect(dialog.querySelector(".pos-qty-dialog-price")?.textContent).toMatch(/200/);
+    await user.click(add);
+    await waitFor(() => expect(screen.getAllByText("拿鐵（冰、燕麥奶、濃縮）").length).toBeGreaterThan(0));
+    await waitFor(() => expect(quoted).not.toBeNull());
+    const line = (quoted as { lines: { menu_option_ids?: number[] }[] }).lines[0];
+    expect(line.menu_option_ids).toEqual([12, 21, 22]);
+  });
+
   it("每日限量的餐飲磚：顯示剩幾份；售完或今天沒填就不能點", async () => {
     const MENU = [
-      { id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, daily_limited: false, remaining: null },
-      { id: 6, store_id: 1, name: "戚風", unit_price: "90", category: "甜點", is_available: true, sort_order: 1, daily_limited: true, remaining: 2, stock_set_today: true },
-      { id: 7, store_id: 1, name: "司康", unit_price: "80", category: "甜點", is_available: true, sort_order: 2, daily_limited: true, remaining: 0, stock_set_today: true },
-      { id: 8, store_id: 1, name: "瑪德蓮", unit_price: "60", category: "甜點", is_available: true, sort_order: 3, daily_limited: true, remaining: 0, stock_set_today: false },
+      { id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0, daily_limited: false, remaining: null, option_groups: [] },
+      { id: 6, store_id: 1, name: "戚風", unit_price: "90", category: "甜點", is_available: true, sort_order: 1, daily_limited: true, remaining: 2, stock_set_today: true, option_groups: [] },
+      { id: 7, store_id: 1, name: "司康", unit_price: "80", category: "甜點", is_available: true, sort_order: 2, daily_limited: true, remaining: 0, stock_set_today: true, option_groups: [] },
+      { id: 8, store_id: 1, name: "瑪德蓮", unit_price: "60", category: "甜點", is_available: true, sort_order: 3, daily_limited: true, remaining: 0, stock_set_today: false, option_groups: [] },
     ];
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
@@ -1866,6 +1971,7 @@ describe("/pos 結帳頁", () => {
         id: 5,
         store_id: 1,
         name: "手沖-耶加",
+        option_groups: [],
         unit_price: "180",
         category: "咖啡",
         is_available: true,

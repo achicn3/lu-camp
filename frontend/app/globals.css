@@ -1141,6 +1141,78 @@ a.btn-ghost {
 .pos-menu-tile-soldout .pos-menu-tile-stock {
   color: var(--danger);
 }
+/* 分類分頁與選項彈窗（docs/44 §3.2） */
+.pos-menu-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.pos-menu-tab {
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.pos-menu-tab-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.pos-option-dialog {
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.pos-option-description {
+  color: var(--ink-soft);
+  margin: 0 0 var(--sp-3);
+}
+.pos-option-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+.pos-option-group legend {
+  font-weight: 600;
+  padding: 0 var(--sp-1);
+}
+.pos-option-hint {
+  font-weight: 400;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.pos-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  cursor: pointer;
+}
+.pos-option-delta {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.pos-option-flag {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+.pos-option-unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pos-option-unavailable .pos-option-flag {
+  color: var(--danger);
+}
+.pos-option-missing {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
 .pos-menu-tile:disabled:hover {
   border-color: var(--border);
   box-shadow: none;
