@@ -17,7 +17,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -139,6 +139,11 @@ from app.shared.exceptions import (
 _POINTS_DIVISOR = Decimal(100)  # 會員點數：floor(含稅總額 ÷ 100)，docs/16 §0
 
 
+
+if TYPE_CHECKING:
+    # 只供型別：returns 在執行期依賴 sales（函式內 import 破循環，同 margin_breakdown）。
+    from app.modules.returns.repository import ReturnsMarginAdjustments
+
 @dataclass
 class LinePayAttemptState:
     """記錄本次結帳是否可能已觸及外部付款；不落庫、不含付款碼。"""
@@ -148,6 +153,16 @@ class LinePayAttemptState:
     @property
     def may_have_succeeded(self) -> bool:
         return self.status in {"POSSIBLE", "SUCCESS"}
+
+
+@dataclass(frozen=True)
+class FoodWasteRow:
+    """餐飲損耗的一欄（docs/49 §4）：報廢／盤點短少／客訴退款。"""
+
+    reason: str  # WASTE / SHORTAGE / REFUND
+    qty: int
+    cost: Decimal  # 已知成本合計
+    unknown_cost_qty: int  # 成本未知的份數（只計份數）
 
 
 @dataclass(frozen=True)
@@ -199,6 +214,10 @@ class MarginBreakdown:
     # 貢獻毛利＝淨毛利 − 淨贈品成本：贈品成本不進 gross_margin（營收 0 加全額成本會讓
     # 毛利率失真）；退回則在退貨發生日沖回原成交成本快照。
     contribution_margin: Decimal = Decimal(0)
+    # 餐飲損耗（docs/49）：報廢＋盤點短少＋客訴退款的已知成本，
+    # 已從 food_margin 與 gross_margin 扣除。
+    food_waste_cost: Decimal = Decimal(0)
+    food_waste_breakdown: tuple[FoodWasteRow, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2249,6 +2268,41 @@ class SalesService:
             store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
         )
 
+    async def _food_waste(
+        self,
+        store_id: int,
+        date_from: datetime,
+        date_to: datetime,
+        adj: "ReturnsMarginAdjustments",
+    ) -> tuple[FoodWasteRow, ...]:
+        """餐飲損耗三欄（docs/49 §4）：報廢、盤點短少（−1 盤點校正）、
+        客訴退款（沒勾還能賣的餐點退款）。"""
+        from app.shared.enums import MenuStockAdjustReason
+
+        by_reason = {
+            reason: (qty, cost, unknown)
+            for reason, qty, cost, unknown in await self._menu.waste_summary(
+                store_id, date_from, date_to
+            )
+        }
+        empty = (0, Decimal(0), 0)
+        rows = (
+            ("WASTE", by_reason.get(MenuStockAdjustReason.WASTE, empty)),
+            ("SHORTAGE", by_reason.get(MenuStockAdjustReason.CORRECTION, empty)),
+            (
+                "REFUND",
+                (
+                    adj.menu_refund_waste_qty,
+                    adj.menu_refund_waste_cost,
+                    adj.menu_refund_waste_unknown_qty,
+                ),
+            ),
+        )
+        return tuple(
+            FoodWasteRow(reason=name, qty=qty, cost=cost, unknown_cost_qty=unknown)
+            for name, (qty, cost, unknown) in rows
+        )
+
     async def list_fnb_sales(
         self,
         store_id: int,
@@ -2433,7 +2487,10 @@ class SalesService:
         # 有成本快照的一般商品也認列毛利（收貨帶入進價後才有；沒有的仍走「成本未知」桶）。
         catalog_margin = comp.catalog_known_revenue - comp.catalog_cogs
         # 餐飲同理：品項有填成本才認毛利，沒填的留在「成本未知」桶（裁示 2026-09-17）。
-        menu_margin = comp.menu_known_revenue - comp.menu_cogs
+        # 損耗（docs/49）從餐飲毛利扣：報廢／盤點短少的材料錢、以及客訴退款報銷那份的成本。
+        food_waste = await self._food_waste(store_id, date_from, date_to, adj)
+        food_waste_cost = sum((row.cost for row in food_waste), Decimal(0))
+        menu_margin = comp.menu_known_revenue - comp.menu_cogs - food_waste_cost
         gross_margin = owned_margin + bulk_margin + catalog_margin + menu_margin + commission
         known_cost_revenue = (
             comp.owned_serialized_revenue
@@ -2464,6 +2521,8 @@ class SalesService:
             transaction_count=comp.transaction_count,
             food_cogs=comp.menu_cogs,
             food_margin=menu_margin,
+            food_waste_cost=food_waste_cost,
+            food_waste_breakdown=food_waste,
             food_revenue=comp.menu_revenue,
             secondhand_revenue=recognized_revenue - comp.menu_revenue,
             payment_fee_total=comp.payment_fee_total,

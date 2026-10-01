@@ -38,6 +38,11 @@ class ReturnsMarginAdjustments:
     menu_known_revenue: Decimal = Decimal(0)
     menu_cogs: Decimal = Decimal(0)
     menu_unknown_revenue: Decimal = Decimal(0)
+    # 客訴退款損耗（docs/49）：沒勾「還能賣」的餐點退款——成本照樣從賣出成本扣回（上面 menu_cogs），
+    # 但改記在這裡，報表從毛利扣掉；所以不會重複扣，也不會當成沒做過。
+    menu_refund_waste_qty: int = 0
+    menu_refund_waste_cost: Decimal = Decimal(0)
+    menu_refund_waste_unknown_qty: int = 0
 
 
 @dataclass(frozen=True)
@@ -235,7 +240,7 @@ class ReturnsRepository:
             # refund_amount 是**當初實際退給客人的錢**（差額法算出、已落盤）。
             # 正向營收認 net_amount，反轉就必須認同一筆金額——用 unit_price × qty 會以
             # 牌價扣回：折後實收 400 的商品退貨，報表會 +400 再 −500，變成 −100 元營收。
-            select(SaleLine, ReturnLine.qty, ReturnLine.refund_amount)
+            select(SaleLine, ReturnLine.qty, ReturnLine.refund_amount, ReturnLine.resellable)
             .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
             .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
             .join(Sale, Sale.id == SaleLine.sale_id)
@@ -250,7 +255,20 @@ class ReturnsRepository:
                 SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
-        rows = [(r[0], r[1], Decimal(r[2])) for r in (await self._session.execute(base)).all()]
+        fetched = (await self._session.execute(base)).all()
+        rows = [(r[0], r[1], Decimal(r[2])) for r in fetched]
+        waste_qty = waste_unknown_qty = 0
+        waste_cost = Decimal(0)
+        for r in fetched:
+            line, rqty, resellable = r[0], int(r[1]), bool(r[3])
+            if line.line_type != SaleLineType.MENU or resellable:
+                continue
+            waste_qty += rqty
+            if line.cost_snapshot is None:
+                waste_unknown_qty += rqty
+            else:
+                waste_cost += round_ntd(line.cost_snapshot * Decimal(rqty) / Decimal(line.qty))
+
         # 無退貨窗口（如 trends 逐桶大量呼叫）：即早返回零調整，避免 IN(0) 空查詢
         # 每桶多打兩趟 DB（365 天報表 = 730 次無謂往返；Codex 波次二第三輪 P2）。
         if not rows:
@@ -392,6 +410,9 @@ class ReturnsRepository:
             menu_known_revenue=menu_known_rev,
             menu_cogs=menu_cogs,
             menu_unknown_revenue=menu_unknown_rev,
+            menu_refund_waste_qty=waste_qty,
+            menu_refund_waste_cost=waste_cost,
+            menu_refund_waste_unknown_qty=waste_unknown_qty,
         )
 
     async def refunds_by_sale(

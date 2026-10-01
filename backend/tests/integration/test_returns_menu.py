@@ -252,7 +252,7 @@ async def test_menu_line_on_sale_line_model_is_unchanged(db_session: AsyncSessio
 
 
 async def test_margin_report_nets_food_refunds(db_session: AsyncSession) -> None:
-    """退一杯拿鐵（150）：餐飲營收扣 150；有填成本的照退量比例扣成本，毛利同步反轉。"""
+    """退一杯拿鐵（150）且勾還能賣：餐飲營收扣 150；成本照退量比例扣回，毛利同步反轉。"""
     from datetime import UTC, datetime, timedelta
 
     m = await _mixed_sale(db_session)
@@ -263,7 +263,8 @@ async def test_margin_report_nets_food_refunds(db_session: AsyncSession) -> None
     t0, t1 = datetime.now(UTC) - timedelta(hours=1), datetime.now(UTC) + timedelta(hours=1)
     sales = SalesService(db_session)
     before = await sales.margin_breakdown(m.store_id, t0, t1)
-    await _return(db_session, m, [ReturnLineInput(m.latte_line, 1)], "rep")
+    # 勾「還能賣」＝這份沒報銷：營收與成本一起扣回（沒勾的見 test_food_waste.py，成本改算損耗）。
+    await _return(db_session, m, [ReturnLineInput(m.latte_line, 1, resellable=True)], "rep")
     after = await sales.margin_breakdown(m.store_id, t0, t1)
 
     assert before.food_revenue - after.food_revenue == Decimal(150)

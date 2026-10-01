@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -101,6 +102,8 @@ class ReturnLine(Base):
     sale_line_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     qty: Mapped[int] = mapped_column()
     refund_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 餐點退款「這份還能賣」（docs/47 §3、docs/49）：沒勾＝這份報銷了，成本改算「客訴退款」損耗。
+    resellable: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
 
     customer_return: Mapped[CustomerReturn] = relationship(back_populates="lines")
 

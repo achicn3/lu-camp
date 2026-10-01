@@ -1,9 +1,10 @@
 """menu repository：唯一直接碰菜單相關資料表的層（§2）。"""
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import ColumnElement, case, delete, select, update
+from sqlalchemy import ColumnElement, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.menu.models import (
@@ -14,6 +15,7 @@ from app.modules.menu.models import (
     MenuOptionGroup,
     MenuStockAdjustment,
 )
+from app.shared.enums import MenuStockAdjustReason
 
 
 class MenuRepository:
@@ -336,6 +338,48 @@ class MenuRepository:
             )
             .values(stock_qty=model.stock_qty + qty)
         )
+
+    async def waste_summary(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[MenuStockAdjustReason, int, Decimal, int]]:
+        qty = -MenuStockAdjustment.delta
+        rows = await self._session.execute(
+            select(
+                MenuStockAdjustment.reason,
+                func.coalesce(func.sum(qty), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                MenuStockAdjustment.unit_cost_snapshot.is_not(None),
+                                MenuStockAdjustment.unit_cost_snapshot * qty,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case((MenuStockAdjustment.unit_cost_snapshot.is_(None), qty), else_=0)
+                    ),
+                    0,
+                ),
+            )
+            .where(
+                MenuStockAdjustment.store_id == store_id,
+                MenuStockAdjustment.reason.in_(
+                    [MenuStockAdjustReason.WASTE.value, MenuStockAdjustReason.CORRECTION.value]
+                ),
+                MenuStockAdjustment.created_at >= date_from,
+                MenuStockAdjustment.created_at < date_to,
+            )
+            .group_by(MenuStockAdjustment.reason)
+        )
+        return [
+            (MenuStockAdjustReason(reason), int(q), Decimal(cost), int(unknown))
+            for reason, q, cost, unknown in rows
+        ]
 
     async def add_adjustment(self, row: MenuStockAdjustment) -> None:
         self._session.add(row)

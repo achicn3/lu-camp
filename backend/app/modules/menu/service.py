@@ -648,6 +648,7 @@ class MenuService:
                 delta=delta,
                 reason=resolved.value,
                 business_date=day,
+                unit_cost_snapshot=target.unit_cost,
                 actor_user_id=actor_user_id,
             )
         )
@@ -662,6 +663,15 @@ class MenuService:
             after={"remaining": result, "day": day.isoformat(), "reason": resolved.value},
         )
         return self._entry(kind, target, label)
+
+    async def waste_summary(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[MenuStockAdjustReason, int, Decimal, int]]:
+        """期間內報廢／盤點短少：(原因, 份數, 已知成本合計, 成本未知份數)（docs/49 §4）。
+
+        歸屬按下的那一刻（與退貨扣減同口徑，以時間區間切，不是營業日）。補貨不算。
+        """
+        return await self._repo.waste_summary(store_id, date_from, date_to)
 
     async def list_daily_stock(self, store_id: int) -> list[DailyStockEntry]:
         """今天要填份數的對象（每日限量、未封存、未停售）：品項在前、選項在後。"""

@@ -808,6 +808,7 @@ class ReturnsService:
                     sale_line_id=line.id,
                     qty=qty,
                     refund_amount=line_refund,
+                    resellable=line.id in resellable,
                 )
             )
             await self._return_inventory_line(

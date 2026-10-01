@@ -180,6 +180,8 @@ class MenuStockAdjustment(Base):
     delta: Mapped[int] = mapped_column()
     reason: Mapped[str] = mapped_column(String(20))
     business_date: Mapped[date] = mapped_column(Date, index=True)
+    # 按下當下一份的成本（docs/49 §3）；之後改成本不改寫損耗。成本未知＝NULL（只計份數）。
+    unit_cost_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
