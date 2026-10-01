@@ -17,6 +17,7 @@
 | 設定頁新增「收購付錢前一定要客人簽名」開關 | 設定 | 升級後**預設關閉**，要不要打開由店主決定（§5） |
 | 收購頁「買斷」可以再加散裝，一起簽名付款（收購①） | 後端＋前端 | 同上：重啟後端、重新 build 前端（沒有新的 migration） |
 | 顧客螢幕手繪露營動畫（待機露營車循環、第一人稱手帳結帳、簽署完成）（2026-10-01） | 前端 | 重新 build 前端即可（沿用上面的 `gsap`，沒有新套件、沒有 migration） |
+| 收購紀錄可以只作廢其中幾件（勾選要作廢的商品）；全額購物金付款不開發票；顧客螢幕斷線後自動重新取配對碼（2026-10-01） | 資料庫＋後端＋前端 | migration `f8c4d2a91b63`（選品作廢紀錄表）、重啟後端、重新 build 前端 |
 
 > 如果正式機的版本比 2026-09-23 更舊，中間還有別的 migration；`alembic upgrade head` 會一次補齊，不用逐一處理。
 
@@ -52,7 +53,7 @@ cd backend
 /opt/homebrew/bin/uv sync
 set -a; source ../.env; set +a
 /opt/homebrew/bin/uv run alembic upgrade head
-/opt/homebrew/bin/uv run alembic current   # 應顯示 b7e2c4d9f1a3 (head)
+/opt/homebrew/bin/uv run alembic current   # 應顯示 f8c4d2a91b63 (head)
 cd ..
 
 # 3.4 硬體代理依賴
@@ -87,6 +88,8 @@ launchctl print gui/$(id -u)/com.lucamp.hardware-agent | grep state
 3. 「收購」頁照常能收一筆（可以用測試賣方收一件再作廢）。
 4. 報表 → 帳務 → 庫存價值，表格多一列「待整理（已付款、還沒上架）」。
 5. 設定頁有「收購付錢前一定要客人在顧客螢幕簽名」開關。
+6. 收購紀錄 → 買斷單按「作廢」，對話框會列出這張單的商品可以勾選；已售出的商品不能勾。
+7. 顧客螢幕若曾斷線或在 POS 解除配對，會自動顯示新的配對碼（畫面上沒有讓客人按的按鈕）。
 
 ## 5. 升級後給店主決定的事
 
@@ -96,6 +99,7 @@ launchctl print gui/$(id -u)/com.lucamp.hardware-agent | grep state
 ## 6. 出問題怎麼退
 
 - **只退程式、不要降資料庫**：`alembic downgrade` 會刪掉差異紀錄與批次對應資料，**不可以做**。
+  已經有「只作廢其中幾件」的紀錄時，`f8c4d2a91b63` 本身也會拒絕降版。
 - 只退程式的前提：升級後**還沒有任何排隊收購付過款**。一旦有商品變成「待整理」，舊程式讀到這個
   新狀態會出錯（庫存頁、報表打不開）——這時**不要退**，把狀況回報店主，由開發端修正。
   ```bash
