@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -712,6 +713,46 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     await waitFor(() => expect(scanBox().disabled).toBe(false));
+  });
+
+  function stubPlainPos() {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(null), 201);
+      return null;
+    });
+  }
+
+  // 店主 2026-10-01：進結帳頁就能直接掃。條碼欄載入時是停用的，autoFocus 對停用欄位無效，
+  // 要在解鎖那一刻補對焦。
+  it("條碼欄解鎖後自動對焦，進頁面不用先點一下", async () => {
+    stubPlainPos();
+    renderPage();
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(scanBox()));
+  });
+
+  it("中文輸入法在組字 → 提醒切成英文", async () => {
+    stubPlainPos();
+    renderPage();
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    fireEvent.compositionStart(scanBox());
+    expect(screen.getByRole("alert").textContent).toContain("切成英文");
+    fireEvent.compositionEnd(scanBox());
+  });
+
+  it("掃進注音符號 → 提醒切成英文；全形英數自動轉半形", async () => {
+    stubPlainPos();
+    renderPage();
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    fireEvent.change(scanBox(), { target: { value: "ㄋㄅ" } });
+    expect(screen.getByRole("alert").textContent).toContain("切成英文");
+    fireEvent.change(scanBox(), { target: { value: "ＴＥＮＴ１" } });
+    expect(scanBox().value).toBe("TENT1");
+    expect(screen.queryByText(/切成英文/)).toBeNull();
   });
 
   it("有舊購物車：還原完成前鎖住掃碼，完成後放行且舊車已帶回", async () => {

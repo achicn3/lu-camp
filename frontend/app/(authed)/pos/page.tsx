@@ -74,6 +74,7 @@ import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
 import { CampaignPanel } from "@/features/pos/CampaignPanel";
 import { disabledCampaignsSignature } from "@/features/pos/campaignOverrides";
 import { formatSalePaymentSummary } from "@/lib/payment";
+import { looksLikeImeInput, scanFocusFree, toHalfWidth } from "@/lib/pos-scan-input";
 import {
   clearPersistedIdemKey,
   getOrCreatePersistedIdemKey,
@@ -153,6 +154,8 @@ function ScanBar({
 }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const mutation = useMutation({
     mutationFn: async (code: string): Promise<CartLine> => {
       // 販售籃碼制明確，直接查籃子，不必先問序號品與散裝（ADR-025）。
@@ -265,8 +268,15 @@ function ScanBar({
     mutation.mutate(value);
   }
 
+  const locked = mutation.isPending || disabled;
+  // autoFocus 只在掛載那一刻有效，而載入時欄位是停用的（在確認有沒有未結完的購物車），
+  // 停用欄位對不了焦——所以在每次解鎖時補對焦：進頁面、掃完一件都能直接接著掃（店主 2026-10-01）。
+  useEffect(() => {
+    if (!locked && scanFocusFree(document.activeElement)) inputRef.current?.focus();
+  }, [locked]);
+
   function onChange(event: ChangeEvent<HTMLInputElement>) {
-    const value = event.target.value;
+    const value = toHalfWidth(event.target.value);
     // 掃碼槍：輸入到完整碼制即自動送出、清空（免按 Enter）；清空後若掃碼槍補送 Enter 也是空字串、無副作用。
     if (ITEM_CODE_RE.test(value.trim())) {
       setCode("");
@@ -287,10 +297,13 @@ function ScanBar({
         <span className="field-label">掃描或輸入商品條碼</span>
         {/* 櫃檯掃碼槍輸入，聚焦為核心操作（docs/10 §3）：掃到完整碼自動加入，免按 Enter。 */}
         <input
+          ref={inputRef}
           name="code"
           className="pos-scan-input"
           value={code}
           onChange={onChange}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
           autoFocus
           inputMode="text"
           autoComplete="off"
@@ -305,6 +318,11 @@ function ScanBar({
             ? "查詢中…"
             : "掃描後自動加入購物車（免按 Enter）。"}
       </span>
+      {(composing || looksLikeImeInput(code)) && (
+        <p role="alert" className="form-error">
+          輸入法目前是中文，掃碼前請先切成英文（Windows 按 Shift、Mac 按 Caps Lock），再清空重掃。
+        </p>
+      )}
       {error !== null && (
         <p role="alert" className="form-error">
           {error}
