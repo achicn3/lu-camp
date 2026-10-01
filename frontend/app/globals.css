@@ -5808,3 +5808,9 @@ a.btn-ghost {
   font-weight: 600;
   text-align: center;
 }
+
+/* 報表的明細子列（docs/49 餐飲損耗三欄）：縮排、淡色，與合計列分得出。 */
+.rpt-subrow td:first-child {
+  padding-left: var(--sp-5, 24px);
+  color: var(--ink-soft);
+}

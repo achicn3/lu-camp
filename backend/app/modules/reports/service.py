@@ -50,6 +50,7 @@ from app.modules.reports.schemas import (
     EffectivenessReport,
     FlowRow,
     FlowsReport,
+    FoodWasteRowRead,
     GiftProductRow,
     GiftReasonRow,
     GiftReport,
@@ -522,6 +523,16 @@ class ReportsService:
             catalog_cogs=bd.catalog_cogs,
             food_cogs=bd.food_cogs,
             food_margin=bd.food_margin,
+            food_waste_cost=bd.food_waste_cost,
+            food_waste_breakdown=[
+                FoodWasteRowRead(
+                    reason=row.reason,
+                    qty=row.qty,
+                    cost=row.cost,
+                    unknown_cost_qty=row.unknown_cost_qty,
+                )
+                for row in bd.food_waste_breakdown
+            ],
             consignment_commission_income=bd.consignment_commission_income,
             gross_margin=bd.gross_margin,
             gross_margin_rate=bd.gross_margin_rate,

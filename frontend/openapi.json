@@ -6683,6 +6683,38 @@
         "title": "FnbSaleSummaryRead",
         "type": "object"
       },
+      "FoodWasteRowRead": {
+        "description": "餐飲損耗一欄（docs/49 §4）。",
+        "properties": {
+          "cost": {
+            "description": "已知成本合計",
+            "title": "Cost",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "WASTE＝報廢、SHORTAGE＝盤點短少、REFUND＝客訴退款",
+            "title": "Reason",
+            "type": "string"
+          },
+          "unknown_cost_qty": {
+            "description": "成本未知的份數（只計份數）",
+            "title": "Unknown Cost Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "qty",
+          "cost",
+          "unknown_cost_qty"
+        ],
+        "title": "FoodWasteRowRead",
+        "type": "object"
+      },
       "GiftProductRow": {
         "description": "一個品項在期間內送出、退回與淨額。",
         "properties": {
@@ -14549,6 +14581,19 @@
           },
           "food_revenue": {
             "title": "Food Revenue",
+            "type": "string"
+          },
+          "food_waste_breakdown": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FoodWasteRowRead"
+            },
+            "title": "Food Waste Breakdown",
+            "type": "array"
+          },
+          "food_waste_cost": {
+            "default": "0",
+            "title": "Food Waste Cost",
             "type": "string"
           },
           "generated_at": {

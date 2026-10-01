@@ -130,6 +130,15 @@ class PaymentMethodTotal(BaseModel):
     fee: NTDAmount  # 該方式手續費合計（現金/購物金為 0）
 
 
+class FoodWasteRowRead(BaseModel):
+    """餐飲損耗一欄（docs/49 §4）。"""
+
+    reason: str = Field(description="WASTE＝報廢、SHORTAGE＝盤點短少、REFUND＝客訴退款")
+    qty: int
+    cost: NTDAmount = Field(description="已知成本合計")
+    unknown_cost_qty: int = Field(description="成本未知的份數（只計份數）")
+
+
 class SalesMarginReport(BaseModel):
     """銷售 / 毛利報表（docs/19 §2.3）。未作廢銷售；買斷認成本、寄售只認抽成、catalog 成本 N/A。"""
 
@@ -146,6 +155,9 @@ class SalesMarginReport(BaseModel):
     # 不可用 food_revenue − food_cogs 反推（那等於把成本未知當成 0）。
     food_cogs: NTDAmount = Decimal(0)
     food_margin: NTDAmount = Decimal(0)
+    # 餐飲損耗（docs/49）：報廢＋盤點短少＋客訴退款，已從 food_margin 與 gross_margin 扣除。
+    food_waste_cost: NTDAmount = Decimal(0)
+    food_waste_breakdown: list[FoodWasteRowRead] = []
     consignment_commission_income: NTDAmount
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt  # 毛利 ÷ 已知成本營收；分母 0 → null

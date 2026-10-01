@@ -6456,6 +6456,29 @@ export interface components {
             total_refunded: string;
         };
         /**
+         * FoodWasteRowRead
+         * @description 餐飲損耗一欄（docs/49 §4）。
+         */
+        FoodWasteRowRead: {
+            /**
+             * Cost
+             * @description 已知成本合計
+             */
+            cost: string;
+            /** Qty */
+            qty: number;
+            /**
+             * Reason
+             * @description WASTE＝報廢、SHORTAGE＝盤點短少、REFUND＝客訴退款
+             */
+            reason: string;
+            /**
+             * Unknown Cost Qty
+             * @description 成本未知的份數（只計份數）
+             */
+            unknown_cost_qty: number;
+        };
+        /**
          * GiftProductRow
          * @description 一個品項在期間內送出、退回與淨額。
          */
@@ -9380,6 +9403,16 @@ export interface components {
             food_margin: string;
             /** Food Revenue */
             food_revenue: string;
+            /**
+             * Food Waste Breakdown
+             * @default []
+             */
+            food_waste_breakdown: components["schemas"]["FoodWasteRowRead"][];
+            /**
+             * Food Waste Cost
+             * @default 0
+             */
+            food_waste_cost: string;
             /**
              * Generated At
              * Format: date-time

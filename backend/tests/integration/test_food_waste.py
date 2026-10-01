@@ -140,3 +140,21 @@ async def test_resellable_flag_is_persisted_on_return_line(db_session: AsyncSess
     )
     flags = (await db_session.scalars(select(ReturnLine.resellable))).all()
     assert list(flags) == [True]
+
+
+async def test_sales_margin_report_exposes_food_waste(db_session: AsyncSession) -> None:
+    from app.modules.reports.service import ReportsService
+
+    store_id, uid, cake = await _cake(db_session, Decimal(40))
+    await MenuService(db_session).adjust_daily_stock(
+        store_id, "item", cake, delta=-2, reason="WASTE", actor_user_id=uid
+    )
+    t0, t1 = _window()
+    report = await ReportsService(db_session).sales_margin(store_id, date_from=t0, date_to=t1)
+    assert report.food_waste_cost == Decimal(80)
+    rows = {r.reason: (r.qty, r.cost) for r in report.food_waste_breakdown}
+    assert rows == {
+        "WASTE": (2, Decimal(80)),
+        "SHORTAGE": (0, Decimal(0)),
+        "REFUND": (0, Decimal(0)),
+    }

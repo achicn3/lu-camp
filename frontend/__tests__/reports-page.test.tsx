@@ -135,6 +135,12 @@ const SALES_MARGIN_DATA = {
   food_revenue: "88000",
   food_cogs: "26000",
   food_margin: "34000",  // 只認有填成本的餐飲：不等於 88000−26000
+  food_waste_cost: "3210",
+  food_waste_breakdown: [
+    { reason: "WASTE", qty: 12, cost: "2400", unknown_cost_qty: 0 },
+    { reason: "SHORTAGE", qty: 3, cost: "660", unknown_cost_qty: 1 },
+    { reason: "REFUND", qty: 1, cost: "150", unknown_cost_qty: 0 },
+  ],
   secondhand_revenue: "312000",
   cash_received: "450000",
   store_credit_redeemed: "50000",
@@ -776,7 +782,13 @@ describe("ReportsPage", () => {
     // 餐飲成本與毛利：毛利由後端算（只認有填成本的品項），前端不可用營收−成本反推
     expect(screen.getByText("餐飲成本")).toBeTruthy();
     expect(screen.getByText("26,000")).toBeTruthy(); // food_cogs
-    expect(screen.getByText("餐飲毛利（已填成本的品項）")).toBeTruthy();
+    expect(screen.getByText("餐飲毛利（已填成本的品項，已扣損耗）")).toBeTruthy();
+    // 餐飲損耗（docs/49）：合計與三欄，成本未知的份數要講明
+    expect(screen.getByText("餐飲損耗（已從毛利扣除）")).toBeTruthy();
+    expect(screen.getByText("3,210")).toBeTruthy();
+    expect(screen.getByText("報廢 12 份")).toBeTruthy();
+    expect(screen.getByText("盤點短少 3 份（1 份沒填成本）")).toBeTruthy();
+    expect(screen.getByText("客訴退款 1 份")).toBeTruthy();
     expect(screen.getByText("34,000")).toBeTruthy(); // food_margin（≠ 88,000−26,000）
     // transaction_count
     expect(screen.getByText("200")).toBeTruthy();

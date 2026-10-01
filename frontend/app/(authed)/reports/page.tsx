@@ -1194,8 +1194,19 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.food_revenue} /></td>
                 </tr>
                 <tr>
+                  {/* docs/49：報廢、盤點短少、客訴退款的材料成本，已從餐飲毛利扣除。 */}
+                  <td>餐飲損耗（已從毛利扣除）</td>
+                  <td><MoneyText value={report.food_waste_cost} /></td>
+                </tr>
+                {(report.food_waste_breakdown ?? []).map((row) => (
+                  <tr key={row.reason} className="rpt-subrow">
+                    <td>{foodWasteLabel(row)}</td>
+                    <td><MoneyText value={row.cost} /></td>
+                  </tr>
+                ))}
+                <tr>
                   {/* 後端同一口徑算好；沒填成本的餐飲留在「成本不明銷售額」，這裡不反推。 */}
-                  <td>餐飲毛利（已填成本的品項）</td>
+                  <td>餐飲毛利（已填成本的品項，已扣損耗）</td>
                   <td><MoneyText value={report.food_margin} /></td>
                 </tr>
                 <tr>
@@ -2512,6 +2523,19 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
 }
 
 // -- Main Page --
+
+const FOOD_WASTE_REASON: Record<string, string> = {
+  WASTE: "報廢",
+  SHORTAGE: "盤點短少",
+  REFUND: "客訴退款",
+};
+
+/** 「報廢 12 份」「盤點短少 3 份（1 份沒填成本）」——沒填成本的只算份數，金額不含它們。 */
+function foodWasteLabel(row: { reason: string; qty: number; unknown_cost_qty: number }): string {
+  const name = FOOD_WASTE_REASON[row.reason] ?? row.reason;
+  const unknown = row.unknown_cost_qty > 0 ? `（${row.unknown_cost_qty} 份沒填成本）` : "";
+  return `${name} ${row.qty} 份${unknown}`;
+}
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
