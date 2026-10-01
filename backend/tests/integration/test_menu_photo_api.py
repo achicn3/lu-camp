@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
-from app.main import create_app
+from app.main import PHOTO_MAX_BODY_BYTES, create_app
 from app.modules.menu.models import MenuPhoto
 from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.store.models import Store
@@ -207,3 +207,37 @@ async def test_unknown_or_malformed_photo_key_is_not_found(
     assert (await client.get(f"/api/v1/menu-photos/{'0' * 64}.webp")).status_code == 404
     assert (await client.get("/api/v1/menu-photos/..%2F..%2Fetc.webp")).status_code == 404
     assert (await client.get(f"/api/v1/menu-photos/{'A' * 64}.webp")).status_code == 404
+
+
+async def test_oversized_body_is_rejected_before_parsing_even_without_login(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """Codex 對抗審查 O1d：multipart 會在檢查檔案大小（甚至驗登入）之前就整包解析、落暫存檔，
+    所以要在解析**前**用 Content-Length 擋——連沒登入的請求都會先被解析，不能只靠 handler。"""
+    _, mgr = await _seed(db_session)
+    item_id = await _item(client, mgr)
+    huge = str(PHOTO_MAX_BODY_BYTES + 1)
+    resp = await client.post(
+        f"/api/v1/menu-items/{item_id}/photo",
+        content=b"x",
+        headers={"Content-Length": huge, "Content-Type": "multipart/form-data; boundary=b"},
+    )
+    assert resp.status_code == 413
+    assert "10 MB" in resp.json()["detail"]
+
+
+async def test_streamed_body_without_length_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, mgr = await _seed(db_session)
+    item_id = await _item(client, mgr)
+
+    async def chunks() -> AsyncGenerator[bytes]:
+        yield b"--b\r\n"
+
+    resp = await client.post(
+        f"/api/v1/menu-items/{item_id}/photo",
+        content=chunks(),
+        headers={**_auth(mgr), "Content-Type": "multipart/form-data; boundary=b"},
+    )
+    assert resp.status_code == 411

@@ -8,6 +8,7 @@ docs/05-project-structure.md 掛載於此。
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -38,6 +39,7 @@ from app.modules.einvoice.scheduler import scheduler_loop as einvoice_scheduler_
 from app.modules.intake.router import router as intake_router
 from app.modules.inventory.basket_router import router as bulk_basket_router
 from app.modules.inventory.router import router as inventory_router
+from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.menu.router import entries_router as menu_entries_router
 from app.modules.menu.router import router as menu_router
 from app.modules.openingcheck.router import router as opening_check_router
@@ -65,9 +67,26 @@ KIOSK_MAX_BODY_BYTES = 1_000_000
 # 切結書內文上限 20000 字（UTF-8 中文最多 3 bytes/字）＋標題與 JSON 外殼，抓 256KB 綽綽有餘。
 # 字數上限是在 JSON 解析**之後**才驗的，擋不住有人先塞一個超大 body 進來。
 AGREEMENT_MAX_BODY_BYTES = 256_000
+# 菜單照片上傳（docs/44 §3.4）：檔案上限 10 MB＋multipart 外殼。multipart 會在 handler 檢查大小、
+# 甚至在驗登入之前就整包解析並落暫存檔，所以一定要在這裡先擋（Codex 對抗審查 O1d）。
+PHOTO_MAX_BODY_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
+_PHOTO_UPLOAD_PATH = re.compile(rf"^{API_PREFIX}/menu-items/[^/]+/photo/?$")
 
 
 logger = logging.getLogger(__name__)
+
+
+def _reject_photo_body(content_length: str | None) -> JSONResponse | None:
+    """照片上傳必須帶 Content-Length（瀏覽器送 FormData 一定會帶），且不得超過上限。"""
+    if content_length is None:
+        return JSONResponse(status_code=411, content={"detail": "上傳照片必須帶 Content-Length"})
+    try:
+        too_large = int(content_length) > PHOTO_MAX_BODY_BYTES
+    except ValueError:
+        too_large = True
+    if too_large:
+        return JSONResponse(status_code=413, content={"detail": "照片超過 10 MB，請先縮小再上傳"})
+    return None
 
 
 class HealthResponse(BaseModel):
@@ -138,6 +157,10 @@ def create_app() -> FastAPI:
         is_kiosk = request.url.path.startswith(f"{API_PREFIX}/kiosk")
         # 切結書改版是唯一會收「整份長文」的店務端點，同樣在解析前擋大小。
         is_agreement = request.url.path.startswith(f"{API_PREFIX}/agreements")
+        if request.method == "POST" and _PHOTO_UPLOAD_PATH.match(request.url.path):
+            rejected = _reject_photo_body(request.headers.get("content-length"))
+            if rejected is not None:
+                return rejected
         if (is_kiosk or is_agreement) and request.method in ("POST", "PUT", "PATCH"):
             limit = KIOSK_MAX_BODY_BYTES if is_kiosk else AGREEMENT_MAX_BODY_BYTES
             content_length = request.headers.get("content-length")
