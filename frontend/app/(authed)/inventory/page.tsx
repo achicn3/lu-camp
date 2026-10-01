@@ -1184,7 +1184,7 @@ function SerializedPanel() {
 
   return (
     <div className="inv-panel">
-      <SearchBar placeholder="品名 / 序號碼 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="條碼 / 品名 / 種類 / 品牌" onSearch={(value) => { setQ(value); setPage(0); }}>
         <select
           aria-label="狀態"
           value={status}
@@ -1555,7 +1555,7 @@ function CatalogPanel() {
   return (
     <div className="inv-panel">
       <CreateCatalogProduct />
-      <SearchBar placeholder="品名 / 商品編號 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="條碼 / 品名 / 種類 / 品牌" onSearch={(value) => { setQ(value); setPage(0); }}>
         <label className="inv-check">
           <input
             type="checkbox"
@@ -1748,7 +1748,7 @@ function BulkPanel() {
 
   return (
     <div className="inv-panel">
-      <SearchBar placeholder="名稱 / 批號 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="條碼 / 名稱 / 種類 / 品牌" onSearch={(value) => { setQ(value); setPage(0); }}>
         <select
           aria-label="狀態"
           value={status}

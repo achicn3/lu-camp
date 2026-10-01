@@ -204,10 +204,15 @@ class InventoryRepository:
             conds.append(SerializedItem.intake_date <= stocked_before)
         if q:
             pattern = f"%{q}%"
+            # 條碼（序號碼）、種類、品牌、型號都找得到（店主 2026-10-01）。
             conds.append(
                 SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
                 | SerializedItem.category_id.in_(select(Category.id).where(
                     Category.store_id == store_id, Category.name.ilike(pattern)))
+                | SerializedItem.brand_id.in_(select(Brand.id).where(
+                    Brand.store_id == store_id, Brand.name.ilike(pattern)))
+                | SerializedItem.product_model_id.in_(select(ProductModel.id).where(
+                    ProductModel.store_id == store_id, ProductModel.name.ilike(pattern)))
             )
         return conds
 
@@ -440,6 +445,8 @@ class InventoryRepository:
                 | BulkLot.label.ilike(pattern)
                 | BulkLot.category_id.in_(select(Category.id).where(
                     Category.store_id == store_id, Category.name.ilike(pattern)))
+                | BulkLot.brand_id.in_(select(Brand.id).where(
+                    Brand.store_id == store_id, Brand.name.ilike(pattern)))
             )
         return conds
 

@@ -1509,3 +1509,64 @@ async def test_catalog_search_matches_brand_and_model_names(
         )
         assert resp.status_code == 200, resp.text
         assert [row["name"] for row in resp.json()] == ["高山瓦斯罐"], q
+
+
+async def test_serialized_and_bulk_search_match_brand_names(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """庫存搜尋框打品牌也找得到（店主 2026-10-01：條碼、種類、品牌都要能搜）。"""
+    store_id = await _seed_store(db_session)
+    brand = Brand(store_id=store_id, name="Snow Peak")
+    db_session.add(brand)
+    await db_session.flush()
+    model = ProductModel(store_id=store_id, brand_id=brand.id, name="Amenity Dome")
+    db_session.add(model)
+    await db_session.flush()
+
+    def _item(code: str, name: str, *, branded: bool) -> SerializedItem:
+        return SerializedItem(
+            store_id=store_id,
+            item_code=code,
+            name=name,
+            grade=Grade.B,
+            ownership_type=OwnershipType.OWNED,
+            listed_price=Decimal("3000"),
+            status=SerializedItemStatus.IN_STOCK,
+            brand_id=brand.id if branded else None,
+            product_model_id=model.id if branded else None,
+        )
+
+    def _lot(code: str, name: str, *, branded: bool) -> BulkLot:
+        return BulkLot(
+            store_id=store_id,
+            lot_code=code,
+            name=name,
+            grade=Grade.E,
+            acquisition_cost=Decimal("500"),
+            acquisition_basis=BulkAcquisitionBasis.BAG,
+            unit_price=Decimal("30"),
+            total_qty=50,
+            remaining_qty=10,
+            status=BulkLotStatus.ON_SALE,
+            brand_id=brand.id if branded else None,
+        )
+
+    db_session.add_all(
+        [
+            _item("ITM-SP", "三人帳篷", branded=True),
+            _item("ITM-NB", "雙人帳篷", branded=False),
+            _lot("LOT-SP", "營釘", branded=True),
+            _lot("LOT-NB", "營繩", branded=False),
+        ]
+    )
+    await db_session.flush()
+
+    for q in ("snow peak", "amenity"):
+        items = await client.get(
+            "/api/v1/serialized-items", params={"q": q}, headers=_auth(store_id)
+        )
+        assert items.status_code == 200, items.text
+        assert [row["item_code"] for row in items.json()] == ["ITM-SP"], q
+    lots = await client.get("/api/v1/bulk-lots", params={"q": "snow"}, headers=_auth(store_id))
+    assert lots.status_code == 200, lots.text
+    assert [row["lot_code"] for row in lots.json()] == ["LOT-SP"]

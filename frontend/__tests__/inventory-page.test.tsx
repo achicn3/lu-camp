@@ -382,6 +382,16 @@ describe("InventoryPage", () => {
     expect(screen.getByText("販售中", { selector: ".inv-badge" })).toBeTruthy();
   });
 
+  // 店主 2026-10-01：三個分頁的搜尋框都能打條碼、種類、品牌——提示字要讓店員知道。
+  it.each(["序號品", "一般商品", "散裝"])("%s 分頁的搜尋框提示可搜條碼、種類、品牌", async (tab) => {
+    stubInventory();
+    renderPage();
+    if (tab !== "序號品") await userEvent.click(screen.getByRole("tab", { name: tab }));
+    const box = await screen.findByLabelText("搜尋");
+    const hint = box.getAttribute("placeholder") ?? "";
+    for (const word of ["條碼", "種類", "品牌"]) expect(hint).toContain(word);
+  });
+
   it("serialized row reprints a label via the hardware agent", async () => {
     const calls: { url: string; body: unknown }[] = [];
     vi.stubGlobal(
