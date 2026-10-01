@@ -1,6 +1,6 @@
 """openingcheck 業務邏輯：今天做到哪、打勾、略過、自訂項目增刪。
 
-`completed` 只涵蓋**後端管得到的**部分（開帳＋自訂項目）；裝置狀態由前端直接問
+`completed` 只涵蓋**後端管得到的**部分（開帳＋今日餐點數量＋自訂項目）；裝置狀態由前端直接問
 hardware-agent（印標籤走同一條路），所以畫面上的「全部完成」可能比這裡嚴格。
 略過的 key 存在後端，是因為裁示要求「每店每日共用」——在收銀電腦略過的，手機上也算略過。
 """
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.core.time import store_date, utc_now
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.menu.service import MenuService
 from app.modules.openingcheck.models import OpeningCheck, OpeningCheckItem
 from app.modules.openingcheck.repository import OpeningCheckRepository
 from app.modules.openingcheck.schemas import (
@@ -23,6 +24,8 @@ from app.modules.openingcheck.schemas import (
 from app.shared.exceptions import OpeningCheckConflict
 
 CASH_SESSION_KEY = "cash_session"
+# 今日餐點數量（docs/44 §3.7）：每日限量的品項／選項今天都填過份數才算完成；可略過。
+MENU_STOCK_KEY = "menu_stock"
 
 
 class OpeningCheckService:
@@ -76,6 +79,8 @@ class OpeningCheckService:
         else:
             state = CashSessionState.STALE
         cash_ok = state is CashSessionState.OPEN_TODAY or CASH_SESSION_KEY in skipped
+        menu_pending = await MenuService(self._session).daily_stock_pending(store_id)
+        menu_ok = menu_pending == 0 or MENU_STOCK_KEY in skipped
         return OpeningCheckTodayRead(
             business_date=business_date,
             cash_session_state=state,
@@ -87,7 +92,8 @@ class OpeningCheckService:
                 for item in items
             ],
             skipped_keys=skipped,
-            completed=cash_ok and all(item.id in done_ids for item in items),
+            menu_stock_pending=menu_pending,
+            completed=cash_ok and menu_ok and all(item.id in done_ids for item in items),
         )
 
     async def set_item_done(

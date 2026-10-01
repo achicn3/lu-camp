@@ -5497,6 +5497,77 @@
         "title": "DailyCashSessionRow",
         "type": "object"
       },
+      "DailyStockAdjustRequest": {
+        "description": "今天的份數加減（剛做好 +4、報廢 −1）。",
+        "properties": {
+          "delta": {
+            "maximum": 9999.0,
+            "minimum": -9999.0,
+            "title": "Delta",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delta"
+        ],
+        "title": "DailyStockAdjustRequest",
+        "type": "object"
+      },
+      "DailyStockEntryRead": {
+        "description": "一個每日限量對象今天的狀態。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MenuStockTarget"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "set_today": {
+            "title": "Set Today",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "remaining",
+          "set_today"
+        ],
+        "title": "DailyStockEntryRead",
+        "type": "object"
+      },
+      "DailyStockSetRequest": {
+        "description": "把今天的份數改成 qty；expected_remaining 是店員畫面上看到的數字（被搶先改過就拒絕）。",
+        "properties": {
+          "expected_remaining": {
+            "minimum": 0.0,
+            "title": "Expected Remaining",
+            "type": "integer"
+          },
+          "qty": {
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "qty",
+          "expected_remaining"
+        ],
+        "title": "DailyStockSetRequest",
+        "type": "object"
+      },
       "DailySummaryReport": {
         "description": "每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。\n\n營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利。",
         "properties": {
@@ -10777,6 +10848,10 @@
             ],
             "title": "Category Id"
           },
+          "daily_limited": {
+            "title": "Daily Limited",
+            "type": "boolean"
+          },
           "description": {
             "anyOf": [
               {
@@ -10806,6 +10881,17 @@
             },
             "title": "Option Groups",
             "type": "array"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
           },
           "sort_order": {
             "title": "Sort Order",
@@ -10842,6 +10928,8 @@
           "description",
           "is_available",
           "sort_order",
+          "daily_limited",
+          "remaining",
           "option_groups"
         ],
         "title": "MenuItemRead",
@@ -10861,6 +10949,17 @@
               }
             ],
             "title": "Category"
+          },
+          "daily_limited": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limited"
           },
           "description": {
             "anyOf": [
@@ -11106,6 +11205,10 @@
       },
       "MenuOptionRead": {
         "properties": {
+          "daily_limited": {
+            "title": "Daily Limited",
+            "type": "boolean"
+          },
           "group_id": {
             "title": "Group Id",
             "type": "integer"
@@ -11126,6 +11229,17 @@
             "title": "Price Delta",
             "type": "string"
           },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
           "sort_order": {
             "title": "Sort Order",
             "type": "integer"
@@ -11137,13 +11251,26 @@
           "name",
           "price_delta",
           "is_available",
-          "sort_order"
+          "sort_order",
+          "daily_limited",
+          "remaining"
         ],
         "title": "MenuOptionRead",
         "type": "object"
       },
       "MenuOptionUpdateRequest": {
         "properties": {
+          "daily_limited": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limited"
+          },
           "is_available": {
             "anyOf": [
               {
@@ -11197,6 +11324,15 @@
         },
         "title": "MenuOptionUpdateRequest",
         "type": "object"
+      },
+      "MenuStockTarget": {
+        "description": "每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。\n\n值用小寫，因為它直接出現在網址路徑 `/menu-daily-stock/{kind}/{id}`。",
+        "enum": [
+          "item",
+          "option"
+        ],
+        "title": "MenuStockTarget",
+        "type": "string"
       },
       "NoteUpdateRequest": {
         "description": "改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。\n\n單一自由欄位，兼「商品狀況說明」與「內部作業備忘」（2026-09-02 裁示）。\n空字串/全空白一律存 NULL——否則 POS 結帳會為了空白備註跳一個沒有內容的提醒。",
@@ -11339,6 +11475,11 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "menu_stock_pending": {
+            "default": 0,
+            "title": "Menu Stock Pending",
+            "type": "integer"
           },
           "skipped_keys": {
             "items": {
@@ -25370,6 +25511,166 @@
           }
         ],
         "summary": "Update Menu Category",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/menu-daily-stock": {
+      "get": {
+        "operationId": "listMenuDailyStock",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DailyStockEntryRead"
+                  },
+                  "title": "Response Listmenudailystock",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Menu Daily Stock",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/menu-daily-stock/{kind}/{target_id}/adjust": {
+      "post": {
+        "operationId": "adjustMenuDailyStock",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MenuStockTarget"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyStockAdjustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyStockEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adjust Menu Daily Stock",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/menu-daily-stock/{kind}/{target_id}/set": {
+      "post": {
+        "operationId": "setMenuDailyStock",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MenuStockTarget"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyStockSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyStockEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Menu Daily Stock",
         "tags": [
           "menu"
         ]

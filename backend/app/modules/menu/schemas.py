@@ -11,7 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.menu.models import MenuCategory, MenuOption
-from app.modules.menu.service import MenuItemDetail, OptionGroupDetail
+from app.modules.menu.service import (
+    DailyStockEntry,
+    MenuItemDetail,
+    OptionGroupDetail,
+    remaining_today,
+    today,
+)
+from app.shared.enums import MenuStockTarget
+
+# 一天的份數上限：防手滑多打幾個 0，正常餐點遠低於此。
+DAILY_STOCK_MAX = 9999
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[
@@ -61,6 +71,8 @@ class MenuItemUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=500)  # 明確給 null＝清空
     sort_order: int | None = None
     is_available: bool | None = None
+    # 每日限量開關（管理者）；份數本身由店員在開店檢查／POS 調整。
+    daily_limited: bool | None = None
 
     @field_validator("unit_price")
     @classmethod
@@ -96,18 +108,28 @@ def _valid_price_delta(value: Decimal) -> Decimal:
 
 
 class MenuOptionRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     group_id: int
     name: str
     price_delta: NTDAmount
     is_available: bool
     sort_order: int
+    daily_limited: bool
+    # 今天還能賣幾份；不限量＝null。
+    remaining: int | None
 
     @classmethod
     def from_model(cls, option: MenuOption) -> "MenuOptionRead":
-        return cls.model_validate(option, from_attributes=True)
+        return cls(
+            id=option.id,
+            group_id=option.group_id,
+            name=option.name,
+            price_delta=option.price_delta,
+            is_available=option.is_available,
+            sort_order=option.sort_order,
+            daily_limited=option.daily_limited,
+            remaining=remaining_today(option, today()),
+        )
 
 
 class MenuOptionGroupRead(BaseModel):
@@ -146,6 +168,7 @@ class MenuOptionUpdateRequest(BaseModel):
     price_delta: Decimal | None = None
     is_available: bool | None = None
     sort_order: int | None = None
+    daily_limited: bool | None = None
 
     @field_validator("price_delta")
     @classmethod
@@ -218,6 +241,9 @@ class MenuItemRead(BaseModel):
     description: str | None
     is_available: bool
     sort_order: int
+    daily_limited: bool
+    # 今天還能賣幾份；不限量＝null（0＝今天售完或還沒填）。
+    remaining: int | None
     option_groups: list[MenuOptionGroupRead]
 
     @classmethod
@@ -234,5 +260,48 @@ class MenuItemRead(BaseModel):
             description=item.description,
             is_available=item.is_available,
             sort_order=item.sort_order,
+            daily_limited=item.daily_limited,
+            remaining=remaining_today(item, today()),
             option_groups=[MenuOptionGroupRead.from_detail(g) for g in detail.option_groups],
         )
+
+
+class DailyStockEntryRead(BaseModel):
+    """一個每日限量對象今天的狀態。"""
+
+    kind: MenuStockTarget
+    id: int
+    label: str
+    remaining: int
+    # 今天填過沒有（填 0 也算）；開店檢查據此判斷是否完成。
+    set_today: bool
+
+    @classmethod
+    def from_entry(cls, entry: DailyStockEntry) -> "DailyStockEntryRead":
+        return cls(
+            kind=entry.kind,
+            id=entry.id,
+            label=entry.label,
+            remaining=entry.remaining,
+            set_today=entry.set_today,
+        )
+
+
+class DailyStockSetRequest(BaseModel):
+    """把今天的份數改成 qty；expected_remaining 是店員畫面上看到的數字（被搶先改過就拒絕）。"""
+
+    qty: int = Field(ge=0, le=DAILY_STOCK_MAX)
+    expected_remaining: int = Field(ge=0)
+
+
+class DailyStockAdjustRequest(BaseModel):
+    """今天的份數加減（剛做好 +4、報廢 −1）。"""
+
+    delta: int = Field(ge=-DAILY_STOCK_MAX, le=DAILY_STOCK_MAX)
+
+    @field_validator("delta")
+    @classmethod
+    def _nonzero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("加減的份數不可為 0")
+        return value

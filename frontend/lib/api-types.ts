@@ -2429,6 +2429,57 @@ export interface paths {
         patch: operations["updateMenuCategory"];
         trace?: never;
     };
+    "/api/v1/menu-daily-stock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Daily Stock */
+        get: operations["listMenuDailyStock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-daily-stock/{kind}/{target_id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adjust Menu Daily Stock */
+        post: operations["adjustMenuDailyStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-daily-stock/{kind}/{target_id}/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Menu Daily Stock */
+        post: operations["setMenuDailyStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/menu-items": {
         parameters: {
             query?: never;
@@ -5866,6 +5917,39 @@ export interface components {
             variance: string | null;
         };
         /**
+         * DailyStockAdjustRequest
+         * @description 今天的份數加減（剛做好 +4、報廢 −1）。
+         */
+        DailyStockAdjustRequest: {
+            /** Delta */
+            delta: number;
+        };
+        /**
+         * DailyStockEntryRead
+         * @description 一個每日限量對象今天的狀態。
+         */
+        DailyStockEntryRead: {
+            /** Id */
+            id: number;
+            kind: components["schemas"]["MenuStockTarget"];
+            /** Label */
+            label: string;
+            /** Remaining */
+            remaining: number;
+            /** Set Today */
+            set_today: boolean;
+        };
+        /**
+         * DailyStockSetRequest
+         * @description 把今天的份數改成 qty；expected_remaining 是店員畫面上看到的數字（被搶先改過就拒絕）。
+         */
+        DailyStockSetRequest: {
+            /** Expected Remaining */
+            expected_remaining: number;
+            /** Qty */
+            qty: number;
+        };
+        /**
          * DailySummaryReport
          * @description 每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。
          *
@@ -7840,6 +7924,8 @@ export interface components {
             category: string | null;
             /** Category Id */
             category_id: number | null;
+            /** Daily Limited */
+            daily_limited: boolean;
             /** Description */
             description: string | null;
             /** Id */
@@ -7850,6 +7936,8 @@ export interface components {
             name: string;
             /** Option Groups */
             option_groups: components["schemas"]["MenuOptionGroupRead"][];
+            /** Remaining */
+            remaining: number | null;
             /** Sort Order */
             sort_order: number;
             /** Store Id */
@@ -7866,6 +7954,8 @@ export interface components {
         MenuItemUpdateRequest: {
             /** Category */
             category?: string | null;
+            /** Daily Limited */
+            daily_limited?: boolean | null;
             /** Description */
             description?: string | null;
             /** Is Available */
@@ -7933,6 +8023,8 @@ export interface components {
         };
         /** MenuOptionRead */
         MenuOptionRead: {
+            /** Daily Limited */
+            daily_limited: boolean;
             /** Group Id */
             group_id: number;
             /** Id */
@@ -7943,11 +8035,15 @@ export interface components {
             name: string;
             /** Price Delta */
             price_delta: string;
+            /** Remaining */
+            remaining: number | null;
             /** Sort Order */
             sort_order: number;
         };
         /** MenuOptionUpdateRequest */
         MenuOptionUpdateRequest: {
+            /** Daily Limited */
+            daily_limited?: boolean | null;
             /** Is Available */
             is_available?: boolean | null;
             /** Name */
@@ -7957,6 +8053,14 @@ export interface components {
             /** Sort Order */
             sort_order?: number | null;
         };
+        /**
+         * MenuStockTarget
+         * @description 每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。
+         *
+         *     值用小寫，因為它直接出現在網址路徑 `/menu-daily-stock/{kind}/{id}`。
+         * @enum {string}
+         */
+        MenuStockTarget: "item" | "option";
         /**
          * NoteUpdateRequest
          * @description 改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。
@@ -8029,6 +8133,11 @@ export interface components {
             completed: boolean;
             /** Items */
             items: components["schemas"]["OpeningCheckItemRead"][];
+            /**
+             * Menu Stock Pending
+             * @default 0
+             */
+            menu_stock_pending: number;
             /** Skipped Keys */
             skipped_keys: string[];
         };
@@ -14781,6 +14890,98 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MenuCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMenuDailyStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyStockEntryRead"][];
+                };
+            };
+        };
+    };
+    adjustMenuDailyStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: components["schemas"]["MenuStockTarget"];
+                target_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DailyStockAdjustRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyStockEntryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setMenuDailyStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: components["schemas"]["MenuStockTarget"];
+                target_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DailyStockSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyStockEntryRead"];
                 };
             };
             /** @description Validation Error */

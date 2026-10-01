@@ -311,6 +311,10 @@ class DuplicateMenuItem(DomainError):
     """同店餐飲菜單品項名稱重複。"""
 
 
+class MenuStockConflict(DomainError):
+    """每日限量數量的調整與現況衝突：不限量品項、數量剛被結帳改過、扣到小於 0。"""
+
+
 class MenuEntryNotFound(DomainError):
     """菜單分類／選項群組／選項不存在（或不屬於本店、已封存）。"""
 

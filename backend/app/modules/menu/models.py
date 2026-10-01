@@ -13,11 +13,12 @@
 實刪會破壞參照完整性。POS 只列「未封存且 is_available」者。
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -51,6 +52,9 @@ class MenuCategory(Base, TimestampMixin):
 
 class MenuItem(Base, TimestampMixin):
     __tablename__ = "menu_items"
+    __table_args__ = (
+        CheckConstraint("stock_qty IS NULL OR stock_qty >= 0", name="ck_menu_items_stock_nonneg"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -66,6 +70,11 @@ class MenuItem(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(500))
     # POS 是否可點（上架/停售切換，不影響歷史）。
     is_available: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    # 每日限量（docs/44 §3.7）：勾了就每天開店歸零，要填當天份數才能賣；沒勾＝不限量。
+    # 「歸零」不靠排程：stock_qty 只在 stock_day＝今天（台北營業日）時有效，否則視為 0。
+    daily_limited: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    stock_qty: Mapped[int | None] = mapped_column()
+    stock_day: Mapped[date | None] = mapped_column(Date)
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     # 封存（軟刪除）：非 NULL 即從 POS/管理清單隱藏，但保留供歷史 sale_line 參照。
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -101,6 +110,7 @@ class MenuOption(Base, TimestampMixin):
     __tablename__ = "menu_options"
     __table_args__ = (
         CheckConstraint("price_delta >= 0", name="ck_menu_options_price_delta_nonneg"),
+        CheckConstraint("stock_qty IS NULL OR stock_qty >= 0", name="ck_menu_options_stock_nonneg"),
         Index(
             "uq_menu_options_group_name_active",
             "group_id",
@@ -118,6 +128,11 @@ class MenuOption(Base, TimestampMixin):
     price_delta: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     # 單一選項停售（例：某支豆子用完）。
     is_available: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    # 每日限量（docs/44 §3.7）：勾了就每天開店歸零，要填當天份數才能賣；沒勾＝不限量。
+    # 「歸零」不靠排程：stock_qty 只在 stock_day＝今天（台北營業日）時有效，否則視為 0。
+    daily_limited: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    stock_qty: Mapped[int | None] = mapped_column()
+    stock_day: Mapped[date | None] = mapped_column(Date)
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

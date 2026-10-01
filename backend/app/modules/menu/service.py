@@ -6,7 +6,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Final
 
@@ -15,15 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
 from app.core.money import MAX_NTD, format_ntd
+from app.core.time import store_date, utc_now
 from app.modules.menu.models import MenuCategory, MenuItem, MenuOption, MenuOptionGroup
 from app.modules.menu.repository import MenuRepository
+from app.shared.enums import MenuStockTarget
 from app.shared.exceptions import (
     DuplicateMenuEntry,
     DuplicateMenuItem,
+    InsufficientStock,
     ItemDeleteBlocked,
     MenuEntryNotFound,
     MenuItemNotFound,
     MenuItemUnavailable,
+    MenuStockConflict,
     SaleLineInvalid,
 )
 
@@ -89,11 +93,51 @@ class MenuItemDetail:
 
 @dataclass(frozen=True)
 class MenuSelection:
-    """一行餐飲的計價結果：單價（基本價＋選項加價）、帶選項的品名、選項快照。"""
+    """一行餐飲的計價結果：單價（基本價＋選項加價）、帶選項的品名、選項快照、所選選項。"""
 
     unit_price: Decimal
     description: str
     options_snapshot: list[dict[str, object]]
+    options: list[MenuOption]
+
+
+@dataclass(frozen=True)
+class DailyStockEntry:
+    """一個每日限量對象今天的狀態（開店檢查與 POS 共用）。"""
+
+    kind: MenuStockTarget
+    id: int
+    label: str
+    remaining: int
+    set_today: bool
+
+
+def today() -> date:
+    """門市營業日（台北）。每日限量以此判斷「是不是今天填的」。"""
+    return store_date(utc_now())
+
+
+def remaining_today(entry: MenuItem | MenuOption, day: date) -> int | None:
+    """今天還能賣幾份；不限量 → None。stock_day 不是今天＝已歸零（不靠排程）。"""
+    if not entry.daily_limited:
+        return None
+    if entry.stock_day != day or entry.stock_qty is None:
+        return 0
+    return entry.stock_qty
+
+
+def _short(entry: MenuItem | MenuOption, day: date, qty: int) -> bool:
+    left = remaining_today(entry, day)
+    return left is not None and left < qty
+
+
+def _shortage_message(name: str, entry: MenuItem | MenuOption, day: date) -> str:
+    left = remaining_today(entry, day) or 0
+    if entry.stock_day != day:
+        return f"「{name}」今天還沒設定數量（每日限量），請先到開店檢查填份數"
+    if left == 0:
+        return f"「{name}」今天已售完"
+    return f"「{name}」今天只剩 {left} 份"
 
 
 def _line_description(name: str, picked: Sequence[tuple[str, str]]) -> str:
@@ -170,6 +214,7 @@ class MenuService:
         description: str | None | object = _UNSET,
         sort_order: int | None = None,
         is_available: bool | None = None,
+        daily_limited: bool | None = None,
         actor_user_id: int,
     ) -> MenuItem:
         """部分更新（None=不變；category/description 另以 _UNSET 區分「不變」與「清空」）。
@@ -203,6 +248,7 @@ class MenuService:
             item.sort_order = sort_order
         if is_available is not None:
             item.is_available = is_available
+        await self._set_daily_limited(store_id, item, daily_limited, actor_user_id, "menu_item")
         await self._session.flush()
 
         if unit_price is not None and unit_price != before_price:
@@ -289,6 +335,31 @@ class MenuService:
         )
         return item
 
+    async def _set_daily_limited(
+        self,
+        store_id: int,
+        target: MenuItem | MenuOption,
+        daily_limited: bool | None,
+        actor_user_id: int,
+        entity_type: str,
+    ) -> None:
+        """開／關每日限量（管理者設定，寫稽核）。關掉＝不限量；重新打開＝今天要重新填份數。"""
+        if daily_limited is None or daily_limited == target.daily_limited:
+            return
+        target.daily_limited = daily_limited
+        target.stock_qty = None
+        target.stock_day = None
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_MENU_DAILY_LIMITED",
+            entity_type=entity_type,
+            entity_id=str(target.id),
+            before={"daily_limited": not daily_limited},
+            after={"daily_limited": daily_limited},
+        )
+
     # ── 查詢 ──
     async def get(self, store_id: int, item_id: int) -> MenuItem | None:
         return await self._repo.get(store_id, item_id)
@@ -329,7 +400,7 @@ class MenuService:
         ]
 
     async def price_selection(
-        self, store_id: int, item: MenuItem, option_ids: Sequence[int]
+        self, store_id: int, item: MenuItem, option_ids: Sequence[int], qty: int = 1
     ) -> MenuSelection:
         """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
 
@@ -344,7 +415,11 @@ class MenuService:
         known = {o.id for d in details for o in d.options}
         if not chosen <= known:
             raise SaleLineInvalid(f"「{item.name}」沒有這個選項，請重新選擇")
+        day = today()
+        if _short(item, day, qty):
+            raise InsufficientStock(_shortage_message(item.name, item, day))
         unit_price = item.unit_price
+        chosen_options: list[MenuOption] = []
         picked_names: list[tuple[str, str]] = []
         snapshot: list[dict[str, object]] = []
         for detail in details:
@@ -359,6 +434,9 @@ class MenuService:
             for option in picked:
                 if not option.is_available:
                     raise MenuItemUnavailable(f"「{option.name}」目前停售")
+                if _short(option, day, qty):
+                    raise InsufficientStock(_shortage_message(option.name, option, day))
+                chosen_options.append(option)
                 unit_price += option.price_delta
                 picked_names.append((group.name, option.name))
                 snapshot.append(
@@ -374,7 +452,164 @@ class MenuService:
             unit_price=unit_price,
             description=_line_description(item.name, picked_names),
             options_snapshot=snapshot,
+            options=chosen_options,
         )
+
+    # ── 每日限量（docs/44 §3.7）──
+
+    async def consume_daily_stock(
+        self, store_id: int, item: MenuItem, selection: MenuSelection, qty: int
+    ) -> None:
+        """結帳扣份數（原子）；不夠 → InsufficientStock，同一交易的其他扣減會一起回滾。"""
+        day = today()
+        targets: list[MenuItem | MenuOption] = [item, *selection.options]
+        for entry in targets:
+            if not entry.daily_limited:
+                continue
+            ok = await self._repo.consume_stock(type(entry), store_id, entry.id, qty, day)
+            if not ok:
+                await self._session.refresh(entry)
+                raise InsufficientStock(_shortage_message(entry.name, entry, day))
+            await self._session.refresh(entry)
+
+    async def restore_daily_stock(
+        self,
+        store_id: int,
+        item: MenuItem,
+        option_ids: Sequence[int],
+        *,
+        qty: int,
+        sold_day: date,
+    ) -> None:
+        """作廢加回份數：只在**同一個營業日**作廢才加回（昨天賣掉的不會變成今天的份數）。"""
+        if sold_day != today():
+            return
+        await self._repo.restore_stock(MenuItem, store_id, item.id, qty, sold_day)
+        for option_id in option_ids:
+            await self._repo.restore_stock(MenuOption, store_id, option_id, qty, sold_day)
+
+    async def _stock_target(
+        self, store_id: int, kind: MenuStockTarget, target_id: int
+    ) -> tuple[MenuItem | MenuOption, str]:
+        if kind is MenuStockTarget.ITEM:
+            item = await self._repo.get(store_id, target_id)
+            if item is None or item.archived_at is not None:
+                raise MenuItemNotFound(f"找不到菜單品項 {target_id}")
+            return item, item.name
+        option = await self._repo.get_option(store_id, target_id)
+        if option is None:
+            raise MenuEntryNotFound(f"找不到選項 {target_id}")
+        group = await self._repo.get_group(store_id, option.group_id)
+        label = option.name if group is None else f"{group.name}：{option.name}"
+        return option, label
+
+    def _entry(
+        self, kind: MenuStockTarget, target: MenuItem | MenuOption, label: str
+    ) -> DailyStockEntry:
+        day = today()
+        return DailyStockEntry(
+            kind=kind,
+            id=target.id,
+            label=label,
+            remaining=remaining_today(target, day) or 0,
+            set_today=target.stock_day == day,
+        )
+
+    async def remaining(
+        self, store_id: int, kind: MenuStockTarget | str, target_id: int
+    ) -> int | None:
+        target, _ = await self._stock_target(store_id, MenuStockTarget(kind), target_id)
+        await self._session.refresh(target)
+        return remaining_today(target, today())
+
+    async def set_daily_stock(
+        self,
+        store_id: int,
+        kind: MenuStockTarget | str,
+        target_id: int,
+        *,
+        qty: int,
+        expected_remaining: int,
+        actor_user_id: int,
+    ) -> DailyStockEntry:
+        """把今天的份數改成 qty（開店填數量、或營業中直接改）。
+
+        必須附上店員畫面上看到的數字：期間若有人結帳、數字已變，就拒絕讓店員重看，
+        不能把剛賣掉的份數覆寫回來。
+        """
+        kind = MenuStockTarget(kind)
+        if qty < 0:
+            raise SaleLineInvalid("份數不可小於 0")
+        target, label = await self._stock_target(store_id, kind, target_id)
+        if not target.daily_limited:
+            raise MenuStockConflict(f"「{label}」是不限量品項，不需要設定份數")
+        day = today()
+        result = await self._repo.set_stock(
+            type(target), store_id, target_id, qty, expected_remaining, day
+        )
+        await self._session.refresh(target)
+        if result is None:
+            now = remaining_today(target, day) or 0
+            raise MenuStockConflict(f"「{label}」的數量剛剛變動（現在剩 {now} 份），請重新確認")
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="SET_MENU_DAILY_STOCK",
+            entity_type=f"menu_{kind.value}",
+            entity_id=str(target_id),
+            before={"remaining": expected_remaining},
+            after={"remaining": qty, "day": day.isoformat()},
+        )
+        return self._entry(kind, target, label)
+
+    async def adjust_daily_stock(
+        self,
+        store_id: int,
+        kind: MenuStockTarget | str,
+        target_id: int,
+        *,
+        delta: int,
+        actor_user_id: int,
+    ) -> DailyStockEntry:
+        """今天的份數加減（剛做好 +4、報廢 −1）。原子操作，與結帳同時進行也不會算錯。"""
+        kind = MenuStockTarget(kind)
+        target, label = await self._stock_target(store_id, kind, target_id)
+        if not target.daily_limited:
+            raise MenuStockConflict(f"「{label}」是不限量品項，不需要設定份數")
+        day = today()
+        result = await self._repo.add_stock(type(target), store_id, target_id, delta, day)
+        await self._session.refresh(target)
+        if result is None:
+            now = remaining_today(target, day) or 0
+            raise MenuStockConflict(f"「{label}」現在剩 {now} 份，不能再減 {-delta} 份")
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="ADJUST_MENU_DAILY_STOCK",
+            entity_type=f"menu_{kind.value}",
+            entity_id=str(target_id),
+            before={"remaining": result - delta},
+            after={"remaining": result, "day": day.isoformat()},
+        )
+        return self._entry(kind, target, label)
+
+    async def list_daily_stock(self, store_id: int) -> list[DailyStockEntry]:
+        """今天要填份數的對象（每日限量、未封存、未停售）：品項在前、選項在後。"""
+        entries = [
+            self._entry(MenuStockTarget.ITEM, item, item.name)
+            for item in await self._repo.list_limited_items(store_id)
+        ]
+        entries += [
+            self._entry(MenuStockTarget.OPTION, option, f"{group.name}：{option.name}")
+            for option, group in await self._repo.list_limited_options(store_id)
+        ]
+        return entries
+
+    async def daily_stock_pending(self, store_id: int) -> int:
+        """今天還沒填份數的限量對象數（開店前檢查用）。填 0 也算填過。"""
+        return sum(1 for e in await self.list_daily_stock(store_id) if not e.set_today)
 
     async def set_item_option_groups(
         self, store_id: int, item_id: int, group_ids: Sequence[int], *, actor_user_id: int
@@ -601,6 +836,7 @@ class MenuService:
         price_delta: Decimal | None = None,
         is_available: bool | None = None,
         sort_order: int | None = None,
+        daily_limited: bool | None = None,
         actor_user_id: int,
     ) -> MenuOption:
         option = await self._repo.get_option(store_id, option_id, for_update=True)
@@ -618,6 +854,7 @@ class MenuService:
             option.is_available = is_available
         if sort_order is not None:
             option.sort_order = sort_order
+        await self._set_daily_limited(store_id, option, daily_limited, actor_user_id, "menu_option")
         await self._session.flush()
         if price_delta is not None and price_delta != before_delta:
             await write_audit_log(

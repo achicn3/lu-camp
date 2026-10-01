@@ -15,6 +15,9 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.menu.models import MenuItem
 from app.modules.menu.schemas import (
+    DailyStockAdjustRequest,
+    DailyStockEntryRead,
+    DailyStockSetRequest,
     MenuCategoryCreateRequest,
     MenuCategoryRead,
     MenuCategoryUpdateRequest,
@@ -30,12 +33,14 @@ from app.modules.menu.schemas import (
     MenuOptionUpdateRequest,
 )
 from app.modules.menu.service import MenuService
+from app.shared.enums import MenuStockTarget
 from app.shared.exceptions import (
     DuplicateMenuEntry,
     DuplicateMenuItem,
     ItemDeleteBlocked,
     MenuEntryNotFound,
     MenuItemNotFound,
+    MenuStockConflict,
     SaleLineInvalid,
 )
 
@@ -115,6 +120,7 @@ async def update_menu_item(
             unit_price=body.unit_price,
             sort_order=body.sort_order,
             is_available=body.is_available,
+            daily_limited=body.daily_limited,
             actor_user_id=user.id,
             **category_kw,
             **cost_kw,
@@ -177,12 +183,18 @@ def _http_error(exc: Exception) -> HTTPException:
     """菜單領域例外 → HTTP（找不到 404、重複 409、不合法 422）。"""
     if isinstance(exc, MenuEntryNotFound | MenuItemNotFound):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    if isinstance(exc, DuplicateMenuEntry):
+    if isinstance(exc, DuplicateMenuEntry | MenuStockConflict):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
 
 
-_MenuErrors = (MenuEntryNotFound, MenuItemNotFound, DuplicateMenuEntry, SaleLineInvalid)
+_MenuErrors = (
+    MenuEntryNotFound,
+    MenuItemNotFound,
+    DuplicateMenuEntry,
+    MenuStockConflict,
+    SaleLineInvalid,
+)
 
 
 @router.put(
@@ -396,6 +408,7 @@ async def update_menu_option(
             price_delta=body.price_delta,
             is_available=body.is_available,
             sort_order=body.sort_order,
+            daily_limited=body.daily_limited,
             actor_user_id=user.id,
         )
     except _MenuErrors as exc:
@@ -418,3 +431,67 @@ async def archive_menu_option(
         raise _http_error(exc) from exc
     await session.commit()
     return MenuOptionRead.from_model(option)
+
+
+# ── 每日限量（docs/44 §3.7）：店員即可填／調整份數（開店檢查與營業中補貨） ──
+
+
+@entries_router.get(
+    "/menu-daily-stock",
+    response_model=list[DailyStockEntryRead],
+    operation_id="listMenuDailyStock",
+)
+async def list_menu_daily_stock(session: SessionDep, user: AuthDep) -> list[DailyStockEntryRead]:
+    entries = await MenuService(session).list_daily_stock(user.store_id)
+    return [DailyStockEntryRead.from_entry(e) for e in entries]
+
+
+@entries_router.post(
+    "/menu-daily-stock/{kind}/{target_id}/set",
+    response_model=DailyStockEntryRead,
+    operation_id="setMenuDailyStock",
+)
+async def set_menu_daily_stock(
+    kind: MenuStockTarget,
+    target_id: int,
+    body: DailyStockSetRequest,
+    session: SessionDep,
+    user: AuthDep,
+) -> DailyStockEntryRead:
+    try:
+        entry = await MenuService(session).set_daily_stock(
+            user.store_id,
+            kind,
+            target_id,
+            qty=body.qty,
+            expected_remaining=body.expected_remaining,
+            actor_user_id=user.id,
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return DailyStockEntryRead.from_entry(entry)
+
+
+@entries_router.post(
+    "/menu-daily-stock/{kind}/{target_id}/adjust",
+    response_model=DailyStockEntryRead,
+    operation_id="adjustMenuDailyStock",
+)
+async def adjust_menu_daily_stock(
+    kind: MenuStockTarget,
+    target_id: int,
+    body: DailyStockAdjustRequest,
+    session: SessionDep,
+    user: AuthDep,
+) -> DailyStockEntryRead:
+    try:
+        entry = await MenuService(session).adjust_daily_stock(
+            user.store_id, kind, target_id, delta=body.delta, actor_user_id=user.id
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return DailyStockEntryRead.from_entry(entry)

@@ -601,3 +601,13 @@ class IntakeDisposition(StrEnum):
     ACCEPTED = "ACCEPTED"  # 接受（可部分：3 張收 2 張）
     CUSTOMER_KEPT = "CUSTOMER_KEPT"  # 客人不售、帶回
     STORE_DECLINED = "STORE_DECLINED"  # 店家不收、退回客人
+
+
+class MenuStockTarget(StrEnum):
+    """每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。
+
+    值用小寫，因為它直接出現在網址路徑 `/menu-daily-stock/{kind}/{id}`。
+    """
+
+    ITEM = "item"
+    OPTION = "option"

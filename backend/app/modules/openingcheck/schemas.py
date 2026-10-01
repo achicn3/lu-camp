@@ -64,6 +64,8 @@ class OpeningCheckTodayRead(BaseModel):
     cash_session_open: bool
     items: list[OpeningCheckItemRead]
     skipped_keys: list[str]
+    # 每日限量的餐點今天還有幾項沒填份數（docs/44 §3.7）；0＝都填了或沒有限量品項。
+    menu_stock_pending: int = 0
     # 後端管得到的部分是否都完成（開帳＋自訂項目）。裝置那幾項由前端自己併進去判斷，
     # 所以前端顯示的「全部完成」可能比這個嚴格。
     completed: bool
@@ -73,7 +75,7 @@ class OpeningCheckItemDoneRequest(BaseModel):
     done: bool
 
 
-_SKIP_KEY = re.compile(r"^(cash_session|device:[A-Z_]{1,30}:[\w.\-]{1,60})$")
+_SKIP_KEY = re.compile(r"^(cash_session|menu_stock|device:[A-Z_]{1,30}:[\w.\-]{1,60})$")
 
 
 class OpeningCheckSkipRequest(BaseModel):
