@@ -41,6 +41,7 @@
 - [收購佇列：現場收件估價付款、空檔上架（規格草案）](./42-acquisition-intake-queue.md)
 - [MacBook 正式機：讓區網平板也能列印](./41-macbook-lan-tablet-printing.md)
 - [MacBook 正式機：升級到 2026-09-26 版（給正式機上的 AI 照做）](./43-macbook-upgrade-2026-09-26.md)
+- [線上掃碼點餐（Cloudflare）＋彈性菜單（規格草案）](./44-online-ordering.md)
 
 ## 評估與後續實作
 
