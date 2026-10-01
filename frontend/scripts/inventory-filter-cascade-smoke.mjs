@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
@@ -50,6 +51,7 @@ async function optionsOf(page, label) {
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+await skipOpeningCheckRedirect(page);
 const pageErrors = [];
 page.on("pageerror", (err) => pageErrors.push(String(err)));
 
