@@ -246,6 +246,11 @@ LINE Pay Online API v4（2026-10-01 查官方文件：`POST /v4/payments/request
 - `GET /v4/payments/requests/{transactionId}/check` → 客人未付時回 `0000 reserved transaction.`
 - 回應 JSON 的 `transactionId` 是 19 位**數字**（例 `2026100102385323710`），超過 JS 安全整數。
   Worker（JS）**必須**從原始文字取出字串，不可用 `JSON.parse` 後的數字。
+- **完整走通（店主手機掃碼授權）**：check 由 `0000 reserved` → `0110 authentication is done`（客人已授權、
+  **尚未扣款**）→ Worker 呼叫 `confirm {amount:150, currency:"TWD"}` → `0000`（payStatus `CAPTURE`）→ check 變
+  `0123 completed transaction` → `refund {}` 全額退 `0000` → 再退一次回 `1165 already refunded`
+  （與 Offline 相同，現有退款冪等邏輯可沿用）。`GET /v4/payments?transactionId=` 可查明細與退款紀錄。
+- 補查用的狀態碼：`0000` 等客人付款、`0110` 可 confirm、`0123` 已完成（confirm 回應遺失時據此收斂，§4.5 C7）。
 - 沙盒付款頁要用**真的 LINE 帳號**登入或用 LINE App 掃 QR 授權，無法全自動化。
   自動測試改用假 LINE Pay 伺服器；真沙盒驗收由店主手機掃碼配合。
 
