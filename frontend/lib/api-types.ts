@@ -2393,6 +2393,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/menu-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Categories */
+        get: operations["listMenuCategories"];
+        put?: never;
+        /** Create Menu Category */
+        post: operations["createMenuCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive Menu Category */
+        delete: operations["archiveMenuCategory"];
+        options?: never;
+        head?: never;
+        /** Update Menu Category */
+        patch: operations["updateMenuCategory"];
+        trace?: never;
+    };
     "/api/v1/menu-items": {
         parameters: {
             query?: never;
@@ -2447,6 +2483,94 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-items/{item_id}/option-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Menu Item Option Groups */
+        put: operations["setMenuItemOptionGroups"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-option-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Option Groups */
+        get: operations["listMenuOptionGroups"];
+        put?: never;
+        /** Create Menu Option Group */
+        post: operations["createMenuOptionGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-option-groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive Menu Option Group */
+        delete: operations["archiveMenuOptionGroup"];
+        options?: never;
+        head?: never;
+        /** Update Menu Option Group */
+        patch: operations["updateMenuOptionGroup"];
+        trace?: never;
+    };
+    "/api/v1/menu-option-groups/{group_id}/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Menu Option */
+        post: operations["addMenuOption"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-options/{option_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive Menu Option */
+        delete: operations["archiveMenuOption"];
+        options?: never;
+        head?: never;
+        /** Update Menu Option */
+        patch: operations["updateMenuOption"];
         trace?: never;
     };
     "/api/v1/opening-check/items": {
@@ -7656,10 +7780,38 @@ export interface components {
             /** Store Credit Balance */
             store_credit_balance: string;
         };
+        /** MenuCategoryCreateRequest */
+        MenuCategoryCreateRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+        };
+        /** MenuCategoryRead */
+        MenuCategoryRead: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** MenuCategoryUpdateRequest */
+        MenuCategoryUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+        };
         /** MenuItemCreateRequest */
         MenuItemCreateRequest: {
             /** Category */
             category?: string | null;
+            /** Description */
+            description?: string | null;
             /** Name */
             name: string;
             /**
@@ -7672,16 +7824,30 @@ export interface components {
             /** Unit Price */
             unit_price: number | string;
         };
+        /**
+         * MenuItemOptionGroupsRequest
+         * @description 整批替換品項所掛的群組；順序即顯示順序。
+         */
+        MenuItemOptionGroupsRequest: {
+            /** Group Ids */
+            group_ids: number[];
+        };
         /** MenuItemRead */
         MenuItemRead: {
             /** Category */
             category: string | null;
+            /** Category Id */
+            category_id: number | null;
+            /** Description */
+            description: string | null;
             /** Id */
             id: number;
             /** Is Available */
             is_available: boolean;
             /** Name */
             name: string;
+            /** Option Groups */
+            option_groups: components["schemas"]["MenuOptionGroupRead"][];
             /** Sort Order */
             sort_order: number;
             /** Store Id */
@@ -7698,6 +7864,8 @@ export interface components {
         MenuItemUpdateRequest: {
             /** Category */
             category?: string | null;
+            /** Description */
+            description?: string | null;
             /** Is Available */
             is_available?: boolean | null;
             /** Name */
@@ -7708,6 +7876,84 @@ export interface components {
             unit_cost?: number | string | null;
             /** Unit Price */
             unit_price?: number | string | null;
+        };
+        /** MenuOptionGroupCreateRequest */
+        MenuOptionGroupCreateRequest: {
+            /** Max Select */
+            max_select: number;
+            /** Min Select */
+            min_select: number;
+            /** Name */
+            name: string;
+            /** Options */
+            options?: components["schemas"]["MenuOptionInput"][];
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+        };
+        /** MenuOptionGroupRead */
+        MenuOptionGroupRead: {
+            /** Id */
+            id: number;
+            /** Max Select */
+            max_select: number;
+            /** Min Select */
+            min_select: number;
+            /** Name */
+            name: string;
+            /** Options */
+            options: components["schemas"]["MenuOptionRead"][];
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** MenuOptionGroupUpdateRequest */
+        MenuOptionGroupUpdateRequest: {
+            /** Max Select */
+            max_select?: number | null;
+            /** Min Select */
+            min_select?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+        };
+        /** MenuOptionInput */
+        MenuOptionInput: {
+            /** Name */
+            name: string;
+            /**
+             * Price Delta
+             * @default 0
+             */
+            price_delta: number | string;
+        };
+        /** MenuOptionRead */
+        MenuOptionRead: {
+            /** Group Id */
+            group_id: number;
+            /** Id */
+            id: number;
+            /** Is Available */
+            is_available: boolean;
+            /** Name */
+            name: string;
+            /** Price Delta */
+            price_delta: string;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** MenuOptionUpdateRequest */
+        MenuOptionUpdateRequest: {
+            /** Is Available */
+            is_available?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Price Delta */
+            price_delta?: number | string | null;
+            /** Sort Order */
+            sort_order?: number | null;
         };
         /**
          * NoteUpdateRequest
@@ -14419,6 +14665,125 @@ export interface operations {
             };
         };
     };
+    listMenuCategories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuCategoryRead"][];
+                };
+            };
+        };
+    };
+    createMenuCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuCategoryCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archiveMenuCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuCategoryUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuCategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listMenuItems: {
         parameters: {
             query?: {
@@ -14566,6 +14931,261 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setMenuItemOptionGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuItemOptionGroupsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMenuOptionGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionGroupRead"][];
+                };
+            };
+        };
+    };
+    createMenuOptionGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOptionGroupCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionGroupRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archiveMenuOptionGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionGroupRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuOptionGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOptionGroupUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionGroupRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addMenuOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOptionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archiveMenuOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                option_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                option_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOptionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOptionRead"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -13,20 +13,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.menu.models import MenuItem
 from app.modules.menu.schemas import (
+    MenuCategoryCreateRequest,
+    MenuCategoryRead,
+    MenuCategoryUpdateRequest,
     MenuItemCreateRequest,
+    MenuItemOptionGroupsRequest,
     MenuItemRead,
     MenuItemUpdateRequest,
+    MenuOptionGroupCreateRequest,
+    MenuOptionGroupRead,
+    MenuOptionGroupUpdateRequest,
+    MenuOptionInput,
+    MenuOptionRead,
+    MenuOptionUpdateRequest,
 )
 from app.modules.menu.service import MenuService
 from app.shared.exceptions import (
+    DuplicateMenuEntry,
     DuplicateMenuItem,
     ItemDeleteBlocked,
+    MenuEntryNotFound,
     MenuItemNotFound,
     SaleLineInvalid,
 )
 
 router = APIRouter(prefix="/menu-items", tags=["menu"])
+# 分類／選項群組／選項掛在各自的路徑下，同一個 router 檔維持 menu 模組單一入口。
+entries_router = APIRouter(tags=["menu"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 AuthDep = Annotated[CurrentUser, Depends(get_current_user)]
@@ -39,10 +54,9 @@ async def list_menu_items(
     user: AuthDep,
     available_only: Annotated[bool, Query()] = False,
 ) -> list[MenuItemRead]:
-    items = await MenuService(session).list_items(
-        user.store_id, include_unavailable=not available_only
-    )
-    return [MenuItemRead.from_model(i) for i in items]
+    svc = MenuService(session)
+    items = await svc.list_items(user.store_id, include_unavailable=not available_only)
+    return [MenuItemRead.from_detail(d) for d in await svc.describe_items(user.store_id, items)]
 
 
 @router.post(
@@ -61,6 +75,7 @@ async def create_menu_item(
             unit_price=body.unit_price,
             unit_cost=body.unit_cost,
             category=body.category,
+            description=body.description,
             sort_order=body.sort_order,
             actor_user_id=user.id,
         )
@@ -73,7 +88,7 @@ async def create_menu_item(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
-    return MenuItemRead.from_model(item)
+    return await _read_item(session, item)
 
 
 @router.patch("/{item_id}", response_model=MenuItemRead, operation_id="updateMenuItem")
@@ -89,6 +104,9 @@ async def update_menu_item(
     cost_kw: dict[str, Decimal | None] = (
         {"unit_cost": body.unit_cost} if "unit_cost" in body.model_fields_set else {}
     )
+    description_kw: dict[str, str | None] = (
+        {"description": body.description} if "description" in body.model_fields_set else {}
+    )
     try:
         item = await MenuService(session).update_menu_item(
             user.store_id,
@@ -100,6 +118,7 @@ async def update_menu_item(
             actor_user_id=user.id,
             **category_kw,
             **cost_kw,
+            **description_kw,
         )
     except MenuItemNotFound as exc:
         await session.rollback()
@@ -113,13 +132,11 @@ async def update_menu_item(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
-    return MenuItemRead.from_model(item)
+    return await _read_item(session, item)
 
 
 @router.delete("/{item_id}", response_model=MenuItemRead, operation_id="archiveMenuItem")
-async def archive_menu_item(
-    item_id: int, session: SessionDep, user: ManagerDep
-) -> MenuItemRead:
+async def archive_menu_item(item_id: int, session: SessionDep, user: ManagerDep) -> MenuItemRead:
     try:
         item = await MenuService(session).archive_menu_item(
             user.store_id, item_id, actor_user_id=user.id
@@ -128,7 +145,7 @@ async def archive_menu_item(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     await session.commit()
-    return MenuItemRead.from_model(item)
+    return await _read_item(session, item)
 
 
 @router.delete(
@@ -149,3 +166,255 @@ async def delete_menu_item(item_id: int, session: SessionDep, user: ManagerDep) 
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到菜單品項")
     await session.commit()
+
+
+async def _read_item(session: AsyncSession, item: MenuItem) -> MenuItemRead:
+    [detail] = await MenuService(session).describe_items(item.store_id, [item])
+    return MenuItemRead.from_detail(detail)
+
+
+def _http_error(exc: Exception) -> HTTPException:
+    """菜單領域例外 → HTTP（找不到 404、重複 409、不合法 422）。"""
+    if isinstance(exc, MenuEntryNotFound | MenuItemNotFound):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, DuplicateMenuEntry):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+
+
+_MenuErrors = (MenuEntryNotFound, MenuItemNotFound, DuplicateMenuEntry, SaleLineInvalid)
+
+
+@router.put(
+    "/{item_id}/option-groups",
+    response_model=MenuItemRead,
+    operation_id="setMenuItemOptionGroups",
+)
+async def set_menu_item_option_groups(
+    item_id: int, body: MenuItemOptionGroupsRequest, session: SessionDep, user: ManagerDep
+) -> MenuItemRead:
+    try:
+        item = await MenuService(session).set_item_option_groups(
+            user.store_id, item_id, body.group_ids, actor_user_id=user.id
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return await _read_item(session, item)
+
+
+# ── 分類 ──
+
+
+@entries_router.get(
+    "/menu-categories", response_model=list[MenuCategoryRead], operation_id="listMenuCategories"
+)
+async def list_menu_categories(session: SessionDep, user: AuthDep) -> list[MenuCategoryRead]:
+    return [
+        MenuCategoryRead.from_model(c)
+        for c in await MenuService(session).list_categories(user.store_id)
+    ]
+
+
+@entries_router.post(
+    "/menu-categories",
+    response_model=MenuCategoryRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createMenuCategory",
+)
+async def create_menu_category(
+    body: MenuCategoryCreateRequest, session: SessionDep, user: ManagerDep
+) -> MenuCategoryRead:
+    try:
+        category = await MenuService(session).create_category(
+            user.store_id, name=body.name, sort_order=body.sort_order
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuCategoryRead.from_model(category)
+
+
+@entries_router.patch(
+    "/menu-categories/{category_id}",
+    response_model=MenuCategoryRead,
+    operation_id="updateMenuCategory",
+)
+async def update_menu_category(
+    category_id: int, body: MenuCategoryUpdateRequest, session: SessionDep, user: ManagerDep
+) -> MenuCategoryRead:
+    try:
+        category = await MenuService(session).update_category(
+            user.store_id, category_id, name=body.name, sort_order=body.sort_order
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuCategoryRead.from_model(category)
+
+
+@entries_router.delete(
+    "/menu-categories/{category_id}",
+    response_model=MenuCategoryRead,
+    operation_id="archiveMenuCategory",
+)
+async def archive_menu_category(
+    category_id: int, session: SessionDep, user: ManagerDep
+) -> MenuCategoryRead:
+    try:
+        category = await MenuService(session).archive_category(user.store_id, category_id)
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuCategoryRead.from_model(category)
+
+
+# ── 選項群組 ──
+
+
+@entries_router.get(
+    "/menu-option-groups",
+    response_model=list[MenuOptionGroupRead],
+    operation_id="listMenuOptionGroups",
+)
+async def list_menu_option_groups(session: SessionDep, user: AuthDep) -> list[MenuOptionGroupRead]:
+    groups = await MenuService(session).list_option_groups(user.store_id)
+    return [MenuOptionGroupRead.from_detail(g) for g in groups]
+
+
+@entries_router.post(
+    "/menu-option-groups",
+    response_model=MenuOptionGroupRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createMenuOptionGroup",
+)
+async def create_menu_option_group(
+    body: MenuOptionGroupCreateRequest, session: SessionDep, user: ManagerDep
+) -> MenuOptionGroupRead:
+    try:
+        detail = await MenuService(session).create_option_group(
+            user.store_id,
+            name=body.name,
+            min_select=body.min_select,
+            max_select=body.max_select,
+            options=[(o.name, o.price_delta) for o in body.options],
+            sort_order=body.sort_order,
+            actor_user_id=user.id,
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionGroupRead.from_detail(detail)
+
+
+@entries_router.patch(
+    "/menu-option-groups/{group_id}",
+    response_model=MenuOptionGroupRead,
+    operation_id="updateMenuOptionGroup",
+)
+async def update_menu_option_group(
+    group_id: int, body: MenuOptionGroupUpdateRequest, session: SessionDep, user: ManagerDep
+) -> MenuOptionGroupRead:
+    try:
+        detail = await MenuService(session).update_option_group(
+            user.store_id,
+            group_id,
+            name=body.name,
+            min_select=body.min_select,
+            max_select=body.max_select,
+            sort_order=body.sort_order,
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionGroupRead.from_detail(detail)
+
+
+@entries_router.delete(
+    "/menu-option-groups/{group_id}",
+    response_model=MenuOptionGroupRead,
+    operation_id="archiveMenuOptionGroup",
+)
+async def archive_menu_option_group(
+    group_id: int, session: SessionDep, user: ManagerDep
+) -> MenuOptionGroupRead:
+    svc = MenuService(session)
+    try:
+        detail = await svc.get_option_group(user.store_id, group_id)
+        await svc.archive_option_group(user.store_id, group_id)
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionGroupRead.from_detail(detail)
+
+
+# ── 選項 ──
+
+
+@entries_router.post(
+    "/menu-option-groups/{group_id}/options",
+    response_model=MenuOptionRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="addMenuOption",
+)
+async def add_menu_option(
+    group_id: int, body: MenuOptionInput, session: SessionDep, user: ManagerDep
+) -> MenuOptionRead:
+    try:
+        option = await MenuService(session).add_option(
+            user.store_id,
+            group_id,
+            name=body.name,
+            price_delta=body.price_delta,
+            actor_user_id=user.id,
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionRead.from_model(option)
+
+
+@entries_router.patch(
+    "/menu-options/{option_id}", response_model=MenuOptionRead, operation_id="updateMenuOption"
+)
+async def update_menu_option(
+    option_id: int, body: MenuOptionUpdateRequest, session: SessionDep, user: ManagerDep
+) -> MenuOptionRead:
+    try:
+        option = await MenuService(session).update_option(
+            user.store_id,
+            option_id,
+            name=body.name,
+            price_delta=body.price_delta,
+            is_available=body.is_available,
+            sort_order=body.sort_order,
+            actor_user_id=user.id,
+        )
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionRead.from_model(option)
+
+
+@entries_router.delete(
+    "/menu-options/{option_id}", response_model=MenuOptionRead, operation_id="archiveMenuOption"
+)
+async def archive_menu_option(
+    option_id: int, session: SessionDep, user: ManagerDep
+) -> MenuOptionRead:
+    try:
+        option = await MenuService(session).archive_option(user.store_id, option_id)
+    except _MenuErrors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    return MenuOptionRead.from_model(option)

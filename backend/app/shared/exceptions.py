@@ -311,6 +311,14 @@ class DuplicateMenuItem(DomainError):
     """同店餐飲菜單品項名稱重複。"""
 
 
+class MenuEntryNotFound(DomainError):
+    """菜單分類／選項群組／選項不存在（或不屬於本店、已封存）。"""
+
+
+class DuplicateMenuEntry(DomainError):
+    """菜單分類／選項群組／同群組選項名稱重複。"""
+
+
 class InvoiceNotFound(DomainError):
     """指定的發票不存在（或不屬於本店）。"""
 

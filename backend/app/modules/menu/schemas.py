@@ -7,10 +7,11 @@
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
-from app.modules.menu.models import MenuItem
+from app.modules.menu.models import MenuCategory, MenuOption
+from app.modules.menu.service import MenuItemDetail, OptionGroupDetail
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[
@@ -25,6 +26,7 @@ class MenuItemCreateRequest(BaseModel):
     # 成本可不填（不知道就誠實留空，不要填 0——那會讓報表以為毛利 100%）。
     unit_cost: Decimal | None = Field(default=None, ge=0)
     category: str | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=500)
     sort_order: int = 0
 
     @field_validator("unit_price")
@@ -56,6 +58,7 @@ class MenuItemUpdateRequest(BaseModel):
     unit_price: Decimal | None = Field(default=None, gt=0)
     unit_cost: Decimal | None = Field(default=None, ge=0)  # 明確給 null＝清空成本
     category: str | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=500)  # 明確給 null＝清空
     sort_order: int | None = None
     is_available: bool | None = None
 
@@ -83,18 +86,153 @@ class MenuItemUpdateRequest(BaseModel):
         return value
 
 
-class MenuItemRead(BaseModel):
+def _valid_price_delta(value: Decimal) -> Decimal:
+    if value != value.to_integral_value():
+        raise ValueError("選項加價必須為整數元")
+    if value < 0:
+        raise ValueError("選項加價不可為負")
+    ensure_ntd_fits_numeric_12(value, field="選項加價")
+    return value
+
+
+class MenuOptionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: int
+    group_id: int
+    name: str
+    price_delta: NTDAmount
+    is_available: bool
+    sort_order: int
+
+    @classmethod
+    def from_model(cls, option: MenuOption) -> "MenuOptionRead":
+        return cls.model_validate(option, from_attributes=True)
+
+
+class MenuOptionGroupRead(BaseModel):
+    id: int
+    name: str
+    min_select: int
+    max_select: int
+    sort_order: int
+    options: list[MenuOptionRead]
+
+    @classmethod
+    def from_detail(cls, detail: OptionGroupDetail) -> "MenuOptionGroupRead":
+        g = detail.group
+        return cls(
+            id=g.id,
+            name=g.name,
+            min_select=g.min_select,
+            max_select=g.max_select,
+            sort_order=g.sort_order,
+            options=[MenuOptionRead.from_model(o) for o in detail.options],
+        )
+
+
+class MenuOptionInput(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    price_delta: Decimal = Decimal(0)
+
+    @field_validator("price_delta")
+    @classmethod
+    def _valid_delta(cls, value: Decimal) -> Decimal:
+        return _valid_price_delta(value)
+
+
+class MenuOptionUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    price_delta: Decimal | None = None
+    is_available: bool | None = None
+    sort_order: int | None = None
+
+    @field_validator("price_delta")
+    @classmethod
+    def _valid_delta(cls, value: Decimal | None) -> Decimal | None:
+        return None if value is None else _valid_price_delta(value)
+
+
+def _check_bounds(min_select: int, max_select: int) -> None:
+    if min_select < 0 or max_select < 1 or min_select > max_select:
+        raise ValueError("可選數量設定不正確：最少不可小於 0、最多至少 1，且最少不可大於最多")
+
+
+class MenuOptionGroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    min_select: int
+    max_select: int
+    sort_order: int = 0
+    options: list[MenuOptionInput] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def _valid_bounds(self) -> "MenuOptionGroupCreateRequest":
+        _check_bounds(self.min_select, self.max_select)
+        return self
+
+
+class MenuOptionGroupUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    min_select: int | None = None
+    max_select: int | None = None
+    sort_order: int | None = None
+
+
+class MenuItemOptionGroupsRequest(BaseModel):
+    """整批替換品項所掛的群組；順序即顯示順序。"""
+
+    group_ids: list[int] = Field(max_length=20)
+
+
+class MenuCategoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    sort_order: int
+
+    @classmethod
+    def from_model(cls, category: MenuCategory) -> "MenuCategoryRead":
+        return cls.model_validate(category, from_attributes=True)
+
+
+class MenuCategoryCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    sort_order: int = 0
+
+
+class MenuCategoryUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    sort_order: int | None = None
+
+
+class MenuItemRead(BaseModel):
     id: int
     store_id: int
     name: str
     unit_price: NTDAmount
     unit_cost: NTDAmountOpt
+    # 分類名稱（相容舊欄位）＋ id；未分類兩者皆 null。
     category: str | None
+    category_id: int | None
+    description: str | None
     is_available: bool
     sort_order: int
+    option_groups: list[MenuOptionGroupRead]
 
     @classmethod
-    def from_model(cls, item: MenuItem) -> "MenuItemRead":
-        return cls.model_validate(item, from_attributes=True)
+    def from_detail(cls, detail: MenuItemDetail) -> "MenuItemRead":
+        item = detail.item
+        return cls(
+            id=item.id,
+            store_id=item.store_id,
+            name=item.name,
+            unit_price=item.unit_price,
+            unit_cost=item.unit_cost,
+            category=detail.category.name if detail.category is not None else None,
+            category_id=detail.category.id if detail.category is not None else None,
+            description=item.description,
+            is_available=item.is_available,
+            sort_order=item.sort_order,
+            option_groups=[MenuOptionGroupRead.from_detail(g) for g in detail.option_groups],
+        )
