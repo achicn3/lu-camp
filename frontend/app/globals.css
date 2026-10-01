@@ -5768,3 +5768,20 @@ a.btn-ghost {
   gap: var(--sp-2);
   white-space: nowrap;
 }
+
+/* 餐飲交易紀錄（docs/47） */
+.fnb-toolbar {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-end;
+}
+.fnb-mixed-badge {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}

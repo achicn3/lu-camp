@@ -224,6 +224,12 @@ describe("/sales 交易紀錄頁", () => {
           reason: "原交易沒有已開立的發票，本次退貨不涉及發票處置。",
           refund_total: "200",
           unreturned_gifts: [],
+          // 退款去向由後端預覽給（docs/47）：購物金優先、台灣Pay 補差額。
+          refund_tenders: [
+            { tender_type: "STORE_CREDIT", amount: "100" },
+            { tender_type: "TAIWAN_PAY", amount: "100" },
+          ],
+          refund_supported: true,
         });
       }
       if (url.includes("/api/v1/returns") && method === "POST") {

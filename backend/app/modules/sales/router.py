@@ -584,6 +584,7 @@ async def list_fnb_sales(
             table_no=row.sale.table_no,
             payment_method=row.sale.payment_method,
             invoice_status=row.sale.invoice_status,
+            buyer_contact_id=row.sale.buyer_contact_id,
             total=row.sale.total,
             food_items=row.food_items,
             food_subtotal=row.food_subtotal,

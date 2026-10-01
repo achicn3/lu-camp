@@ -5,15 +5,18 @@ import type { components } from "@/lib/api-types";
 
 type SaleLine = components["schemas"]["SaleLineRead"];
 
-/** v1 後端支援退貨的行別（餐飲現做即售不退）。 */
+/** 退貨對話框的範圍（docs/47）：交易紀錄退二手／一般商品，餐飲交易紀錄退餐點。 */
+export type ReturnScope = "goods" | "food";
+
+/** 交易紀錄頁可退的行別；餐點改在餐飲交易紀錄頁退款（docs/47）。 */
 export const RETURNABLE_TYPES: ReadonlySet<string> = new Set([
   "CATALOG",
   "SERIALIZED",
   "BULK_LOT",
 ]);
 
-export function isReturnable(line: SaleLine): boolean {
-  return RETURNABLE_TYPES.has(line.line_type);
+export function isReturnable(line: SaleLine, scope: ReturnScope = "goods"): boolean {
+  return scope === "food" ? line.line_type === "MENU" : RETURNABLE_TYPES.has(line.line_type);
 }
 
 /** 可退餘量＝購買數 − 已退數（部分退貨後單仍 COMPLETED，可再退剩餘；後端為最終防線）。 */
@@ -58,13 +61,18 @@ export function validateReturnPlan(
   lines: SaleLine[],
   qtys: Record<number, number>,
   reason: string,
+  scope: ReturnScope = "goods",
 ): string | null {
   if (reason.trim() === "") return "請填寫退貨原因";
   let any = false;
   for (const line of lines) {
     const qty = qtys[line.id] ?? 0;
     if (qty === 0) continue;
-    if (!isReturnable(line)) return `「${line.description}」為餐飲品項，不支援退貨`;
+    if (!isReturnable(line, scope)) {
+      return scope === "food"
+        ? `「${line.description}」不是餐點，請到交易紀錄退貨`
+        : `「${line.description}」是餐點，請到餐飲交易紀錄退款`;
+    }
     if (qty < 0 || !Number.isInteger(qty)) return "退貨數量必須為正整數";
     const remaining = remainingQty(line);
     if (qty > remaining) {

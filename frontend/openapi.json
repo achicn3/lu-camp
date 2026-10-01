@@ -6589,6 +6589,17 @@
       "FnbSaleSummaryRead": {
         "description": "餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。",
         "properties": {
+          "buyer_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Contact Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -6661,6 +6672,7 @@
           "table_no",
           "payment_method",
           "invoice_status",
+          "buyer_contact_id",
           "total",
           "food_items",
           "food_subtotal",

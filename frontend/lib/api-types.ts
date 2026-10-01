@@ -6427,6 +6427,8 @@ export interface components {
          * @description 餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。
          */
         FnbSaleSummaryRead: {
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
             /**
              * Created At
              * Format: date-time

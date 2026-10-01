@@ -590,6 +590,8 @@ class FnbSaleSummaryRead(BaseModel):
     table_no: str | None
     payment_method: PaymentMethod
     invoice_status: SaleInvoiceStatus
+    # 買方會員（退款要請客人在顧客螢幕同意時帶入；匿名交易為 null）。
+    buyer_contact_id: int | None
     total: NTDAmount
     # 餐點摘要：「拿鐵（冰）×2、戚風×1」（品名已含選項）。
     food_items: str
