@@ -169,6 +169,14 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     # 上架時記的少件／壞件：那幾件已報廢出庫，弄丟就查不到成本為什麼少了。
     ("收購佇列-上架差異數", "SELECT count(*) FROM intake_discrepancies"),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
+    # 彈性菜單（docs/44）：分類、選項群組與加價都是店主手打的設定，弄丟就要重建整份菜單。
+    ("餐飲-菜單分類數", "SELECT count(*) FROM menu_categories"),
+    ("餐飲-選項群組數", "SELECT count(*) FROM menu_option_groups"),
+    (
+        "餐飲-選項（數／加價合計）",
+        "SELECT count(*)::text || '/' || COALESCE(SUM(price_delta),0)::text FROM menu_options",
+    ),
+    ("餐飲-品項掛群組數", "SELECT count(*) FROM menu_item_option_groups"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
     ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),
