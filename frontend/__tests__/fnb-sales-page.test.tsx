@@ -192,4 +192,47 @@ describe("/fnb-sales 餐飲交易紀錄", () => {
     const button = await screen.findByRole("button", { name: "餐點退款 12" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("已開發票的餐點退款：請客人點選同意（推送的任務帶 consent_mode TAP）", async () => {
+    let pushed: unknown = null;
+    stubFetch((url, method, body) => {
+      if (url.includes("/api/v1/sales/fnb")) return json([ROW]);
+      if (url.endsWith("/api/v1/sales/12") && method === "GET") return json(DETAIL);
+      if (url.includes("/api/v1/returns/preview")) {
+        return json({
+          is_full_return: false,
+          invoice_action: "ALLOWANCE",
+          manual_paper_resolvable: false,
+          requires_paper_recall: false,
+          requires_customer_consent: true,
+          reason: "部分退貨：原發票對未退商品仍有效，開立折讓單。",
+          refund_total: "150",
+          unreturned_gifts: [],
+          refund_tenders: [{ tender_type: "CASH", amount: "150" }],
+          refund_supported: true,
+        });
+      }
+      if (url.includes("/api/v1/customer-display/terminals") && method === "POST") {
+        return json({ id: 3, paired_kiosk: { id: 5, online: true } });
+      }
+      if (url.includes("/api/v1/signing/tasks") && method === "POST") {
+        pushed = body;
+        return json({ id: 99, status: "PENDING" });
+      }
+      if (url.includes("/api/v1/signing/tasks/99")) return json({ id: 99, status: "PENDING" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "餐點退款 12" }));
+    const dialog = await screen.findByRole("dialog", { name: "餐點退款" });
+    const qty = within(dialog).getByLabelText("拿鐵（冰） 退貨數量");
+    await user.clear(qty);
+    await user.type(qty, "1");
+    expect(await within(dialog).findByText("請先請客人於顧客螢幕點選同意")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "請客人於顧客螢幕點選同意" }));
+    await waitFor(() => expect(pushed).not.toBeNull());
+    expect((pushed as { consent_mode?: string }).consent_mode).toBe("TAP");
+    expect(await within(dialog).findByText("已送出，等待客人同意…")).toBeTruthy();
+  });
 });

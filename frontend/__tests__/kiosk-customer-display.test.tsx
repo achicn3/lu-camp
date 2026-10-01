@@ -281,6 +281,62 @@ describe("/kiosk 客顯", () => {
     ).toBeTruthy();
   });
 
+  it("點選同意的任務（純餐點退款）：不出簽名板，按「同意」送出、不帶簽名圖", async () => {
+    const csrf = "csrf-token-at-least-thirty-two-characters";
+    window.localStorage.setItem("lu-camp.kiosk.csrf", csrf);
+    const requests: Request[] = [];
+    const task = {
+      id: 61,
+      kind: "RETURN_INVOICE_CONSENT",
+      status: "SIGNING",
+      consent_mode: "TAP",
+      content: {
+        invoice_action_label: "開立折讓單",
+        refund_total: "150",
+        items: [{ name: "拿鐵（冰）", qty: 1, line_total: "150" }],
+      },
+      chosen_payout: null,
+      expires_at: null,
+      agreement_title: null,
+      agreement_body: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        requests.push(request);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(task);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        if (request.url.endsWith("/activity")) return json(task);
+        if (request.url.endsWith("/sign")) return json({ ...task, status: "SIGNED" });
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const agree = await screen.findByRole("button", { name: "我同意" });
+    expect(screen.queryByRole("button", { name: "模擬簽名" })).toBeNull();
+    await user.click(agree);
+    await screen.findByText("已完成簽署");
+    const signRequest = requests.find((request) => request.url.endsWith("/sign"));
+    const body = (await signRequest!.clone().json()) as Record<string, unknown>;
+    expect(body.signature_image_base64).toBeNull();
+    expect(typeof body.idempotency_key).toBe("string");
+  });
+
   it("送出簽名時帶裝置 CSRF token", async () => {
     const csrf = "csrf-token-at-least-thirty-two-characters";
     window.localStorage.setItem("lu-camp.kiosk.csrf", csrf);

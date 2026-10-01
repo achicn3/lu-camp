@@ -1311,9 +1311,11 @@ function TaskScreen({
   // 後端回放同結果而非 409（Codex K3 第六輪）。key=task.id 換任務即重掛→自然換新鍵。
   const idempotencyKey = useRef<string>(newIdempotencyKey());
   // 首次送出凍結的 payload（重試沿用同一份，避免在途變更造成同鍵不同指紋 409）。
-  const submittedPayload = useRef<{ image: string; payout: "CASH" | "STORE_CREDIT" | null } | null>(
-    null,
-  );
+  // 點選同意（docs/47 E3）沒有簽名圖：image 為 null。
+  const submittedPayload = useRef<{
+    image: string | null;
+    payout: "CASH" | "STORE_CREDIT" | null;
+  } | null>(null);
   const [hasInk, setHasInk] = useState(false);
   const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1326,6 +1328,9 @@ function TaskScreen({
   const [payloadLocked, setPayloadLocked] = useState(false);
 
   const needsPayout = PAYOUT_KINDS.has(task.kind);
+  // 純餐點退款的發票同意（docs/47 E3）：客人按「我同意」即可，不出簽名板。
+  // 是不是點選同意由後端決定（建任務時已驗證本次全部是餐點），這裡只照著顯示。
+  const tapConsent = task.consent_mode === "TAP";
   const needsAgreement = task.agreement_body !== null;
   // 送出在途或曖昧鎖定時，撥款/同意/簽名一律不可改（重試須與已送出的 payload 一致）。
   const controlsLocked = submitting || payloadLocked;
@@ -1347,7 +1352,7 @@ function TaskScreen({
   }, []);
 
   const canSubmit =
-    hasInk &&
+    (tapConsent || hasInk) &&
     !submitting &&
     !superseded &&
     (!needsPayout || payout !== null) &&
@@ -1358,12 +1363,16 @@ function TaskScreen({
     // 在途期間客人改撥款/重畫，重試會以同鍵送出不同內容 → 撞不同指紋 409 → 誤判 superseded
     // 清鎖恢復輪詢。捕捉於 ref、送出即鎖控制項（submitting||payloadLocked），杜絕在途變更。
     if (submittedPayload.current === null) {
-      const image = canvasRef.current?.toBase64();
-      if (!image) {
-        setError("簽名太少，請簽得更完整（或清除重簽）。");
-        return;
+      if (tapConsent) {
+        submittedPayload.current = { image: null, payout: null };
+      } else {
+        const image = canvasRef.current?.toBase64();
+        if (!image) {
+          setError("簽名太少，請簽得更完整（或清除重簽）。");
+          return;
+        }
+        submittedPayload.current = { image, payout: needsPayout ? payout : null };
       }
-      submittedPayload.current = { image, payout: needsPayout ? payout : null };
     }
     const frozen = submittedPayload.current;
     setSubmitting(true);
@@ -1508,17 +1517,23 @@ function TaskScreen({
           </div>
         )}
 
-        <div className="kiosk-signature">
-          <h2 className="kiosk-section-title">簽名確認</h2>
-          <SignatureCanvas
-            ref={canvasRef}
-            onInkChange={(ink) => {
-              setHasInk(ink);
-              reportActivity(ink ? "SIGNATURE_INPUT" : "SIGNATURE_CLEARED");
-            }}
-            locked={controlsLocked}
-          />
-        </div>
+        {tapConsent ? (
+          <p className="kiosk-tap-consent-hint">
+            確認上面的退款品項與金額沒有問題，請按下方「我同意」。
+          </p>
+        ) : (
+          <div className="kiosk-signature">
+            <h2 className="kiosk-section-title">簽名確認</h2>
+            <SignatureCanvas
+              ref={canvasRef}
+              onInkChange={(ink) => {
+                setHasInk(ink);
+                reportActivity(ink ? "SIGNATURE_INPUT" : "SIGNATURE_CLEARED");
+              }}
+              locked={controlsLocked}
+            />
+          </div>
+        )}
       </section>
 
       <footer className="kiosk-task-footer">
@@ -1533,7 +1548,7 @@ function TaskScreen({
           disabled={!canSubmit}
           onClick={submit}
         >
-          {submitting ? "送出中…" : "確認並送出"}
+          {submitting ? "送出中…" : tapConsent ? "我同意" : "確認並送出"}
         </button>
       </footer>
     </main>

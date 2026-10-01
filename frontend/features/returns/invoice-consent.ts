@@ -22,6 +22,8 @@ export interface ReturnConsentState {
   consentTaskSigned: boolean;
   /** 店長已確認依國稅局程序處置手開紙本發票（docs/36）。 */
   manualPaperDisposed?: boolean;
+  /** 純餐點退款用點選同意（docs/47 E3）：提示改講「點選同意」。 */
+  tapConsent?: boolean;
 }
 
 /**
@@ -61,7 +63,11 @@ export function returnSubmitBlockers(
     blockers.push("請先向客人收回發票證明聯（紙本）並勾選確認");
   }
   if (preview.requires_customer_consent && !state.consentTaskSigned) {
-    blockers.push("請先請客人於顧客螢幕簽名同意");
+    blockers.push(
+      state.tapConsent === true
+        ? "請先請客人於顧客螢幕點選同意"
+        : "請先請客人於顧客螢幕簽名同意",
+    );
   }
   return blockers;
 }

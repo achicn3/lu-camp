@@ -5800,3 +5800,11 @@ a.btn-ghost {
   border: 1px solid var(--border);
   white-space: nowrap;
 }
+
+/* 顧客螢幕點選同意（docs/47 E3）：沒有簽名板時，說明要大而清楚。 */
+.kiosk-tap-consent-hint {
+  margin: var(--sp-4) 0 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-align: center;
+}

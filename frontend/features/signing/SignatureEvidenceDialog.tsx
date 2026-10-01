@@ -144,8 +144,15 @@ export function SignatureEvidenceDialog({
                 ))}
               </tbody>
             </table>
-            <h3>手寫簽名</h3>
-            {full.has_signature ? (
+            <h3>{full.consent_mode === "TAP" ? "同意方式" : "手寫簽名"}</h3>
+            {full.consent_mode === "TAP" ? (
+              // 純餐點退款的發票同意（docs/47 E3）：客人在顧客螢幕按「我同意」，本來就沒有簽名圖。
+              <p>
+                {full.signed_at !== null
+                  ? "客人在顧客螢幕點選「我同意」（純餐點退款，不需手寫簽名）。"
+                  : "此任務尚未同意。"}
+              </p>
+            ) : full.has_signature ? (
               imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- blob URL 無法用 next/image
                 <img

@@ -227,6 +227,8 @@ export function ReturnDialog({
           terminal_id: terminal.id,
           ref_type: "sale",
           ref_id: sale.id,
+          // 純餐點退款：客人在顧客螢幕點「我同意」即可（docs/47 E3，後端會再驗全是餐點）。
+          ...(scope === "food" ? { consent_mode: "TAP" as const } : {}),
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "推送簽名同意失敗");
@@ -244,6 +246,7 @@ export function ReturnDialog({
     paperRecalled,
     consentTaskSigned: consentSigned,
     manualPaperDisposed,
+    tapConsent: scope === "food",
   });
 
   const submit = useMutation({
@@ -528,7 +531,9 @@ export function ReturnDialog({
             {previewData.requires_customer_consent && (
               <div className="return-consent">
                 {consentSigned ? (
-                  <p className="form-success">客人已簽名同意（簽署單號 #{consentTaskId}）</p>
+                  <p className="form-success">
+                    {scope === "food" ? "客人已同意" : "客人已簽名同意"}（簽署單號 #{consentTaskId}）
+                  </p>
                 ) : (
                   <>
                     <button
@@ -537,13 +542,21 @@ export function ReturnDialog({
                       disabled={pushConsent.isPending}
                       onClick={() => pushConsent.mutate()}
                     >
-                      {pushConsent.isPending ? "推送中…" : "請客人於顧客螢幕簽名同意"}
+                      {pushConsent.isPending
+                        ? "推送中…"
+                        : scope === "food"
+                          ? "請客人於顧客螢幕點選同意"
+                          : "請客人於顧客螢幕簽名同意"}
                     </button>
                     {consentMatchesPlan && consentTask.data?.status === "PENDING" && (
-                      <span className="hint">已送出，等待客人簽名…</span>
+                      <span className="hint">
+                        {scope === "food" ? "已送出，等待客人同意…" : "已送出，等待客人簽名…"}
+                      </span>
                     )}
                     {consentMatchesPlan && consentTask.data?.status === "SIGNING" && (
-                      <span className="hint">客人簽名中…</span>
+                      <span className="hint">
+                        {scope === "food" ? "客人確認中…" : "客人簽名中…"}
+                      </span>
                     )}
                     {consentTaskId !== null && !consentMatchesPlan && (
                       <span className="hint">退貨品項已變更，請重新請客人簽名。</span>
