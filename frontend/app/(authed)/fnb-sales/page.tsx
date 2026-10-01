@@ -9,7 +9,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { INVOICE_STATUS_LABELS, PAYMENT_METHOD_LABELS, labelFor } from "@/features/member/labels";
+import {
+  INVOICE_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+  labelFor,
+} from "@/features/member/labels";
 import { ReturnDialog } from "@/features/returns/ReturnDialog";
 import { refundTenderLabel } from "@/features/returns/refund";
 import { api } from "@/lib/api";
@@ -51,7 +55,9 @@ function seatLabel(sale: FnbSale): string {
 /** 這筆還有沒有餐點可退：作廢／全退的不行，餐點已退金額達餐點小計也不行。 */
 function canRefundFood(sale: FnbSale): boolean {
   if (sale.status !== "COMPLETED") return false;
-  return (parseNtd(sale.food_refunded) ?? 0) < (parseNtd(sale.food_subtotal) ?? 0);
+  return (
+    (parseNtd(sale.food_refunded) ?? 0) < (parseNtd(sale.food_subtotal) ?? 0)
+  );
 }
 
 export default function FnbSalesPage() {
@@ -66,10 +72,15 @@ export default function FnbSalesPage() {
     queryFn: async (): Promise<FnbSale[]> => {
       const { data, error } = await api.GET("/api/v1/sales/fnb", {
         params: {
-          query: { from: startOfTaipeiDay(day), to: exclusiveEndOfTaipeiDay(day), limit: 200 },
+          query: {
+            from: startOfTaipeiDay(day),
+            to: exclusiveEndOfTaipeiDay(day),
+            limit: 200,
+          },
         },
       });
-      if (!data) throw new Error(extractDetail(error) ?? "讀取餐飲交易紀錄失敗");
+      if (!data)
+        throw new Error(extractDetail(error) ?? "讀取餐飲交易紀錄失敗");
       return data;
     },
   });
@@ -79,8 +90,9 @@ export default function FnbSalesPage() {
     <section>
       <h1 className="page-title">餐飲交易紀錄</h1>
       <p className="hint">
-        只列有點餐的交易。可以退其中幾份餐點（例如 3 杯拿鐵退 1 杯），金額由系統依實付計算；
-        同一張單的二手商品請到<Link href="/sales">交易紀錄</Link>退貨。
+        只列有點餐的交易。可以退其中幾份餐點（例如 3 杯拿鐵退 1
+        杯），金額由系統依實付計算； 同一張單的二手商品請到
+        <Link href="/sales">交易紀錄</Link>退貨。
       </p>
 
       <div className="card fnb-toolbar">
@@ -109,74 +121,86 @@ export default function FnbSalesPage() {
         </p>
       )}
       {list.isPending && <p className="hint">載入中…</p>}
-      {list.isSuccess && rows.length === 0 && <p className="hint">這天沒有餐飲交易。</p>}
+      {list.isSuccess && rows.length === 0 && (
+        <p className="hint">這天沒有餐飲交易。</p>
+      )}
 
       {rows.length > 0 && (
-        <div className="card">
-          <table className="data-table fnb-table">
-            <thead>
-              <tr>
-                <th>時間</th>
-                <th>單號</th>
-                <th>內用／外帶</th>
-                <th>餐點</th>
-                <th>餐點小計</th>
-                <th>整單總額</th>
-                <th>已退</th>
-                <th>付款／發票</th>
-                <th>狀態</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((sale) => (
-                <tr key={sale.id}>
-                  <td>{formatTaipeiTime(sale.created_at)}</td>
-                  <td>#{sale.id}</td>
-                  <td>{seatLabel(sale)}</td>
-                  <td>
-                    {sale.food_items}
-                    {sale.has_other_items && (
-                      <span className="fnb-mixed-badge" title="二手商品請到交易紀錄退貨">
-                        含二手商品
-                      </span>
-                    )}
-                  </td>
-                  <td className="money">{money(sale.food_subtotal)}</td>
-                  <td className="money">{money(sale.total)}</td>
-                  <td className="money">
-                    {(parseNtd(sale.total_refunded) ?? 0) === 0 ? "—" : money(sale.total_refunded)}
-                  </td>
-                  <td>
-                    {labelFor(PAYMENT_METHOD_LABELS, sale.payment_method)}／
-                    {labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}
-                  </td>
-                  <td>{STATUS_LABELS[sale.status] ?? sale.status}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      aria-label={`餐點退款 ${sale.id}`}
-                      disabled={!canRefundFood(sale)}
-                      onClick={() => {
-                        setNotice(null);
-                        setTarget(sale);
-                      }}
-                    >
-                      退款
-                    </button>
-                  </td>
+        <div className="card fnb-list-card">
+          <div className="fnb-list-wrap">
+            <table className="data-table fnb-table">
+              <thead>
+                <tr>
+                  <th>時間</th>
+                  <th>單號</th>
+                  <th>內用／外帶</th>
+                  <th>餐點</th>
+                  <th>餐點小計</th>
+                  <th>整單總額</th>
+                  <th>已退</th>
+                  <th>付款／發票</th>
+                  <th>狀態</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((sale) => (
+                  <tr key={sale.id}>
+                    <td>{formatTaipeiTime(sale.created_at)}</td>
+                    <td>#{sale.id}</td>
+                    <td>{seatLabel(sale)}</td>
+                    <td>
+                      {sale.food_items}
+                      {sale.has_other_items && (
+                        <span
+                          className="fnb-mixed-badge"
+                          title="二手商品請到交易紀錄退貨"
+                        >
+                          含二手商品
+                        </span>
+                      )}
+                    </td>
+                    <td className="money">{money(sale.food_subtotal)}</td>
+                    <td className="money">{money(sale.total)}</td>
+                    <td className="money">
+                      {(parseNtd(sale.total_refunded) ?? 0) === 0
+                        ? "—"
+                        : money(sale.total_refunded)}
+                    </td>
+                    <td>
+                      {labelFor(PAYMENT_METHOD_LABELS, sale.payment_method)}／
+                      {labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}
+                    </td>
+                    <td>{STATUS_LABELS[sale.status] ?? sale.status}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`餐點退款 ${sale.id}`}
+                        disabled={!canRefundFood(sale)}
+                        onClick={() => {
+                          setNotice(null);
+                          setTarget(sale);
+                        }}
+                      >
+                        退款
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {target !== null && (
         <ReturnDialog
           scope="food"
-          sale={{ id: target.id, buyer_contact_id: target.buyer_contact_id ?? null }}
+          sale={{
+            id: target.id,
+            buyer_contact_id: target.buyer_contact_id ?? null,
+          }}
           canConfirmPaper={isManager}
           onClose={() => setTarget(null)}
           onReturned={(refund, tenders) => {

@@ -5771,9 +5771,24 @@ a.btn-ghost {
 
 /* 餐飲交易紀錄（docs/47） */
 .fnb-toolbar {
-  display: flex;
+  flex-direction: row;
   gap: var(--sp-3);
   align-items: flex-end;
+}
+/* 表格要用滿寬：.card 預設 max-width 520px，欄位會被擠成直排。 */
+.fnb-list-card {
+  max-width: none;
+}
+.fnb-list-wrap {
+  overflow-x: auto;
+}
+.data-table.fnb-table th,
+.data-table.fnb-table td {
+  white-space: nowrap;
+}
+.data-table.fnb-table td:nth-child(4) {
+  white-space: normal;
+  min-width: 14rem;
 }
 .fnb-mixed-badge {
   display: inline-block;
