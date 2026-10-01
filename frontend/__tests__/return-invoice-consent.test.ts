@@ -17,6 +17,8 @@ function preview(overrides: Partial<ReturnInvoicePreview> = {}): ReturnInvoicePr
     reason: "整筆退貨且原發票為本月開立：作廢原發票。需先向客人收回紙本證明聯。",
     refund_total: "500",
     unreturned_gifts: [],
+    refund_tenders: [{ tender_type: "CASH", amount: "500" }],
+    refund_supported: true,
     ...overrides,
   };
 }

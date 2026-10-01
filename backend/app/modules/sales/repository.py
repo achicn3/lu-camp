@@ -529,6 +529,39 @@ class SalesRepository:
         result = await self._session.scalars(stmt)
         return list(result)
 
+    async def list_fnb_sales(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime | None,
+        date_to: datetime | None,
+        limit: int,
+        offset: int,
+    ) -> list[Sale]:
+        """含餐點明細的銷售（新到舊）；餐飲交易紀錄頁用（docs/47 §4）。"""
+        has_menu = (
+            select(SaleLine.id)
+            .where(SaleLine.sale_id == Sale.id, SaleLine.line_type == SaleLineType.MENU)
+            .exists()
+        )
+        stmt = select(Sale).where(Sale.store_id == store_id, has_menu)
+        if date_from is not None:
+            stmt = stmt.where(Sale.created_at >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Sale.created_at < date_to)
+        stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
+        return list(await self._session.scalars(stmt))
+
+    async def list_lines_for_sales(self, sale_ids: list[int]) -> list[SaleLine]:
+        if not sale_ids:
+            return []
+        stmt = (
+            select(SaleLine)
+            .where(SaleLine.sale_id.in_(sale_ids))
+            .order_by(SaleLine.sale_id, SaleLine.id)
+        )
+        return list(await self._session.scalars(stmt))
+
     async def list_lines(self, sale_id: int) -> list[SaleLine]:
         stmt = select(SaleLine).where(SaleLine.sale_id == sale_id).order_by(SaleLine.id)
         result = await self._session.scalars(stmt)

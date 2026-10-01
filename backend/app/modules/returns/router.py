@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
 from app.modules.returns.schemas import (
+    RefundTenderPreviewRead,
     ReturnCreateRequest,
     ReturnPreviewRead,
     ReturnPreviewRequest,
@@ -155,7 +156,14 @@ async def preview_return(
         )
     except DomainError as exc:
         raise _map_domain_error(exc) from exc
-    return ReturnPreviewRead(**result)
+    tenders = result.pop("refund_tenders")
+    assert isinstance(tenders, list)
+    return ReturnPreviewRead(
+        **result,
+        refund_tenders=[
+            RefundTenderPreviewRead(tender_type=kind, amount=amount) for kind, amount in tenders
+        ],
+    )
 
 
 @router.get("/returns/{return_id}", response_model=ReturnRead, operation_id="getReturn")

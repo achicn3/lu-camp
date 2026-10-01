@@ -3296,6 +3296,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales/fnb": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Fnb Sales
+         * @description 餐飲交易紀錄（docs/47 §4）：只列含餐點的交易，附餐點摘要、小計與已退金額。
+         *
+         *     **必須排在 `/{sale_id}` 之前**：否則 `fnb` 會被當成單號而回 422。
+         */
+        get: operations["listFnbSales"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales/linepay-refunds/pending": {
         parameters: {
             query?: never;
@@ -6401,6 +6423,37 @@ export interface components {
             store_id: number;
         };
         /**
+         * FnbSaleSummaryRead
+         * @description 餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。
+         */
+        FnbSaleSummaryRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Food Items */
+            food_items: string;
+            /** Food Refunded */
+            food_refunded: string;
+            /** Food Subtotal */
+            food_subtotal: string;
+            /** Has Other Items */
+            has_other_items: boolean;
+            /** Id */
+            id: number;
+            invoice_status: components["schemas"]["SaleInvoiceStatus"];
+            payment_method: components["schemas"]["PaymentMethod"];
+            service_mode: components["schemas"]["ServiceMode"] | null;
+            status: components["schemas"]["SaleStatus"];
+            /** Table No */
+            table_no: string | null;
+            /** Total */
+            total: string;
+            /** Total Refunded */
+            total_refunded: string;
+        };
+        /**
          * GiftProductRow
          * @description 一個品項在期間內送出、退回與淨額。
          */
@@ -8607,6 +8660,15 @@ export interface components {
             low: string;
         };
         /**
+         * RefundTenderPreviewRead
+         * @description 本次退款退回的一種付款方式（後端算，畫面照抄）。
+         */
+        RefundTenderPreviewRead: {
+            /** Amount */
+            amount: string;
+            tender_type: components["schemas"]["TenderType"];
+        };
+        /**
          * RestoreRunRead
          * @description 一次還原執行的輸出（docs/31 §6）：四驗結果供 UI 呈現;VERIFIED 才代表救得回。
          */
@@ -8714,6 +8776,16 @@ export interface components {
             manual_paper_resolvable: boolean;
             /** Reason */
             reason: string;
+            /**
+             * Refund Supported
+             * @default true
+             */
+            refund_supported: boolean;
+            /**
+             * Refund Tenders
+             * @default []
+             */
+            refund_tenders: components["schemas"]["RefundTenderPreviewRead"][];
             /** Refund Total */
             refund_total: string;
             /** Requires Customer Consent */
@@ -16589,6 +16661,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listFnbSales: {
+        parameters: {
+            query?: {
+                from?: components["schemas"]["AwareDateTime"] | null;
+                to?: components["schemas"]["AwareDateTime"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FnbSaleSummaryRead"][];
                 };
             };
             /** @description Validation Error */

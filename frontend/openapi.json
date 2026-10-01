@@ -6586,6 +6586,91 @@
         "title": "FlowsReport",
         "type": "object"
       },
+      "FnbSaleSummaryRead": {
+        "description": "餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "food_items": {
+            "title": "Food Items",
+            "type": "string"
+          },
+          "food_refunded": {
+            "title": "Food Refunded",
+            "type": "string"
+          },
+          "food_subtotal": {
+            "title": "Food Subtotal",
+            "type": "string"
+          },
+          "has_other_items": {
+            "title": "Has Other Items",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invoice_status": {
+            "$ref": "#/components/schemas/SaleInvoiceStatus"
+          },
+          "payment_method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/SaleStatus"
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          },
+          "total_refunded": {
+            "title": "Total Refunded",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "status",
+          "service_mode",
+          "table_no",
+          "payment_method",
+          "invoice_status",
+          "total",
+          "food_items",
+          "food_subtotal",
+          "has_other_items",
+          "food_refunded",
+          "total_refunded"
+        ],
+        "title": "FnbSaleSummaryRead",
+        "type": "object"
+      },
       "GiftProductRow": {
         "description": "一個品項在期間內送出、退回與淨額。",
         "properties": {
@@ -12626,6 +12711,24 @@
         "title": "ReferencePriceSummary",
         "type": "object"
       },
+      "RefundTenderPreviewRead": {
+        "description": "本次退款退回的一種付款方式（後端算，畫面照抄）。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "tender_type",
+          "amount"
+        ],
+        "title": "RefundTenderPreviewRead",
+        "type": "object"
+      },
       "RestoreRunRead": {
         "description": "一次還原執行的輸出（docs/31 §6）：四驗結果供 UI 呈現;VERIFIED 才代表救得回。",
         "properties": {
@@ -12880,6 +12983,19 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "refund_supported": {
+            "default": true,
+            "title": "Refund Supported",
+            "type": "boolean"
+          },
+          "refund_tenders": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RefundTenderPreviewRead"
+            },
+            "title": "Refund Tenders",
+            "type": "array"
           },
           "refund_total": {
             "title": "Refund Total",
@@ -28627,6 +28743,104 @@
           }
         ],
         "summary": "Create Sale",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/sales/fnb": {
+      "get": {
+        "description": "餐飲交易紀錄（docs/47 §4）：只列含餐點的交易，附餐點摘要、小計與已退金額。\n\n**必須排在 `/{sale_id}` 之前**：否則 `fnb` 會被當成單號而回 422。",
+        "operationId": "listFnbSales",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AwareDateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AwareDateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FnbSaleSummaryRead"
+                  },
+                  "title": "Response Listfnbsales",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Fnb Sales",
         "tags": [
           "sales"
         ]

@@ -640,6 +640,18 @@ def _ensure_listed(name: str, status: SerializedItemStatus | BulkLotStatus) -> N
         raise SaleLineInvalid(f"「{name}」還在待整理，上架後才能賣")
 
 
+@dataclass(frozen=True)
+class FnbSaleSummary:
+    """餐飲交易紀錄的一列（docs/47 §4）。"""
+
+    sale: Sale
+    food_items: str
+    food_subtotal: Decimal
+    has_other_items: bool
+    food_refunded: Decimal
+    total_refunded: Decimal
+
+
 class SalesService:
     @staticmethod
     def configured_linepay_client() -> LinePayClient | None:
@@ -2236,6 +2248,46 @@ class SalesService:
         return await self._repo.list_sales(
             store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
         )
+
+    async def list_fnb_sales(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime | None,
+        date_to: datetime | None,
+        limit: int,
+        offset: int,
+    ) -> list["FnbSaleSummary"]:
+        """餐飲交易紀錄（docs/47 §4）：含餐點的交易，附餐點摘要、餐點小計與已退金額。
+
+        已退金額經 returns service 取（§2 跨模組只經 service；函式內 import 破循環）。
+        """
+        from app.modules.returns.service import ReturnsService
+
+        sales = await self._repo.list_fnb_sales(
+            store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
+        )
+        sale_ids = [sale.id for sale in sales]
+        lines_by_sale: dict[int, list[SaleLine]] = {sale_id: [] for sale_id in sale_ids}
+        for line in await self._repo.list_lines_for_sales(sale_ids):
+            lines_by_sale[line.sale_id].append(line)
+        refunds = await ReturnsService(self._session).refunds_by_sale(store_id, sale_ids)
+        summaries: list[FnbSaleSummary] = []
+        for sale in sales:
+            lines = lines_by_sale[sale.id]
+            food = [line for line in lines if line.line_type is SaleLineType.MENU]
+            food_refunded, total_refunded = refunds.get(sale.id, (Decimal(0), Decimal(0)))
+            summaries.append(
+                FnbSaleSummary(
+                    sale=sale,
+                    food_items="、".join(f"{line.description}×{line.qty}" for line in food),
+                    food_subtotal=sum((line.net_amount for line in food), Decimal(0)),
+                    has_other_items=len(food) < len(lines),
+                    food_refunded=food_refunded,
+                    total_refunded=total_refunded,
+                )
+            )
+        return summaries
 
     async def list_purchases_by_buyer(
         self,

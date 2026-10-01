@@ -23,6 +23,7 @@ from app.modules.sales.linepay import (
     linepay_order_id,
 )
 from app.modules.sales.schemas import (
+    FnbSaleSummaryRead,
     LinePayRefundAttemptRead,
     LinePayRefundResolveRequest,
     SaleCreateRequest,
@@ -555,6 +556,42 @@ async def list_sales(
             }
         )
         for sale in sales
+    ]
+
+
+@router.get("/fnb", response_model=list[FnbSaleSummaryRead], operation_id="listFnbSales")
+async def list_fnb_sales(
+    session: SessionDep,
+    user: CurrentUserDep,
+    date_from: Annotated[AwareDateTime | None, Query(alias="from")] = None,
+    date_to: Annotated[AwareDateTime | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[FnbSaleSummaryRead]:
+    """餐飲交易紀錄（docs/47 §4）：只列含餐點的交易，附餐點摘要、小計與已退金額。
+
+    **必須排在 `/{sale_id}` 之前**：否則 `fnb` 會被當成單號而回 422。
+    """
+    rows = await SalesService(session).list_fnb_sales(
+        user.store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
+    )
+    return [
+        FnbSaleSummaryRead(
+            id=row.sale.id,
+            created_at=row.sale.created_at,
+            status=row.sale.status,
+            service_mode=row.sale.service_mode,
+            table_no=row.sale.table_no,
+            payment_method=row.sale.payment_method,
+            invoice_status=row.sale.invoice_status,
+            total=row.sale.total,
+            food_items=row.food_items,
+            food_subtotal=row.food_subtotal,
+            has_other_items=row.has_other_items,
+            food_refunded=row.food_refunded,
+            total_refunded=row.total_refunded,
+        )
+        for row in rows
     ]
 
 

@@ -53,6 +53,13 @@ class UnreturnedGiftRead(BaseModel):
     retail_value: NTDAmount
 
 
+class RefundTenderPreviewRead(BaseModel):
+    """本次退款退回的一種付款方式（後端算，畫面照抄）。"""
+
+    tender_type: TenderType
+    amount: NTDAmount
+
+
 class ReturnPreviewRead(BaseModel):
     """預覽結果。**僅供畫面提示**，送出時後端會以當下狀態重新判斷一次（條件可能已變）。"""
 
@@ -67,6 +74,11 @@ class ReturnPreviewRead(BaseModel):
     # 本次退款金額（與實際送出同一套差額法）：畫面不必自己算，也不會算錯。
     refund_total: NTDAmount
     unreturned_gifts: list[UnreturnedGiftRead] = []
+    # 退款去向（docs/47 §2）：與實際送出同一支函式算出。餐點只退外部付款、二手購物金優先——
+    # 這套規則只在後端維護，畫面不另算一份（兩份遲早算得不一樣）。
+    refund_tenders: list[RefundTenderPreviewRead] = []
+    # 原付款組合是否支援退款（不支援時 refund_tenders 為空，畫面要講明）。
+    refund_supported: bool = True
 
 
 class ReturnLineRead(BaseModel):

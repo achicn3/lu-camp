@@ -35,7 +35,7 @@ from app.modules.returns.repository import (
 )
 from app.modules.sales.bulk_allocation import returned_cost
 from app.modules.sales.linepay import LinePayClient
-from app.modules.sales.models import SaleLine, SaleTender
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.sales.service import GiftLineSnapshot, SalesService
 from app.modules.settings.service import StoreSettingsService
@@ -309,7 +309,30 @@ class ReturnsService:
                 reason="本次退貨金額為 0（僅退回贈品），發票不需處置。",
             )
         preview_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale_id)
+        # 退款去向（與實際送出同一支函式）：付款組合不支援退款時明講，不讓畫面自己猜。
+        selected = [
+            (
+                lines_by_id[sale_line_id],
+                qty,
+                line_refund_amount(
+                    lines_by_id[sale_line_id].net_amount,
+                    lines_by_id[sale_line_id].qty,
+                    previous.get(sale_line_id, 0),
+                    qty,
+                ),
+            )
+            for sale_line_id, qty in requested.items()
+        ]
+        try:
+            refund_tenders = self._refund_plan(
+                sale, await self._sales.list_tenders(sale.id), sale_lines, previous, selected
+            )
+            refund_supported = True
+        except ReturnConflict:
+            refund_tenders, refund_supported = [], False
         return {
+            "refund_tenders": refund_tenders,
+            "refund_supported": refund_supported,
             "is_full_return": is_full_return,
             "invoice_action": decision.action.value,
             # **由後端明說「這個轉人工店長可以解除」**（docs/36）：REVIEW_REQUIRED 有兩種——
@@ -729,42 +752,7 @@ class ReturnsService:
             )
 
         sale_tenders = await self._sales.list_tenders(sale.id)
-        # 餐點與二手分開累計（docs/47 §2）：餐點不能用購物金付，退款也只能回外部付款。
-        previous_food = sum(
-            (
-                refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
-                for line in sale_lines
-                if line.line_type is SaleLineType.MENU
-            ),
-            Decimal(0),
-        )
-        previous_other = sum(
-            (
-                refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
-                for line in sale_lines
-                if line.line_type is not SaleLineType.MENU
-            ),
-            Decimal(0),
-        )
-        refund_food = sum(
-            (amount for line, _, amount in selected if line.line_type is SaleLineType.MENU),
-            Decimal(0),
-        )
-        refund_other = refund_amount - refund_food
-        # 純贈品退貨（實付 0）沒有錢可退：不產生任何退款渠道明細。
-        # deferred 對平守衛看的是加總，0 == 0 仍成立。
-        refund_allocations = (
-            self._refund_allocations(
-                sale.payment_method,
-                sale_tenders,
-                previous_food=previous_food,
-                previous_other=previous_other,
-                refund_food=refund_food,
-                refund_other=refund_other,
-            )
-            if refund_amount > 0
-            else []
-        )
+        refund_allocations = self._refund_plan(sale, sale_tenders, sale_lines, previous, selected)
         if any(kind == TenderType.TAIWAN_PAY for kind, _ in refund_allocations):
             if not taiwan_pay_refund_confirmed:
                 raise ReturnConflict("請先在台灣Pay完成退款，並確認本次退款金額")
@@ -920,6 +908,10 @@ class ReturnsService:
             # 只按本次的**二手**退款沖點：餐點沒發點數（docs/47 §2），退餐點不沖。
             awarded = Decimal(sale.awarded_points)
             prior_ent = int(awarded * prior_refund / non_menu_subtotal)
+            refund_other = sum(
+                (amount for line, _, amount in selected if line.line_type is not SaleLineType.MENU),
+                Decimal(0),
+            )
             now_ent = int(awarded * (prior_refund + refund_other) / non_menu_subtotal)
             claw = now_ent - prior_ent
             if claw > 0:
@@ -1091,6 +1083,47 @@ class ReturnsService:
         if not requested:
             raise ReturnLineInvalid("退貨單必須至少有一筆明細")
         return requested
+
+    @classmethod
+    def _refund_plan(
+        cls,
+        sale: Sale,
+        sale_tenders: list[SaleTender],
+        sale_lines: Sequence[SaleLine],
+        previous: dict[int, int],
+        selected: Sequence[tuple[SaleLine, int, Decimal]],
+    ) -> list[tuple[TenderType, Decimal]]:
+        """本次退款要退回哪些付款方式、各多少（預覽與實際送出共用，畫面不自己算）。
+
+        餐點與二手分開累計（docs/47 §2）：餐點不能用購物金付，退款也只能回外部付款。
+        純贈品退貨（實付 0）沒有錢可退：不產生任何退款渠道明細。
+        """
+
+        def previously(food: bool) -> Decimal:
+            return sum(
+                (
+                    refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
+                    for line in sale_lines
+                    if (line.line_type is SaleLineType.MENU) is food
+                ),
+                Decimal(0),
+            )
+
+        refund_food = sum(
+            (amount for line, _, amount in selected if line.line_type is SaleLineType.MENU),
+            Decimal(0),
+        )
+        refund_other = sum((amount for _, _, amount in selected), Decimal(0)) - refund_food
+        if refund_food + refund_other <= 0:
+            return []
+        return cls._refund_allocations(
+            sale.payment_method,
+            sale_tenders,
+            previous_food=previously(True),
+            previous_other=previously(False),
+            refund_food=refund_food,
+            refund_other=refund_other,
+        )
 
     @staticmethod
     def _refund_allocations(

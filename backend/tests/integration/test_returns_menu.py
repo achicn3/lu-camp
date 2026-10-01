@@ -326,3 +326,21 @@ async def test_refunds_by_sale_ignores_voided_sales(db_session: AsyncSession) ->
     sale.status = SaleStatus.VOIDED
     await db_session.flush()
     assert await returns.refunds_by_sale(m.store_id, [m.sale_id]) == {}
+
+
+async def test_preview_tells_where_the_money_goes(db_session: AsyncSession) -> None:
+    """退款去向由後端預覽給出（畫面不再自己算一份）：餐點→現金；二手→購物金優先。"""
+    m = await _mixed_sale(db_session)
+    svc = ReturnsService(db_session)
+    food = await svc.preview_return(
+        m.store_id, sale_id=m.sale_id, lines=[ReturnLineInput(m.latte_line, 1)]
+    )
+    assert food["refund_supported"] is True
+    assert food["refund_tenders"] == [(TenderType.CASH, Decimal(150))]
+    other = await svc.preview_return(
+        m.store_id, sale_id=m.sale_id, lines=[ReturnLineInput(m.item_line, 1)]
+    )
+    assert other["refund_tenders"] == [
+        (TenderType.STORE_CREDIT, Decimal(400)),
+        (TenderType.CASH, Decimal(600)),
+    ]

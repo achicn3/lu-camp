@@ -580,6 +580,26 @@ class SaleRead(BaseModel):
         )
 
 
+class FnbSaleSummaryRead(BaseModel):
+    """餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。"""
+
+    id: int
+    created_at: datetime
+    status: SaleStatus
+    service_mode: ServiceMode | None
+    table_no: str | None
+    payment_method: PaymentMethod
+    invoice_status: SaleInvoiceStatus
+    total: NTDAmount
+    # 餐點摘要：「拿鐵（冰）×2、戚風×1」（品名已含選項）。
+    food_items: str
+    food_subtotal: NTDAmount
+    # 同一張單還有二手／一般商品（這裡只能退餐點，其餘到交易紀錄退）。
+    has_other_items: bool
+    food_refunded: NTDAmount
+    total_refunded: NTDAmount
+
+
 class SaleSummaryRead(BaseModel):
     """銷售單摘要輸出（列表用，不含明細）。"""
 
