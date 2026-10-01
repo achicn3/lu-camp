@@ -134,3 +134,33 @@ async def test_overwrite_never_resurrects_a_sold_slice(seeded: _Seeded, attempt:
         assert final == 0  # 先賣掉，改數字因為看到的 1 已過期被拒
     else:
         pytest.fail(f"不應發生：set_ok={set_ok} sold={sold} final={final}")
+
+
+async def test_limit_turned_on_mid_checkout_is_not_bypassed(seeded: _Seeded) -> None:
+    """結帳讀到「不限量」後、扣份數前，管理者把它切成限量（Codex 對抗審查 O1c 第二輪）。
+
+    扣份數前必須鎖住該列重讀，不能憑先前讀到的舊旗標跳過扣減——否則這筆會在限量
+    生效後照樣成交、一份都沒扣。今天還沒填份數，所以正確結果是擋下。
+    """
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        await MenuService(s).update_menu_item(
+            seeded.store_id, seeded.item_id, daily_limited=False, actor_user_id=seeded.user_id
+        )
+        await s.commit()
+
+    async with sm() as checkout:
+        svc = MenuService(checkout)
+        item = await svc.get(seeded.store_id, seeded.item_id)
+        assert item is not None and item.daily_limited is False  # 結帳先讀到不限量
+        selection = await svc.price_selection(seeded.store_id, item, [], 1)
+
+        async with sm() as manager:  # 這時管理者切成每日限量並提交
+            await MenuService(manager).update_menu_item(
+                seeded.store_id, seeded.item_id, daily_limited=True, actor_user_id=seeded.user_id
+            )
+            await manager.commit()
+
+        with pytest.raises(InsufficientStock):
+            await svc.consume_daily_stock(seeded.store_id, item, selection, 1)
+        await checkout.rollback()

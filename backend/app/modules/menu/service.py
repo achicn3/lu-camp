@@ -491,6 +491,10 @@ class MenuService:
             *((MenuStockTarget.OPTION, option) for option in selection.options),
         ]
         for kind, entry in targets:
+            # 鎖住該列重讀再判斷是否限量：先前讀到的旗標可能已過期——管理者剛好在這筆結帳中途
+            # 把它切成限量時，憑舊旗標跳過扣減會讓這筆一份都沒扣就成交（Codex 對抗審查 O1c）。
+            # 切換限量走同一列的鎖，兩邊因此排隊、不會交錯。
+            await self._session.refresh(entry, with_for_update=True)
             if not entry.daily_limited:
                 continue
             generation = await self._repo.consume_stock(type(entry), store_id, entry.id, qty, day)
