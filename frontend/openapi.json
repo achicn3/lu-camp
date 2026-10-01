@@ -1005,7 +1005,6 @@
           "CONSIGNMENT",
           "ALREADY_VOIDED",
           "HAS_SOLD_ITEMS",
-          "PARTIALLY_LISTED",
           "CREDIT_SPENT",
           "NO_OPEN_CASH_SESSION"
         ],

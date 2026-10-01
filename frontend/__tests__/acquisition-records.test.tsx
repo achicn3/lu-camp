@@ -138,7 +138,7 @@ describe("收購紀錄清單", () => {
     // 買斷單已有商品賣出：整張不能作廢，但其餘商品仍可逐件作廢 → 鈕可按、講清楚只能作廢其餘
     const partial = rowOf(10);
     expect((within(partial).getByRole("button", { name: "作廢" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(partial.textContent).toContain("已賣出的商品不能作廢，其餘可勾選作廢");
+    expect(partial.textContent).toContain("部分商品已賣出或已作廢，其餘可勾選作廢");
     // 購物金已被用掉：整張沖不回，但只作廢幾件可能沖得回 → 鈕可按、講清楚
     const credit = rowOf(9);
     expect((within(credit).getByRole("button", { name: "作廢" }) as HTMLButtonElement).disabled).toBe(false);
@@ -351,18 +351,21 @@ it("確認視窗開著時按 Esc 不會把外層勾選視窗整個關掉（已�
   expect(screen.getByRole("dialog", { name: "作廢收購 #12" })).toBeTruthy();
 });
 
-it("已上架一部分的買斷單：能只作廢幾件，但不預設全勾（不能整批作廢）", async () => {
+it("已上架的商品也能作廢：待整理與已上架混在一起，一樣預設全勾（店主 2026-10-02）", async () => {
   auth.role = "MANAGER";
-  voidFlowStub({ void_block: "PARTIALLY_LISTED" }, [
+  const posted = voidFlowStub({}, [
     { id: 31, item_code: "I31", name: "營燈", acquisition_cost: "1000", status: "PENDING_LISTING", voided: false },
     { id: 32, item_code: "I32", name: "睡袋", acquisition_cost: "1000", status: "IN_STOCK", voided: false },
   ]);
   const user = userEvent.setup();
   wrap(<AcquisitionRecords />);
-  expect((await screen.findByText(/不能整批作廢/)).textContent).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "作廢" }));
+  await user.click(await screen.findByRole("button", { name: "作廢" }));
   const dialog = await screen.findByRole("dialog", { name: "作廢收購 #12" });
   const lamp = (await within(dialog).findByRole("checkbox", { name: /營燈/ })) as HTMLInputElement;
-  expect(lamp.checked).toBe(false);
-  expect((within(dialog).getByRole("button", { name: "作廢收購" }) as HTMLButtonElement).disabled).toBe(true);
+  const bag = within(dialog).getByRole("checkbox", { name: /睡袋/ }) as HTMLInputElement;
+  expect(lamp.checked && bag.checked).toBe(true);
+  await user.click(within(dialog).getByRole("button", { name: "作廢收購" }));
+  await user.type(screen.getByLabelText("作廢原因"), "全退");
+  await user.click(screen.getByRole("button", { name: "確認作廢" }));
+  await waitFor(() => expect(posted).toEqual([{ reason: "全退", item_ids: [31, 32] }]));
 });

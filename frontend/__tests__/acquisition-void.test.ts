@@ -36,7 +36,6 @@ describe("收購紀錄的作廢鈕（一顆鈕，依類型與擋下原因決定�
     // [類型, void_block, voided_at, 預期模式]
     ["BUYOUT", null, null, "SELECT_ALL"],
     ["BUYOUT", "HAS_SOLD_ITEMS", null, "SELECT_ALL"], // 已售的勾不了，其餘預設全勾
-    ["BUYOUT", "PARTIALLY_LISTED", null, "SELECT_SOME"], // 不能整批 → 不預設全勾
     ["BUYOUT", "CREDIT_SPENT", null, "SELECT_SOME"], // 整張沖不回，只作廢幾件可能可以
     ["BUYOUT", "NO_OPEN_CASH_SESSION", null, null],
     ["BUYOUT", "ALREADY_VOIDED", "2026-10-01T00:00:00Z", null],
@@ -53,8 +52,8 @@ describe("收購紀錄的作廢鈕（一顆鈕，依類型與擋下原因決定�
   it("說明文字：買斷單講清楚還能怎麼作廢；已作廢不重複講", () => {
     const hint = (type: string, block: string | null) =>
       recordVoidHint({ type, void_block: block, voided_at: null } as Parameters<typeof recordVoidHint>[0]);
-    expect(hint("BUYOUT", "HAS_SOLD_ITEMS")).toBe("已賣出的商品不能作廢，其餘可勾選作廢");
-    expect(hint("BUYOUT", "PARTIALLY_LISTED")).toContain("不能整批作廢");
+    // 逐件作廢過的件也算「已動用」，所以不能說成只有賣出
+    expect(hint("BUYOUT", "HAS_SOLD_ITEMS")).toBe("部分商品已賣出或已作廢，其餘可勾選作廢");
     expect(hint("BUYOUT", "CREDIT_SPENT")).toContain("購物金已被用掉");
     expect(hint("BULK_LOT", "HAS_SOLD_ITEMS")).toBe("已有商品賣出或報廢，不能作廢");
     expect(hint("BUYOUT", "NO_OPEN_CASH_SESSION")).toBe("要退回現金，請先開帳");

@@ -137,8 +137,6 @@ class AcquisitionItemOverview:
     count: int = 0
     names: list[str] = field(default_factory=list)
     used: bool = False
-    partially_listed: bool = False
-    """排隊收購的件有的上架了、有的還在待整理（這時不能整張作廢）。"""
     pending_listing_count: int = 0
     """還在待整理的件數（散裝算剩餘件數）。"""
 
@@ -1925,19 +1923,9 @@ class InventoryService:
             ov.count += int(row.count or 0)
             ov.names.extend(row.names or [])
             ov.used = ov.used or bool(row.used)
-            pending, in_stock = getattr(row, "pending", False), getattr(row, "in_stock", False)
-            ov.partially_listed = ov.partially_listed or bool(pending and in_stock)
             ov.pending_listing_count += int(getattr(row, "pending_count", 0) or 0)
         return overviews
 
-    async def is_partially_listed(self, store_id: int, acquisition_id: int) -> bool:
-        """排隊收購的件是否已上架一部分（有待整理、也有在庫）——作廢前置擋下用（docs/42 §10-2）。"""
-        items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
-        statuses = {it.status for it in items}
-        return (
-            SerializedItemStatus.PENDING_LISTING in statuses
-            and SerializedItemStatus.IN_STOCK in statuses
-        )
     async def acquisition_items_for_void(
         self, store_id: int, acquisition_id: int
     ) -> list[SerializedItem]:

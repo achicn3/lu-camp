@@ -37,14 +37,13 @@ export const VOID_BLOCK_LABEL: Record<VoidBlock, string> = {
   CONSIGNMENT: "寄售不能作廢，請走寄售退貨",
   ALREADY_VOIDED: "已作廢",
   HAS_SOLD_ITEMS: "已有商品賣出或報廢，不能作廢",
-  PARTIALLY_LISTED: "已上架一部分，不能整張作廢",
   CREDIT_SPENT: "購物金已被用掉，不能作廢",
   NO_OPEN_CASH_SESSION: "要退回現金，請先開帳",
 };
 
 /** 買斷單整張作廢被擋下、但仍可勾選部分商品作廢時，作廢鈕旁的說明。 */
 export const BUYOUT_ITEM_VOID_HINT = {
-  HAS_SOLD_ITEMS: "已賣出的商品不能作廢，其餘可勾選作廢",
-  PARTIALLY_LISTED: "已上架一部分，不能整批作廢；可勾選部分商品作廢",
+  // 逐件作廢過的件也算「已動用」，不能說成只有賣出。
+  HAS_SOLD_ITEMS: "部分商品已賣出或已作廢，其餘可勾選作廢",
   CREDIT_SPENT: "購物金已被用掉，不能整張作廢；可試著只作廢部分商品",
 } as const satisfies Partial<Record<VoidBlock, string>>;

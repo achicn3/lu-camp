@@ -288,10 +288,13 @@ async def test_listed_items_can_be_sold(
     assert resp.status_code == 200, resp.text
 
 
-async def test_partly_listed_acquisition_cannot_be_voided(
+async def test_partly_listed_acquisition_can_still_be_voided(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """店主 2026-09-25：已經上架一部分就不能整張作廢（標籤已貼、商品已在架上）。"""
+    """店主 2026-10-02：只要沒賣出都可以作廢——已上架一部分也能整張作廢。
+
+    取代 2026-09-25「已上架一部分不能整張作廢」的限制。
+    """
     ctx = await _ctx(db_session, client)
     batch = await _paid_batch(client, ctx)
     category_id = await _category(db_session, ctx)
@@ -306,11 +309,12 @@ async def test_partly_listed_acquisition_cannot_be_voided(
     buyout_id = min(batch["acquisition_ids"])
     rows = (await client.get("/api/v1/acquisitions", headers=ctx.auth)).json()["items"]
     row = next(r for r in rows if r["id"] == buyout_id)
-    assert row["void_block"] == "PARTIALLY_LISTED"
+    assert row["void_block"] is None
     resp = await client.post(
         f"/api/v1/acquisitions/{buyout_id}/void", json={"reason": "反悔"}, headers=ctx.auth
     )
-    assert resp.status_code == 409 and "上架" in resp.text
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fully_voided"] is True
 
 
 async def test_items_know_which_estimate_line_they_came_from(
@@ -352,13 +356,10 @@ async def test_acquisition_records_show_how_many_are_still_waiting(
     assert waiting[bulk_id] == 10
 
 
-async def test_records_still_say_partly_listed_after_voiding_one_piece(
+async def test_rest_of_partly_listed_batch_can_be_voided_after_voiding_one_piece(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """作廢掉的件轉 WRITTEN_OFF，會讓清單的「已動用」成立；原因若因此報成「已有商品賣出」，
-    前端就會預設全勾（＝整批作廢），送出必被擋（code-reviewer，2026-10-02）。
-    已上架一部分要優先回報：什麼都沒賣出，真正的限制是「不能整批作廢」。
-    """
+    """先作廢一件待整理的，剩下的（一件待整理、一件已上架）也能一起作廢。"""
     ctx = await _ctx(db_session, client)
     batch = await _confirmed_batch(client, ctx, [_line(qty=3), BULK], [3, 10])
     paid = (await _pay(client, ctx, batch["id"])).json()
@@ -379,7 +380,11 @@ async def test_records_still_say_partly_listed_after_voiding_one_piece(
     )
     assert voided.status_code == 200, voided.text
 
-    rows = (await client.get("/api/v1/acquisitions", headers=ctx.auth)).json()["items"]
-    row = next(r for r in rows if r["id"] == buyout_id)
+    rest = await client.post(
+        f"/api/v1/acquisitions/{buyout_id}/void",
+        json={"reason": "其餘全退", "item_ids": [chairs[0]["id"], chairs[2]["id"]]},
+        headers=ctx.auth,
+    )
 
-    assert row["void_block"] == "PARTIALLY_LISTED"
+    assert rest.status_code == 200, rest.text
+    assert rest.json()["fully_voided"] is True

@@ -65,7 +65,6 @@ from app.shared.exceptions import (
     AcquisitionCreditSpent,
     AcquisitionHasSoldItems,
     AcquisitionNotFound,
-    AcquisitionPartiallyListed,
     AcquisitionRequiresNationalId,
     AcquisitionVoidUnsupported,
     ContactNotFound,
@@ -218,16 +217,11 @@ class AcquisitionService:
             acq: Acquisition, overview: AcquisitionItemOverview | None
         ) -> AcquisitionVoidBlock | None:
             used = overview.used if overview else False
-            # 順序大致與 void_acquisition 的擋下順序一致，清單講的原因才會跟按下去時一樣。
-            # 例外：「已上架一部分」排在「已動用」前面——逐件作廢過的件轉 WRITTEN_OFF 也算動用，
-            # 照原順序會把什麼都沒賣出的單講成「已有商品賣出」，前端據此預設全勾＝整批作廢，
-            # 送出必被擋（docs/42 §10-2）。兩者同時成立時，真正限制店長的是「不能整批作廢」。
+            # 順序與 void_acquisition 的擋下順序一致，清單講的原因才會跟按下去時一樣。
             if acq.type == AcquisitionType.CONSIGNMENT:
                 return AcquisitionVoidBlock.CONSIGNMENT
             if acq.voided_at is not None:
                 return AcquisitionVoidBlock.ALREADY_VOIDED
-            if overview is not None and overview.partially_listed:
-                return AcquisitionVoidBlock.PARTIALLY_LISTED
             if used:
                 return AcquisitionVoidBlock.HAS_SOLD_ITEMS
             if (acq.payout_cash_amount or Decimal(0)) > 0 and not drawer_open:
@@ -1043,10 +1037,6 @@ class AcquisitionService:
         # 讀層前置擋（清楚錯誤、早於任何寫入）：含已售庫存 → 不可作廢
         if await self._inventory.has_sold_items(store_id, acquisition_id):
             raise AcquisitionHasSoldItems(f"收購 {acquisition_id} 含已售出庫存，無法作廢")
-        if await self._inventory.is_partially_listed(store_id, acquisition_id):
-            raise AcquisitionPartiallyListed(
-                f"收購 {acquisition_id} 的商品已經上架一部分，不能整張作廢"
-            )
         cash_back = acquisition.payout_cash_amount or Decimal(0)
         credit_back = acquisition.payout_credit_cash_equivalent or Decimal(0)
         # 付現的退款須落當前開帳 session（現行紅字，不改歷史）；無開帳 → 擋
@@ -1150,13 +1140,6 @@ class AcquisitionService:
             for i in selected
         ):
             raise AcquisitionHasSoldItems("所選商品已售出或已下架，無法作廢")
-        # 把剩下的全部作廢＝整批作廢：已上架一部分的批次不行（docs/42 §10-2），逐件路徑不可繞過。
-        if (selected | already) >= set(by_id) and await self._inventory.is_partially_listed(
-            store_id, acquisition_id
-        ):
-            raise AcquisitionPartiallyListed(
-                f"收購 {acquisition_id} 的商品已經上架一部分，不能整批作廢；請只勾選要作廢的商品"
-            )
         original_cash = acquisition.payout_cash_amount or Decimal(0)
         original_equivalent = acquisition.payout_credit_cash_equivalent or Decimal(0)
         original_total = original_cash + original_equivalent

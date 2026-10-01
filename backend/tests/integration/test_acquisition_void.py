@@ -785,16 +785,16 @@ async def test_partial_void_accepts_pending_item_in_partially_listed_acquisition
     assert await _void_in(db_session, store_id) == Decimal("1")
 
 
-async def test_selecting_every_item_of_partially_listed_acquisition_is_still_whole_void(
+async def test_partially_listed_acquisition_can_be_voided_whole_when_nothing_sold(
     client: httpx.AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    """docs/42 §10-2 店主裁示：已上架一部分的批次不能整批作廢。
+    """店主 2026-10-02 裁示：只要沒賣出都可以作廢——已上架的件也一樣，可以整批作廢。
 
-    逐件作廢若把整批全勾，效果就是整批作廢——不能拿它繞過（收購紀錄 2026-10-02 起「作廢」鈕
-    預設全勾，這條防線必須在後端）。只作廢其中幾件照常可以。
+    取代 2026-09-25「已上架一部分的批次不能整批作廢」（docs/42 §10-2）：實務上待整理的件
+    不會去作廢，那條規則只會擋到要退已上架商品的店長。
     """
-    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    clerk, mgr, _store_id, seller_id = await _seed(db_session)
     acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
     items = list(
         await db_session.scalars(
@@ -812,22 +812,45 @@ async def test_selecting_every_item_of_partially_listed_acquisition_is_still_who
         headers=_auth(mgr),
     )
 
-    assert resp.status_code == 409, resp.text
-    assert "上架一部分" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fully_voided"] is True
     await db_session.refresh(items[0])
     await db_session.refresh(items[1])
-    assert items[0].status == SerializedItemStatus.PENDING_LISTING
-    assert items[1].status == SerializedItemStatus.IN_STOCK
-    assert await _void_in(db_session, store_id) == Decimal(0)
+    assert items[0].status == SerializedItemStatus.WRITTEN_OFF
+    assert items[1].status == SerializedItemStatus.WRITTEN_OFF
 
 
-async def test_whole_void_after_partial_void_respects_partially_listed_rule(
+async def test_whole_void_without_item_ids_works_for_partially_listed_acquisition(
     client: httpx.AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    """先作廢過一件後，「整張作廢」會改走逐件路徑沖回剩餘品項——同樣不得作廢已上架一部分的批次。"""
+    """舊客戶端的整張作廢（不帶 item_ids）同樣不再因「已上架一部分」被擋。"""
     clerk, mgr, _store_id, seller_id = await _seed(db_session)
-    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 3)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
+    first = await db_session.scalar(
+        select(SerializedItem)
+        .where(SerializedItem.acquisition_id == acq_id)
+        .order_by(SerializedItem.id)
+    )
+    assert first is not None
+    first.status = SerializedItemStatus.PENDING_LISTING
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "整張退"}, headers=_auth(mgr)
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fully_voided"] is True
+
+
+async def test_sold_item_still_cannot_be_voided(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """放寬的只有「已上架」；賣出去的照舊不能作廢（店主：只要沒有賣出去都可以作廢）。"""
+    clerk, mgr, _store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 2)
     items = list(
         await db_session.scalars(
             select(SerializedItem)
@@ -835,22 +858,15 @@ async def test_whole_void_after_partial_void_respects_partially_listed_rule(
             .order_by(SerializedItem.id)
         )
     )
-    items[0].status = SerializedItemStatus.PENDING_LISTING
-    items[1].status = SerializedItemStatus.PENDING_LISTING  # items[2] 已上架
+    items[0].status = SerializedItemStatus.SOLD
     await db_session.commit()
-    first = await client.post(
+
+    resp = await client.post(
         f"/api/v1/acquisitions/{acq_id}/void",
-        json={"reason": "先退一件", "item_ids": [items[0].id]},
+        json={"reason": "想退賣掉的", "item_ids": [items[0].id]},
         headers=_auth(mgr),
     )
-    assert first.status_code == 200, first.text
 
-    rest = await client.post(
-        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "其餘全退"}, headers=_auth(mgr)
-    )
-
-    assert rest.status_code == 409, rest.text
+    assert resp.status_code == 409, resp.text
     await db_session.refresh(items[1])
-    await db_session.refresh(items[2])
-    assert items[1].status == SerializedItemStatus.PENDING_LISTING
-    assert items[2].status == SerializedItemStatus.IN_STOCK
+    assert items[1].status == SerializedItemStatus.IN_STOCK

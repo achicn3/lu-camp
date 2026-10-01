@@ -15,13 +15,14 @@ type VoidBlock = NonNullable<RecordRow["void_block"]>;
  * 收購紀錄上那一顆「作廢」鈕按下去做什麼（店主 2026-10-02：不再另分「選品作廢」）。
  * - SELECT_ALL：買斷單，開商品勾選視窗並預設全勾（＝整張作廢，取消勾選的保留）。
  * - SELECT_SOME：買斷單，整張不行但只作廢幾件可能可以——開視窗但**不預設全勾**：
- *   已上架一部分（docs/42 §10-2 不能整批作廢，後端擋全勾）、購物金已被用掉（整張沖不回）。
+ *   購物金已被用掉（整張沖不回）。
+ *   已上架的商品沒有限制：店主 2026-10-02「只要沒有賣出去都可以作廢」。
  * - WHOLE：散裝單，整張作廢。
  * - null：不能作廢（鈕反灰）。後端作廢端點仍是最終權威。
  */
 export type RecordVoidMode = "SELECT_ALL" | "SELECT_SOME" | "WHOLE" | null;
 
-const SELECT_SOME_BLOCKS: ReadonlySet<VoidBlock> = new Set(["PARTIALLY_LISTED", "CREDIT_SPENT"]);
+const SELECT_SOME_BLOCKS: ReadonlySet<VoidBlock> = new Set(["CREDIT_SPENT"]);
 
 export function recordVoidMode(row: RecordRow): RecordVoidMode {
   const block = row.void_block;

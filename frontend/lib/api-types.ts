@@ -4343,7 +4343,7 @@ export interface components {
          *     清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
          * @enum {string}
          */
-        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "PARTIALLY_LISTED" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
+        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
         /** AcquisitionVoidItemRead */
         AcquisitionVoidItemRead: {
             /** Acquisition Cost */
