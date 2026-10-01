@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.core.money import MAX_NTD
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
@@ -392,3 +393,45 @@ async def test_same_option_name_in_two_groups_is_disambiguated(
     ]
     snap = resp.json()["lines"][0]["menu_options_snapshot"]
     assert [(o["group"], o["option"]) for o in snap] == [("甜度", "正常"), ("冰量", "正常")]
+
+
+async def _price_latte(db_session: AsyncSession, m: _Menu, price: Decimal) -> None:
+    latte = await db_session.get(MenuItem, m.latte)
+    assert latte is not None
+    latte.unit_price = price
+    await db_session.flush()
+
+
+async def test_sale_over_db_limit_is_a_validation_error(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """基本價＋選項加價超過 Numeric(12,0)：結帳回 422（領域錯誤），不是資料庫錯誤。"""
+    m = await _seed(db_session)
+    await _price_latte(db_session, m, MAX_NTD)
+    sale = await _sell(client, m, [_line(m.latte, [m.opt["冰"], m.opt["燕麥奶"]])], "big-1")
+    assert sale.status_code == 422, sale.text
+    assert "上限" in sale.text
+
+
+async def test_sale_qty_over_db_limit_is_a_validation_error(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    m = await _seed(db_session)
+    await _price_latte(db_session, m, MAX_NTD // 2)
+    sale = await _sell(client, m, [_line(m.latte, [m.opt["冰"], m.opt["鮮奶"]], qty=3)], "big-2")
+    assert sale.status_code == 422, sale.text
+    assert "上限" in sale.text
+
+
+async def test_quote_over_db_limit_is_a_validation_error(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    m = await _seed(db_session)
+    await _price_latte(db_session, m, MAX_NTD)
+    quote = await client.post(
+        "/api/v1/sales/quote",
+        json={"lines": [_line(m.latte, [m.opt["冰"], m.opt["燕麥奶"]])]},
+        headers={"Authorization": f"Bearer {m.token}"},
+    )
+    assert quote.status_code == 422, quote.text
+    assert "上限" in quote.text
