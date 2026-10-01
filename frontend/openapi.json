@@ -12838,6 +12838,17 @@
             "title": "Qty",
             "type": "integer"
           },
+          "resellable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resellable"
+          },
           "sale_line_id": {
             "title": "Sale Line Id",
             "type": "integer"

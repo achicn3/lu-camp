@@ -80,7 +80,7 @@ async def create_return(
         )
     svc = ReturnsService(session)
     inputs = [
-        ReturnLineInput(line.sale_line_id, line.qty, line.resellable) for line in payload.lines
+        ReturnLineInput(line.sale_line_id, line.qty, bool(line.resellable)) for line in payload.lines
     ]
     requested = {line.sale_line_id: line.qty for line in payload.lines}
     try:
@@ -148,7 +148,7 @@ async def preview_return(
             user.store_id,
             sale_id=payload.sale_id,
             lines=[
-                ReturnLineInput(line.sale_line_id, line.qty, line.resellable)
+                ReturnLineInput(line.sale_line_id, line.qty, bool(line.resellable))
                 for line in payload.lines
             ],
         )

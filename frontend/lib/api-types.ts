@@ -8693,6 +8693,8 @@ export interface components {
         ReturnLineRequest: {
             /** Qty */
             qty: number;
+            /** Resellable */
+            resellable?: boolean | null;
             /** Sale Line Id */
             sale_line_id: number;
         };

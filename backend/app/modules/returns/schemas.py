@@ -17,7 +17,8 @@ class ReturnLineRequest(BaseModel):
     sale_line_id: int
     qty: int = Field(gt=0)
     # 餐點退款「這份還能賣」（docs/47 §3）：勾了才把份數加回今日份數；其他品項忽略。
-    resellable: bool = False
+    # 可空＝沒勾（生成的前端型別才維持選填，既有退貨畫面不必補這欄）。
+    resellable: bool | None = None
 
 
 class ReturnCreateRequest(BaseModel):
