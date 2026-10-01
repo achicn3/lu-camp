@@ -5093,6 +5093,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Menu Option Ids */
+            menu_option_ids?: number[] | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /**
@@ -8773,6 +8775,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Menu Option Ids */
+            menu_option_ids?: number[] | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /**
@@ -9682,6 +9686,8 @@ export interface components {
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
+            /** Menu Option Ids */
+            menu_option_ids?: number[] | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /** Qty */

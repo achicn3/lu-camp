@@ -3300,6 +3300,21 @@
             ],
             "title": "Menu Item Id"
           },
+          "menu_option_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Option Ids"
+          },
           "promo_free": {
             "anyOf": [
               {
@@ -13249,6 +13264,21 @@
             ],
             "title": "Menu Item Id"
           },
+          "menu_option_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Option Ids"
+          },
           "promo_free": {
             "anyOf": [
               {
@@ -15912,6 +15942,20 @@
               }
             ],
             "title": "Menu Item Id"
+          },
+          "menu_option_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Option Ids"
           },
           "promo_free": {
             "anyOf": [

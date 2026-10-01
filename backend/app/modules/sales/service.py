@@ -49,6 +49,7 @@ from app.modules.sales.inputs import (
     LinePayReturnRecoveryLine,
     SaleLineInput,
     TenderInput,
+    menu_line_key,
 )
 from app.modules.sales.linepay import (
     DEFINITIVE_PAY_REJECT_CODES,
@@ -625,8 +626,9 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
         fields["bulk_basket_id"] = line.bulk_basket_id
     if line.promo_free:  # 後加欄位（docs/40 P3b）：沒勾就不放，舊請求的指紋不變
         fields["promo_free"] = True
+    if line.menu_option_ids:  # 後加欄位（docs/44）：沒選項就不放，舊請求的指紋不變
+        fields["menu_option_ids"] = sorted(line.menu_option_ids)
     return fields
-
 
 
 _PENDING_LISTING = frozenset({SerializedItemStatus.PENDING_LISTING, BulkLotStatus.PENDING_LISTING})
@@ -636,6 +638,7 @@ def _ensure_listed(name: str, status: SerializedItemStatus | BulkLotStatus) -> N
     """排隊收購付款後的「待整理」商品還沒補齊資料、貼標，不可結帳（docs/42 §7）。"""
     if status in _PENDING_LISTING:
         raise SaleLineInvalid(f"「{name}」還在待整理，上架後才能賣")
+
 
 class SalesService:
     @staticmethod
@@ -778,7 +781,7 @@ class SalesService:
         elif line.line_type is SaleLineType.BULK_LOT:
             base = f"BULK_LOT:{line.bulk_lot_id}"
         else:
-            base = f"MENU:{line.menu_item_id}"
+            base = menu_line_key(line)
         return base if line.line_kind is SaleLineKind.NORMAL else f"GIFT:{base}"
 
     async def _validate_display_cart_checkout(
@@ -3166,17 +3169,18 @@ class SalesService:
             menu_item = await self._resolve_menu_item(store_id, line)
             if gift is not None:
                 raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
+            selection = await self._menu.price_selection(store_id, menu_item, line.menu_option_ids)
             if discountable_out is not None:
                 discountable_out.append(False)
             return QuoteLine(
                 line_type=SaleLineType.MENU,
-                description=menu_item.name,
+                description=selection.description,
                 qty=line.qty,
-                unit_price=menu_item.unit_price,  # 餐飲不折活動，原價即成交價
-                line_total=menu_item.unit_price * line.qty,
+                unit_price=selection.unit_price,  # 餐飲不折活動，原價（含選項加價）即成交價
+                line_total=selection.unit_price * line.qty,
                 original_unit_price=None,
                 discount_amount=Decimal(0),
-                net_amount=menu_item.unit_price * line.qty,
+                net_amount=selection.unit_price * line.qty,
             )
         if line.bulk_basket_id is not None:
             return await self._quote_basket(store_id, line, promos, priced, gift, discountable_out)
@@ -3500,21 +3504,26 @@ class SalesService:
         gift: _GiftContext | None = None,
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
-        """餐飲明細：不扣庫存、不套活動折扣、原價成交；建 sale_line（line_type=MENU）。"""
+        """餐飲明細：不套活動折扣、原價（含選項加價）成交；建 sale_line（line_type=MENU）。
+
+        選項寫進品名（收據／出餐單／發票／客顯直接顯示）並快照到 `menu_options_snapshot`。
+        """
         item = await self._resolve_menu_item(store_id, line)
         if discountable_out is not None:
             discountable_out.append(False)  # 餐飲不折（沿用活動折扣的既有排除口徑）
         if gift is not None:
             # 餐飲現做、不扣庫存，「贈送」在庫存與成本上都留不下痕跡，統計不到。
             raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
-        disc = _AppliedDiscount.full_price(item.unit_price, line.qty)
+        selection = await self._menu.price_selection(store_id, item, line.menu_option_ids)
+        disc = _AppliedDiscount.full_price(selection.unit_price, line.qty)
         await self._repo.add_line(
             SaleLine(
                 store_id=store_id,
                 sale_id=sale_id,
                 line_type=SaleLineType.MENU,
                 menu_item_id=item.id,
-                description=item.name,
+                description=selection.description,
+                menu_options_snapshot=selection.options_snapshot or None,
                 qty=line.qty,
                 # 成本＝品項成本 × 數量，凍結於此（裁示 2026-09-17）。沒填成本就留 NULL
                 # ＝「成本未知」，報表照既有口徑處理——填 0 會讓毛利看起來是 100%。
@@ -3525,7 +3534,7 @@ class SalesService:
                 ),
             )
         )
-        return item.unit_price * line.qty
+        return selection.unit_price * line.qty
 
     async def _process_serialized(
         self,

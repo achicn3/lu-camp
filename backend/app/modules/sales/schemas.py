@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.sales.inputs import (
     CARRIER_TYPE_MOBILE,
+    MENU_OPTIONS_MAX,
     CampaignOverrideInput,
     InvoiceInfoInput,
     SaleLineInput,
@@ -55,12 +56,16 @@ class SaleLineCreateRequest(BaseModel):
     # 買 N 送 M：店員指定「送這件」（docs/40 P3b）；沒成組或不適用時不生效。
     # 可空＝沒指定（生成的前端型別才維持選填，舊的購物車快照不必補這欄）。
     promo_free: bool | None = None
+    # 餐飲選項（docs/44 §3）；只有 MENU 明細可帶。可空＝沒有選項（舊的購物車快照不必補）。
+    menu_option_ids: list[int] | None = Field(default=None, max_length=MENU_OPTIONS_MAX)
 
     @model_validator(mode="after")
     def _check_shape(self) -> "SaleLineCreateRequest":
         """依 line_type 驗證：只接受對應的參照、序號品 qty 必為 1（避免靜默只賣 1）。"""
         if self.line_type != SaleLineType.BULK_LOT and self.bulk_basket_id is not None:
             raise ValueError("只有散裝明細可以帶 bulk_basket_id")
+        if self.line_type != SaleLineType.MENU and self.menu_option_ids:
+            raise ValueError("只有餐飲明細可以帶選項")
         if self.line_type == SaleLineType.SERIALIZED:
             if self.item_code is None:
                 raise ValueError("SERIALIZED 明細必須帶 item_code")
@@ -114,6 +119,7 @@ class SaleLineCreateRequest(BaseModel):
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
             promo_free=bool(self.promo_free),
+            menu_option_ids=tuple(sorted(self.menu_option_ids or ())),
         )
 
 

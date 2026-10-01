@@ -1,4 +1,4 @@
-"""彈性菜單：分類、選項群組、選項、品項掛群組、品項介紹（docs/44 §3）。
+"""彈性菜單：分類、選項群組、選項、品項掛群組、品項介紹、銷售明細選項快照（docs/44 §3）。
 
 既有 menu_items.category 字串轉成 menu_categories 列後移除該欄；既有品項沒有群組＝沒有選項，
 照常可賣。降版時把分類名稱寫回字串欄；但選項群組、選項與品項介紹是店主手打、舊版沒地方放，
@@ -12,6 +12,7 @@ from typing import Any
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection
 
 revision = "0a577011b3c1"
@@ -135,6 +136,19 @@ def upgrade() -> None:
     )
     op.drop_column("menu_items", "category")
 
+    # 結帳帶選項（O1b）：品名帶選項會變長、選項另存快照。
+    op.alter_column(
+        "sale_lines",
+        "description",
+        existing_type=sa.String(150),
+        type_=sa.String(300),
+        existing_nullable=False,
+    )
+    op.add_column(
+        "sale_lines",
+        sa.Column("menu_options_snapshot", postgresql.JSONB(), nullable=True),
+    )
+
 
 def abort_if_option_data_exists(conn: Connection) -> None:
     """降版會 DROP 這些表／欄；有店主建的資料就中止並指出哪裡有幾筆。"""
@@ -142,6 +156,12 @@ def abort_if_option_data_exists(conn: Connection) -> None:
         "menu_option_groups": "SELECT count(*) FROM menu_option_groups",
         "menu_options": "SELECT count(*) FROM menu_options",
         "menu_items.description": "SELECT count(*) FROM menu_items WHERE description IS NOT NULL",
+        "sale_lines.menu_options_snapshot": (
+            "SELECT count(*) FROM sale_lines WHERE menu_options_snapshot IS NOT NULL"
+        ),
+        "sale_lines.description 超過 150 字": (
+            "SELECT count(*) FROM sale_lines WHERE char_length(description) > 150"
+        ),
     }
     found = []
     for label, sql in checks.items():
@@ -154,6 +174,14 @@ def abort_if_option_data_exists(conn: Connection) -> None:
 
 def downgrade() -> None:
     abort_if_option_data_exists(op.get_bind())
+    op.drop_column("sale_lines", "menu_options_snapshot")
+    op.alter_column(
+        "sale_lines",
+        "description",
+        existing_type=sa.String(300),
+        type_=sa.String(150),
+        existing_nullable=False,
+    )
     op.add_column("menu_items", sa.Column("category", sa.String(50), nullable=True))
     op.execute(
         """

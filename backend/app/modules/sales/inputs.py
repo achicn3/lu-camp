@@ -10,6 +10,9 @@ from app.shared.enums import SaleLineKind, SaleLineType, TenderType
 
 LINEPAY_RETURN_RECOVERY_KIND = "RETURN"
 
+# 一行餐飲最多帶幾個選項（docs/44 §3.3）：防惡意大請求，正常菜單遠低於此。
+MENU_OPTIONS_MAX = 20
+
 
 # 手機條碼載具的 CarrierType（財政部代碼）。本系統**只開放手機條碼**（docs/24 §載具）——
 # 不支援自然人憑證或光貿會員載具，故此值為唯一。
@@ -22,7 +25,7 @@ class SaleLineInput:
 
     SERIALIZED → item_code（qty 固定 1）；CATALOG → catalog_product_id + qty；
     BULK_LOT → bulk_lot_id（單一來源）或 bulk_basket_id（販售籃，ADR-025）擇一 + qty；
-    MENU → menu_item_id + qty（餐飲，不扣庫存）。
+    MENU → menu_item_id + qty（餐飲）＋ menu_option_ids（所選選項，docs/44 §3；排序後保存）。
 
     `line_kind` 是**商業性質**（一般銷售／贈品），與品項種類正交：贈品照樣扣庫存，
     只是成交 0 元、原價與成本另外留痕。贈品必須帶 `gift_reason_id`。
@@ -40,6 +43,19 @@ class SaleLineInput:
     gift_note: str | None = None
     # 買 N 送 M：店員指定「送這件」（docs/40 P3b、裁示 4）；成組時優先當送的那件。
     promo_free: bool = False
+    # 餐飲選項（docs/44 §3）：一律由小到大排序，順序不同視為同一組選擇。
+    menu_option_ids: tuple[int, ...] = ()
+
+
+def menu_line_key(line: SaleLineInput) -> str:
+    """餐飲明細的購物車項目鍵：同品項不同選項是不同項目（否則差異比對會吃掉一筆）。
+
+    沒有選項時維持舊鍵 `MENU:{id}`，既有購物車與快照不受影響。
+    """
+    base = f"MENU:{line.menu_item_id}"
+    if not line.menu_option_ids:
+        return base
+    return base + ":" + ",".join(str(i) for i in line.menu_option_ids)
 
 
 @dataclass(frozen=True)

@@ -24,7 +24,7 @@ from app.modules.customerdisplay.models import (
 )
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.customerdisplay.schemas import CartTenderRequest, CartUpsertRequest
-from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.inputs import SaleLineInput, menu_line_key
 from app.modules.sales.linepay import LinePayClient, LinePayResult
 from app.modules.sales.schemas import SaleCreateRequest
 from app.modules.sales.service import SalesService
@@ -147,7 +147,7 @@ def _line_key(line: SaleLineInput) -> str:
         return f"BULK_BASKET:{line.bulk_basket_id}"
     if line.line_type is SaleLineType.BULK_LOT:
         return f"BULK_LOT:{line.bulk_lot_id}"
-    return f"MENU:{line.menu_item_id}"
+    return menu_line_key(line)
 
 
 def _dining_identity(data: CartUpsertRequest) -> tuple[str | None, str | None]:

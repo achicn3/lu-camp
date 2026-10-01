@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.money import ensure_ntd_fits_numeric_12
-from app.modules.sales.inputs import CampaignOverrideInput, SaleLineInput
+from app.modules.sales.inputs import MENU_OPTIONS_MAX, CampaignOverrideInput, SaleLineInput
 from app.modules.sales.pricing import DiscountRequest
 from app.modules.sales.schemas import (
     DISABLED_CAMPAIGNS_MAX,
@@ -112,6 +112,8 @@ class CartLineRequest(BaseModel):
     # 買 N 送 M：店員指定「送這件」（docs/40 P3b）；沒成組或不適用時不生效。
     # 可空＝沒指定（生成的前端型別才維持選填，舊的購物車快照不必補這欄）。
     promo_free: bool | None = None
+    # 餐飲選項（docs/44 §3）；與 SaleLineCreateRequest 同形。
+    menu_option_ids: list[int] | None = Field(default=None, max_length=MENU_OPTIONS_MAX)
 
     @model_validator(mode="after")
     def _matching_reference(self) -> "CartLineRequest":
@@ -129,6 +131,8 @@ class CartLineRequest(BaseModel):
             raise ValueError("販售籃明細只能帶 bulk_basket_id")
         if self.line_type is SaleLineType.SERIALIZED and self.qty != 1:
             raise ValueError("序號品數量固定為 1")
+        if self.line_type is not SaleLineType.MENU and self.menu_option_ids:
+            raise ValueError("只有餐飲明細可以帶選項")
         return self
 
     def to_input(self) -> SaleLineInput:
@@ -144,6 +148,7 @@ class CartLineRequest(BaseModel):
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
             promo_free=bool(self.promo_free),
+            menu_option_ids=tuple(sorted(self.menu_option_ids or ())),
         )
 
 
@@ -311,6 +316,7 @@ class StaffCartLineRead(BaseModel):
     gift_reason_id: int | None = None
     gift_note: str | None = None
     promo_free: bool | None = None
+    menu_option_ids: list[int] | None = None
 
 
 class StaffCartAdjustmentRead(BaseModel):

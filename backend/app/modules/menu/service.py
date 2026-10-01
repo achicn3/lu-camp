@@ -23,8 +23,12 @@ from app.shared.exceptions import (
     ItemDeleteBlocked,
     MenuEntryNotFound,
     MenuItemNotFound,
+    MenuItemUnavailable,
     SaleLineInvalid,
 )
+
+# 銷售明細品名欄寬（sale_lines.description）；品名＋選項超過就截斷並以「…」結尾。
+SALE_LINE_DESCRIPTION_MAX: Final = 300
 
 # 區分「未提供（不變）」與「明確設為 None（清空）」——目前僅 category 需要清空語意。
 _UNSET: Final = object()
@@ -81,6 +85,22 @@ class MenuItemDetail:
     item: MenuItem
     category: MenuCategory | None
     option_groups: list[OptionGroupDetail]
+
+
+@dataclass(frozen=True)
+class MenuSelection:
+    """一行餐飲的計價結果：單價（基本價＋選項加價）、帶選項的品名、選項快照。"""
+
+    unit_price: Decimal
+    description: str
+    options_snapshot: list[dict[str, object]]
+
+
+def _line_description(name: str, option_names: Sequence[str]) -> str:
+    text = name if not option_names else f"{name}（{'、'.join(option_names)}）"
+    if len(text) <= SALE_LINE_DESCRIPTION_MAX:
+        return text
+    return text[: SALE_LINE_DESCRIPTION_MAX - 1] + "…"
 
 
 class MenuService:
@@ -301,6 +321,54 @@ class MenuService:
             )
             for i in items
         ]
+
+    async def price_selection(
+        self, store_id: int, item: MenuItem, option_ids: Sequence[int]
+    ) -> MenuSelection:
+        """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
+
+        - 選項必須屬於品項目前所掛、未封存的群組，且未封存；停售 → MenuItemUnavailable。
+        - 每個群組所選數量須在 [min_select, max_select]；同一選項不可重複。
+        - 品名依「群組掛載順序 → 群組內選項順序」排列，與客戶端送來的順序無關。
+        """
+        if len(set(option_ids)) != len(option_ids):
+            raise SaleLineInvalid(f"「{item.name}」的同一個選項不能選兩次")
+        details = (await self.describe_items(store_id, [item]))[0].option_groups
+        chosen = set(option_ids)
+        known = {o.id for d in details for o in d.options}
+        if not chosen <= known:
+            raise SaleLineInvalid(f"「{item.name}」沒有這個選項，請重新選擇")
+        unit_price = item.unit_price
+        names: list[str] = []
+        snapshot: list[dict[str, object]] = []
+        for detail in details:
+            group = detail.group
+            picked = [o for o in detail.options if o.id in chosen]
+            if len(picked) < group.min_select:
+                if group.min_select == 1:
+                    raise SaleLineInvalid(f"「{item.name}」要選「{group.name}」")
+                raise SaleLineInvalid(f"「{group.name}」至少要選 {group.min_select} 項")
+            if len(picked) > group.max_select:
+                raise SaleLineInvalid(f"「{group.name}」最多只能選 {group.max_select} 項")
+            for option in picked:
+                if not option.is_available:
+                    raise MenuItemUnavailable(f"「{option.name}」目前停售")
+                unit_price += option.price_delta
+                names.append(option.name)
+                snapshot.append(
+                    {
+                        "group_id": group.id,
+                        "group": group.name,
+                        "option_id": option.id,
+                        "option": option.name,
+                        "price_delta": format_ntd(option.price_delta),
+                    }
+                )
+        return MenuSelection(
+            unit_price=unit_price,
+            description=_line_description(item.name, names),
+            options_snapshot=snapshot,
+        )
 
     async def set_item_option_groups(
         self, store_id: int, item_id: int, group_ids: Sequence[int], *, actor_user_id: int

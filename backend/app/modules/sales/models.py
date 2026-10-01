@@ -154,7 +154,11 @@ class SaleLine(Base, TimestampMixin):
     # 同籃來源這三項必與籃子一致），**庫存回補一律依分配紀錄，不可只回 bulk_lot_id**。
     bulk_basket_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_baskets.id"))
     menu_item_id: Mapped[int | None] = mapped_column(ForeignKey("menu_items.id"))
-    description: Mapped[str] = mapped_column(String(150))
+    # 餐飲選項快照（docs/44 §3.2）：[{group_id, group, option_id, option, price_delta}]；
+    # 沒選項＝NULL。日後改選項名稱或加價不影響歷史收據與報表。
+    menu_options_snapshot: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
+    # 餐飲帶選項時品名會變長（「拿鐵（冰、燕麥奶）」），2026-10-01 由 150 放寬為 300。
+    description: Mapped[str] = mapped_column(String(300))
     qty: Mapped[int] = mapped_column()
     # unit_price/line_total 為**實際成交（折後）**值——退貨退實付、報表認實收皆以此為準。
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
