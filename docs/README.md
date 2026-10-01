@@ -45,6 +45,7 @@
 - [MacBook 正式機：升級到 2026-10-01 版（彈性菜單後端）](./45-macbook-upgrade-2026-10-01-menu-options.md)
 - [MacBook 正式機：升級到 2026-10-01 版（餐飲每日限量）](./46-macbook-upgrade-2026-10-01-daily-stock.md)
 - [餐飲交易紀錄頁＋餐點部分退款](./47-fnb-transactions-and-refund.md)
+- [MacBook 正式機：升級到 2026-10-01 版（餐飲交易紀錄、餐點退款、點選同意）](./48-macbook-upgrade-2026-10-01-fnb-refund.md)
 
 ## 評估與後續實作
 
