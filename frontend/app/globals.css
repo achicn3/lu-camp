@@ -5990,6 +5990,10 @@ a.btn-ghost {
 .menu-item-options-dialog textarea {
   width: 100%;
   font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
 }
 .menu-item-options-dialog {
   max-width: 520px;
