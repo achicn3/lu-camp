@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
@@ -76,6 +77,56 @@ _PHOTO_UPLOAD_PATH = re.compile(rf"^{API_PREFIX}/menu-items/[^/]+/photo/?$")
 logger = logging.getLogger(__name__)
 
 
+class PhotoBodyLimit:
+    """照片上傳實際收到的位元組數上限（Codex 對抗審查 O1d 第二輪）。
+
+    Content-Length 只是對方自己宣告的；這裡邊收邊數，超過就當成連線中斷讓解析停下，
+    再自己回 413。只套在照片上傳路徑，其他請求原封不動。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not (
+            scope["type"] == "http"
+            and scope["method"] == "POST"
+            and _PHOTO_UPLOAD_PATH.match(scope["path"])
+        ):
+            await self.app(scope, receive, send)
+            return
+        received = 0
+        exceeded = False
+        started = False
+
+        async def limited_receive() -> Message:
+            nonlocal received, exceeded
+            if exceeded:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > PHOTO_MAX_BODY_BYTES:
+                    exceeded = True
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message: Message) -> None:
+            nonlocal started
+            if exceeded:
+                return  # 超量後 app 的任何回應都不送，改由下面統一回 413
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, guarded_send)
+        except Exception:
+            if not exceeded:
+                raise
+        if exceeded and not started:
+            await _photo_too_large()(scope, receive, send)
+
+
 def _reject_photo_body(content_length: str | None) -> JSONResponse | None:
     """照片上傳必須帶 Content-Length（瀏覽器送 FormData 一定會帶），且不得超過上限。"""
     if content_length is None:
@@ -84,9 +135,11 @@ def _reject_photo_body(content_length: str | None) -> JSONResponse | None:
         too_large = int(content_length) > PHOTO_MAX_BODY_BYTES
     except ValueError:
         too_large = True
-    if too_large:
-        return JSONResponse(status_code=413, content={"detail": "照片超過 10 MB，請先縮小再上傳"})
-    return None
+    return _photo_too_large() if too_large else None
+
+
+def _photo_too_large() -> JSONResponse:
+    return JSONResponse(status_code=413, content={"detail": "照片超過 10 MB，請先縮小再上傳"})
 
 
 class HealthResponse(BaseModel):
@@ -136,6 +189,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="lu-camp API", version="0.1.0", lifespan=_lifespan)
     # CORS：店務認證仍走 Bearer；KIOSK v2 使用 Path-scoped HttpOnly cookie，故明確允許
     # credentials。allow_origins 是列舉值而非 "*"，瀏覽器不會把 cookie 放行給未知來源。
+    app.add_middleware(PhotoBodyLimit)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

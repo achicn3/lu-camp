@@ -241,3 +241,30 @@ async def test_streamed_body_without_length_is_rejected(
         headers={**_auth(mgr), "Content-Type": "multipart/form-data; boundary=b"},
     )
     assert resp.status_code == 411
+
+
+async def test_body_larger_than_declared_length_is_cut_off(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """Codex 對抗審查 O1d 第二輪：Content-Length 報小、實際串流送更多，也要在解析前擋下。"""
+    _, mgr = await _seed(db_session)
+    item_id = await _item(client, mgr)
+    chunk = b"x" * (1024 * 1024)
+
+    async def flood() -> AsyncGenerator[bytes]:
+        yield b'--b\r\nContent-Disposition: form-data; name="file"; filename="a.jpg"\r\n\r\n'
+        for _ in range(PHOTO_MAX_BODY_BYTES // len(chunk) + 2):
+            yield chunk
+
+    resp = await client.post(
+        f"/api/v1/menu-items/{item_id}/photo",
+        content=flood(),
+        headers={
+            **_auth(mgr),
+            "Content-Length": "1000",
+            "Content-Type": "multipart/form-data; boundary=b",
+        },
+    )
+    assert resp.status_code == 413
+    assert "10 MB" in resp.json()["detail"]
+    assert await db_session.scalar(select(func.count()).select_from(MenuPhoto)) == 0
