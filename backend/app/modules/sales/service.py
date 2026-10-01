@@ -1878,6 +1878,7 @@ class SalesService:
                 LinePayReturnRecoveryLine(
                     sale_line_id=self._required_recovery_int(raw, "sale_line_id"),
                     qty=self._required_recovery_int(raw, "qty"),
+                    resellable=raw.get("resellable") is True,
                 )
             )
         reason = payload.get("reason")
@@ -2348,7 +2349,12 @@ class SalesService:
             catalog_cogs=comp.catalog_cogs - adj.catalog_cogs,
             unknown_cost_revenue=comp.unknown_cost_revenue
             - adj.catalog_revenue
-            - adj.no_cost_serialized_revenue,
+            - adj.no_cost_serialized_revenue
+            - adj.menu_unknown_revenue,
+            # 餐點退款（docs/47）：同正向口徑分桶反轉，餐飲營收／成本／毛利一起扣。
+            menu_revenue=comp.menu_revenue - adj.menu_known_revenue - adj.menu_unknown_revenue,
+            menu_known_revenue=comp.menu_known_revenue - adj.menu_known_revenue,
+            menu_cogs=comp.menu_cogs - adj.menu_cogs,
         )
         sale_ids = await self._repo.nonvoid_sale_ids(store_id, date_from, date_to)
         commission = await self._consignment.commission_total_for_sales(store_id, sale_ids)
@@ -2805,8 +2811,24 @@ class SalesService:
     async def dine_in_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[tuple[datetime, str, Decimal, Decimal]]:
-        """含餐飲品項的銷售逐筆：(成交時間, 服務型態, 餐飲營收, 整單合計)（docs/39）。"""
-        return await self._repo.dine_in_rows(store_id, date_from, date_to)
+        """含餐飲品項的銷售逐筆：(成交時間, 服務型態, 餐飲營收, 整單合計)（docs/39）。
+
+        金額**扣掉該單已退的部分**（docs/47 起餐點可退）：退款歸回原結帳，客單價與佔比才有意義；
+        餐點全退光的那筆不算一組（那組客人等於沒消費餐飲）。
+        """
+        from app.modules.returns.service import ReturnsService
+
+        rows = await self._repo.dine_in_rows(store_id, date_from, date_to)
+        refunds = await ReturnsService(self._session).refunds_by_sale(
+            store_id, [sale_id for sale_id, *_ in rows]
+        )
+        netted: list[tuple[datetime, str, Decimal, Decimal]] = []
+        for sale_id, created_at, mode, fnb, gross in rows:
+            food_refund, total_refund = refunds.get(sale_id, (Decimal(0), Decimal(0)))
+            if fnb - food_refund <= 0:
+                continue
+            netted.append((created_at, mode, fnb - food_refund, gross - total_refund))
+        return netted
 
     async def gift_report_rows(
         self, store_id: int, date_from: datetime, date_to: datetime

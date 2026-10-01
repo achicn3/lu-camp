@@ -111,8 +111,8 @@ def decide(
 ) -> ReturnInvoiceDecision:
     """依原發票事實與本次退貨範圍，決定要折讓、作廢、或轉人工。
 
-    `is_full_return`＝**本次退貨後累計**是否所有可退品項都退完（由呼叫端計算，含餐飲的
-    混合單因餐飲不可退而永遠不成立）。
+    `is_full_return`＝**本次退貨後累計**是否所有付費品項都退完（由呼叫端計算；
+    docs/47 起餐點也可退，混合單要餐點與二手都退光才成立）。
     """
     if not facts.exists:
         return ReturnInvoiceDecision(

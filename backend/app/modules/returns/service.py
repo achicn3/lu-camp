@@ -18,6 +18,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
+from app.modules.menu.service import MenuService
 from app.modules.returns.bundle_policy import BundleGroupMembers, bundles_to_return
 from app.modules.returns.invoice_policy import (
     InvoiceFacts,
@@ -65,6 +66,8 @@ from app.shared.exceptions import (
 class ReturnLineInput:
     sale_line_id: int
     qty: int
+    # 餐點退款「這份還能賣」（docs/47 §3）：勾了才把份數加回今日份數；其他品項忽略。
+    resellable: bool = False
 
 
 @dataclass(frozen=True)
@@ -188,7 +191,9 @@ class ReturnsService:
             recovery.store_id,
             sale_id=recovery.sale_id,
             lines=[
-                ReturnLineInput(sale_line_id=line.sale_line_id, qty=line.qty)
+                ReturnLineInput(
+                    sale_line_id=line.sale_line_id, qty=line.qty, resellable=line.resellable
+                )
                 for line in recovery.lines
             ],
             reason=recovery.reason,
@@ -418,6 +423,12 @@ class ReturnsService:
         """期間內各銷售的退款金額與筆數（申報月報的紙本待調整用）。"""
         return await self._repo.period_refunds_by_sale(store_id, date_from, date_to)
 
+    async def refunds_by_sale(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, tuple[Decimal, Decimal]]:
+        """各銷售單累計已退金額：(餐點部分, 全部)（docs/39 §3.5、docs/47）。"""
+        return await self._repo.refunds_by_sale(store_id, sale_ids)
+
     async def margin_adjustments(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> "ReturnsMarginAdjustments":
@@ -578,6 +589,7 @@ class ReturnsService:
         if clean_reason == "":
             raise ReturnLineInvalid("退貨原因不可空白")
         requested = self._normalize_lines(lines)
+        resellable = {line.sale_line_id for line in lines if line.resellable}
 
         # idempotent replay：同 key 內容相同 → 回原單、不再退現；內容不同 → 拒絕。
         replay = await self.find_idempotent_replay(
@@ -717,21 +729,38 @@ class ReturnsService:
             )
 
         sale_tenders = await self._sales.list_tenders(sale.id)
-        previous_refund = sum(
+        # 餐點與二手分開累計（docs/47 §2）：餐點不能用購物金付，退款也只能回外部付款。
+        previous_food = sum(
             (
                 refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
                 for line in sale_lines
+                if line.line_type is SaleLineType.MENU
             ),
             Decimal(0),
         )
+        previous_other = sum(
+            (
+                refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
+                for line in sale_lines
+                if line.line_type is not SaleLineType.MENU
+            ),
+            Decimal(0),
+        )
+        refund_food = sum(
+            (amount for line, _, amount in selected if line.line_type is SaleLineType.MENU),
+            Decimal(0),
+        )
+        refund_other = refund_amount - refund_food
         # 純贈品退貨（實付 0）沒有錢可退：不產生任何退款渠道明細。
         # deferred 對平守衛看的是加總，0 == 0 仍成立。
         refund_allocations = (
             self._refund_allocations(
                 sale.payment_method,
                 sale_tenders,
-                previous_refund=previous_refund,
-                refund_amount=refund_amount,
+                previous_food=previous_food,
+                previous_other=previous_other,
+                refund_food=refund_food,
+                refund_other=refund_other,
             )
             if refund_amount > 0
             else []
@@ -775,7 +804,9 @@ class ReturnsService:
                     refund_amount=line_refund,
                 )
             )
-            await self._return_inventory_line(store_id, customer_return.id, line, qty)
+            await self._return_inventory_line(
+                store_id, customer_return.id, line, qty, resellable=line.id in resellable
+            )
             # 退回寄售序號品 → 反轉其結算（invariant #7），即使只退這一品、整張單未全退。
             # 在現金出帳前先取得結算鎖，建立『結算 → cash_session』鎖序與 pay_settlement 一致，
             # 避免退貨↔付款死結（Codex High）。非寄售序號品無結算 → no-op。
@@ -838,7 +869,9 @@ class ReturnsService:
                 recovery_payload={
                     "sale_id": sale.id,
                     "lines": [
+                        # 「這份還能賣」只在勾了時才放，舊格式的復原紀錄維持原形狀。
                         {"sale_line_id": sale_line_id, "qty": qty}
+                        | ({"resellable": True} if sale_line_id in resellable else {})
                         for sale_line_id, qty in sorted(requested.items())
                     ],
                     "reason": clean_reason,
@@ -857,8 +890,7 @@ class ReturnsService:
         returned_after = dict(previous)
         for sale_line_id, qty in requested.items():
             returned_after[sale_line_id] = returned_after.get(sale_line_id, 0) + qty
-        # 「累計全退」＝本次退完後所有明細都退光。含餐飲的混合單因餐飲不可退，永遠不成立
-        # ——這正確：餐飲確實沒退，本來就不算整筆退。
+        # 「累計全退」＝本次退完後所有明細都退光（docs/47 起含餐點；混合單要兩邊都退光）。
         is_full_return = all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines)
         if is_full_return:
             sale.status = SaleStatus.RETURNED
@@ -885,10 +917,10 @@ class ReturnsService:
                 ),
                 Decimal(0),
             )
-            # 本次退貨全為非餐飲（餐飲不可退，_validate_supported_line 已擋）→ refund_amount
+            # 只按本次的**二手**退款沖點：餐點沒發點數（docs/47 §2），退餐點不沖。
             awarded = Decimal(sale.awarded_points)
             prior_ent = int(awarded * prior_refund / non_menu_subtotal)
-            now_ent = int(awarded * (prior_refund + refund_amount) / non_menu_subtotal)
+            now_ent = int(awarded * (prior_refund + refund_other) / non_menu_subtotal)
             claw = now_ent - prior_ent
             if claw > 0:
                 from app.modules.contacts.service import ContactService
@@ -1065,10 +1097,20 @@ class ReturnsService:
         payment_method: PaymentMethod,
         tenders: list[SaleTender],
         *,
-        previous_refund: Decimal,
-        refund_amount: Decimal,
+        previous_food: Decimal,
+        previous_other: Decimal,
+        refund_food: Decimal,
+        refund_other: Decimal,
     ) -> list[tuple[TenderType, Decimal]]:
-        """按累計退款做差額拆帳：購物金優先，其餘僅支援單一付款。"""
+        """按累計退款做差額拆帳。
+
+        - 二手（非餐點）：購物金優先，其餘退外部付款（既有規則）。
+        - 餐點：**只退外部付款**——餐點本來就不能用購物金付（M1 不變量），
+          退成購物金等於把現金變成購物金給客人（docs/47 §2）。
+        外部付款僅支援單一渠道（現金／LINE Pay／台灣Pay），可搭配購物金。
+        """
+        refund_amount = refund_food + refund_other
+        previous_refund = previous_food + previous_other
         if not tenders:
             if payment_method == PaymentMethod.CASH:
                 return [(TenderType.CASH, refund_amount)]
@@ -1080,14 +1122,9 @@ class ReturnsService:
         external = kinds - {TenderType.STORE_CREDIT}
         if any(kind not in supported_external for kind in external):
             raise ReturnConflict("原銷售含不支援的退款渠道")
-
-        if TenderType.STORE_CREDIT in kinds:
-            if len(external) > 1:
+        if len(external) > 1:
+            if TenderType.STORE_CREDIT in kinds:
                 raise ReturnConflict("購物金退款僅支援搭配單一現金／LINE Pay／台灣Pay付款")
-            priority = [TenderType.STORE_CREDIT, *external]
-        elif len(kinds) == 1 and kinds <= supported_external:
-            priority = list(kinds)
-        else:
             raise ReturnConflict("退款僅支援單一付款或購物金搭配一種其他付款")
 
         total_paid = sum(amounts.values(), Decimal(0))
@@ -1098,19 +1135,37 @@ class ReturnsService:
         ):
             raise ReturnConflict("累計退款金額超過原付款渠道金額")
 
+        credit = amounts.get(TenderType.STORE_CREDIT, Decimal(0))
+
+        def credit_refunded(other: Decimal) -> Decimal:
+            return min(credit, other)
+
+        def external_refunded(food: Decimal, other: Decimal) -> Decimal:
+            return food + other - credit_refunded(other)
+
+        credit_delta = credit_refunded(previous_other + refund_other) - credit_refunded(
+            previous_other
+        )
+        external_delta = external_refunded(
+            previous_food + refund_food, previous_other + refund_other
+        ) - external_refunded(previous_food, previous_other)
+        if external:
+            [external_kind] = external
+            if (
+                external_refunded(previous_food + refund_food, previous_other + refund_other)
+                > amounts[external_kind]
+            ):
+                raise ReturnConflict("累計退款金額超過原付款渠道金額")
+        elif external_delta > 0:
+            # 只用購物金付的單不會有餐點（餐點不可用購物金），走到這裡代表資料不一致。
+            raise ReturnConflict("原銷售沒有可退回餐點款項的付款渠道")
+
         allocations: list[tuple[TenderType, Decimal]] = []
-        priority_capacity = Decimal(0)
-        for tender_type in priority:
-            capacity = amounts[tender_type]
-            refunded_before = min(capacity, max(Decimal(0), previous_refund - priority_capacity))
-            refunded_after = min(
-                capacity,
-                max(Decimal(0), previous_refund + refund_amount - priority_capacity),
-            )
-            delta = refunded_after - refunded_before
-            if delta > 0:
-                allocations.append((tender_type, delta))
-            priority_capacity += capacity
+        if credit_delta > 0:
+            allocations.append((TenderType.STORE_CREDIT, credit_delta))
+        if external_delta > 0:
+            [external_kind] = external
+            allocations.append((external_kind, external_delta))
         return allocations
 
     @staticmethod
@@ -1121,11 +1176,21 @@ class ReturnsService:
             return
         if line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id is not None:
             return
+        if line.line_type == SaleLineType.MENU and line.menu_item_id is not None:
+            return  # 餐點退款（docs/47）
         raise ReturnLineInvalid(f"銷售明細 {line.id} 品項參照不完整，無法退貨")
 
     async def _return_inventory_line(
-        self, store_id: int, return_id: int, line: SaleLine, qty: int
+        self, store_id: int, return_id: int, line: SaleLine, qty: int, *, resellable: bool
     ) -> None:
+        if line.line_type == SaleLineType.MENU:
+            # 餐點做好送出通常不能再賣：預設不動份數；店員勾「這份還能賣」才加回
+            # （同一營業日、份數版本未變，規則同作廢，docs/47 §3）。
+            if resellable and line.menu_stock_consumed:
+                await MenuService(self._session).restore_daily_stock(
+                    store_id, line.menu_stock_consumed, qty=qty
+                )
+            return
         # 贈品退回要能與一般退貨分辨，否則贈品報表算不出「送出去又退回來」幾件。
         reason = (
             StockReason.GIFT_RETURN if line.line_kind is SaleLineKind.GIFT else StockReason.RETURN

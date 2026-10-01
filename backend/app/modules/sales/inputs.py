@@ -92,6 +92,8 @@ class TenderInput:
 class LinePayReturnRecoveryLine:
     sale_line_id: int
     qty: int
+    # 餐點退款勾「這份還能賣」（docs/47）：復原時照樣加回份數；舊紀錄沒有此鍵＝False。
+    resellable: bool = False
 
 
 @dataclass(frozen=True)

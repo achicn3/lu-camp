@@ -79,7 +79,9 @@ async def create_return(
             detail="「紙本已處置」需店長確認",
         )
     svc = ReturnsService(session)
-    inputs = [ReturnLineInput(line.sale_line_id, line.qty) for line in payload.lines]
+    inputs = [
+        ReturnLineInput(line.sale_line_id, line.qty, line.resellable) for line in payload.lines
+    ]
     requested = {line.sale_line_id: line.qty for line in payload.lines}
     try:
         customer_return = await svc.create_return(
@@ -145,7 +147,10 @@ async def preview_return(
         result = await svc.preview_return(
             user.store_id,
             sale_id=payload.sale_id,
-            lines=[ReturnLineInput(line.sale_line_id, line.qty) for line in payload.lines],
+            lines=[
+                ReturnLineInput(line.sale_line_id, line.qty, line.resellable)
+                for line in payload.lines
+            ],
         )
     except DomainError as exc:
         raise _map_domain_error(exc) from exc

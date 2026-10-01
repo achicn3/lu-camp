@@ -896,8 +896,8 @@ class SalesRepository:
 
     async def dine_in_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
-    ) -> list[tuple[datetime, str, Decimal, Decimal]]:
-        """期間內**每一筆含餐飲品項的銷售**：(成交時間, 服務型態, 餐飲營收, 整單合計)。
+    ) -> list[tuple[int, datetime, str, Decimal, Decimal]]:
+        """期間內**每一筆含餐飲品項的銷售**：(銷售 id, 成交時間, 服務型態, 餐飲營收, 整單合計)。
 
         一列＝一筆結帳＝一「組」（docs/39 裁示）。回傳逐筆而非彙總，
         是因為報表要同時做組數、佔比、趨勢分桶與時段分佈，逐筆最省事也最不容易算錯。
@@ -912,6 +912,7 @@ class SalesRepository:
         )
         rows = await self._session.execute(
             select(
+                Sale.id,
                 Sale.created_at,
                 Sale.service_mode,
                 func.coalesce(fnb, 0),
@@ -929,7 +930,8 @@ class SalesRepository:
             .having(fnb > 0)
         )
         return [
-            (created, str(mode), Decimal(rev), Decimal(total)) for created, mode, rev, total in rows
+            (int(sid), created, str(mode), Decimal(rev), Decimal(total))
+            for sid, created, mode, rev, total in rows
         ]
 
     async def gift_rows(

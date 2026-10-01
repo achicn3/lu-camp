@@ -16,6 +16,8 @@ NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 class ReturnLineRequest(BaseModel):
     sale_line_id: int
     qty: int = Field(gt=0)
+    # 餐點退款「這份還能賣」（docs/47 §3）：勾了才把份數加回今日份數；其他品項忽略。
+    resellable: bool = False
 
 
 class ReturnCreateRequest(BaseModel):

@@ -34,6 +34,10 @@ class ReturnsMarginAdjustments:
     # 有成本快照的一般商品：營收與成本要一起反轉，否則毛利只退了收入沒退成本。
     catalog_known_revenue: Decimal = Decimal(0)
     catalog_cogs: Decimal = Decimal(0)  # 缺成本自有序號（unknown 桶）
+    # 餐點退款（docs/47）：與正向口徑同桶——有填成本的認毛利、沒填的在「成本未知」。
+    menu_known_revenue: Decimal = Decimal(0)
+    menu_cogs: Decimal = Decimal(0)
+    menu_unknown_revenue: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -215,6 +219,7 @@ class ReturnsRepository:
         o_bulk_rev = o_bulk_cogs = Decimal(0)
         c_ser_rev = c_bulk_rev = cat_rev = nocost_rev = Decimal(0)
         cat_known_rev = cat_cogs = Decimal(0)
+        menu_known_rev = menu_cogs = menu_unknown_rev = Decimal(0)
         _zero = ReturnsMarginAdjustments(
             owned_serialized_revenue=Decimal(0),
             owned_serialized_cogs=Decimal(0),
@@ -324,7 +329,13 @@ class ReturnsRepository:
                 )
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
         for line, rqty, refund in rows:
-            if line.line_type == SaleLineType.CATALOG:
+            if line.line_type == SaleLineType.MENU:
+                if line.cost_snapshot is None:
+                    menu_unknown_rev += refund
+                else:
+                    menu_known_rev += refund
+                    menu_cogs += round_ntd(line.cost_snapshot * Decimal(rqty) / Decimal(line.qty))
+            elif line.line_type == SaleLineType.CATALOG:
                 if line.cost_snapshot is None:
                     cat_rev += refund  # 成本未知：只反轉營收（沿用舊口徑）
                 else:
@@ -378,7 +389,27 @@ class ReturnsRepository:
             no_cost_serialized_revenue=nocost_rev,
             catalog_known_revenue=cat_known_rev,
             catalog_cogs=cat_cogs,
+            menu_known_revenue=menu_known_rev,
+            menu_cogs=menu_cogs,
+            menu_unknown_revenue=menu_unknown_rev,
         )
+
+    async def refunds_by_sale(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, tuple[Decimal, Decimal]]:
+        """各銷售單累計已退金額：(餐點部分, 全部)。只讀；供報表把退款扣回該筆結帳。"""
+        if not sale_ids:
+            return {}
+        food = func.sum(
+            case((SaleLine.line_type == SaleLineType.MENU, ReturnLine.refund_amount), else_=0)
+        )
+        rows = await self._session.execute(
+            select(SaleLine.sale_id, func.coalesce(food, 0), func.sum(ReturnLine.refund_amount))
+            .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
+            .where(ReturnLine.store_id == store_id, SaleLine.sale_id.in_(sale_ids))
+            .group_by(SaleLine.sale_id)
+        )
+        return {int(sid): (Decimal(f), Decimal(t)) for sid, f, t in rows}
 
     async def returned_qty_by_sale_line_ids(
         self, store_id: int, sale_line_ids: list[int]
