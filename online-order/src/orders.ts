@@ -201,7 +201,6 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
 
   const body = parseRequest(raw);
   if (body === null) return error("invalid_request", 422);
-  if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(
@@ -215,6 +214,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     if (prior.fingerprint !== fingerprint) return error("idempotency_conflict", 409);
     return json({ token, status: customerStatus(prior), total: prior.total });
   }
+  // 暫停只擋新的單：已經成立的單（回應遺失後重送）要拿得回來，否則客人查不到自己的單（Codex O4 第一輪）。
+  if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
   if (!(await verifyTurnstile(env, body.turnstile_token, ip))) return error("challenge_failed", 403);
 

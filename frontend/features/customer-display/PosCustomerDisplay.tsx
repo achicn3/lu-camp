@@ -111,6 +111,8 @@ interface PosCustomerDisplayProps {
   /** 餐飲內用/外帶與桌號（docs/35）：跟著購物車保存，POS 重掛/還原時才不會遺失選擇。 */
   serviceMode: "DINE_IN" | "TAKEOUT" | null;
   tableNo: string | null;
+  /** 帶入結帳的線上訂單（docs/44 §4.3）：同桌號跟著購物車保存，POS 重新整理才還原得回來。 */
+  onlineOrderId?: number | null;
   ready: boolean;
   onRestore: (cart: StaffCart) => void | Promise<void>;
   onTerminalChange?: (terminal: Terminal | null) => void;
@@ -141,6 +143,7 @@ type PendingSync = { fingerprint: string } & (
       disabledCampaigns: DisabledCampaign[];
       serviceMode: "DINE_IN" | "TAKEOUT" | null;
       tableNo: string | null;
+      onlineOrderId: number | null;
     }
   | { kind: "CANCEL" }
 );
@@ -153,6 +156,7 @@ export function PosCustomerDisplay({
   disabledCampaigns = NO_DISABLED_CAMPAIGNS,
   serviceMode,
   tableNo,
+  onlineOrderId = null,
   ready,
   onRestore,
   onTerminalChange,
@@ -184,6 +188,7 @@ export function PosCustomerDisplay({
     disabledCampaigns,
     serviceMode,
     tableNo,
+    onlineOrderId,
   });
   const payload = useRef({
     lines,
@@ -193,6 +198,7 @@ export function PosCustomerDisplay({
     disabledCampaigns,
     serviceMode,
     tableNo,
+    onlineOrderId,
   });
   // drain 是 useCallback，內部拿不到最新的 payloadFingerprint；用 ref 帶進去。
   // **在 effect 裡寫入**，不在 render 期間碰 ref（React 規則）。
@@ -321,8 +327,18 @@ export function PosCustomerDisplay({
       disabledCampaigns,
       serviceMode,
       tableNo,
+      onlineOrderId,
     };
-  }, [adjustments, buyerContactId, disabledCampaigns, lines, serviceMode, tableNo, tenders]);
+  }, [
+    adjustments,
+    buyerContactId,
+    disabledCampaigns,
+    lines,
+    onlineOrderId,
+    serviceMode,
+    tableNo,
+    tenders,
+  ]);
 
   useEffect(() => {
     const terminalId = terminal.data?.id ?? null;
@@ -423,6 +439,8 @@ export function PosCustomerDisplay({
                   : {}),
                 service_mode: next.serviceMode,
                 table_no: next.tableNo,
+                // 沒帶入線上單時不帶：請求形狀與加欄位前相同。
+                ...(next.onlineOrderId !== null ? { online_order_id: next.onlineOrderId } : {}),
               },
             },
           );
@@ -479,6 +497,7 @@ export function PosCustomerDisplay({
                 disabledCampaigns: latest.disabledCampaigns,
                 serviceMode: latest.serviceMode,
                 tableNo: latest.tableNo,
+                onlineOrderId: latest.onlineOrderId,
               }
             : { kind: "CANCEL", fingerprint: payloadFingerprintRef.current };
         return;
@@ -553,6 +572,7 @@ export function PosCustomerDisplay({
                 disabledCampaigns: latest.disabledCampaigns,
               serviceMode: latest.serviceMode,
               tableNo: latest.tableNo,
+              onlineOrderId: latest.onlineOrderId,
             }
           : { kind: "CANCEL", fingerprint };
       setSyncBusy(true);

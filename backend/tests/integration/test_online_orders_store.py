@@ -31,6 +31,8 @@ from app.core.security import encode_access_token
 from app.core.time import utc_now
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.customerdisplay.schemas import CartUpsertRequest, StaffCartPayloadRead
+from app.modules.customerdisplay.service import CartSessionConflict, CustomerDisplayService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.onlineorder.client import OnlineOrderClient
@@ -47,7 +49,10 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
 from app.shared.exceptions import OnlineOrderNotConfigured
-from tests.integration.customer_display_helpers import CustomerDisplayAwareClient
+from tests.integration.customer_display_helpers import (
+    CustomerDisplayAwareClient,
+    ensure_paired_customer_display,
+)
 
 SECRET = "orders-test-secret"
 BASE = "https://order.test"
@@ -631,3 +636,58 @@ async def test_service_refuses_without_cloud_or_for_another_store(
         await OnlineOrdersService(db_session, None).pull_once(ctx.store_id)
     with pytest.raises(OnlineOrderNotConfigured):
         await _svc(db_session, ctx).pull_once(ctx.store_id + 1)
+
+
+# ── 帶入結帳後 POS 重新整理：線上單跟著購物車還原（Codex O4 第一輪 high）──
+
+
+async def test_cart_keeps_online_order_id_for_restore() -> None:
+    payload = CartUpsertRequest.model_validate(
+        {
+            "lines": [{"line_type": "MENU", "menu_item_id": 1, "qty": 1}],
+            "service_mode": "TAKEOUT",
+            "online_order_id": 7,
+        }
+    )
+    restored = StaffCartPayloadRead.model_validate(payload.model_dump(mode="json"))
+    assert restored.online_order_id == 7
+    # 舊購物車沒有這欄 → None
+    legacy = payload.model_dump(mode="json")
+    del legacy["online_order_id"]
+    old = StaffCartPayloadRead.model_validate(legacy)
+    assert old.online_order_id is None
+
+
+async def test_cart_resend_check_compares_online_order(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """線上單編號不在客顯快照裡：「帶入 → 回應遺失 → 取消帶入」兩次 PUT 快照相同，
+    不比對的話第二次會被當成重送而靜默丟掉，重新整理後又變回線上單。"""
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=ctx.store_id, actor_user_id=ctx.clerk_id
+    )
+    display = CustomerDisplayService(db_session)
+    lines = [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}]
+
+    def body(revision: int | None, online: int | None) -> CartUpsertRequest:
+        return CartUpsertRequest.model_validate(
+            {
+                "lines": lines,
+                "service_mode": "TAKEOUT",
+                **({} if revision is None else {"expected_revision": revision}),
+                **({} if online is None else {"online_order_id": online}),
+            }
+        )
+
+    first = await display.upsert_cart(
+        ctx.store_id, terminal.id, body(None, 5), actor_user_id=ctx.clerk_id
+    )
+    assert first.revision == 1
+    second = await display.upsert_cart(
+        ctx.store_id, terminal.id, body(1, None), actor_user_id=ctx.clerk_id
+    )
+    assert second.revision == 2
+    with pytest.raises(CartSessionConflict):
+        await display.upsert_cart(
+            ctx.store_id, terminal.id, body(1, 5), actor_user_id=ctx.clerk_id
+        )

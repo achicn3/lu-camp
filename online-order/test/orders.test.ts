@@ -171,6 +171,19 @@ describe("接單狀態", () => {
     expect(((await resp.json()) as { error: string }).error).toBe("not_accepting");
   });
 
+  it("已送出的單在暫停後重送：照樣拿回同一張（回應遺失的客人查得到自己的單）", async () => {
+    const key = crypto.randomUUID();
+    const first = await order({ idempotency_key: key }, { ip: "10.9.0.1" });
+    expect(first.status).toBe(201);
+    const { token } = (await first.json()) as { token: string };
+    await env.DB.prepare("UPDATE stores_meta SET accepting_orders = 0 WHERE store_id = 1").run();
+    const again = await order({ idempotency_key: key }, { ip: "10.9.0.1" });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { token: string }).token).toBe(token);
+    // 新的單仍然擋
+    expect((await order({}, { ip: "10.9.0.2" })).status).toBe(503);
+  });
+
   it("店家按了暫停：503", async () => {
     await env.DB.prepare("UPDATE stores_meta SET accepting_orders = 0 WHERE store_id = 1").run();
     expect((await order()).status).toBe(503);

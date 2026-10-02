@@ -1516,6 +1516,19 @@ export default function PosPage() {
         mode: payload?.service_mode ?? null,
         tableNo: payload?.table_no ?? null,
       });
+      // 帶入結帳的線上單（docs/44 §4.3）一併還原：少了它，結帳不會把那張線上單標已付款，
+      // 店員再帶入一次就會跟客人收第二次錢（Codex O4 第一輪）。
+      const restoredOnline = payload?.online_order_id ?? null;
+      setOnlineOrder(
+        restoredOnline === null
+          ? null
+          : {
+              id: restoredOnline,
+              label:
+                payload?.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${payload?.table_no ?? ""}`,
+              note: null,
+            },
+      );
       setSignTaskId(cart.active_signature_task_id ?? null);
       const storeCredit = cart.snapshot.tenders.find(
         (tender) => tender.tender_type === "STORE_CREDIT",
@@ -2485,6 +2498,16 @@ export default function PosPage() {
     });
   }
 
+  /** 取消帶入：清空購物車、回到帶入前；那張線上單留在清單上，等之後再帶入或取消。 */
+  function cancelOnlineLoad() {
+    setLines([]);
+    setDineIn(clearDineIn());
+    setOnlineOrder(null);
+    setDiscountDrafts([]);
+    setDisabledCampaigns([]);
+    setNotice(null);
+  }
+
   function resetSale() {
     clerkAddedRef.current = false;
     setNoteAck("");
@@ -2692,8 +2715,8 @@ export default function PosPage() {
         <p className="pos-online-banner" role="status">
           正在結線上單（{onlineOrder.label}）：收完錢這張線上單會自動標已付款。
           {onlineOrder.note && <strong>客人備註：{onlineOrder.note}</strong>}
-          <button type="button" className="btn-ghost" onClick={() => setOnlineOrder(null)}>
-            不算這張線上單
+          <button type="button" className="btn-ghost" onClick={cancelOnlineLoad}>
+            取消帶入
           </button>
         </p>
       )}
@@ -2706,6 +2729,7 @@ export default function PosPage() {
         ready={quoteReady}
         serviceMode={dineIn.mode}
         tableNo={dineIn.tableNo}
+        onlineOrderId={onlineOrder?.id ?? null}
         onRestore={restoreCustomerDisplayCart}
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}

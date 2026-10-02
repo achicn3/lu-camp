@@ -200,6 +200,99 @@ describe("POS 顧客螢幕同步", () => {
     });
   });
 
+  it("帶入結帳的線上單跟著購物車保存（POS 重新整理才還原得回來）", async () => {
+    const putBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (
+          request.url.endsWith("/api/v1/customer-display/terminals") &&
+          request.method === "POST"
+        ) {
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          });
+        }
+        if (request.url.endsWith("/terminals/3/cart/current")) return json(null);
+        if (request.url.endsWith("/terminals/3/cart") && request.method === "PUT") {
+          putBodies.push(await request.clone().json());
+          return json({
+            id: 21,
+            status: "DRAFT",
+            revision: 1,
+            pos_terminal_id: 3,
+            kiosk_device_id: 8,
+            snapshot: {
+              content_version: "cart-v1",
+              items: [],
+              total: "240",
+              discount_total: "0",
+              campaign_name: null,
+              member: null,
+              tenders: TENDERS,
+            },
+            changes: [],
+            created_at: "2026-07-24T10:00:00Z",
+            updated_at: "2026-07-24T10:00:00Z",
+          });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const onRestore = vi.fn();
+    const view = render(
+      <PosCustomerDisplay
+        lines={[]}
+        buyerContactId={null}
+        adjustments={[]}
+        tenders={[]}
+        ready
+        serviceMode={null}
+        tableNo={null}
+        onRestore={onRestore}
+      />,
+      { wrapper: wrapper() },
+    );
+    expect(await screen.findByText(/顧客螢幕已連線/)).toBeTruthy();
+
+    view.rerender(
+      <PosCustomerDisplay
+        lines={[LINE]}
+        buyerContactId={null}
+        adjustments={[]}
+        tenders={TENDERS}
+        ready
+        serviceMode="TAKEOUT"
+        tableNo={null}
+        onlineOrderId={42}
+        onRestore={onRestore}
+      />,
+    );
+
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+    expect(putBodies[0]).toEqual({
+      expected_revision: null,
+      lines: [LINE],
+      buyer_contact_id: null,
+      tenders: TENDERS,
+      adjustments: null,
+      service_mode: "TAKEOUT",
+      table_no: null,
+      online_order_id: 42,
+    });
+  });
+
   it("已配對時可解除配對並回到輸入配對碼的畫面（客顯斷線/換裝置的唯一復原路徑）", async () => {
     let paired = true;
     let unpairBody: Record<string, unknown> | null = null;
