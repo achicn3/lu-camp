@@ -5,6 +5,7 @@
 //                              /integration/fonts/:hash
 // 其餘交給靜態資產（點餐頁）。每個回應都加安全標頭。
 import { verifyIntegration } from "./auth";
+import { pullOrders, reportOrder, setStoreStatus } from "./integration-orders";
 import { BodyTooLarge, error, readBody, withSecurityHeaders } from "./http";
 import { type MediaKind, getMedia, mediaLimit, putMedia } from "./media";
 import { MENU_MAX_BYTES, publishMenu, readMenu } from "./menu";
@@ -13,25 +14,37 @@ import { publishTables, readTable } from "./tables";
 
 const TABLES_MAX_BYTES = 64 * 1024;
 
+const ROUTES: { method: string; pattern: RegExp; limit: number }[] = [
+  { method: "PUT", pattern: /^\/integration\/menu$/, limit: MENU_MAX_BYTES },
+  { method: "PUT", pattern: /^\/integration\/tables$/, limit: TABLES_MAX_BYTES },
+  { method: "PUT", pattern: /^\/integration\/photos\/[^/]+$/, limit: mediaLimit("photos") },
+  { method: "PUT", pattern: /^\/integration\/fonts\/[^/]+$/, limit: mediaLimit("fonts") },
+  { method: "GET", pattern: /^\/integration\/orders$/, limit: 0 },
+  { method: "POST", pattern: /^\/integration\/orders\/[^/]+\/status$/, limit: 1024 },
+  { method: "PUT", pattern: /^\/integration\/store-status$/, limit: 1024 },
+];
+
 async function integrationRoute(req: Request, env: Env, storeId: number, path: string): Promise<Response> {
-  if (req.method !== "PUT") return error("method_not_allowed", 405);
-  const media = /^\/integration\/(photos|fonts)\/([^/]+)$/.exec(path);
-  const limit = media
-    ? mediaLimit(media[1] as MediaKind)
-    : path === "/integration/menu"
-      ? MENU_MAX_BYTES
-      : TABLES_MAX_BYTES;
+  const matched = ROUTES.filter((r) => r.pattern.test(path));
+  if (matched.length === 0) return error("not_found", 404);
+  const route = matched.find((r) => r.method === req.method);
+  if (route === undefined) return error("method_not_allowed", 405);
   let body: Uint8Array;
   try {
-    body = await readBody(req, limit);
+    body = await readBody(req, route.limit);
   } catch (e) {
     if (e instanceof BodyTooLarge) return error("payload_too_large", 413);
     throw e;
   }
   if (!(await verifyIntegration(req, body, env, storeId))) return error("unauthorized", 401);
+  const media = /^\/integration\/(photos|fonts)\/([^/]+)$/.exec(path);
   if (media) return putMedia(env, media[1] as MediaKind, media[2] ?? "", body);
   if (path === "/integration/menu") return publishMenu(env, storeId, body);
   if (path === "/integration/tables") return publishTables(env, storeId, body);
+  if (path === "/integration/orders") return pullOrders(env, storeId);
+  if (path === "/integration/store-status") return setStoreStatus(env, storeId, body);
+  const status = /^\/integration\/orders\/([^/]+)\/status$/.exec(path);
+  if (status) return reportOrder(env, storeId, status[1] ?? "", body);
   return error("not_found", 404);
 }
 
