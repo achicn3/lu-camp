@@ -27,6 +27,7 @@ WEBP_QUALITY = 82
 
 _ACCEPTED_FORMATS = ("JPEG", "PNG", "WEBP", "HEIF")
 _FORMAT_HINT = "只接受 JPEG、PNG、WebP、HEIC（手機拍的）照片"
+_CORRUPT_HINT = "照片檔案損壞，請重新拍一張或換一張"
 
 
 @dataclass(frozen=True)
@@ -46,13 +47,16 @@ def _open(data: bytes) -> Image.Image:
         raise MenuPhotoInvalid(_FORMAT_HINT) from exc
     except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
         raise MenuPhotoInvalid("照片像素太大，請先縮小再上傳") from exc
+    except (OSError, ValueError, SyntaxError) as exc:
+        # 檔頭就斷掉的圖在開檔時就會出錯（Codex 對抗審查 O1d 第四輪），不能讓它變成伺服器錯誤。
+        raise MenuPhotoInvalid(_CORRUPT_HINT) from exc
     width, height = image.size
     if width * height > MAX_PIXELS:
         raise MenuPhotoInvalid("照片像素太大，請先縮小再上傳")
     try:
         image.load()
     except (OSError, ValueError, SyntaxError) as exc:
-        raise MenuPhotoInvalid("照片檔案損壞，請重新拍一張或換一張") from exc
+        raise MenuPhotoInvalid(_CORRUPT_HINT) from exc
     return image
 
 

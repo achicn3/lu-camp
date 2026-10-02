@@ -164,3 +164,12 @@ async def test_async_conversion_keeps_event_loop_responsive() -> None:
     await beat
     assert photo.width == MAX_LONG_SIDE
     assert max(gaps) < 0.15, f"事件迴圈被卡住 {max(gaps):.3f} 秒"
+
+
+@pytest.mark.parametrize("fmt", ["JPEG", "PNG", "WEBP"])
+def test_truncated_header_is_rejected_not_server_error(fmt: str) -> None:
+    """Codex 對抗審查 O1d 第四輪：檔頭就斷掉的圖，錯誤發生在開檔階段，也要回「檔案損壞」。"""
+    source = _encode(Image.new("RGB", (300, 200), "green"), fmt)
+    for cut in (12, 24, 40):
+        with pytest.raises(MenuPhotoInvalid):
+            process_photo(source[:cut])
