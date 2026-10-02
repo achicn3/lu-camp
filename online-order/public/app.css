@@ -185,15 +185,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .sheet-price { margin: 0 0 12px; font-size: 22px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
-.opt-group { padding: 10px 0; border-top: 1px solid var(--line); }
-.opt-group-head { display: flex; gap: 10px; align-items: baseline; }
+.opt-group { margin: 0; padding: 10px 0; border-top: 1px solid var(--line); line-height: 1.8; }
 .opt-group-name { font-size: 18px; }
 .opt-group-rule { font-size: 14px; color: var(--soft); }
-.opt-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
-.opt { display: flex; justify-content: space-between; }
-.opt-off { color: var(--soft); text-decoration: line-through; }
+.opt-off { color: var(--soft); }
 .opt-extra { font-family: var(--num); font-style: italic; color: var(--gold); }
-.opt-off .opt-extra { font-family: inherit; font-style: normal; color: var(--soft); }
 
 @media (prefers-reduced-motion: reduce) {
   .splash { transition: none; }

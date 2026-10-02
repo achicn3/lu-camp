@@ -190,6 +190,10 @@ async def test_publish_pushes_font_photos_tables_then_menu(
         ("外帶", "TAKEOUT"),
     ]
     assert all(len(t["code"]) >= 16 for t in tables)
+    revisions = [
+        json.loads(b)["revision"] for _, p, b in worker.calls if p == "/integration/tables"
+    ]
+    assert revisions and all(isinstance(r, int) and r > 0 for r in revisions)
 
 
 async def test_second_publish_skips_media_already_pushed_and_version_increases(

@@ -61,26 +61,24 @@ function showMessage(text: string): void {
   box.hidden = false;
 }
 
+/** 選項只列出來參考（O3 還不能點選，送單在 O4），所以寫成一行文字，不做成像按鈕的樣子。 */
 function optionLine(group: OptionGroupView): HTMLElement {
-  const row = el("div", "opt-group");
   const rule =
     group.min_select === 1 && group.max_select === 1
       ? "必選 1 項"
       : group.min_select > 0
         ? `至少 ${group.min_select} 項，最多 ${group.max_select} 項`
         : `可不選，最多 ${group.max_select} 項`;
-  const head = el("div", "opt-group-head");
-  head.append(el("span", "opt-group-name", group.name), el("span", "opt-group-rule", rule));
-  row.append(head);
-  const list = el("ul", "opt-list");
-  for (const o of group.options) {
-    const li = el("li", o.available && o.remaining !== 0 ? "opt" : "opt opt-off");
-    li.append(el("span", "opt-name", o.name));
-    const extra = !o.available || o.remaining === 0 ? "售完" : o.price_delta > 0 ? `+${money(o.price_delta)}` : "";
-    if (extra) li.append(el("span", "opt-extra", extra));
-    list.append(li);
-  }
-  row.append(list);
+  const row = el("p", "opt-group");
+  row.append(el("span", "opt-group-name", group.name), el("span", "opt-group-rule", `（${rule}）`));
+  row.append(document.createTextNode("："));
+  group.options.forEach((o, i) => {
+    if (i > 0) row.append(document.createTextNode("、"));
+    const off = !o.available || o.remaining === 0;
+    const label = off ? `${o.name}（售完）` : o.name;
+    row.append(el("span", off ? "opt opt-off" : "opt", label));
+    if (!off && o.price_delta > 0) row.append(el("span", "opt-extra", ` +${money(o.price_delta)}`));
+  });
   return row;
 }
 

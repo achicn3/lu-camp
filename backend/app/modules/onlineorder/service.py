@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -106,13 +107,15 @@ class OnlineOrderService:
         return result
 
     async def _push_tables(self, client: OnlineOrderClient, tables: list[OnlineTableCode]) -> None:
+        # revision＝推送當下的毫秒時間：雲端只收比上次新的，晚到的舊推送不能把停用的碼推回去。
         await client.put_json(
             "/integration/tables",
             {
+                "revision": time.time_ns() // 1_000_000,
                 "tables": [
                     {"code": t.code, "label": t.label, "service_mode": t.service_mode}
                     for t in tables
-                ]
+                ],
             },
         )
 
