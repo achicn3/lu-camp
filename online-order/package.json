@@ -1,0 +1,17 @@
+{
+  "name": "lu-camp-online-order",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "typescript": "^5",
+    "vitest": "4.1.11",
+    "wrangler": "4.144.0"
+  }
+}

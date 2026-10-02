@@ -1,0 +1,4 @@
+# 只允許這兩個套件執行安裝腳本（下載 esbuild／workerd 執行檔）；其他一律不准。
+allowBuilds:
+  esbuild: true
+  workerd: true
