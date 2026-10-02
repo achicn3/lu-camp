@@ -6,7 +6,7 @@
 ## 1. 一句話現況
 
 線上掃碼點餐的**店內前置工作**（彈性菜單、每日限量、餐飲退款、損耗與成本）已完成並在 `main`；
-POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完成。**雲端（Cloudflare）那一半還沒開始**；下一步是 O3 雲端骨架（需要店主的 Cloudflare token）。
+POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）、**雲端電子菜單（O3，只能看）**已完成；測試版已部署。下一步 O4 現金線上點餐（送單）。
 
 ## 2. 規格地圖
 
@@ -15,7 +15,7 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
 | docs/44 | 線上點餐總規格（Cloudflare Worker＋D1＋R2、POS 主動拉單、LINE Pay 線上付、資安、庫存同步） | 規格定案，雲端未做 |
 | docs/47 | 餐飲交易紀錄頁＋餐點部分退款＋顧客螢幕點選同意 | **已完成** |
 | docs/49 | 餐飲損耗與成本（客訴退款損耗、報廢報表、選項成本、關帳提醒） | **已完成** |
-| docs/45、46、48、51、52、54 | MacBook 正式機升級說明（照**最新的 docs/54** 做即可，一次補齊；docs/53 是另一條線的發票升級） | 可用 |
+| docs/45、46、48、51、52、54、55 | MacBook 正式機升級說明（照**最新的 docs/55** 做即可，一次補齊；docs/53 是另一條線的發票升級） | 可用 |
 | ADR-027 | 線上點餐放 Cloudflare、POS 主動拉單 | 提議中 |
 
 ## 3. 已在 main 的功能
@@ -28,11 +28,12 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
 | O1e | 餐飲交易紀錄 `/fnb-sales`、餐點部分退款（只退外部付款、點數只沖二手、可勾還能賣）、純餐點退款顧客螢幕點選同意 | migration `3c59ce725956` |
 | O1f | 選項成本、報廢／盤點短少凍結成本、客訴退款成本算損耗、毛利報表「餐飲損耗」、關帳提醒剩餘份數 | migrations `31f4b20c0acc`、`edaa5e5ce783` |
 | O1d | 菜單照片：上傳轉 WebP、縮 1200、去 EXIF／XMP（含 GPS）、內容雜湊去重**存資料庫**（店主 2026-10-02 裁示，備份自動涵蓋）；公開讀取 `GET /menu-photos/{sha256}.webp`（不需登入）；新套件 pillow、pillow-heif | migration `2e52d783ec0e`，煙霧 `menu-photo-smoke.mjs` |
+| O3 | 雲端 `online-order/`（Worker＋D1＋R2）：店內 HMAC 簽章（防重放／竄改／過期、一組雲端只服務一家店）、菜單快照（不含成本）、照片與字型子集只推一次、桌位碼（依設定桌號、可單桌重發、版本號防晚到）、客人電子菜單頁（B1 夜墨金＋辰宇落雁體、開場 logo、時段問候、只能看） | migration `da91ffee580d`；D1 `0001`、`0002`；煙霧 `online-menu-smoke.mjs` |
 | O2 | POS 分類分頁＋選項視窗（必選／最多選、加價、停售／售完選項不能點）；菜單頁選項群組管理、品項掛群組與介紹 | 純前端，煙霧 `menu-options-smoke.mjs` |
 
 ## 4. 正式環境上線注意（main 先上線時）
 
-1. **照 docs/54 升級**（含本系列 migration 與新後端套件，`uv sync` 不能跳過；打烊後做、先備份）。
+1. **照 docs/55 升級**（含本系列 migration 與新後端套件，`uv sync` 不能跳過；打烊後做、先備份）。正式機先不設定線上點餐雲端。
 2. 選項群組在菜單頁設定、POS 會跳選項視窗（O2）。**若要退回 O2 以前的版本**，先把品項的選項群組取消勾選，
    否則掛了必選群組的品項在舊版 POS 會被擋「要選○○」。
 3. 報表的餐飲毛利已扣除損耗（報廢、盤點短少、客訴退款）；沒填成本的只列份數。
@@ -45,7 +46,7 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
 |------|------|------|
 | ~~1~~ | ~~O2 POS 選項 UI＋菜單管理頁~~ | **已完成** |
 | ~~2~~ | ~~O1d 照片~~ | **已完成**（推到 R2 留給 O3 的「發佈菜單」一起做） |
-| 3 | **O3 雲端骨架** | `online-order/`（Cloudflare Worker＋D1＋R2）、菜單發佈、客人菜單頁（只能看）、安全標頭 |
+| ~~3~~ | ~~O3 雲端骨架＋電子菜單~~ | **已完成**；零售商品上線（§3.7）與售完即時同步延到 O4 |
 | 4 | **O4 現金線上點餐** | 送單、Turnstile、D1 上限、庫存保留（HELD）、POS 線上訂單清單、異常自動暫停 |
 | 5 | **O5 LINE Pay 線上付款** | request/confirm（沙盒已實測通過，docs/44 §4.4.1）、POS 自動成立銷售 |
 | 6 | O6、O7 | 退款對稱、對帳、備份、資安測試；店內實測、試營運、買網域 |
@@ -54,7 +55,7 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
 
 | 事項 | 何時需要 | 狀態 |
 |------|---------|------|
-| Cloudflare API token（Workers Scripts、D1、R2 **編輯**權限） | O3 開工前 | 未提供（現有 `.env.r2` 的 token 沒有 D1 權限、也不能建 token） |
+| Cloudflare API token（Workers Scripts、D1、R2 **編輯**權限） | O3 開工前 | **已提供**：`/home/test/lu-camp/.env.cloudflare-online-order`（帳號層級 token；`/user/tokens/verify` 會回 Invalid，屬正常） |
 | LINE Pay **正式**線上收款開通 | O5 上線前 | 店主確認可以，手續費 2.2% |
 | 網域 | O7 | 未買，先用 workers.dev |
 | 餐點退款「點選同意」是否符合記帳士見解 | 隨時 | 建議店主確認（作業要點第 9 點，docs/47 §1） |
@@ -67,6 +68,17 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
   `menu-daily-stock-smoke.mjs`、`fnb-refund-smoke.mjs`、`fnb-tap-consent-smoke.mjs`（會暫時打開電子發票並還原）、
   `cash-leftover-waste-smoke.mjs`（會關掉班別再開一個新的）、`menu-options-smoke.mjs`（每跑一次多建兩個選項群組）。
 - Codex 審查一律 `--base origin/main`，金流／簽署相關用 `adversarial-review`。
+
+### 7.1 雲端測試版（staging）
+
+- 網址 `https://lu-camp-online-order-staging.noiping2.workers.dev`；D1 `lu-camp-online-order-staging`（APAC）、R2 同名。
+- 部署：`cd online-order && set -a; . /home/test/lu-camp/.env.cloudflare-online-order; set +a && npx wrangler deploy`
+  （會先 build 客人頁）；D1 變更：`npx wrangler d1 migrations apply lu-camp-online-order-staging --remote`。
+- 整合密鑰：Worker 端 `wrangler secret put INTEGRATION_SECRET`；店內端在 `/home/test/lu-camp/.env.online-order-staging`
+  （`ONLINE_ORDER_BASE_URL`／`ONLINE_ORDER_SECRET`／`ONLINE_ORDER_STORE_ID`，權限 600，不進 repo）。
+- 示範菜單從本機示範庫 `lucamp_staging_demo` 發佈（不碰正式資料）。正式版另建 Worker／D1／密鑰（§8.5）。
+- 本機開發：`cd online-order && pnpm dev`（`.dev.vars` 放本機密鑰）；Worker 測試 `pnpm test`、型別 `pnpm typecheck`。
+- 套件：pnpm 11 有「新版本發佈未滿一段時間不裝」的保護，**不要繞過**（剛發佈的 wrangler 版本先別用）。
 
 ## 8. 踩過的坑（接手前先看）
 
@@ -83,4 +95,9 @@ POS 選項點餐與菜單選項管理（O2）、菜單照片（O1d）也已完�
 - **照片上傳已知風險（Codex O1d 第四輪，待店主裁示）**：轉檔一次一張、排隊中的上傳仍佔著一條資料庫連線
   （驗登入時開的交易）。要同時十五張以上才會吃光連線池卡住 POS；只有店長會傳照片，判定實務上不會發生。
   若之後有多人同時傳照片的情境，再改成轉檔前先結束交易。
+- **客人頁的 `hidden` 會被 class 的 display 蓋掉**：隱藏中的詳情視窗曾透明地擋住整頁（只有真瀏覽器抓得到）；
+  `public/app.css` 已加 `[hidden]{display:none!important}`。
+- **客人頁的中文字要在字型子集的 `UI_TEXT` 裡**：漏了會掉回系統字型；`test_onlineorder_font.py` 會掃客人頁原始碼，
+  改文案後紅了就補字。
+- **辰宇落雁體有保留字型名稱**：子集一律改名 `LukengHand`，不可改回原名（OFL）。
 - `test_passwords_are_hashed_not_stored` 約 4% 隨機紅（雜湊剛好含 "pw"），已裁示不修，單獨重跑確認即可。

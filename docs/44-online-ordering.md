@@ -311,8 +311,12 @@ LINE Pay Online API v4（2026-10-01 查官方文件：`POST /v4/payments/request
 
 ### 5.2 POS 整合 API（Worker，只給店內 backend）
 
-驗證：`X-LuCamp-Timestamp` ＋ `X-LuCamp-Signature = HMAC-SHA256(secret, method+path+timestamp+body)`；
-時間差超過 5 分鐘拒收、nonce 防重放。secret 放 Worker secrets 和 backend `.env`，不進 repo。
+驗證（O3 實作定案）：標頭 `X-LuCamp-Timestamp`（秒）、`X-LuCamp-Nonce`（16–64 個英數或連字號）、
+`X-LuCamp-Signature = hex(HMAC-SHA256(secret, METHOD \n PATH(含 query) \n TIMESTAMP \n NONCE \n hex(SHA-256(body))))`；
+時間差超過 5 分鐘拒收、nonce 在 D1 記 10 分鐘防重放。兩邊用同一組跨語言測試向量守住
+（`backend/tests/test_onlineorder_signing.py`、`online-order/test/signature-vector.test.ts`）。
+secret 放 Worker secrets 和 backend `.env`，不進 repo。**一組雲端只服務一家店**（`ONLINE_ORDER_STORE_ID`），
+別家店的店長不能發佈或重發 QR。桌位碼推送帶 `revision`（毫秒），雲端只收較新的——晚到的舊推送不能把停用的 QR 推回來。
 
 | 端點 | 說明 |
 |------|------|
