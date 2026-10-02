@@ -189,6 +189,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(md5(content), ',' ORDER BY store_id, sha256)), '-') "
         "FROM menu_photos",
     ),
+    # 線上點餐桌位碼（docs/44 §4.1）：印在桌上的 QR，弄丟就得全部重印；比對碼本身才知道有沒有還原對。
+    (
+        "線上點餐-桌位碼（使用中筆數／碼指紋）",
+        "SELECT count(*)::text || '/' || COALESCE(md5(string_agg(code, ',' ORDER BY code)), '-') "
+        "FROM online_table_codes WHERE retired_at IS NULL",
+    ),
+    ("線上點餐-發佈紀錄筆數", "SELECT count(*) FROM online_menu_publications"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
     ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),

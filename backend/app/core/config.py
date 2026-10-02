@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # 備份系統（docs/31）：R2 憑證與 AES 口令走 .env.r2、不入 repo/DB；空字串＝未設定，
     # 未設定時排程 tick 不會嘗試備份（改由健康度頁告警），手動觸發則回錯。
     # 部署時以 `set -a; source .env.r2; set +a` 注入下列 R2_* 與 BACKUP_PASSPHRASE。
+    # 線上點餐雲端（docs/44 §5.2）：Worker 網址與整合密鑰（HMAC）。空字串＝未設定，不能發佈。
+    # 密鑰走環境變數、不入 repo；正式與測試用不同密鑰（§8.1 T7）。
+    online_order_base_url: str = ""
+    online_order_secret: str = ""
     r2_endpoint: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""

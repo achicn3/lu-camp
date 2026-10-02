@@ -577,3 +577,15 @@ class IntakeConflict(DomainError):
 
 class InvalidIntakeLine(DomainError):
     """估價列內容不合法（例如用折數估價卻沒填原價、寄售沒填抽成）。"""
+
+
+class OnlineOrderNotConfigured(DomainError):
+    """線上點餐尚未設定（沒有雲端網址或整合密鑰）。"""
+
+
+class OnlineOrderPushFailed(DomainError):
+    """推送到線上點餐雲端失敗（網路或雲端回錯誤）；訊息可直接給店員看。"""
+
+
+class OnlineTableNotFound(DomainError):
+    """找不到這個桌號的線上點餐桌位碼。"""
