@@ -6087,3 +6087,24 @@ a.btn-ghost {
   object-fit: cover;
   border-radius: 8px;
 }
+
+/* 菜單頁「線上點餐」區塊（docs/44 §3.5；O3b） */
+.online-publish {
+  max-width: 820px;
+  margin-bottom: var(--sp-5);
+  display: grid;
+  gap: var(--sp-3);
+  justify-items: start;
+}
+.online-publish h2 {
+  margin: 0;
+}
+.online-publish .inv-table-wrap {
+  justify-self: stretch;
+}
+.online-publish-url {
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-sm);
+  word-break: break-all;
+  user-select: all;
+}

@@ -9,6 +9,7 @@ import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing"
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
+import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -506,6 +507,7 @@ export default function MenuPage() {
   return (
     <section>
       <h1 className="page-title">餐飲菜單</h1>
+      <OnlinePublishPanel />
       <CreateMenuItemForm onCreated={refresh} rates={rates} />
 
       <div className="menu-list-section">

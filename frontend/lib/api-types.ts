@@ -2686,6 +2686,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Online Menu */
+        post: operations["publishOnlineMenu"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Online Order Status */
+        get: operations["getOnlineOrderStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tables/{label}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Online Table Code */
+        post: operations["rotateOnlineTableCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/opening-check/items": {
         parameters: {
             query?: never;
@@ -8250,6 +8301,44 @@ export interface components {
         NoteUpdateRequest: {
             /** Note */
             note?: string | null;
+        };
+        /** OnlineMenuPublishRead */
+        OnlineMenuPublishRead: {
+            /** Font Pushed */
+            font_pushed: boolean;
+            /** Item Count */
+            item_count: number;
+            /** Photos Pushed */
+            photos_pushed: number;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /** Version */
+            version: number;
+        };
+        /** OnlineOrderStatusRead */
+        OnlineOrderStatusRead: {
+            /** Configured */
+            configured: boolean;
+            /** Last Published At */
+            last_published_at: string | null;
+            /** Last Version */
+            last_version: number | null;
+            /** Tables */
+            tables: components["schemas"]["OnlineTableRead"][];
+        };
+        /** OnlineTableRead */
+        OnlineTableRead: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Service Mode */
+            service_mode: string;
+            /** Url */
+            url: string;
         };
         /** OpeningCheckItemCreateRequest */
         OpeningCheckItemCreateRequest: {
@@ -15746,6 +15835,77 @@ export interface operations {
                 };
                 content: {
                     "image/webp": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publishOnlineMenu: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineMenuPublishRead"];
+                };
+            };
+        };
+    };
+    getOnlineOrderStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrderStatusRead"];
+                };
+            };
+        };
+    };
+    rotateOnlineTableCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineTableRead"];
                 };
             };
             /** @description Validation Error */

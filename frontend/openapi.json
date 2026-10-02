@@ -11592,6 +11592,114 @@
         "title": "NoteUpdateRequest",
         "type": "object"
       },
+      "OnlineMenuPublishRead": {
+        "properties": {
+          "font_pushed": {
+            "title": "Font Pushed",
+            "type": "boolean"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "photos_pushed": {
+            "title": "Photos Pushed",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "published_at",
+          "item_count",
+          "photos_pushed",
+          "font_pushed"
+        ],
+        "title": "OnlineMenuPublishRead",
+        "type": "object"
+      },
+      "OnlineOrderStatusRead": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "last_published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Published At"
+          },
+          "last_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Version"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineTableRead"
+            },
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "configured",
+          "last_version",
+          "last_published_at",
+          "tables"
+        ],
+        "title": "OnlineOrderStatusRead",
+        "type": "object"
+      },
+      "OnlineTableRead": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "service_mode": {
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "service_mode",
+          "code",
+          "url"
+        ],
+        "title": "OnlineTableRead",
+        "type": "object"
+      },
       "OpeningCheckItemCreateRequest": {
         "properties": {
           "href": {
@@ -26811,6 +26919,105 @@
         "summary": "Get Menu Photo",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/online-order/publish": {
+      "post": {
+        "operationId": "publishOnlineMenu",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineMenuPublishRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Online Menu",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/status": {
+      "get": {
+        "operationId": "getOnlineOrderStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineOrderStatusRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Online Order Status",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tables/{label}/rotate": {
+      "post": {
+        "operationId": "rotateOnlineTableCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineTableRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rotate Online Table Code",
+        "tags": [
+          "online-order"
         ]
       }
     },
