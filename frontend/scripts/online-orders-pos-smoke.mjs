@@ -1,6 +1,7 @@
 // POS 線上訂單瀏覽器煙霧（docs/44 §4.3；O4b＋O4c）：真雲端（本機 wrangler dev）＋真 backend＋真 Postgres。
-// 發佈菜單（拿鐵不限量、戚風每日限量 2 份）→ 客人用桌位碼向雲端送現金單 → POS 背景拉單（5 秒內）、
-// 徽章出現 → 戚風保留（剩 1 份）→ 「帶入結帳」品項／桌號帶進購物車 → 收現結帳 → 雲端那張單變已付款、
+// 配好顧客螢幕（購物車才會存到伺服器、重新整理還原得回來）→ 發佈菜單（拿鐵不限量、戚風每日限量 2 份）→ 客人用桌位碼向雲端送現金單 → POS 背景拉單（5 秒內）、
+// 徽章出現 → 戚風保留（剩 1 份）→ 「帶入結帳」品項／桌號帶進購物車 → **重新整理 POS 仍是那張線上單** →
+// 收現結帳 → 雲端那張單變已付款、
 // 份數只扣一次 → 第二張要 5 份戚風被拒（庫存不足）→ 第三張取消、雲端變已取消 → 暫停接單、恢復。
 //
 // 需三個服務已起且指向隔離測試庫（SMOKE_ALLOW_WRITE=1）：backend（ONLINE_ORDER_BASE_URL 指向 SMOKE_ORDER、
@@ -78,7 +79,9 @@ async function waitFor(fn, label, timeoutMs = 20000) {
 }
 
 const run = randomUUID().slice(0, 6);
+const INSTALLATION = randomUUID();
 const browser = await chromium.launch();
+const kiosk = await browser.newPage({ viewport: { width: 834, height: 1112 } });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 1000 } })).newPage();
 const pageErrors = [];
 page.on("pageerror", (err) => pageErrors.push(String(err)));
@@ -93,6 +96,23 @@ try {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
   token = await page.evaluate(() => localStorage.getItem("lu-camp.access-token"));
   await api("POST", "/api/v1/cash-sessions/open", { opening_float: "1000" });
+
+  // 顧客螢幕：啟用裝置 → 配對到這台櫃檯（櫃檯的安裝碼預先寫進瀏覽器）
+  await kiosk.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await kiosk.fill('input[name="username"]', "dev-kiosk");
+  await kiosk.fill('input[name="password"]', "dev-test-123456");
+  await kiosk.click('button:has-text("啟用裝置")');
+  await kiosk.waitForSelector(".kiosk-pairing-code", { timeout: 8000 });
+  const pairingCode = (await kiosk.textContent(".kiosk-pairing-code"))?.trim();
+  const terminal = await api("POST", "/api/v1/customer-display/terminals", {
+    installation_id: INSTALLATION,
+    name: `線上訂單煙霧櫃檯 ${run}`,
+  });
+  const paired = await api("POST", `/api/v1/customer-display/terminals/${terminal.body.id}/pair`, {
+    pairing_code: pairingCode,
+  });
+  ok("顧客螢幕與櫃檯配對", paired.status === 200, `status=${paired.status}`);
+  await page.evaluate((id) => window.localStorage.setItem("lu-camp.pos-terminal.installation", id), INSTALLATION);
 
   // 菜單：拿鐵不限量、戚風每日限量 2 份；桌號 A1；發佈
   const latte = (await api("POST", "/api/v1/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: "咖啡" })).body;
@@ -147,6 +167,11 @@ try {
   ok("帶入購物車：兩個品項", (await page.getByText(`拿鐵-${run}`).count()) > 0 && (await page.getByText(`戚風-${run}`).count()) > 0);
   ok("內用桌號 A1 已選好", (await page.locator('.pos-dinein-table[aria-checked="true"]').innerText()).includes("A1"));
   await page.screenshot({ path: join(SHOTS, "02-loaded-cart.png") });
+  // 平板休眠／不小心重新整理：購物車和「這是哪張線上單」都要還原，否則結帳不會標已付款
+  await page.waitForTimeout(1500); // 等購物車同步到伺服器
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("正在結線上單（桌號 A1）").waitFor({ timeout: 15000 });
+  ok("重新整理後仍是那張線上單（品項也還在）", (await page.getByText(`戚風-${run}`).count()) > 0);
   await page.waitForSelector(".pos-checkout:not([disabled])", { timeout: 15000 });
   await page.click(".pos-checkout");
   await page.waitForSelector(".pos-complete", { timeout: 30000 });

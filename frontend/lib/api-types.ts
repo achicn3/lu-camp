@@ -5509,6 +5509,8 @@ export interface components {
             expected_revision?: number | null;
             /** Lines */
             lines: components["schemas"]["CartLineRequest"][];
+            /** Online Order Id */
+            online_order_id?: number | null;
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Table No */
             table_no?: string | null;
@@ -10408,6 +10410,8 @@ export interface components {
             disabled_campaigns: components["schemas"]["SaleCampaignOverrideRequest"][];
             /** Lines */
             lines: components["schemas"]["StaffCartLineRead"][];
+            /** Online Order Id */
+            online_order_id?: number | null;
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Table No */
             table_no?: string | null;

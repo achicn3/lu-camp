@@ -183,6 +183,9 @@ class CartUpsertRequest(BaseModel):
     # 購物車時選擇會遺失；而凍結中兩顆模式鍵都是停用的，已簽名的交易就只能作廢重簽。
     service_mode: ServiceMode | None = None
     table_no: str | None = Field(default=None, max_length=20)
+    # 帶入結帳的線上訂單（docs/44 §4.3）：同桌號，必須跟著購物車保存——POS 重新整理後若沒還原，
+    # 結帳不會把那張線上單標已付款，店員再帶入一次就會跟客人收第二次錢（Codex O4 第一輪）。
+    online_order_id: int | None = Field(default=None, ge=1)
 
     @field_validator("table_no")
     @classmethod
@@ -340,6 +343,8 @@ class StaffCartPayloadRead(BaseModel):
     # 餐飲內用/外帶與桌號（docs/35）；舊購物車沒有這兩欄 → None。
     service_mode: ServiceMode | None = None
     table_no: str | None = None
+    # 帶入結帳的線上訂單；舊購物車沒有 → None。
+    online_order_id: int | None = None
 
     @field_validator("adjustments", "disabled_campaigns", mode="before")
     @classmethod

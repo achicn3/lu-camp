@@ -3618,6 +3618,18 @@
             "title": "Lines",
             "type": "array"
           },
+          "online_order_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Online Order Id"
+          },
           "service_mode": {
             "anyOf": [
               {
@@ -17089,6 +17101,17 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "online_order_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Online Order Id"
           },
           "service_mode": {
             "anyOf": [

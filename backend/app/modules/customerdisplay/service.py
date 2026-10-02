@@ -166,6 +166,13 @@ def _dining_identity_of(cart: CartSession) -> tuple[str | None, str | None]:
     )
 
 
+def _online_order_of(cart: CartSession) -> int | None:
+    """已保存購物車帶入的線上訂單；沒有或舊購物車 → None。"""
+    payload = cart.staff_payload if isinstance(cart.staff_payload, dict) else {}
+    value = payload.get("online_order_id")
+    return value if isinstance(value, int) else None
+
+
 def _service_mode_problem(cart: CartSession, raw_items: object) -> str | None:
     """這台購物車的內用/外帶設定有沒有問題？有的話回一句給店員看的話。
 
@@ -857,6 +864,8 @@ class CustomerDisplayService:
                 data.expected_revision == current.revision - 1
                 and fingerprint == current.snapshot_fingerprint
                 and _dining_identity(data) == _dining_identity_of(current)
+                # 線上單編號同理：不在快照裡，「帶入 → 取消帶入」兩次 PUT 快照相同。
+                and data.online_order_id == _online_order_of(current)
             ):
                 return current
             raise CartSessionConflict(
