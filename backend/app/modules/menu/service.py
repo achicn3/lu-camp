@@ -24,7 +24,7 @@ from app.modules.menu.models import (
     MenuOptionGroup,
     MenuStockAdjustment,
 )
-from app.modules.menu.photos import process_photo
+from app.modules.menu.photos import process_photo_async
 from app.modules.menu.repository import MenuRepository
 from app.shared.enums import MenuStockAdjustReason, MenuStockTarget
 from app.shared.exceptions import (
@@ -232,10 +232,11 @@ class MenuService:
 
         不合格的檔案丟 `MenuPhotoInvalid`，品項不動。
         """
+        # 先轉檔（背景執行緒、不持鎖），轉好才鎖品項列寫入：轉檔約一秒，不該讓別人等這把鎖。
+        photo = await process_photo_async(data)
         item = await self._repo.get_for_update(store_id, item_id)
         if item is None or item.archived_at is not None:
             raise MenuItemNotFound(f"找不到菜單品項 {item_id}")
-        photo = process_photo(data)
         await self._repo.save_photo(
             store_id,
             sha256=photo.sha256,

@@ -6,6 +6,7 @@
 - 長邊縮到 1200px（不放大），一律輸出 WebP；檔名用內容雜湊，同一張照片傳兩次只存一份。
 """
 
+import asyncio
 import hashlib
 import io
 import warnings
@@ -84,3 +85,14 @@ def process_photo(data: bytes) -> ProcessedPhoto:
         width=image.width,
         height=image.height,
     )
+
+
+# 一次只轉一張：轉檔吃 CPU 與記憶體（解開最大約 200 MB），同時多張只會互相拖慢。
+_CONVERT_SLOTS = asyncio.Semaphore(1)
+
+
+async def process_photo_async(data: bytes) -> ProcessedPhoto:
+    """在背景執行緒轉檔，不卡住事件迴圈——後端只有一個 worker，卡住等於 POS 一起停
+    （Codex 對抗審查 O1d 第三輪：一張 4800 萬像素照片會卡約一秒）。"""
+    async with _CONVERT_SLOTS:
+        return await asyncio.to_thread(process_photo, data)

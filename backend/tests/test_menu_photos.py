@@ -3,6 +3,7 @@
 照片會公開在線上菜單上，**GPS 留在檔案裡等於把店主家的位置貼出去**，所以去 EXIF 是硬性要求。
 """
 
+import asyncio
 import hashlib
 import io
 
@@ -10,7 +11,12 @@ import pillow_heif
 import pytest
 from PIL import Image
 
-from app.modules.menu.photos import MAX_LONG_SIDE, MAX_UPLOAD_BYTES, process_photo
+from app.modules.menu.photos import (
+    MAX_LONG_SIDE,
+    MAX_UPLOAD_BYTES,
+    process_photo,
+    process_photo_async,
+)
 from app.shared.exceptions import MenuPhotoInvalid
 
 pillow_heif.register_heif_opener()
@@ -132,3 +138,29 @@ def test_xmp_location_is_dropped() -> None:
     photo = process_photo(source)
     assert b"GPSLatitude" not in photo.content
     assert "xmp" not in _open(photo.content).info
+
+
+async def test_async_conversion_keeps_event_loop_responsive() -> None:
+    """Codex 對抗審查 O1d 第三輪：轉檔在事件迴圈上跑會讓整個後端（含 POS）卡住約一秒。"""
+    big = _encode(Image.effect_noise((4000, 3000), 20).convert("RGB"), "JPEG", quality=80)
+    gaps: list[float] = []
+    done = asyncio.Event()
+
+    async def heartbeat() -> None:
+        loop = asyncio.get_running_loop()
+        last = loop.time()
+        while True:
+            await asyncio.sleep(0.01)
+            now = loop.time()
+            gaps.append(now - last)
+            last = now
+            if done.is_set():
+                return
+
+    beat = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0)  # 讓心跳先開始計時
+    photo = await process_photo_async(big)
+    done.set()
+    await beat
+    assert photo.width == MAX_LONG_SIDE
+    assert max(gaps) < 0.15, f"事件迴圈被卡住 {max(gaps):.3f} 秒"
