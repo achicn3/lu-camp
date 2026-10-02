@@ -53,6 +53,53 @@ class OnlineOrderClient:
             )
         return resp.status_code
 
+    async def _send(
+        self, method: str, path: str, body: bytes = b""
+    ) -> tuple[int, dict[str, object]]:
+        """送一個簽章請求，回 (狀態碼, JSON)。
+
+        連不上 → OnlineOrderPushFailed；狀態碼由呼叫端判斷。
+        """
+        headers = {
+            "Content-Type": "application/json",
+            **sign_request(self._secret, method, path, body),
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, transport=self._transport, timeout=TIMEOUT_SECONDS
+            ) as http:
+                resp = await http.request(method, path, content=body, headers=headers)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "online order request failed", extra={"path": path, "error": type(exc).__name__}
+            )
+            raise OnlineOrderPushFailed("連不上線上點餐雲端") from exc
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return resp.status_code, data if isinstance(data, dict) else {}
+
+    async def pull_orders(self) -> dict[str, object]:
+        """拉還沒匯入的新單（兼心跳）。雲端回錯 → OnlineOrderPushFailed。"""
+        code, data = await self._send("GET", "/integration/orders")
+        if code >= 400:
+            raise OnlineOrderPushFailed(f"線上點餐雲端拉單失敗（{code}）")
+        return data
+
+    async def report_status(self, remote_id: str, payload: dict[str, str]) -> tuple[int, str]:
+        """回報一張單的狀態；回 (狀態碼, 雲端錯誤代碼)。連不上 → OnlineOrderPushFailed。"""
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        code, data = await self._send("POST", f"/integration/orders/{remote_id}/status", body)
+        return code, str(data.get("error", ""))
+
+    async def set_accepting(self, accepting: bool) -> dict[str, object]:
+        body = json.dumps({"accepting": accepting}).encode()
+        code, data = await self._send("PUT", "/integration/store-status", body)
+        if code >= 400:
+            raise OnlineOrderPushFailed(f"線上點餐雲端拒收（{code}），請稍後再試")
+        return data
+
     async def put_json(self, path: str, payload: object) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
         await self._put(path, body, "application/json")

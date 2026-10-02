@@ -28,6 +28,7 @@ _EXEMPT: dict[str, str] = {
     "kiosk_pairing_codes": "配對碼短效一次性，過期即失效",
     "kiosk_device_sessions": "裝置連線階段，重新連線即重建",
     "online_pushed_media": "已推到雲端的照片／字型清單，只為省流量；遺失時下次發佈重推（雲端冪等）",
+    "online_order_links": "和雲端的連線狀態（最後拉單時間、接單與否），下次拉單就重建",
     # 由主體表涵蓋的附屬事件流（主體對得上，事件就在同一份 dump 裡）。
     "cart_session_events": "購物車事件流，主體由 cart_sessions 涵蓋",
     "pos_terminals": "配對狀態由 terminal_kiosk_pairings 與 kiosk_devices 涵蓋",

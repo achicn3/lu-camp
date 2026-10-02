@@ -199,6 +199,20 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "FROM online_table_codes WHERE retired_at IS NULL",
     ),
     ("線上點餐-發佈紀錄筆數", "SELECT count(*) FROM online_menu_publications"),
+    # 線上訂單（docs/44 §4.3）：已收錢的單掛著銷售單，弄丟就對不回哪張線上單付過了。
+    (
+        "線上點餐-訂單（筆數／狀態指紋）",
+        "SELECT count(*)::text || '/' || COALESCE(md5(string_agg(remote_id || sync_status || "
+        "payment_status || COALESCE(sale_id::text, ''), ',' ORDER BY remote_id)), '-') "
+        "FROM online_orders",
+    ),
+    # 份數保留：還扣著的份數要能加回，弄丟就會永遠少那幾份。
+    ("線上點餐-份數保留筆數", "SELECT count(*) FROM stock_reservations"),
+    # 回報雲端的佇列：還沒送出的回報弄丟，雲端那張單會一直卡在未付款、佔著接單上限。
+    (
+        "線上點餐-待送回報筆數",
+        "SELECT count(*) FROM online_order_outbox WHERE status = 'PENDING'",
+    ),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
     ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),

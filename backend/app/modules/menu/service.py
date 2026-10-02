@@ -482,9 +482,18 @@ class MenuService:
         ]
 
     async def price_selection(
-        self, store_id: int, item: MenuItem, option_ids: Sequence[int], qty: int = 1
+        self,
+        store_id: int,
+        item: MenuItem,
+        option_ids: Sequence[int],
+        qty: int = 1,
+        *,
+        check_stock: bool = True,
     ) -> MenuSelection:
         """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
+
+        `check_stock=False`：只算價、不看今天剩幾份——線上單帶入結帳前的預覽用，那張單保留的
+        份數已經先扣掉了，用剩餘份數判斷會誤報售完（真正結帳仍會檢查）。
 
         - 選項必須屬於品項目前所掛、未封存的群組，且未封存；停售 → MenuItemUnavailable。
         - 每個群組所選數量須在 [min_select, max_select]；同一選項不可重複。
@@ -498,7 +507,7 @@ class MenuService:
         if not chosen <= known:
             raise SaleLineInvalid(f"「{item.name}」沒有這個選項，請重新選擇")
         day = today()
-        if _short(item, day, qty):
+        if check_stock and _short(item, day, qty):
             raise InsufficientStock(_shortage_message(item.name, item, day))
         unit_price = item.unit_price
         chosen_options: list[MenuOption] = []
@@ -516,7 +525,7 @@ class MenuService:
             for option in picked:
                 if not option.is_available:
                     raise MenuItemUnavailable(f"「{option.name}」目前停售")
-                if _short(option, day, qty):
+                if check_stock and _short(option, day, qty):
                     raise InsufficientStock(_shortage_message(option.name, option, day))
                 chosen_options.append(option)
                 unit_price += option.price_delta

@@ -6200,4 +6200,181 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+/* POS 線上訂單（docs/44 §4.3；O4c） */
+.pos-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.pos-title-row .page-title {
+  margin-bottom: 0;
+}
+.online-orders-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 48px;
+}
+.online-orders-toggle.has-new {
+  border-color: var(--accent);
+}
+.online-orders-badge {
+  min-width: 1.6rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger, #9a3f2f);
+  color: #fff;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.online-orders-paused-tag {
+  font-size: var(--text-xs);
+  color: var(--danger, #9a3f2f);
+  font-weight: 700;
+}
+.pos-online-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 4px solid var(--accent);
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.online-orders-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgb(0 0 0 / 0.35);
+  display: flex;
+  justify-content: flex-end;
+}
+.online-orders-sheet {
+  width: min(560px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+  padding: var(--sp-4);
+  display: grid;
+  align-content: start;
+  gap: var(--sp-3);
+}
+.online-orders-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.online-orders-head h2 {
+  margin: 0;
+}
+.online-orders-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.online-orders-status > span:first-child {
+  font-weight: 700;
+  margin-right: auto;
+}
+.online-orders-status.is-paused {
+  border-color: var(--danger, #9a3f2f);
+}
+.online-orders-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.online-order {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  background: var(--surface);
+  display: grid;
+  gap: var(--sp-2);
+}
+.online-order.is-open {
+  border-color: var(--accent);
+}
+.online-order.is-late {
+  background: var(--warn-soft, #fbf3d6);
+}
+.online-order.is-muted,
+.online-order.is-done {
+  opacity: 0.7;
+}
+.online-order-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.online-order-place {
+  font-size: 1.15rem;
+}
+.online-order-total {
+  margin-left: auto;
+  font-size: 1.15rem;
+}
+.online-order-status {
+  font-size: var(--text-sm);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+}
+.online-order-status.tone-open {
+  color: var(--accent);
+}
+.online-order-status.tone-danger {
+  color: var(--danger, #9a3f2f);
+}
+.online-order-lines {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.online-order-note {
+  margin: 0;
+  color: var(--ink-soft);
+}
+.online-order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.online-order-actions button {
+  min-height: 44px;
+}
+.online-orders-price {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 71;
+  width: min(480px, calc(100% - 32px));
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+}
+.online-orders-price h3 {
+  margin-top: 0;
+}
+.online-orders-price-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
 }

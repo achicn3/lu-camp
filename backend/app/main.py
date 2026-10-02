@@ -44,7 +44,9 @@ from app.modules.inventory.router import router as inventory_router
 from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.menu.router import entries_router as menu_entries_router
 from app.modules.menu.router import router as menu_router
+from app.modules.onlineorder.orders_router import router as online_orders_router
 from app.modules.onlineorder.router import router as online_order_router
+from app.modules.onlineorder.scheduler import scheduler_loop as online_order_scheduler_loop
 from app.modules.openingcheck.router import router as opening_check_router
 from app.modules.purchasing.router import router as purchasing_router
 from app.modules.reports.finance_router import router as reports_finance_router
@@ -174,6 +176,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             einvoice_scheduler_loop(stop_event),
             name="einvoice-autosend-scheduler",
         ),
+        # 線上點餐拉單（docs/44 §5.3）：沒設定雲端就空轉。
+        asyncio.create_task(
+            online_order_scheduler_loop(stop_event),
+            name="online-order-puller",
+        ),
     )
     try:
         yield
@@ -262,6 +269,7 @@ def create_app() -> FastAPI:
     app.include_router(bulk_basket_router, prefix=API_PREFIX)
     app.include_router(menu_router, prefix=API_PREFIX)
     app.include_router(online_order_router, prefix=API_PREFIX)
+    app.include_router(online_orders_router, prefix=API_PREFIX)
     app.include_router(menu_entries_router, prefix=API_PREFIX)
     app.include_router(purchasing_router, prefix=API_PREFIX)
     app.include_router(stocktake_router, prefix=API_PREFIX)
