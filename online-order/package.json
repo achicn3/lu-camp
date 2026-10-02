@@ -3,15 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "pnpm build:client && wrangler dev",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "cf-typegen": "wrangler types"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/client",
+    "cf-typegen": "wrangler types",
+    "build:client": "esbuild src/client/app.ts --bundle --minify --format=esm --target=es2020,safari15 --outfile=public/app.js"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.22.0",
     "typescript": "^5",
     "vitest": "4.1.11",
-    "wrangler": "4.144.0"
+    "wrangler": "4.144.0",
+    "esbuild": "0.28.1"
   }
 }

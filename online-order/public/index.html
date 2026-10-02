@@ -2,10 +2,32 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e0f10" />
     <title>露坑 Camp &amp; Coffee</title>
+    <link rel="preload" href="/brand/logo-ink.png" as="image" />
+    <link rel="stylesheet" href="/app.css" />
+    <script type="module" src="/app.js"></script>
   </head>
   <body>
-    <p>線上點餐準備中。</p>
+    <div id="splash" class="splash" aria-hidden="true"><div class="logo splash-logo"></div><span class="splash-rule"></span></div>
+    <header class="bar">
+      <div class="logo bar-logo" role="img" aria-label="露坑 logo"></div>
+      <div class="bar-name"><b>露坑</b><small>Camp &amp; Coffee</small></div>
+      <span id="table" class="bar-table" hidden></span>
+    </header>
+    <main class="page">
+      <p id="greeting" class="greeting"></p>
+      <p id="message" class="message" role="status" hidden></p>
+      <nav id="tabs" class="tabs" role="tablist" aria-label="分類" hidden></nav>
+      <div id="list" class="list"></div>
+    </main>
+    <footer id="footer" class="footer" hidden>線上點餐即將開放，請先至櫃台點餐。</footer>
+    <div id="sheet" class="sheet-backdrop" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <button id="sheet-close" class="sheet-close" type="button" aria-label="關閉">×</button>
+        <div id="sheet-body"></div>
+      </div>
+    </div>
   </body>
 </html>

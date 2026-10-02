@@ -1,0 +1,201 @@
+/* 露坑線上點餐：B1 夜墨金＋辰宇落雁體（店主 2026-10-02 定案；docs/44 §4.2）。
+   單一深色設計（夜營），刻意不跟系統淺色模式切換。 */
+@font-face {
+  font-family: "Cormorant Italic";
+  src: url("/fonts-static/cormorant-italic-600.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --bg: #0e0f10;
+  --ink: #efe8da;
+  --soft: #a59f92;
+  --line: #24262a;
+  --gold: #c8a96a;
+  --photo: #1d1f22;
+  --hand: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --num: "Cormorant Italic", "Times New Roman", serif;
+  --logo: url("/brand/logo-ink.png");
+}
+.hand-font-ready {
+  --hand: "LukengHand", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+/* hidden 一定要贏過 class 的 display（否則隱藏的詳情視窗會透明地蓋住整頁、什麼都點不到）。 */
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body {
+  font-family: var(--hand);
+  font-size: 17px;
+  line-height: 1.55;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+}
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.logo {
+  background-color: var(--ink);
+  -webkit-mask: var(--logo) center / contain no-repeat;
+  mask: var(--logo) center / contain no-repeat;
+}
+
+/* 開場：滿版 logo 約 1.2 秒後淡出；點一下可跳過 */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  transition: opacity 600ms ease, visibility 0s linear 600ms;
+}
+.splash-logo { width: min(56vw, 300px); aspect-ratio: 486 / 640; animation: settle 1200ms ease-out both; }
+.splash-rule {
+  position: absolute;
+  bottom: 18%;
+  width: 28vw;
+  max-width: 140px;
+  height: 1px;
+  background: var(--gold);
+  opacity: 0.7;
+}
+.entered .splash { opacity: 0; visibility: hidden; }
+@keyframes settle { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 18px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.bar-logo { width: 30px; height: 40px; flex: none; }
+.bar-name { display: grid; line-height: 1.2; }
+.bar-name b { font-weight: 400; font-size: 21px; letter-spacing: 0.08em; }
+.bar-name small { font-family: var(--num); font-style: italic; font-size: 14px; color: var(--gold); letter-spacing: 0.04em; }
+.bar-table {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--gold);
+  border-radius: 2px;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+  font-size: 15px;
+}
+
+.page { max-width: 640px; margin: 0 auto; padding: 0 18px 120px; }
+.greeting { margin: 22px 0 8px; font-size: 23px; letter-spacing: 0.04em; text-wrap: balance; }
+.message { margin: 18px 0; padding: 12px 14px; border: 1px solid var(--gold); color: var(--ink); }
+
+.tabs { display: flex; gap: 20px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  min-height: 44px;
+  color: var(--soft);
+  font-size: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab-on { color: var(--ink); box-shadow: inset 0 -1px 0 var(--gold); }
+
+.list { display: grid; }
+.item {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  cursor: pointer;
+}
+.item-soldout { opacity: 0.5; }
+.item-photo { width: 76px; height: 76px; border-radius: 4px; background: var(--photo); overflow: hidden; }
+.item-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.item-text { display: grid; gap: 2px; min-width: 0; }
+.item-name { font-size: 19px; letter-spacing: 0.03em; }
+.item-desc { font-size: 15px; color: var(--soft); }
+.item-price, .sheet-price {
+  font-family: var(--num);
+  font-style: italic;
+  font-weight: 600;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--gold);
+  font-size: 19px;
+}
+.price-from { font-family: var(--hand); font-style: normal; font-weight: 400; font-size: 0.8em; }
+.item-badge { font-size: 14px; color: var(--gold); white-space: nowrap; }
+.item-badge-off { color: var(--soft); }
+
+.footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  border-top: 1px solid var(--gold);
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+.sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.6); display: grid; align-items: end; }
+.sheet {
+  position: relative;
+  max-height: 88dvh;
+  overflow-y: auto;
+  background: var(--bg);
+  border-top: 1px solid var(--gold);
+  padding: 22px 18px calc(28px + env(safe-area-inset-bottom, 0px));
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+.sheet-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  background: none;
+  border: 0;
+  font-size: 28px;
+  color: var(--soft);
+  cursor: pointer;
+}
+.sheet-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block; }
+.sheet-title { margin: 16px 0 4px; font-weight: 400; font-size: 26px; letter-spacing: 0.04em; }
+.sheet-desc { margin: 0 0 6px; color: var(--soft); }
+.sheet-price { margin: 0 0 12px; font-size: 22px; }
+.sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
+.sheet-open { overflow: hidden; }
+.opt-group { padding: 10px 0; border-top: 1px solid var(--line); }
+.opt-group-head { display: flex; gap: 10px; align-items: baseline; }
+.opt-group-name { font-size: 18px; }
+.opt-group-rule { font-size: 14px; color: var(--soft); }
+.opt-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.opt { display: flex; justify-content: space-between; }
+.opt-off { color: var(--soft); text-decoration: line-through; }
+.opt-extra { font-family: var(--num); font-style: italic; color: var(--gold); }
+.opt-off .opt-extra { font-family: inherit; font-style: normal; color: var(--soft); }
+
+@media (prefers-reduced-motion: reduce) {
+  .splash { transition: none; }
+  .splash-logo { animation: none; }
+}

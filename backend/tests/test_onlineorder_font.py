@@ -4,6 +4,7 @@
 """
 
 import io
+from pathlib import Path
 
 from fontTools.ttLib import TTFont
 
@@ -43,3 +44,20 @@ def test_subset_is_renamed_but_keeps_copyright_and_license() -> None:
 
 def test_same_text_gives_same_hash() -> None:
     assert subset_font("拿鐵").sha256 == subset_font("拿鐵").sha256
+
+
+def test_ui_text_covers_every_cjk_char_on_the_customer_page() -> None:
+    """客人頁寫死的中文字都要在 UI_TEXT 裡，否則那幾個字會掉回系統字型（O3c 實機截圖抓到過）。
+
+    掃 online-order 的客人頁原始碼；改了點餐頁文案、這支測試紅了，就把新字補進 UI_TEXT。
+    """
+    root = Path(__file__).resolve().parents[2] / "online-order"
+    sources = [*sorted((root / "src" / "client").glob("*.ts")), root / "public" / "index.html"]
+    text = "".join(p.read_text(encoding="utf-8") for p in sources)
+    # 只看字串裡會顯示的字：去掉註解行
+    shown = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith(("//", "*", "/*", "<!--"))
+    )
+    cjk = {ch for ch in shown if "　" <= ch <= "鿿" or "＀" <= ch <= "￯"}
+    missing = sorted(cjk - set(UI_TEXT))
+    assert not missing, f"UI_TEXT 少了這些字：{''.join(missing)}"

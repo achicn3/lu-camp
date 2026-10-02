@@ -34,12 +34,14 @@ describe("菜單照片", () => {
     expect((await integration("PUT", `/integration/photos/${hash}`, data)).status).toBe(413);
   });
 
-  it.each(["../../secret", "ABC", "a".repeat(63), `${"a".repeat(64)}.png`])(
-    "不合法的照片網址 404：%s",
-    async (key) => {
-      expect((await get(`/photos/${key}.webp`)).status).toBe(404);
-    },
-  );
+  it.each(["ABC", "a".repeat(63), `${"a".repeat(64)}.png`])("不合法的照片網址 404：%s", async (key) => {
+    expect((await get(`/photos/${key}.webp`)).status).toBe(404);
+  });
+
+  it("../ 路徑穿越拿不到任何檔案（URL 正規化後變成一般頁面路徑，回點餐頁）", async () => {
+    const resp = await get("/photos/../../secret.webp");
+    expect(resp.headers.get("Content-Type") ?? "").not.toContain("image/");
+  });
 
   it("沒上傳過的照片 404", async () => {
     expect((await get(`/photos/${"0".repeat(64)}.webp`)).status).toBe(404);

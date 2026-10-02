@@ -4,11 +4,14 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "lu-camp-online-order-staging",
   "main": "src/index.ts",
+  "build": { "command": "pnpm build:client" },
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
+    // /t/<桌位碼> 等沒有對應檔案的路徑一律回點餐頁（index.html）。
+    "not_found_handling": "single-page-application",
     // 動態路徑先進 Worker；點餐頁的靜態檔直接由資產服務（不計請求額度），安全標頭見 public/_headers。
     "run_worker_first": ["/api/*", "/integration/*", "/photos/*", "/fonts/*"]
   },
