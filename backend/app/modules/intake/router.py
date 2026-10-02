@@ -34,6 +34,8 @@ from app.modules.intake.schemas import (
     IntakeSignatureRequest,
 )
 from app.modules.intake.service import IntakeService
+from app.modules.signing.schemas import KioskTaskRead
+from app.modules.signing.service import SigningService
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
@@ -228,6 +230,43 @@ async def confirm_intake_by_customer(
             user.store_id, batch_id, kept_line_ids=payload.kept_line_ids
         )
     return await _read_batch(session, user.store_id, batch_id)
+
+
+@router.post(
+    "/{batch_id}/tablet-signature",
+    response_model=KioskTaskRead,
+    operation_id="startIntakeTabletSignature",
+)
+async def start_intake_tablet_signature(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> KioskTaskRead:
+    """客人勾完 → 同一台平板直接簽切結書（docs/42 §13）。依目前勾選建新任務，舊任務作廢。"""
+    async with _write(session):
+        task = await IntakeService(session).start_tablet_signature(
+            user.store_id, batch_id, actor_user_id=user.id
+        )
+        agreement = await SigningService(session).get_agreement_for_task(task)
+        result = KioskTaskRead.from_task(task, agreement)
+    return result
+
+
+@router.get(
+    "/{batch_id}/tablet-signature",
+    response_model=KioskTaskRead,
+    operation_id="getIntakeTabletSignature",
+)
+async def get_intake_tablet_signature(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> KioskTaskRead:
+    """平板重新整理時讀回目前待簽的任務；沒有就 404。"""
+    try:
+        task = await IntakeService(session).current_tablet_signature(user.store_id, batch_id)
+    except IntakeBatchNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目前沒有待簽的切結書")
+    agreement = await SigningService(session).get_agreement_for_task(task)
+    return KioskTaskRead.from_task(task, agreement)
 
 
 @router.patch(

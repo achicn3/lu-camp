@@ -90,21 +90,7 @@ def _to_read(
 
 
 def _to_kiosk_read(task: SignatureTask, agreement: AgreementVersion | None) -> KioskTaskRead:
-    sealed = task.status in (
-        SignatureTaskStatus.SIGNED,
-        SignatureTaskStatus.CONSUMED,
-    )
-    return KioskTaskRead(
-        id=task.id,
-        kind=task.kind,
-        status=task.status,
-        content={} if sealed else task.content,
-        chosen_payout=task.chosen_payout,
-        expires_at=task.expires_at,
-        agreement_title=agreement.title if agreement is not None and not sealed else None,
-        agreement_body=agreement.body if agreement is not None and not sealed else None,
-        consent_mode=task.consent_mode,
-    )
+    return KioskTaskRead.from_task(task, agreement)
 
 
 # ── 店務端 ──────────────────────────────────────────────────────────────
@@ -282,6 +268,42 @@ async def cancel_signature_task(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     agreement = await service.get_agreement_for_task(task)
     result = _to_read(task, agreement)
+    await session.commit()
+    return result
+
+
+@staff_router.post(
+    "/tasks/{task_id}/tablet-sign", response_model=KioskTaskRead, operation_id="signOnTablet"
+)
+async def sign_on_tablet(
+    task_id: int, body: KioskSignRequest, session: SessionDep, user: StaffDep
+) -> KioskTaskRead:
+    """客人在店員平板上簽切結書（docs/42 §13）。只限店內平板建立的任務；顧客螢幕的任務不行。"""
+    service = SigningService(session)
+    try:
+        task = await service.sign_on_tablet(
+            user.store_id,
+            task_id,
+            actor_user_id=user.id,
+            signature_image_base64=body.signature_image_base64,
+            chosen_payout=body.chosen_payout,
+            idempotency_key=body.idempotency_key,
+        )
+    except SignatureTaskNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SignatureTaskNotPending as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SignatureTaskInvalidated as exc:
+        await session.commit()  # 逾時作廢要留下（同顧客螢幕）
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (InvalidSignatureImage, InvalidKioskPayout) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    result = KioskTaskRead.from_task(task, await service.get_agreement_for_task(task))
     await session.commit()
     return result
 

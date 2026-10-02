@@ -11,7 +11,7 @@ import hashlib
 import zlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from app.modules.sales.models import Sale
@@ -82,6 +82,9 @@ _PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法�
 _PENDING_ACK_TTL = timedelta(seconds=60)
 _SIGNING_IDLE_TTL = timedelta(minutes=5)
 _SIGNED_CHECKOUT_TTL = timedelta(minutes=5)
+# 店內平板簽署（docs/42 §13）：客人在店員平板上讀切結書、簽名，沒有裝置認領與心跳；
+# 給足夠閱讀時間，逾時就作廢（店員再按一次即重建）。
+_TABLET_PENDING_TTL = timedelta(minutes=15)
 _ACTIVITY_WRITE_THROTTLE = timedelta(seconds=2)
 
 
@@ -104,20 +107,17 @@ def _normalize_agreement_text(title: str, body: str) -> tuple[str, str]:
     if not clean_title:
         raise InvalidAgreementText("切結書標題不可空白")
     if len(clean_title) > agreements.MAX_AGREEMENT_TITLE_CHARS:
-        raise InvalidAgreementText(
-            f"切結書標題不可超過 {agreements.MAX_AGREEMENT_TITLE_CHARS} 字"
-        )
+        raise InvalidAgreementText(f"切結書標題不可超過 {agreements.MAX_AGREEMENT_TITLE_CHARS} 字")
     if not clean_body.strip():
         raise InvalidAgreementText("切結書內文不可空白")
     if len(clean_body) > agreements.MAX_AGREEMENT_BODY_CHARS:
-        raise InvalidAgreementText(
-            f"切結書內文不可超過 {agreements.MAX_AGREEMENT_BODY_CHARS} 字"
-        )
+        raise InvalidAgreementText(f"切結書內文不可超過 {agreements.MAX_AGREEMENT_BODY_CHARS} 字")
     return clean_title, clean_body
 
 
 # 點選同意的冪等指紋用固定標記代替簽名影像（docs/47 E3）。
 _TAP_MARK: Final = b"TAP_CONSENT"
+
 
 class SigningService:
     def __init__(self, session: AsyncSession) -> None:
@@ -198,12 +198,13 @@ class SigningService:
             )
         return await self._repo.get_for_update(store_id, task_id)
 
-    async def create_task(
-        self, store_id: int, data: SignatureTaskCreate, *, created_by: int
-    ) -> SignatureTask:
-        """建立簽署任務（店員發起）。AFFIDAVIT 自動綁定切結書版本，並以後端為準補齊
-        身分欄（姓名/電話/證號遮罩/住址，D1）與購物金溢價預覽（客人選購物金可多得幾%）。"""
-        await self._lock_store_signing(store_id)
+    async def _prepare_task(
+        self, store_id: int, data: SignatureTaskCreate
+    ) -> tuple[dict[str, Any], int | None, SignatureConsentMode, Any]:
+        """建立任務前的共同準備（顧客螢幕與店內平板同一套）：確認對象、凍結內容、綁切結書版本。
+
+        回傳 (內容, 切結書版本, 同意方式, 對象)。呼叫端須已持有店內簽署鎖。
+        """
         # 跨模組只經對方 service：確認任務對象存在且屬同店。
         from app.modules.contacts.service import ContactService
 
@@ -238,6 +239,17 @@ class SigningService:
         if consent_mode is SignatureConsentMode.TAP:
             await self._ensure_tap_consent_allowed(store_id, data)
 
+        return content, agreement_version_id, consent_mode, contact
+
+    async def create_task(
+        self, store_id: int, data: SignatureTaskCreate, *, created_by: int
+    ) -> SignatureTask:
+        """建立簽署任務（店員發起）。AFFIDAVIT 自動綁定切結書版本，並以後端為準補齊
+        身分欄（姓名/電話/證號遮罩/住址，D1）與購物金溢價預覽（客人選購物金可多得幾%）。"""
+        await self._lock_store_signing(store_id)
+        content, agreement_version_id, consent_mode, contact = await self._prepare_task(
+            store_id, data
+        )
         if data.kind is SignatureTaskKind.STORE_CREDIT_USE:
             raise SignatureTaskConflict("購物金簽署必須從 POS 權威購物車凍結流程建立")
         kiosk_device_id, pos_terminal_id = await self._resolve_kiosk_device(
@@ -963,6 +975,53 @@ class SigningService:
                 )
                 raise SignatureTaskInvalidated(f"該銷售已作廢/退貨，簽收已失效：{exc}") from exc
 
+        await self._seal_signature(
+            store_id,
+            task,
+            image=image,
+            chosen_payout=chosen_payout,
+            fingerprint=fingerprint,
+            tap_device_id=device_id,
+        )
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.SIGNING,
+            to_status=SignatureTaskStatus.SIGNED,
+            reason_code=(
+                "TAP_CONSENT_ACCEPTED"
+                if task.consent_mode is SignatureConsentMode.TAP
+                else "SIGNATURE_ACCEPTED"
+            ),
+            actor_kiosk_device_id=device_id,
+        )
+        if task.kind is SignatureTaskKind.TRANSACTION_ACK:
+            task.status = SignatureTaskStatus.CONSUMED
+            task.consumed_at = task.signed_at
+            task.expires_at = None
+            await self._record_event(
+                task,
+                from_status=SignatureTaskStatus.SIGNED,
+                to_status=SignatureTaskStatus.CONSUMED,
+                reason_code="TRANSACTION_ACK_BOUND",
+                actor_kiosk_device_id=device_id,
+                sale_id=task.ref_id,
+            )
+        await self._session.flush()
+        await self._session.refresh(task)
+        return task
+
+    async def _seal_signature(
+        self,
+        store_id: int,
+        task: SignatureTask,
+        *,
+        image: bytes | None,
+        chosen_payout: PayoutMethod | None,
+        fingerprint: str | None,
+        tap_device_id: int | None,
+    ) -> None:
+        """封存簽署證據（顧客螢幕與店內平板同一套）：簽名雜湊、內容雜湊、證據雜湊、簽署時間、
+        撥款選擇、保存期限，狀態改 SIGNED。事件由呼叫端記（來源與操作者不同）。"""
         # 設定查詢在某些門市首次使用時會建立 settings 並 flush；必須先完成，避免已簽欄位
         # 分兩次 UPDATE，讓資料庫不可變證據 trigger 把第二段誤判為封存後修改。
         from app.modules.settings.service import StoreSettingsService
@@ -981,7 +1040,7 @@ class SigningService:
                     {
                         "consent": SignatureConsentMode.TAP.value,
                         "task_id": task.id,
-                        "kiosk_device_id": device_id,
+                        "kiosk_device_id": tap_device_id,
                         "signed_at": signed_at.isoformat(),
                     }
                 )
@@ -1011,32 +1070,6 @@ class SigningService:
         task.expires_at = signed_at + _SIGNED_CHECKOUT_TTL
         task.last_user_activity_at = signed_at
         task.signature_retention_until = signed_at + timedelta(days=retention_days)
-        await self._record_event(
-            task,
-            from_status=SignatureTaskStatus.SIGNING,
-            to_status=SignatureTaskStatus.SIGNED,
-            reason_code=(
-                "TAP_CONSENT_ACCEPTED"
-                if task.consent_mode is SignatureConsentMode.TAP
-                else "SIGNATURE_ACCEPTED"
-            ),
-            actor_kiosk_device_id=device_id,
-        )
-        if task.kind is SignatureTaskKind.TRANSACTION_ACK:
-            task.status = SignatureTaskStatus.CONSUMED
-            task.consumed_at = signed_at
-            task.expires_at = None
-            await self._record_event(
-                task,
-                from_status=SignatureTaskStatus.SIGNED,
-                to_status=SignatureTaskStatus.CONSUMED,
-                reason_code="TRANSACTION_ACK_BOUND",
-                actor_kiosk_device_id=device_id,
-                sale_id=task.ref_id,
-            )
-        await self._session.flush()
-        await self._session.refresh(task)
-        return task
 
     @staticmethod
     def _sign_fingerprint(
@@ -1053,6 +1086,129 @@ class SigningService:
         digest.update(b"\x00")
         digest.update((chosen_payout.value if chosen_payout is not None else "").encode())
         return digest.hexdigest()
+
+    # ── 店內平板簽署（docs/42 §13）──────────────────────────────────────
+
+    async def create_tablet_task(
+        self, store_id: int, data: SignatureTaskCreate, *, created_by: int
+    ) -> SignatureTask:
+        """在店員平板上直接給客人簽的切結書任務（不綁顧客螢幕，顧客螢幕讀不到）。
+
+        內容凍結、身分指紋、切結書版本與 `create_task` 同一套；只限收購切結（手寫簽名）。
+        """
+        if data.kind is not SignatureTaskKind.ACQUISITION_AFFIDAVIT:
+            raise SignatureTaskConflict("店內平板只用來簽收購切結書")
+        if data.consent_mode is SignatureConsentMode.TAP:
+            raise SignatureTaskConflict("收購切結書一定要手寫簽名")
+        await self._lock_store_signing(store_id)
+        content, agreement_version_id, consent_mode, contact = await self._prepare_task(
+            store_id, data
+        )
+        task = SignatureTask(
+            store_id=store_id,
+            kind=data.kind,
+            contact_id=data.contact_id,
+            kiosk_device_id=None,
+            pos_terminal_id=None,
+            content=content,
+            agreement_version_id=agreement_version_id,
+            identity_fingerprint=getattr(contact, "national_id_blind_index", None),
+            consent_mode=consent_mode,
+            ref_type=data.ref_type,
+            ref_id=data.ref_id,
+            created_by=created_by,
+            content_sha256=hashlib.sha256(canonical_json_bytes(content)).hexdigest(),
+            expires_at=datetime.now(UTC) + _TABLET_PENDING_TTL,
+        )
+        task = await self._repo.add(task)
+        await self._record_event(
+            task,
+            from_status=None,
+            to_status=SignatureTaskStatus.PENDING,
+            reason_code="CREATED_FOR_TABLET",
+            actor_user_id=created_by,
+        )
+        return task
+
+    async def get_tablet_task(self, store_id: int, task_id: int) -> SignatureTask | None:
+        """店內平板簽署的任務；顧客螢幕的任務（綁了裝置）一律當作找不到。"""
+        task = await self._repo.get(store_id, task_id)
+        if task is None or task.kiosk_device_id is not None:
+            return None
+        return task
+
+    async def sign_on_tablet(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        actor_user_id: int,
+        signature_image_base64: str | None,
+        chosen_payout: PayoutMethod | None,
+        idempotency_key: str | None = None,
+    ) -> SignatureTask:
+        """客人在店員平板上送出簽名：驗簽名圖與撥款（二選一）、PENDING→SIGNED，證據同顧客螢幕。
+
+        顧客螢幕的任務不能從這裡簽（綁了裝置者當作找不到）；同鍵同內容重送回放（冪等）。
+        """
+        image = (
+            self._decode_signature(signature_image_base64)
+            if signature_image_base64 is not None
+            else None
+        )
+        fingerprint = (
+            self._sign_fingerprint(
+                idempotency_key, image if image is not None else b"", chosen_payout
+            )
+            if idempotency_key is not None
+            else None
+        )
+        await self._lock_store_signing(store_id)
+        task = await self._repo.get_for_update(store_id, task_id)
+        if (
+            task is None
+            or task.kiosk_device_id is not None
+            or task.kind is not SignatureTaskKind.ACQUISITION_AFFIDAVIT
+        ):
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不是店內平板簽署")
+        if task.status in (SignatureTaskStatus.SIGNED, SignatureTaskStatus.CONSUMED):
+            if fingerprint is not None and task.sign_idempotency_key == fingerprint:
+                return task
+            raise SignatureTaskNotPending(f"簽署任務 {task_id} 已簽署")
+        if task.status is not SignatureTaskStatus.PENDING:
+            raise SignatureTaskNotPending(f"簽署任務 {task_id} 已失效（{task.status}），請重新確認")
+        now = datetime.now(UTC)
+        if task.expires_at is not None and task.expires_at <= now:
+            await self._terminate_task(
+                task,
+                target=SignatureTaskStatus.EXPIRED,
+                reason_code="TABLET_PENDING_TTL",
+                actor_user_id=actor_user_id,
+                observed_at=now,
+            )
+            raise SignatureTaskInvalidated("簽署頁停留太久已逾時，請回上一頁再確認一次")
+        if image is None:
+            raise InvalidSignatureImage("請先簽名再送出")
+        if chosen_payout not in (PayoutMethod.CASH, PayoutMethod.STORE_CREDIT):
+            raise InvalidKioskPayout("請選擇拿現金或購物金")
+        await self._seal_signature(
+            store_id,
+            task,
+            image=image,
+            chosen_payout=chosen_payout,
+            fingerprint=fingerprint,
+            tap_device_id=None,
+        )
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.PENDING,
+            to_status=SignatureTaskStatus.SIGNED,
+            reason_code="TABLET_SIGNATURE_ACCEPTED",
+            actor_user_id=actor_user_id,
+        )
+        await self._session.flush()
+        await self._session.refresh(task)
+        return task
 
     async def get_task(self, store_id: int, task_id: int) -> SignatureTask | None:
         return await self._repo.get(store_id, task_id)

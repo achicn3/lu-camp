@@ -5,7 +5,7 @@ content 為顯示內容快照（發起端組裝；PII 遮罩規則由發起端�
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +19,9 @@ from app.shared.enums import (
     SignatureTaskKind,
     SignatureTaskStatus,
 )
+
+if TYPE_CHECKING:
+    from app.modules.signing.models import AgreementVersion, SignatureTask
 
 MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
 # base64 膨脹 4/3；schema 先擋（422），服務層解碼前再驗一次（最後防線）
@@ -84,6 +87,24 @@ class KioskTaskRead(BaseModel):
     agreement_body: str | None
     # TAP：顧客螢幕顯示「同意」按鈕而非簽名板（docs/47 E3）。
     consent_mode: SignatureConsentMode = SignatureConsentMode.SIGNATURE
+
+    @classmethod
+    def from_task(
+        cls, task: "SignatureTask", agreement: "AgreementVersion | None"
+    ) -> "KioskTaskRead":
+        """客人看的任務視圖（顧客螢幕與店內平板共用）。簽完就不再回傳內容與條文。"""
+        sealed = task.status in (SignatureTaskStatus.SIGNED, SignatureTaskStatus.CONSUMED)
+        return cls(
+            id=task.id,
+            kind=task.kind,
+            status=task.status,
+            content={} if sealed else task.content,
+            chosen_payout=task.chosen_payout,
+            expires_at=task.expires_at,
+            agreement_title=agreement.title if agreement is not None and not sealed else None,
+            agreement_body=agreement.body if agreement is not None and not sealed else None,
+            consent_mode=task.consent_mode,
+        )
 
 
 class KioskSignRequest(BaseModel):

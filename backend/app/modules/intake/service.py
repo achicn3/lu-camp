@@ -117,6 +117,10 @@ _PAID_STATUSES = frozenset(
 )
 
 # 送簽後被撤回、逾時或失敗：這份簽名作廢，付款當作沒簽（本店要求簽署時由收購流程擋下）。
+# 還能作廢的簽署任務（還沒簽、簽署中、已簽但還沒付款）。
+_SIGNATURE_LIVE = frozenset(
+    {SignatureTaskStatus.PENDING, SignatureTaskStatus.SIGNING, SignatureTaskStatus.SIGNED}
+)
 _SIGNATURE_GONE = frozenset(
     {SignatureTaskStatus.VOIDED, SignatureTaskStatus.EXPIRED, SignatureTaskStatus.FAILED}
 )
@@ -394,6 +398,60 @@ class IntakeService:
         )
         batch.signature_task_id = task.id
         await self._session.flush()
+        return task
+
+    async def start_tablet_signature(
+        self, store_id: int, batch_id: int, *, actor_user_id: int
+    ) -> SignatureTask:
+        """客人勾完 → 同一台店員平板直接簽切結書（docs/42 §13）。
+
+        每次都依**目前的勾選**建新任務；之前的任務（不論還沒簽或已簽）一律作廢——客人從簽署頁
+        回上一頁重勾，再進來簽的一定是新內容，舊簽名也不能拿去付款。
+        """
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        if batch.status is not IntakeBatchStatus.AWAITING_CONFIRM:
+            raise IntakeConflict("要先估完、讓客人勾選後才能簽署")
+        lines = await self._repo.lines_for(store_id, [batch.id])
+        self._ensure_decided(lines)
+        content = self._affidavit_content(lines)
+        if content is None:
+            raise IntakeConflict("這一批沒有要付錢的商品（寄售不付現），不需要簽署")
+        signing = SigningService(self._session)
+        if batch.signature_task_id is not None:
+            previous = await signing.get_task(store_id, batch.signature_task_id)
+            if previous is not None and previous.status in _SIGNATURE_LIVE:
+                await signing.cancel_task(
+                    store_id,
+                    previous.id,
+                    actor_user_id=actor_user_id,
+                    reason_code="INTAKE_RECONFIRMED",
+                    reason="客人重新勾選，改簽新內容",
+                )
+        task = await signing.create_tablet_task(
+            store_id,
+            SignatureTaskCreate(
+                kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+                contact_id=batch.contact_id,
+                content=content,
+                ref_type="intake_batch",
+                ref_id=batch.id,
+            ),
+            created_by=actor_user_id,
+        )
+        batch.signature_task_id = task.id
+        await self._session.flush()
+        return task
+
+    async def current_tablet_signature(self, store_id: int, batch_id: int) -> SignatureTask | None:
+        """這一批目前在店員平板上待簽的任務（平板重新整理時讀回）；沒有就 None。"""
+        batch = await self._batch(store_id, batch_id)
+        if batch.signature_task_id is None:
+            return None
+        task = await SigningService(self._session).get_tablet_task(
+            store_id, batch.signature_task_id
+        )
+        if task is None or task.status is not SignatureTaskStatus.PENDING:
+            return None
         return task
 
     async def pay(
