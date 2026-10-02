@@ -20,7 +20,7 @@
     {
       "binding": "DB",
       "database_name": "lu-camp-online-order-staging",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "1ca012e3-1610-438c-b42a-03efa69391b3",
       "migrations_dir": "migrations"
     }
   ],
