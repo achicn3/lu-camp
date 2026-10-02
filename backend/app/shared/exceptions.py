@@ -593,3 +593,11 @@ class OnlineOrderPushFailed(DomainError):
 
 class OnlineTableNotFound(DomainError):
     """找不到這個桌號的線上點餐桌位碼。"""
+
+
+class OnlineOrderNotFound(DomainError):
+    """找不到這張線上訂單（或不是本店的）。"""
+
+
+class OnlineOrderConflict(DomainError):
+    """線上訂單目前的狀態不能做這件事（已結帳、已取消、庫存不足被拒…）；訊息可直接給店員看。"""

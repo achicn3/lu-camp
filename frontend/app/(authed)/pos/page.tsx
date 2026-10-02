@@ -73,6 +73,11 @@ import { showsLinePayCarrierNote, showsLinePayNoCarrierNote } from "@/lib/invoic
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
+import {
+  ONLINE_ORDERS_KEY,
+  type OnlineCart,
+  OnlineOrdersPanel,
+} from "@/features/online-orders/OnlineOrdersPanel";
 import { CampaignPanel } from "@/features/pos/CampaignPanel";
 import { disabledCampaignsSignature } from "@/features/pos/campaignOverrides";
 import { formatSalePaymentSummary } from "@/lib/payment";
@@ -1288,6 +1293,12 @@ export default function PosPage() {
   // 第一次回報之前，寧可先擋住。
   const [cartSyncDirty, setCartSyncDirty] = useState(true);
   const [dineIn, setDineIn] = useState<DineInSelection>(clearDineIn());
+  // 帶入結帳的線上訂單（docs/44 §4.3）：結帳時一起送，成立銷售時那張線上單標已付款。
+  const [onlineOrder, setOnlineOrder] = useState<{
+    id: number;
+    label: string;
+    note: string | null;
+  } | null>(null);
   // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
   const [linePayKey, setLinePayKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -2219,6 +2230,8 @@ export default function PosPage() {
         expected_einvoice_enabled: freshEnabled,
         // 餐飲內用/外帶與桌號（docs/35）：沒有餐飲行時完全不帶（多帶欄位後端會 422）。
         ...dineInRequestFields(hasMenuLine, dineIn),
+        // 線上訂單帶入結帳才帶（沒帶時請求形狀與冪等簽章維持原樣）。
+        ...(onlineOrder ? { online_order_id: onlineOrder.id } : {}),
       };
       // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
       // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。
@@ -2273,6 +2286,10 @@ export default function PosPage() {
     onSuccess: ({ sale, sig }) => {
       // 結帳成立 → 清除持久化冪等鍵（Codex 第二輪 #2），下一筆換新鍵。
       clearPersistedIdemKey("pos-checkout");
+      if (onlineOrder) {
+        setOnlineOrder(null);
+        void queryClient.invalidateQueries({ queryKey: ONLINE_ORDERS_KEY });
+      }
       setCompleted(sale);
       setCompletedCampaign(campaignNote);
       // 簽署證據快照＝mutationFn 於送出當下擷取的不可變值（非 callback 時的活狀態）。
@@ -2375,6 +2392,31 @@ export default function PosPage() {
     return true;
   }
 
+  /** 線上單帶入購物車（購物車是空的才會被呼叫）：品項照 POS 現在的價格、內用外帶與桌號一起帶。 */
+  function loadOnlineOrder(cart: OnlineCart) {
+    clerkAddedRef.current = true;
+    setLines(
+      cart.lines.map((line) => ({
+        key: menuLineKey(line.menu_item_id, line.menu_option_ids),
+        lineType: "MENU",
+        description: line.description,
+        unitPrice: parseNtd(line.unit_price) ?? 0,
+        qty: line.qty,
+        menuItemId: line.menu_item_id,
+        ...(line.menu_option_ids.length > 0 ? { menuOptionIds: line.menu_option_ids } : {}),
+      })),
+    );
+    setDineIn({
+      mode: cart.service_mode === "TAKEOUT" ? "TAKEOUT" : "DINE_IN",
+      tableNo: cart.service_mode === "TAKEOUT" ? null : cart.table_no,
+    });
+    setOnlineOrder({
+      id: cart.order_id,
+      label: cart.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${cart.table_no ?? ""}`,
+      note: cart.note,
+    });
+  }
+
   function resetSale() {
     clerkAddedRef.current = false;
     setNoteAck("");
@@ -2384,6 +2426,7 @@ export default function PosPage() {
     // 回報，這中間父層若還留著 false 就有一個 render 的破口——先 fail closed。
     setRestorePending(true);
     setLines([]);
+    setOnlineOrder(null);
     setDiscountDrafts([]);
     setDisabledCampaigns([]);
     setGiftTargetKey(null);
@@ -2566,7 +2609,19 @@ export default function PosPage() {
 
   return (
     <section>
-      <h1 className="page-title">POS 結帳</h1>
+      <div className="pos-title-row">
+        <h1 className="page-title">POS 結帳</h1>
+        <OnlineOrdersPanel cartEmpty={lines.length === 0} onLoad={loadOnlineOrder} />
+      </div>
+      {onlineOrder && (
+        <p className="pos-online-banner" role="status">
+          正在結線上單（{onlineOrder.label}）：收完錢這張線上單會自動標已付款。
+          {onlineOrder.note && <strong>客人備註：{onlineOrder.note}</strong>}
+          <button type="button" className="btn-ghost" onClick={() => setOnlineOrder(null)}>
+            不算這張線上單
+          </button>
+        </p>
+      )}
       <PosCustomerDisplay
         lines={saleLines}
         adjustments={adjustments}

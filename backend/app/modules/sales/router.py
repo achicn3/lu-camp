@@ -60,6 +60,8 @@ from app.shared.exceptions import (
     MenuItemNotFound,
     MenuItemUnavailable,
     NoOpenCashSession,
+    OnlineOrderConflict,
+    OnlineOrderNotFound,
     SaleAlreadyVoid,
     SaleHasReturns,
     SaleItemNotFound,
@@ -98,6 +100,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemUnavailable: status.HTTP_409_CONFLICT,
+    OnlineOrderNotFound: status.HTTP_404_NOT_FOUND,
+    OnlineOrderConflict: status.HTTP_409_CONFLICT,
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
     # 折扣不合法與明細不合法同一性質：內容可讀但語意不成立 → 422（讓 POS 一致地顯示訊息）。
@@ -246,6 +250,7 @@ async def create_sale(
             disabled_campaigns=payload.to_disabled_campaigns(),
             service_mode=payload.service_mode,
             table_no=payload.table_no,
+            online_order_id=payload.online_order_id,
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
             linepay_client=_linepay_client(),
             linepay_attempt=linepay_attempt,

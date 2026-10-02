@@ -2781,6 +2781,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Online Orders */
+        get: operations["listOnlineOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-orders/accepting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Online Order Accepting */
+        put: operations["setOnlineOrderAccepting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-orders/{order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Online Order */
+        post: operations["cancelOnlineOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-orders/{order_id}/cart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Online Order Cart */
+        get: operations["getOnlineOrderCart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/opening-check/items": {
         parameters: {
             query?: never;
@@ -8401,6 +8469,43 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /** OnlineAcceptingRequest */
+        OnlineAcceptingRequest: {
+            /** Accepting */
+            accepting: boolean;
+        };
+        /** OnlineCartLineRead */
+        OnlineCartLineRead: {
+            /** Description */
+            description: string;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /** Menu Option Ids */
+            menu_option_ids: number[];
+            /** Online Unit Price */
+            online_unit_price: string;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /** OnlineCartRead */
+        OnlineCartRead: {
+            /** Lines */
+            lines: components["schemas"]["OnlineCartLineRead"][];
+            /** Note */
+            note: string | null;
+            /** Online Total */
+            online_total: string;
+            /** Order Id */
+            order_id: number;
+            /** Service Mode */
+            service_mode: string;
+            /** Table No */
+            table_no: string | null;
+            /** Total */
+            total: string;
+        };
         /** OnlineMenuPublishRead */
         OnlineMenuPublishRead: {
             /** Font Pushed */
@@ -8417,6 +8522,59 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** OnlineOrderLineRead */
+        OnlineOrderLineRead: {
+            /** Item Id */
+            item_id: number;
+            /** Limited */
+            limited: boolean;
+            /** Line No */
+            line_no: number;
+            /** Line Total */
+            line_total: number;
+            /** Name */
+            name: string;
+            /** Option Ids */
+            option_ids: number[];
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: number;
+        };
+        /** OnlineOrderRead */
+        OnlineOrderRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Hold Status */
+            hold_status: string;
+            /** Id */
+            id: number;
+            /** Lines */
+            lines: components["schemas"]["OnlineOrderLineRead"][];
+            /** Note */
+            note: string | null;
+            /** Payment Method */
+            payment_method: string;
+            /** Payment Status */
+            payment_status: string;
+            /** Reject Reason */
+            reject_reason: string | null;
+            /** Remote Id */
+            remote_id: string;
+            /** Sale Id */
+            sale_id: number | null;
+            /** Service Mode */
+            service_mode: string;
+            /** Sync Status */
+            sync_status: string;
+            /** Table Label */
+            table_label: string | null;
+            /** Total */
+            total: string;
+        };
         /** OnlineOrderStatusRead */
         OnlineOrderStatusRead: {
             /** Configured */
@@ -8427,6 +8585,21 @@ export interface components {
             last_version: number | null;
             /** Tables */
             tables: components["schemas"]["OnlineTableRead"][];
+        };
+        /** OnlineOrdersRead */
+        OnlineOrdersRead: {
+            /** Accepting */
+            accepting: boolean | null;
+            /** Configured */
+            configured: boolean;
+            /** Last Pull At */
+            last_pull_at: string | null;
+            /** Last Pull Error */
+            last_pull_error: string | null;
+            /** Orders */
+            orders: components["schemas"]["OnlineOrderRead"][];
+            /** Paused Reason */
+            paused_reason: string | null;
         };
         /** OnlineTableRead */
         OnlineTableRead: {
@@ -9199,6 +9372,8 @@ export interface components {
             invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
+            /** Online Order Id */
+            online_order_id?: number | null;
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Signature Task Id */
             signature_task_id?: number | null;
@@ -16102,6 +16277,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OnlineTableRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listOnlineOrders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrdersRead"];
+                };
+            };
+        };
+    };
+    setOnlineOrderAccepting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnlineAcceptingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrdersRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelOnlineOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getOnlineOrderCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineCartRead"];
                 };
             };
             /** @description Validation Error */

@@ -320,6 +320,8 @@ class SaleCreateRequest(BaseModel):
     # 兩者與購物車內容的相依關係由 service 驗證（此處看不到明細是不是餐飲）。
     service_mode: ServiceMode | None = None
     table_no: Annotated[str, Field(max_length=20)] | None = None
+    # 線上訂單帶入結帳（docs/44 §4.3）：成立銷售時那張線上單同時標已付款、保留的份數轉成正式扣減。
+    online_order_id: int | None = Field(default=None, ge=1)
 
     @field_validator("table_no")
     @classmethod

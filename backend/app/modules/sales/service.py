@@ -38,6 +38,7 @@ from app.modules.inventory.models import BulkBasket, BulkLot, CatalogProduct, Se
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
+from app.modules.onlineorder.orders_service import OnlineOrdersService
 from app.modules.sales import linepay as sales_linepay
 from app.modules.sales.bulk_allocation import returned_split
 from app.modules.sales.inputs import (
@@ -993,6 +994,7 @@ class SalesService:
         linepay_client: LinePayClient | None = None,
         reconciled_linepay_result: LinePayResult | None = None,
         linepay_attempt: LinePayAttemptState | None = None,
+        online_order_id: int | None = None,
         # 補單（LINE Pay 已扣款、結果不明後補成立本機銷售）：這筆交易**已經發生**，
         # 只是在補帳，所以不能用「商品現在還賣不賣」去擋，否則錢收了、帳補不出來。
         rebuilding_paid_sale: bool = False,
@@ -1163,6 +1165,11 @@ class SalesService:
         ):
             raise CrossStoreReference(f"buyer contact {buyer_contact_id} 不屬於 store {store_id}")
 
+        # 線上訂單帶入結帳（docs/44 §4.3）：先鎖住那張單（同一張只能成立一筆銷售），保留的份數
+        # 加回，下面的餐飲明細再照一般結帳扣——淨額只扣一次。不在指紋裡：成立時已同交易掛上
+        # 銷售單，同鍵重送回放的就是那筆。
+        if online_order_id is not None:
+            await OnlineOrdersService(self._session, None).begin_checkout(store_id, online_order_id)
         # 發票設定確認（docs/24；Codex 第廿二〜廿四輪）：**一律**先取該店設定的交易級共享
         # 鎖，再讀設定——鎖持有至本交易 commit，與並發 PATCH（writer）互斥，使
         # 「read→發票決策→commit」期間設定不可被改，杜絕 TOCTOU（read/writer 讓並發結帳
@@ -1470,6 +1477,10 @@ class SalesService:
                 reason_code="SALE_BOUND",
                 actor_user_id=clerk_user_id,
                 sale_id=sale.id,
+            )
+        if online_order_id is not None:
+            await OnlineOrdersService(self._session, None).mark_settled(
+                store_id, online_order_id, sale_id=sale.id
             )
         if cart is not None:
             now = datetime.now(UTC)

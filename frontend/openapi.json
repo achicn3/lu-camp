@@ -11716,6 +11716,120 @@
         "title": "NoteUpdateRequest",
         "type": "object"
       },
+      "OnlineAcceptingRequest": {
+        "properties": {
+          "accepting": {
+            "title": "Accepting",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepting"
+        ],
+        "title": "OnlineAcceptingRequest",
+        "type": "object"
+      },
+      "OnlineCartLineRead": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "menu_item_id": {
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "menu_option_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Menu Option Ids",
+            "type": "array"
+          },
+          "online_unit_price": {
+            "title": "Online Unit Price",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "menu_item_id",
+          "menu_option_ids",
+          "qty",
+          "description",
+          "online_unit_price",
+          "unit_price"
+        ],
+        "title": "OnlineCartLineRead",
+        "type": "object"
+      },
+      "OnlineCartRead": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineCartLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "online_total": {
+            "title": "Online Total",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "integer"
+          },
+          "service_mode": {
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "service_mode",
+          "table_no",
+          "note",
+          "lines",
+          "online_total",
+          "total"
+        ],
+        "title": "OnlineCartRead",
+        "type": "object"
+      },
       "OnlineMenuPublishRead": {
         "properties": {
           "font_pushed": {
@@ -11748,6 +11862,167 @@
           "font_pushed"
         ],
         "title": "OnlineMenuPublishRead",
+        "type": "object"
+      },
+      "OnlineOrderLineRead": {
+        "properties": {
+          "item_id": {
+            "title": "Item Id",
+            "type": "integer"
+          },
+          "limited": {
+            "title": "Limited",
+            "type": "boolean"
+          },
+          "line_no": {
+            "title": "Line No",
+            "type": "integer"
+          },
+          "line_total": {
+            "title": "Line Total",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "option_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Option Ids",
+            "type": "array"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line_no",
+          "item_id",
+          "name",
+          "option_ids",
+          "unit_price",
+          "qty",
+          "line_total",
+          "limited"
+        ],
+        "title": "OnlineOrderLineRead",
+        "type": "object"
+      },
+      "OnlineOrderRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "hold_status": {
+            "title": "Hold Status",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineOrderLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "payment_method": {
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "payment_status": {
+            "title": "Payment Status",
+            "type": "string"
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason"
+          },
+          "remote_id": {
+            "title": "Remote Id",
+            "type": "string"
+          },
+          "sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Id"
+          },
+          "service_mode": {
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "sync_status": {
+            "title": "Sync Status",
+            "type": "string"
+          },
+          "table_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Label"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "remote_id",
+          "table_label",
+          "service_mode",
+          "total",
+          "payment_method",
+          "note",
+          "lines",
+          "created_at",
+          "sync_status",
+          "hold_status",
+          "payment_status",
+          "reject_reason",
+          "sale_id"
+        ],
+        "title": "OnlineOrderRead",
         "type": "object"
       },
       "OnlineOrderStatusRead": {
@@ -11794,6 +12069,76 @@
           "tables"
         ],
         "title": "OnlineOrderStatusRead",
+        "type": "object"
+      },
+      "OnlineOrdersRead": {
+        "properties": {
+          "accepting": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepting"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "last_pull_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pull At"
+          },
+          "last_pull_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pull Error"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineOrderRead"
+            },
+            "title": "Orders",
+            "type": "array"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          }
+        },
+        "required": [
+          "configured",
+          "accepting",
+          "paused_reason",
+          "last_pull_at",
+          "last_pull_error",
+          "orders"
+        ],
+        "title": "OnlineOrdersRead",
         "type": "object"
       },
       "OnlineTableRead": {
@@ -13691,6 +14036,18 @@
             "minItems": 1,
             "title": "Lines",
             "type": "array"
+          },
+          "online_order_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Online Order Id"
           },
           "service_mode": {
             "anyOf": [
@@ -27315,6 +27672,172 @@
         "summary": "Rotate Online Table Code",
         "tags": [
           "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-orders": {
+      "get": {
+        "operationId": "listOnlineOrders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineOrdersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Online Orders",
+        "tags": [
+          "online-orders"
+        ]
+      }
+    },
+    "/api/v1/online-orders/accepting": {
+      "put": {
+        "operationId": "setOnlineOrderAccepting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnlineAcceptingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineOrdersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Online Order Accepting",
+        "tags": [
+          "online-orders"
+        ]
+      }
+    },
+    "/api/v1/online-orders/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancelOnlineOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineOrderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Online Order",
+        "tags": [
+          "online-orders"
+        ]
+      }
+    },
+    "/api/v1/online-orders/{order_id}/cart": {
+      "get": {
+        "operationId": "getOnlineOrderCart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineCartRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Online Order Cart",
+        "tags": [
+          "online-orders"
         ]
       }
     },

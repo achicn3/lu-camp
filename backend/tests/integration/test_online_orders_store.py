@@ -1,0 +1,633 @@
+"""線上訂單店內端（docs/44 §3.7、§4.3、§4.5；O4b）。
+
+POS 每幾秒向雲端拉新單（假 Worker 接住）：
+- 匯入只做一次（重拉同一張不重複，C3）；回報雲端排進持久化佇列（C4），失敗退避重試、
+  雲端明確拒收不再重試。
+- 有限量品項的單在同一交易內直接扣每日限量份數＝保留，回報 HELD；不夠就 REJECTED（哪一項不夠）。
+- 現金單 30 分鐘沒來付：保留到期加回份數，單子不取消。
+- 取消：保留加回、回報 VOIDED＋CANCELLED。
+- 帶入結帳：以 POS 目前的菜單重新計價（價格變了要看得出差額）；結帳成立銷售時先加回保留
+  再照一般結帳扣
+  （淨額只扣一次），回報 SETTLED＋PAID；同一張線上單只能成立一筆銷售。
+"""
+
+import hashlib
+import hmac
+import json
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from datetime import timedelta
+from decimal import Decimal
+from typing import Any
+
+import httpx
+import pytest
+import pytest_asyncio
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_session
+from app.core.security import encode_access_token
+from app.core.time import utc_now
+from app.main import create_app
+from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.menu.models import MenuItem
+from app.modules.menu.service import MenuService
+from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.models import (
+    OnlineOrder,
+    OnlineOrderOutbox,
+    StockReservation,
+)
+from app.modules.onlineorder.orders_service import OnlineOrdersService
+from app.modules.onlineorder.router import get_online_order_client
+from app.modules.onlineorder.scheduler import tick_once
+from app.modules.onlineorder.signing import canonical_string
+from app.modules.store.models import Store
+from app.modules.user.models import User
+from app.shared.enums import UserRole
+from app.shared.exceptions import OnlineOrderNotConfigured
+from tests.integration.customer_display_helpers import CustomerDisplayAwareClient
+
+SECRET = "orders-test-secret"
+BASE = "https://order.test"
+
+
+@dataclass
+class FakeWorker:
+    """雲端：拉單回 `orders`；回報記下來。`status_reply` 可指定回報的回應（模擬失敗）。"""
+
+    orders: list[Any] = field(default_factory=list)  # 也放壞資料，測匯入會跳過
+    reports: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    status_reply: tuple[int, dict[str, Any]] | None = None
+    store_status: list[bool] = field(default_factory=list)
+    accepting: bool = True
+    paused_reason: str | None = None
+    pull_fails: bool = False
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        body = request.content
+        text = canonical_string(
+            request.method,
+            request.url.raw_path.decode(),
+            request.headers["X-LuCamp-Timestamp"],
+            request.headers["X-LuCamp-Nonce"],
+            body,
+        )
+        expected = hmac.new(SECRET.encode(), text.encode(), hashlib.sha256).hexdigest()
+        assert request.headers["X-LuCamp-Signature"] == expected
+        path = request.url.path
+        if request.method == "GET" and path == "/integration/orders":
+            if self.pull_fails:
+                return httpx.Response(503, json={"error": "down"})
+            return httpx.Response(
+                200,
+                json={
+                    "accepting": self.accepting,
+                    "paused_reason": self.paused_reason,
+                    "server_time": "2026-10-02T08:00:00.000Z",
+                    "orders": self.orders,
+                },
+            )
+        if request.method == "POST" and path.startswith("/integration/orders/"):
+            remote_id = path.split("/")[3]
+            payload = json.loads(body)
+            self.reports.append((remote_id, payload))
+            if self.status_reply is not None:
+                code, reply = self.status_reply
+                return httpx.Response(code, json=reply)
+            return httpx.Response(200, json={"id": remote_id, **payload})
+        if request.method == "PUT" and path == "/integration/store-status":
+            accepting = bool(json.loads(body)["accepting"])
+            self.store_status.append(accepting)
+            self.accepting = accepting
+            return httpx.Response(200, json={"accepting": accepting, "paused_reason": None})
+        return httpx.Response(404, json={"error": "not_found"})
+
+
+@dataclass
+class Ctx:
+    store_id: int = 0
+    clerk_id: int = 0
+    clerk: str = ""
+    cake: int = 0  # 每日限量
+    latte: int = 0  # 不限量
+    worker: FakeWorker = field(default_factory=FakeWorker)
+
+
+_CTX: dict[str, Ctx] = {}
+
+
+def _client(worker: FakeWorker, store_id: int) -> OnlineOrderClient:
+    return OnlineOrderClient(
+        BASE, SECRET, store_id=store_id, transport=httpx.MockTransport(worker.handler)
+    )
+
+
+@pytest_asyncio.fixture
+async def ctx(db_session: AsyncSession) -> Ctx:
+    store = Store(name="露坑")
+    db_session.add(store)
+    await db_session.flush()
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    db_session.add_all([clerk, mgr])
+    await db_session.flush()
+    await CashDrawerService(db_session).open_session(store.id, clerk.id, Decimal("1000"))
+    menu = MenuService(db_session)
+    cake = await menu.create_menu_item(
+        store.id, name="戚風", unit_price=Decimal(90), actor_user_id=mgr.id
+    )
+    await menu.update_menu_item(store.id, cake.id, daily_limited=True, actor_user_id=mgr.id)
+    await menu.set_daily_stock(
+        store.id, "item", cake.id, qty=3, expected_remaining=0, actor_user_id=mgr.id
+    )
+    latte = await menu.create_menu_item(
+        store.id, name="拿鐵", unit_price=Decimal(150), actor_user_id=mgr.id
+    )
+    c = Ctx(
+        store_id=store.id,
+        clerk_id=clerk.id,
+        clerk=encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id),
+        cake=cake.id,
+        latte=latte.id,
+    )
+    _CTX["c"] = c
+    return c
+
+
+@pytest_asyncio.fixture
+async def client(db_session: AsyncSession, ctx: Ctx) -> AsyncGenerator[httpx.AsyncClient]:
+    app = create_app()
+
+    async def _override() -> AsyncGenerator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_online_order_client] = lambda: _client(ctx.worker, ctx.store_id)
+    transport = httpx.ASGITransport(app=app)
+    async with CustomerDisplayAwareClient(
+        transport=transport, base_url="http://test", db_session=db_session
+    ) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def _order(
+    remote_id: str, lines: list[dict[str, Any]], *, hold: str = "NONE", table: str = "A1"
+) -> dict[str, Any]:
+    total = sum(int(line["line_total"]) for line in lines)
+    return {
+        "id": remote_id,
+        "table_label": table,
+        "service_mode": "DINE_IN",
+        "menu_version": 1,
+        "total": total,
+        "payment_method": "CASH",
+        "payment_status": "UNPAID",
+        "hold_status": hold,
+        "note": "少冰",
+        "created_at": "2026-10-02T07:59:00.000Z",
+        "lines": lines,
+    }
+
+
+def _line(
+    no: int, item_id: int, name: str, price: int, qty: int = 1, limited: bool = False
+) -> dict[str, Any]:
+    return {
+        "line_no": no,
+        "item_id": item_id,
+        "name": name,
+        "option_ids": [],
+        "unit_price": price,
+        "qty": qty,
+        "line_total": price * qty,
+        "limited": limited,
+    }
+
+
+def _svc(session: AsyncSession, c: Ctx) -> OnlineOrdersService:
+    return OnlineOrdersService(session, _client(c.worker, c.store_id))
+
+
+async def _cake_left(session: AsyncSession, c: Ctx) -> int | None:
+    item = await session.get(MenuItem, c.cake)
+    assert item is not None
+    await session.refresh(item)
+    return item.stock_qty
+
+
+async def _order_row(session: AsyncSession, remote_id: str) -> OnlineOrder:
+    row = await session.scalar(select(OnlineOrder).where(OnlineOrder.remote_id == remote_id))
+    assert row is not None
+    await session.refresh(row)
+    return row
+
+
+def _rid(n: int) -> str:
+    return f"{n:032x}"
+
+
+def _h(token: str, idem: str | None = None) -> dict[str, str]:
+    h = {"Authorization": f"Bearer {token}"}
+    if idem is not None:
+        h["Idempotency-Key"] = idem
+    return h
+
+
+# ── 拉單與匯入 ────────────────────────────────────────────────────────
+
+
+async def test_pull_imports_once_and_reports_imported(db_session: AsyncSession, ctx: Ctx) -> None:
+    ctx.worker.orders = [_order(_rid(1), [_line(1, ctx.latte, "拿鐵", 150)])]
+    svc = _svc(db_session, ctx)
+    result = await svc.pull_once(ctx.store_id)
+    assert result.imported == 1
+    await svc.flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [(_rid(1), {"sync_status": "IMPORTED"})]
+    # 雲端還沒收到回報前又被拉到：不會匯入第二次
+    again = await svc.pull_once(ctx.store_id)
+    assert again.imported == 0
+    rows = (await db_session.scalars(select(OnlineOrder))).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row.sync_status, row.hold_status, row.payment_status) == ("IMPORTED", "NONE", "UNPAID")
+    assert (row.table_label, row.total, row.note) == ("A1", Decimal(150), "少冰")
+
+
+async def test_limited_line_is_reserved_by_consuming_daily_stock(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.orders = [
+        _order(
+            _rid(2), [_line(1, ctx.cake, "戚風", 90, qty=2, limited=True)], hold="HOLD_REQUESTED"
+        )
+    ]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    await svc.flush_outbox(ctx.store_id)
+    assert await _cake_left(db_session, ctx) == 1  # 3 份扣掉 2 份
+    row = await _order_row(db_session, _rid(2))
+    assert row.hold_status == "HELD"
+    reservation = await db_session.scalar(
+        select(StockReservation).where(StockReservation.online_order_id == row.id)
+    )
+    assert reservation is not None and reservation.status == "ACTIVE"
+    assert ctx.worker.reports == [(_rid(2), {"sync_status": "IMPORTED", "hold_status": "HELD"})]
+
+
+async def test_not_enough_stock_rejects_without_touching_stock(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.orders = [
+        _order(
+            _rid(3),
+            [_line(1, ctx.latte, "拿鐵", 150), _line(2, ctx.cake, "戚風", 90, qty=5, limited=True)],
+            hold="HOLD_REQUESTED",
+        )
+    ]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    await svc.flush_outbox(ctx.store_id)
+    assert await _cake_left(db_session, ctx) == 3
+    row = await _order_row(db_session, _rid(3))
+    assert row.hold_status == "REJECTED"
+    assert row.reject_reason is not None and "戚風" in row.reject_reason
+    assert ctx.worker.reports == [(_rid(3), {"sync_status": "IMPORTED", "hold_status": "REJECTED"})]
+
+
+async def test_reservation_expires_after_30_minutes_but_order_stays(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.orders = [
+        _order(_rid(4), [_line(1, ctx.cake, "戚風", 90, limited=True)], hold="HOLD_REQUESTED")
+    ]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    assert await _cake_left(db_session, ctx) == 2
+    expired = await svc.expire_reservations(ctx.store_id, now=utc_now() + timedelta(minutes=31))
+    assert expired == 1
+    assert await _cake_left(db_session, ctx) == 3
+    row = await _order_row(db_session, _rid(4))
+    assert (row.sync_status, row.payment_status) == ("IMPORTED", "UNPAID")
+
+
+# ── 回報佇列 ──────────────────────────────────────────────────────────
+
+
+async def test_outbox_retries_on_failure_and_gives_up_on_explicit_rejection(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.orders = [_order(_rid(5), [_line(1, ctx.latte, "拿鐵", 150)])]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    ctx.worker.status_reply = (503, {"error": "down"})
+    await svc.flush_outbox(ctx.store_id)
+    entry = await db_session.scalar(select(OnlineOrderOutbox))
+    assert entry is not None
+    await db_session.refresh(entry)
+    assert (entry.status, entry.attempts) == ("PENDING", 1)
+    assert entry.next_attempt_at > utc_now()
+    # 還沒到下次重試時間：不送
+    sent_before = len(ctx.worker.reports)
+    await svc.flush_outbox(ctx.store_id)
+    assert len(ctx.worker.reports) == sent_before
+    # 到了時間、雲端明確拒收 → 不再重試
+    ctx.worker.status_reply = (409, {"error": "invalid_transition"})
+    await svc.flush_outbox(ctx.store_id, now=utc_now() + timedelta(minutes=10))
+    await db_session.refresh(entry)
+    assert entry.status == "DEAD" and entry.last_error is not None
+
+
+# ── 取消、帶入結帳 ───────────────────────────────────────────────────
+
+
+async def _pulled(
+    db_session: AsyncSession,
+    ctx: Ctx,
+    remote_id: str,
+    lines: list[dict[str, Any]],
+    hold: str = "NONE",
+) -> OnlineOrder:
+    ctx.worker.orders = [_order(remote_id, lines, hold=hold)]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    await svc.flush_outbox(ctx.store_id)
+    ctx.worker.reports.clear()
+    ctx.worker.orders = []
+    return await _order_row(db_session, remote_id)
+
+
+async def test_list_and_cancel_releases_reservation(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(
+        db_session, ctx, _rid(6), [_line(1, ctx.cake, "戚風", 90, limited=True)], "HOLD_REQUESTED"
+    )
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    assert listed.status_code == 200, listed.text
+    assert [o["id"] for o in listed.json()["orders"]] == [row.id]
+    resp = await client.post(f"/api/v1/online-orders/{row.id}/cancel", headers=_h(ctx.clerk))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["sync_status"] == "VOIDED"
+    assert await _cake_left(db_session, ctx) == 3
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [
+        (_rid(6), {"sync_status": "VOIDED", "payment_status": "CANCELLED"})
+    ]
+
+
+async def test_cart_reprices_with_current_menu(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(db_session, ctx, _rid(7), [_line(1, ctx.latte, "拿鐵", 150, qty=2)])
+    latte = await db_session.get(MenuItem, ctx.latte)
+    assert latte is not None
+    latte.unit_price = Decimal(160)  # 客人送單後改價
+    await db_session.flush()
+    resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["lines"] == [
+        {
+            "menu_item_id": ctx.latte,
+            "menu_option_ids": [],
+            "qty": 2,
+            "description": "拿鐵",
+            "online_unit_price": "150",
+            "unit_price": "160",
+        }
+    ]
+    assert (body["online_total"], body["total"]) == ("300", "320")
+    assert (body["service_mode"], body["table_no"]) == ("DINE_IN", "A1")
+
+
+async def test_checkout_converts_reservation_and_reports_settled(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(
+        db_session,
+        ctx,
+        _rid(8),
+        [_line(1, ctx.cake, "戚風", 90, qty=2, limited=True)],
+        "HOLD_REQUESTED",
+    )
+    assert await _cake_left(db_session, ctx) == 1
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.cake, "qty": 2}],
+            "service_mode": "TAKEOUT",
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "online-8"),
+    )
+    assert sale.status_code == 201, sale.text
+    assert await _cake_left(db_session, ctx) == 1  # 保留加回再扣：只扣一次
+    row = await _order_row(db_session, _rid(8))
+    assert (row.sync_status, row.payment_status, row.sale_id) == (
+        "SETTLED",
+        "PAID",
+        sale.json()["id"],
+    )
+    reservation = await db_session.scalar(
+        select(StockReservation).where(StockReservation.online_order_id == row.id)
+    )
+    assert reservation is not None and reservation.status == "CONVERTED"
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [(_rid(8), {"sync_status": "SETTLED", "payment_status": "PAID"})]
+
+
+async def test_online_order_settles_only_once(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(db_session, ctx, _rid(9), [_line(1, ctx.latte, "拿鐵", 150)])
+    body = {
+        "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+        "service_mode": "TAKEOUT",
+        "online_order_id": row.id,
+    }
+    first = await client.post("/api/v1/sales", json=body, headers=_h(ctx.clerk, "a"))
+    assert first.status_code == 201, first.text
+    second = await client.post("/api/v1/sales", json=body, headers=_h(ctx.clerk, "b"))
+    assert second.status_code == 409
+    assert "已經結帳" in second.json()["detail"]
+
+
+async def test_cannot_checkout_cancelled_or_rejected_order(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(
+        db_session,
+        ctx,
+        _rid(10),
+        [_line(1, ctx.cake, "戚風", 90, qty=9, limited=True)],
+        "HOLD_REQUESTED",
+    )
+    assert row.hold_status == "REJECTED"
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+            "service_mode": "TAKEOUT",
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "c"),
+    )
+    assert resp.status_code == 409
+    assert "庫存不足" in resp.json()["detail"]
+
+
+# ── 暫停接單 ─────────────────────────────────────────────────────────
+
+
+async def test_pause_and_resume_forwarded_to_cloud(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    resp = await client.put(
+        "/api/v1/online-orders/accepting", json={"accepting": False}, headers=_h(ctx.clerk)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepting"] is False
+    assert ctx.worker.store_status == [False]
+    status = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    assert status.json()["accepting"] is False
+
+
+async def test_pull_failure_is_recorded_for_the_pos(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.pull_fails = True
+    await _svc(db_session, ctx).pull_once(ctx.store_id)
+    status = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
+    assert status["last_pull_error"]
+
+
+async def test_scheduler_tick_is_a_no_op_without_cloud_settings() -> None:
+    """沒設定雲端網址／密鑰：背景工作什麼都不做（測試與未啟用的門市都是這樣）。"""
+    await tick_once()
+
+
+# ── 邊界 ─────────────────────────────────────────────────────────────
+
+
+async def test_bad_orders_are_skipped_and_good_ones_still_import(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    good = _order(_rid(20), [_line(1, ctx.latte, "拿鐵", 150)])
+    no_lines = {**_order(_rid(21), [_line(1, ctx.latte, "拿鐵", 150)]), "lines": []}
+    bad_mode = {**_order(_rid(22), [_line(1, ctx.latte, "拿鐵", 150)]), "service_mode": "BOAT"}
+    ctx.worker.orders = ["oops", {"id": "not-hex"}, no_lines, bad_mode, good]
+    result = await _svc(db_session, ctx).pull_once(ctx.store_id)
+    assert result.imported == 1
+    assert [r.remote_id for r in (await db_session.scalars(select(OnlineOrder))).all()] == [
+        _rid(20)
+    ]
+
+
+async def test_hold_rejects_item_that_is_archived_or_stopped(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    latte = await db_session.get(MenuItem, ctx.latte)
+    assert latte is not None
+    latte.is_available = False
+    await db_session.flush()
+    row = await _pulled(
+        db_session, ctx, _rid(23), [_line(1, ctx.latte, "拿鐵", 150)], "HOLD_REQUESTED"
+    )
+    assert row.hold_status == "REJECTED" and row.reject_reason is not None
+    assert "停售" in row.reject_reason
+    latte.archived_at = utc_now()
+    await db_session.flush()
+    gone = await _pulled(
+        db_session, ctx, _rid(24), [_line(1, ctx.latte, "拿鐵", 150)], "HOLD_REQUESTED"
+    )
+    assert gone.reject_reason is not None and "不在菜單上" in gone.reject_reason
+
+
+async def test_cancel_twice_is_harmless_and_settled_cannot_be_cancelled(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(db_session, ctx, _rid(25), [_line(1, ctx.latte, "拿鐵", 150)])
+    for _ in range(2):
+        resp = await client.post(f"/api/v1/online-orders/{row.id}/cancel", headers=_h(ctx.clerk))
+        assert resp.status_code == 200, resp.text
+    outbox = (
+        await db_session.scalars(
+            select(OnlineOrderOutbox).where(OnlineOrderOutbox.online_order_id == row.id)
+        )
+    ).all()
+    assert [o.payload for o in outbox].count(
+        {"sync_status": "VOIDED", "payment_status": "CANCELLED"}
+    ) == 1
+    cart = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert cart.status_code == 409 and "取消" in cart.json()["detail"]
+    settled = await _pulled(db_session, ctx, _rid(26), [_line(1, ctx.latte, "拿鐵", 150)])
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+            "service_mode": "TAKEOUT",
+            "online_order_id": settled.id,
+        },
+        headers=_h(ctx.clerk, "s26"),
+    )
+    assert sale.status_code == 201, sale.text
+    cart2 = await client.get(f"/api/v1/online-orders/{settled.id}/cart", headers=_h(ctx.clerk))
+    assert cart2.status_code == 409 and "已經結帳" in cart2.json()["detail"]
+    resp = await client.post(f"/api/v1/online-orders/{settled.id}/cancel", headers=_h(ctx.clerk))
+    assert resp.status_code == 409 and "交易紀錄" in resp.json()["detail"]
+
+
+async def test_cart_conflicts_when_menu_changed(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(
+        db_session,
+        ctx,
+        _rid(27),
+        [{**_line(1, ctx.latte, "拿鐵", 150), "option_ids": [999999]}],
+    )
+    resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert resp.status_code == 409 and "菜單選項改過了" in resp.json()["detail"]
+    latte = await db_session.get(MenuItem, ctx.latte)
+    assert latte is not None
+    latte.archived_at = utc_now()
+    await db_session.flush()
+    gone = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert gone.status_code == 409 and "不在菜單上" in gone.json()["detail"]
+    missing = await client.get("/api/v1/online-orders/999999/cart", headers=_h(ctx.clerk))
+    assert missing.status_code == 404
+
+
+async def test_outbox_keeps_order_and_retries_when_cloud_unreachable(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.orders = [_order(_rid(28), [_line(1, ctx.latte, "拿鐵", 150)])]
+
+    def down(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route")
+
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    offline = OnlineOrdersService(
+        db_session,
+        OnlineOrderClient(BASE, SECRET, store_id=ctx.store_id, transport=httpx.MockTransport(down)),
+    )
+    assert await offline.flush_outbox(ctx.store_id) == 0
+    entry = await db_session.scalar(select(OnlineOrderOutbox))
+    assert entry is not None
+    await db_session.refresh(entry)
+    assert (entry.status, entry.attempts) == ("PENDING", 1)
+    # 網路恢復、過了重試時間：送出
+    assert await svc.flush_outbox(ctx.store_id, now=utc_now() + timedelta(minutes=1)) == 1
+
+
+async def test_service_refuses_without_cloud_or_for_another_store(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    with pytest.raises(OnlineOrderNotConfigured):
+        await OnlineOrdersService(db_session, None).pull_once(ctx.store_id)
+    with pytest.raises(OnlineOrderNotConfigured):
+        await _svc(db_session, ctx).pull_once(ctx.store_id + 1)

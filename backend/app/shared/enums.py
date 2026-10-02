@@ -629,3 +629,54 @@ class MenuStockAdjustReason(StrEnum):
     RESTOCK = "RESTOCK"  # 補貨／剛做好（只能加）
     WASTE = "WASTE"  # 報廢：壞掉、做壞、過期（只能減）
     CORRECTION = "CORRECTION"  # 盤點校正：數字跟實物對不上（只能減；要往上校正請用「改成」）
+
+
+class OnlineOrderSync(StrEnum):
+    """線上訂單在店內的同步狀態（docs/44 §4.6）。
+
+    拉到＝IMPORTED、成立銷售＝SETTLED、取消＝VOIDED。
+    """
+
+    IMPORTED = "IMPORTED"
+    SETTLED = "SETTLED"
+    VOIDED = "VOIDED"
+
+
+class OnlineOrderHold(StrEnum):
+    """限量品項的庫存確認（docs/44 §3.7）：不需要＝NONE；保留成功＝HELD；不夠＝REJECTED。"""
+
+    NONE = "NONE"
+    HELD = "HELD"
+    REJECTED = "REJECTED"
+
+
+class OnlineOrderPayment(StrEnum):
+    """線上訂單付款（O4 只有現金單）：未付＝UNPAID、櫃台收款成立銷售＝PAID、取消＝CANCELLED。"""
+
+    UNPAID = "UNPAID"
+    PAID = "PAID"
+    CANCELLED = "CANCELLED"
+
+
+class StockReservationStatus(StrEnum):
+    """線上單的份數保留（docs/44 §3.7 O4 定案）：拉單時直接扣每日限量份數。
+
+    ACTIVE＝扣著；CONVERTED＝帶入結帳成立銷售（加回後由結帳正式扣）；RELEASED＝取消加回；
+    EXPIRED＝現金單 30 分鐘沒來付，加回（單子不取消）。
+    """
+
+    ACTIVE = "ACTIVE"
+    CONVERTED = "CONVERTED"
+    RELEASED = "RELEASED"
+    EXPIRED = "EXPIRED"
+
+
+class OnlineOutboxStatus(StrEnum):
+    """回報雲端的持久化重試佇列（docs/44 §4.5 C4）。
+
+    PENDING 重試到送出；DEAD＝雲端明確拒收、不再重試。
+    """
+
+    PENDING = "PENDING"
+    SENT = "SENT"
+    DEAD = "DEAD"
