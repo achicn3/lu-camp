@@ -87,7 +87,12 @@ class OnlineOrderService:
         既有的碼不動——印好的 QR 才不會失效。
         """
         settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
-        wanted = [(label, ServiceMode.DINE_IN.value) for label in settings.dine_in_tables]
+        # 外帶碼一定有一組；桌號設定裡若也叫「外帶」就併成那一組（Codex 對抗審查 O3 第三輪：
+        # 否則兩筆同名、撞唯一索引，整個發佈失敗）。重複的桌號也只留一筆。
+        dine_in = [
+            label for label in dict.fromkeys(settings.dine_in_tables) if label != TAKEOUT_LABEL
+        ]
+        wanted = [(label, ServiceMode.DINE_IN.value) for label in dine_in]
         wanted.append((TAKEOUT_LABEL, ServiceMode.TAKEOUT.value))
         active = {t.label: t for t in await self._repo.active_tables(store_id, for_update=True)}
         now = datetime.now(UTC)

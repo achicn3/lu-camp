@@ -383,3 +383,19 @@ async def test_rotation_survives_lost_response(
     pushed = {t["label"]: t["code"] for t in worker.tables()}["A1"]
     assert pushed == local
     assert pushed != old
+
+
+async def test_dine_in_table_named_takeout_does_not_break_publishing(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """Codex 對抗審查 O3 第三輪：桌號設定裡有「外帶」時，不能和自動產生的外帶碼撞名而發佈失敗。"""
+    _, mgr = await _seed(db_session)
+    await client.patch(
+        "/api/v1/settings", json={"dine_in_tables": ["A1", "外帶"]}, headers=_auth(mgr)
+    )
+    first = await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    assert first.status_code == 200, first.text
+    second = await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    assert second.status_code == 200, second.text
+    labels = sorted((t["label"], t["service_mode"]) for t in worker.tables())
+    assert labels == [("A1", "DINE_IN"), ("外帶", "TAKEOUT")]
