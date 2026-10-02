@@ -4,7 +4,7 @@
 // 其他欄位（簡稱、類型、原價、折數、售價、成色、分類、品牌型號、備註）收在「詳細」裡，可填可不填，
 // 有填的上架時自動帶入。
 import { useMutation } from "@tanstack/react-query";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
 import type { PricingRates } from "@/features/intake/estimate";
@@ -43,6 +43,7 @@ function PriceRow({
   rates,
   defaultCommissionPct,
   deletable,
+  onUnsavedChange,
 }: {
   batchId: number;
   line: Line;
@@ -52,11 +53,19 @@ function PriceRow({
   rates: PricingRates;
   defaultCommissionPct: number | null;
   deletable: boolean;
+  /** 這件的收購價改了還沒存好（含存檔失敗）：上層據此擋住「估完」，不讓舊價格成交。 */
+  onUnsavedChange: (lineId: number, unsaved: boolean) => void;
 }) {
   const saved = line.deal_cost ?? "";
   const [value, setValue] = useState(saved);
-  // 最後送出的值：按 Enter 存檔後焦點跳走會再觸發 blur，同一個值不重送。
+  // 最後送出的值：按 Enter 存檔後焦點跳走會再觸發 blur，同一個值不重送；存檔失敗就退回，才能重試。
   const sent = useRef(saved);
+  const [failed, setFailed] = useState(false);
+  const unsaved = value.trim() !== saved || failed;
+  useEffect(() => {
+    onUnsavedChange(line.id, unsaved);
+  }, [line.id, unsaved, onUnsavedChange]);
+  useEffect(() => () => onUnsavedChange(line.id, false), [line.id, onUnsavedChange]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const label = `${line.line_no} 號`;
@@ -73,10 +82,15 @@ function PriceRow({
     },
     onSuccess: () => {
       setError(null);
+      setFailed(false);
       setOpen(false);
       onSaved();
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      sent.current = saved; // 沒存進去：下次 Enter／離開欄位要重送
+      setFailed(true);
+      setError(e.message);
+    },
   });
 
   const remove = useMutation({
@@ -200,6 +214,16 @@ export function QuickEstimate({
 }) {
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [unsaved, setUnsaved] = useState<Set<number>>(new Set());
+  const onUnsavedChange = useCallback((lineId: number, isUnsaved: boolean) => {
+    setUnsaved((prev) => {
+      if (prev.has(lineId) === isUnsaved) return prev;
+      const next = new Set(prev);
+      if (isUnsaved) next.add(lineId);
+      else next.delete(lineId);
+      return next;
+    });
+  }, []);
   const lines = batch.lines;
   const priced = lines.filter(isPriced).reduce((n, l) => n + l.qty, 0);
   const total = lines.reduce((n, l) => n + l.qty, 0);
@@ -278,6 +302,7 @@ export function QuickEstimate({
             rates={rates}
             defaultCommissionPct={defaultCommissionPct}
             deletable={DELETABLE.has(batch.status) && lines.length > 1}
+            onUnsavedChange={onUnsavedChange}
           />
         ))}
       </ol>
@@ -286,19 +311,27 @@ export function QuickEstimate({
           {error}
         </p>
       )}
+      {unsaved.size > 0 && (
+        <p className="hint intake-quick-unsaved">還有收購價沒存好：按 Enter 存檔（存檔失敗的再按一次）。</p>
+      )}
       <div className="intake-quick-actions">
         <button type="button" className="btn-secondary" disabled={add.isPending} onClick={() => add.mutate()}>
           ＋ 多一件
         </button>
         {finish ? (
-          <button type="button" className="btn-primary intake-quick-ready" onClick={finish.onClick}>
+          <button
+            type="button"
+            className="btn-primary intake-quick-ready"
+            disabled={unsaved.size > 0}
+            onClick={finish.onClick}
+          >
             {finish.label}
           </button>
         ) : (
           <button
             type="button"
             className="btn-primary intake-quick-ready"
-            disabled={!allPriced || ready.isPending}
+            disabled={!allPriced || unsaved.size > 0 || ready.isPending}
             onClick={() => ready.mutate()}
           >
             估完，給客人確認

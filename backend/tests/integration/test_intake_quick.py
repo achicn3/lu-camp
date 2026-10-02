@@ -318,3 +318,45 @@ async def test_inventory_list_and_detail_show_gradeless_pending_item(
     detail = await client.get(f"/api/v1/serialized-items/{item.id}/detail", headers=ctx.auth)
     assert detail.status_code == 200, detail.text
     assert detail.json()["grade"] is None
+
+
+async def test_ungraded_item_can_be_written_off_as_discrepancy(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """Codex 對抗審查：沒成色的待整理商品少了／壞了，要能記差異報廢（不因成色規則失敗）。"""
+    ctx = await _ctx(db_session, client)
+    batch, _, item = await _paid_gradeless(client, ctx, db_session)
+    resp = await client.post(
+        f"{PATH}/{batch['id']}/discrepancies",
+        json={"kind": "SERIALIZED", "id": item.id, "qty": 1, "reason": "找不到"},
+        headers=ctx.auth,
+    )
+    assert resp.status_code == 201, resp.text
+    await db_session.refresh(item)
+    assert (item.status, item.grade) == (SerializedItemStatus.WRITTEN_OFF, None)
+
+
+async def test_acquisition_with_ungraded_items_can_be_voided(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """Codex 對抗審查：付款後、上架前作廢收購（沒成色的待整理商品一併報廢）不能失敗。"""
+    ctx = await _ctx(db_session, client)
+    batch, _, item = await _paid_gradeless(client, ctx, db_session)
+    paid = (await client.get(f"{PATH}/{batch['id']}", headers=ctx.auth)).json()
+    [acq_id] = paid["acquisition_ids"]
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "賣方反悔"}, headers=ctx.auth
+    )
+    assert resp.status_code == 200, resp.text
+    await db_session.refresh(item)
+    assert item.status is SerializedItemStatus.WRITTEN_OFF and item.grade is None
+
+
+async def test_database_refuses_sold_item_without_grade(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    _, _, item = await _paid_gradeless(client, ctx, db_session)
+    item.status = SerializedItemStatus.SOLD
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

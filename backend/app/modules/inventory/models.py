@@ -151,9 +151,9 @@ class SerializedItem(Base, TimestampMixin):
         CheckConstraint(
             "resale_discount_pct BETWEEN 1 AND 100", name="ck_serialized_resale_discount"
         ),
-        # 只有待整理的可以先沒成色（排隊收購快速估價，docs/42 §13）；上架前一定要選。
+        # 可以賣／賣掉的一定要有成色；待整理（docs/42 §13）與上架前就報廢／退還的可以沒有。
         CheckConstraint(
-            "grade IS NOT NULL OR status = 'PENDING_LISTING'",
+            "grade IS NOT NULL OR status NOT IN ('IN_STOCK', 'SOLD')",
             name="ck_serialized_items_grade_required",
         ),
     )

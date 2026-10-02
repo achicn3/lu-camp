@@ -169,6 +169,55 @@ describe("快速估價", () => {
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/intake-batches/7/ready"))).toBe(true));
   });
 
+  it("存檔失敗：可以再按一次重試；沒存好前不能估完（不會用舊價格成交）", async () => {
+    let fail = true;
+    const calls = stubFetch((_url, method) => {
+      if (method === "PATCH") return fail ? json({ detail: "網路斷了" }, 500) : json({});
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { deal_cost: "100" }), line(2, { deal_cost: "50" })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    const first = screen.getByLabelText("1 號 收購價");
+    await user.clear(first);
+    await user.type(first, "200{Enter}");
+    expect((await screen.findByRole("alert")).textContent).toContain("網路斷了");
+    const ready = screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement;
+    expect(ready.disabled).toBe(true);
+    expect(screen.getByText(/還有收購價沒存好/)).toBeTruthy();
+    fail = false;
+    await user.click(first);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([
+      { deal_cost: "200" },
+      { deal_cost: "200" },
+    ]);
+  });
+
+  it("改了還沒按 Enter／沒離開欄位：不能估完", async () => {
+    stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { deal_cost: "100" })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    const first = screen.getByLabelText("1 號 收購價");
+    await user.clear(first);
+    await user.type(first, "300");
+    expect((screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("寄售的件不用填收購價（看抽成）", () => {
     stubFetch();
     wrap(
