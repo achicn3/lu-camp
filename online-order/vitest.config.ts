@@ -8,7 +8,11 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations, INTEGRATION_SECRET: "test-integration-secret" },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            INTEGRATION_SECRET: "test-integration-secret",
+            TURNSTILE_SECRET: "test-turnstile-secret",
+          },
         },
       }),
     ],
