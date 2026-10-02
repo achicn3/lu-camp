@@ -56,7 +56,9 @@ def test_ui_text_covers_every_cjk_char_on_the_customer_page() -> None:
     text = "".join(p.read_text(encoding="utf-8") for p in sources)
     # 只看字串裡會顯示的字：去掉註解行
     shown = "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith(("//", "*", "/*", "<!--"))
+        line
+        for line in text.splitlines()
+        if not line.lstrip().startswith(("//", "*", "/*", "<!--"))
     )
     cjk = {ch for ch in shown if "　" <= ch <= "鿿" or "＀" <= ch <= "￯"}
     missing = sorted(cjk - set(UI_TEXT))
