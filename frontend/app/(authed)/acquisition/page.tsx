@@ -820,7 +820,7 @@ type PendingLabel = {
   name: string;
   price: number;
   brandId: number | null;
-  grade: components["schemas"]["Grade"];
+  grade: components["schemas"]["Grade"] | null;
 };
 
 /**

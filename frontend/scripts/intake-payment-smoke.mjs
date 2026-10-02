@@ -174,7 +174,7 @@ try {
 
   await panel.getByRole("button", { name: "送到顧客螢幕給客人簽名" }).click();
   await panel.getByText(/已送到顧客螢幕|客人正在核對/).waitFor({ timeout: 8000 });
-  ok("送簽後處置鎖住", await page.getByLabel("第 1 列處置").first().isDisabled());
+  ok("送簽後客人勾選鎖住（改了就和客人簽的不一樣）", await page.getByRole("button", { name: "交給客人勾選" }).isDisabled());
   ok("送簽後不能取消整批", (await page.getByRole("button", { name: "取消整批" }).count()) === 0);
   await page.screenshot({ path: join(SHOTS, "02-waiting.png"), fullPage: true });
 
@@ -182,9 +182,14 @@ try {
   await kiosk.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 10000 });
   await kiosk.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
   const body = await kiosk.textContent(".kiosk-task-body");
+  const signedItems = body.slice(0, body.indexOf("合計金額"));
   ok(
     "顧客螢幕：買斷逐件、散裝帶件數、總額 550、寄售不在內",
-    body.includes("黑色折疊椅") && body.includes("營釘 ×10") && body.includes("550") && !body.includes("帳篷"),
+    // 只看收購明細那段：切結書條文（第六條材質老化）本身就提到「帳篷」。
+    signedItems.includes("黑色折疊椅") &&
+      signedItems.includes("營釘 ×10") &&
+      body.includes("550") &&
+      !signedItems.includes("帳篷"),
   );
   await kiosk.screenshot({ path: join(SHOTS, "03-kiosk.png"), fullPage: true });
   await kiosk.check('.kiosk-agree-check input[type="checkbox"]');

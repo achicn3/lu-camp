@@ -18,8 +18,11 @@ export const GRADE_LABEL: Record<Grade, string> = {
 // 全新未拆排最前（裁示 2026-09-16）。
 export const SERIALIZED_GRADES: Grade[] = ["N", "S", "A", "B", "C", "D"];
 
-export function gradeLabel(grade: Grade): string {
-  return GRADE_LABEL[grade];
+/** 排隊收購快速估價的待整理商品可以先沒有成色（docs/42 §13），上架前一定要選。 */
+export const NO_GRADE_LABEL = "未定成色";
+
+export function gradeLabel(grade: Grade | null): string {
+  return grade === null ? NO_GRADE_LABEL : GRADE_LABEL[grade];
 }
 
 /**
@@ -37,6 +40,6 @@ export function gradeShortName(grade: Grade): string {
  * 「超熱門搶手貨」，講的是好不好賣而不是新舊，不能因為字面好聽就印成全新。
  * （一般商品是採購進來的新品，沒有成色，呼叫端直接給「全新」，不走這裡。）
  */
-export function labelConditionForGrade(grade: Grade): LabelCondition {
+export function labelConditionForGrade(grade: Grade | null): LabelCondition {
   return grade === "N" ? "全新" : "二手";
 }

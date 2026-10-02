@@ -1,6 +1,5 @@
-// 收購佇列 I2 煙霧（docs/42）：報到收件（新建賣方、點清 3 件；收件單送收據機印兩份）→ 估價兩列
-// （五折自動帶收購價、六折紅字）→ 補印一份 → 估完送叫號 → 逐列處置（收 1 張、記已交還）→ 回佇列；
-// 另驗代理連不上時：照樣進估價頁並提示補印。硬體代理以 Playwright 攔截模擬（真機列印由代理測試守）。
+// 收購佇列煙霧（docs/42 §13 快速估價）：報到收件（新建賣方、收購 3 件；收件單送收據機印兩份）→ 補印一份
+// → 3 個收購價輸入框、Enter 跳下一件 → 詳細補名稱 → 估完 → 交給客人勾選（3 號不賣）→ 後端處置正確。硬體代理以 Playwright 攔截模擬（真機列印由代理測試守）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-queue-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -27,7 +26,8 @@ function ok(name, pass, detail = "") {
 }
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+// 平板尺寸（店主會在平板上操作，docs/42 §13）。
+const page = await browser.newPage({ viewport: { width: 820, height: 1180 }, hasTouch: true });
 const pageErrors = [];
 page.on("pageerror", (err) => pageErrors.push(String(err)));
 
@@ -60,7 +60,7 @@ try {
   await page.getByLabel("手機", { exact: true }).fill(uniquePhone());
   await page.getByLabel("身分證字號", { exact: true }).fill(validNationalId());
   await page.getByRole("button", { name: "建立並選取" }).click();
-  await page.getByLabel("實收件數").fill("3");
+  await page.getByLabel("收購幾件").fill("3");
   await page.screenshot({ path: join(SHOTS, "01-checkin.png"), fullPage: true });
   await page.getByRole("button", { name: "報到，發號碼" }).click();
   await page.waitForURL(/\/acquisition\/intake\/\d+/);
@@ -86,81 +86,62 @@ try {
   await page.getByText("收件單已送出列印。").waitFor();
   ok("補印一份", prints.length === 2 && prints[1].body.copies === 1);
 
-  // ② 估價第一列：黑色折疊椅 ×2、原價 1000、五折
-  const form = page.getByRole("form", { name: "新增一列" });
-  await form.getByLabel("商品簡稱").fill("黑色折疊椅");
-  await form.getByLabel("數量").fill("2");
-  await form.getByLabel("原價／件").fill("1000");
-  await form.getByRole("button", { name: "5折", exact: true }).click();
-  const listed = await form.getByLabel("預計售價／件").inputValue();
-  const deal = await form.getByLabel("成交收購價／件").inputValue();
-  ok("五折自動帶預計售價 500、建議收購價當成交價", listed === "500" && Number(deal) > 0, `${listed}／${deal}`);
-  ok("成色沒點時顯示依折數推斷", (await form.getByLabel("成色").innerText()).includes("依折數："));
-  await form.getByRole("button", { name: "＋ 加入這一件" }).click();
-  await page.getByRole("cell", { name: /黑色折疊椅/ }).waitFor();
-
-  // ② 第二列：露營桌、原價 3000、六折 → 紅字
-  const form2 = page.getByRole("form", { name: "新增一列" });
-  await form2.getByLabel("商品簡稱").fill("露營桌");
-  await form2.getByLabel("原價／件").fill("3000");
-  await form2.getByRole("button", { name: "6折", exact: true }).click();
-  ok("六折出現新品紅字提醒", (await form2.locator(".acq-near-new").count()) === 1);
-  await page.screenshot({ path: join(SHOTS, "02-estimating.png"), fullPage: true });
-  await form2.getByRole("button", { name: "＋ 加入這一件" }).click();
-  await page.getByRole("cell", { name: /露營桌/ }).waitFor();
-  const summary = await page.locator(".intake-summary").innerText();
-  ok("已估 3 件（只講件數）、狀態估價中", summary.includes("已估 3 件") && !summary.includes("項") && summary.includes("估價中") && (await page.locator(".intake-status-estimating").count()) === 1, summary.replace(/\n/g, " "));
-
-  // ③ 估完送叫號 → 逐列處置
-  await page.getByRole("button", { name: "估完，送去叫號" }).click();
-  await page.getByText("待確認（等叫號）").waitFor();
-  await page.getByLabel("第 1 列處置").first().selectOption("ACCEPTED");
-  await page.getByLabel("第 1 列接受件數").selectOption("1");
-  await page.getByText("沒收的 1 件已交還客人").click();
-  await page.locator(".intake-disposition").first().getByRole("button", { name: "儲存" }).click();
-  await page.getByText(/收 1 件（共 3 件）/).waitFor();
-  await page.getByLabel("第 2 列處置").first().selectOption("ACCEPTED");
-  await page.locator(".intake-disposition").nth(1).getByRole("button", { name: "儲存" }).click();
-  await page.getByText(/收 2 件（共 3 件）/).waitFor();
-  const payout = await page.getByLabel("要付給客人").innerText();
-  ok("「要付給客人」大字顯示金額與收幾件", payout.includes("要付給客人") && /\$[\d,]+/.test(payout) && payout.includes("收 2 件（共 3 件）"), payout.replace(/\n/g, " "));
-  await page.screenshot({ path: join(SHOTS, "03-confirming.png"), fullPage: true });
-
-  // 回佇列
-  await page.getByRole("link", { name: "回排隊清單" }).click();
-  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
-  const row = page.locator("tr", { hasText: SELLER });
-  await row.waitFor();
-  ok("排隊清單列出這一批、狀態待確認", (await row.innerText()).includes("待確認"), (await row.innerText()).replace(/\s+/g, " "));
-  ok("狀態用顏色標示（待確認＝橘色標籤）", (await row.locator(".intake-status-awaiting_confirm").count()) === 1);
+  // ② 快速估價（docs/42 §13）：照件數建好 3 個輸入框；只填收購價，按 Enter 跳下一件
+  const inputs = page.getByRole("textbox", { name: /號 收購價$/ });
+  ok("報到 3 件就有 3 個收購價輸入框", (await inputs.count()) === 3);
+  await page.getByLabel("1 號 收購價").click();
+  await page.keyboard.type("300");
+  await page.keyboard.press("Enter");
+  ok("按 Enter 跳到 2 號", await page.getByLabel("2 號 收購價").evaluate((el) => el === document.activeElement));
+  await page.keyboard.type("500");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("200");
+  await page.keyboard.press("Enter");
+  await page.getByText(/已填 3／3 件/).waitFor();
+  // 2 號展開詳細，補名稱
+  await page.getByRole("button", { name: "2 號 詳細" }).click();
+  const detailForm = page.getByRole("form", { name: /修改第 2 列/ });
+  await detailForm.getByLabel("商品簡稱").fill("露營桌");
+  await page.screenshot({ path: join(SHOTS, "02-quick-estimate.png") });
+  await detailForm.getByRole("button", { name: "儲存詳細" }).click();
+  await detailForm.waitFor({ state: "detached" });
+  const batchId = Number(/\/acquisition\/intake\/(\d+)/.exec(page.url())?.[1]);
+  const token = await page.evaluate(() => localStorage.getItem("lu-camp.access-token"));
+  const batchApi = async () =>
+    (await fetch(`${API}/api/v1/intake-batches/${batchId}`, { headers: { Authorization: `Bearer ${token}` } })).json();
+  let saved = await batchApi();
   ok(
-    "估完的批次給「叫號」＋「編輯」兩個按鈕",
-    (await row.getByRole("link", { name: "叫號", exact: true }).count()) === 1 &&
-      (await row.getByRole("link", { name: "編輯", exact: true }).count()) === 1,
+    "收購價與詳細都存進後端",
+    JSON.stringify(saved.lines.map((l) => [l.deal_cost, l.short_name])) ===
+      JSON.stringify([["300", "第 1 件"], ["500", "露營桌"], ["200", "第 3 件"]]),
+    JSON.stringify(saved.lines.map((l) => [l.deal_cost, l.short_name])),
   );
-  const callBox = await row.getByRole("link", { name: "叫號", exact: true }).boundingBox();
-  const editBox = await row.getByRole("link", { name: "編輯", exact: true }).boundingBox();
-  ok("「叫號」「編輯」在同一列", callBox !== null && editBox !== null && Math.abs(callBox.y - editBox.y) < 2);
-  const timeText = await row.locator('td[data-label="報到時間"]').innerText();
-  ok("報到時間不顯示西元年", /^\d{2}\/\d{2} \d{2}:\d{2}$/.test(timeText.trim()), timeText);
-  await row.getByRole("link", { name: "編輯", exact: true }).click();
-  await page.getByRole("heading", { name: "新增一件商品" }).waitFor();
-  ok(
-    "編輯模式：回到新增／編輯商品，收起叫號處置與要付金額",
-    (await page.locator(".intake-disposition").count()) === 0 &&
-      (await page.getByLabel("要付給客人").count()) === 0 &&
-      (await page.getByRole("button", { name: "編輯", exact: true }).count()) === 2,
-  );
-  await page.screenshot({ path: join(SHOTS, "03b-edit-mode.png"), fullPage: true });
-  await page.getByRole("link", { name: "回到叫號確認" }).click();
-  await page.getByLabel("要付給客人").waitFor();
-  await page.getByRole("link", { name: "回排隊清單" }).click();
-  await page.getByRole("heading", { name: "排隊收購" }).waitFor();
-  await row.waitFor();
-  ok("已估只講件數＋進度條", (await row.innerText()).includes("3／3 件") && (await row.getByRole("progressbar").count()) === 1);
-  await page.screenshot({ path: join(SHOTS, "04-queue.png"), fullPage: true });
 
-  // 代理連不上：照樣進估價頁，並提示補印（號碼已登記，不能因印表機卡住現場）
+  // ③ 估完 → 交給客人勾選（3 號不賣）
+  await page.getByRole("button", { name: "估完，給客人確認" }).click();
+  await page.getByRole("button", { name: "交給客人勾選" }).click();
+  const sheet = page.getByRole("dialog", { name: /確認要賣的商品/ });
+  await sheet.waitFor();
+  ok("客人畫面不顯示成本毛利售價", !/毛利|預計售價|成本|建議/.test(await sheet.innerText()));
+  await sheet.getByRole("checkbox", { name: /3 號/ }).uncheck();
+  ok("取消勾選後合計即時更新", /共 2 件.*\$800/.test(await sheet.getByRole("status").innerText()));
+  await page.screenshot({ path: join(SHOTS, "03-customer-checklist.png") });
+  await sheet.getByRole("button", { name: "確認" }).click();
+  await sheet.getByText(/請把平板交還給店員/).waitFor();
+  await sheet.getByRole("button", { name: "交還店員" }).click();
+  saved = await batchApi();
+  ok(
+    "後端：1、2 號要賣，3 號客人不賣且已交還",
+    JSON.stringify(saved.lines.map((l) => [l.disposition, l.returned_to_customer])) ===
+      JSON.stringify([["ACCEPTED", false], ["ACCEPTED", false], ["CUSTOMER_KEPT", true]]) &&
+      saved.accepted_total === "800",
+    JSON.stringify(saved.lines.map((l) => l.disposition)),
+  );
+  ok("店員畫面標出 3 號不賣", (await page.locator(".intake-confirm-list li.is-kept").innerText()).includes("3 號"));
+  await page.screenshot({ path: join(SHOTS, "04-confirmed.png"), fullPage: true });
+
+  // 代理連不上：照樣進估價頁並提示補印
+  await page.goto(`${BASE}/acquisition/intake`, { waitUntil: "networkidle" });
   agentDown = true;
   await page.getByRole("button", { name: /建立新賣方/ }).click();
   await page.getByLabel("姓名", { exact: true }).fill(`${SELLER}-2`);

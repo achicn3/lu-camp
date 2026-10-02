@@ -3,7 +3,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { GRADE_LABEL } from "@/features/inventory/grades";
+import { gradeLabel } from "@/features/inventory/grades";
 import { ITEM_STATUS_LABELS } from "@/features/member/labels";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -58,7 +58,7 @@ function RecordsTable({ label, items }: { label: string; items: PriceHintRecord[
             // 同一天同價的兩件完全可能，沒有 id 可用，以位置當 key（清單只讀、不重排）。
             <tr key={`${r.acquired_at}-${i}`}>
               <td>{formatTaipeiDate(r.acquired_at)}</td>
-              <td>{GRADE_LABEL[r.grade] ?? r.grade}</td>
+              <td>{gradeLabel(r.grade)}</td>
               <td>{money(r.cost, "未填")}</td>
               <td>{money(r.reference_price, "—")}</td>
               <td>{money(r.listed_price, "—")}</td>

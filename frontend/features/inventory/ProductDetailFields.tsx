@@ -47,8 +47,9 @@ export function ProductDetailFields({ item, kind, edits, onChange, disabled }: {
     })}
     {select("種類", category, options.data?.categories ?? [], (id) => onChange({ ...edits, category_id: id }))}
     {kind === "serialized" && "grade" in item && <label className="field"><span className="field-label">成色</span>
-      <select aria-label="成色" value={edits.grade ?? item.grade} disabled={disabled}
+      <select aria-label="成色" value={edits.grade ?? item.grade ?? ""} disabled={disabled}
         onChange={(e) => onChange({ ...edits, grade: e.target.value as DetailEdits["grade"] })}>
+        {(edits.grade ?? item.grade) == null && <option value="" disabled>請選成色</option>}
         {SERIALIZED_GRADES.map((g) => <option value={g} key={g}>{GRADE_LABEL[g]}</option>)}
       </select></label>}
     <label className="field"><span className="field-label">商品備註</span>

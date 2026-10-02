@@ -1095,6 +1095,15 @@ class IntakeService:
             cancel_reason=batch.cancel_reason,
             line_count=len(lines),
             item_count=sum(line.qty for line in lines),
+            priced_item_count=sum(
+                line.qty
+                for line in lines
+                if (
+                    line.commission_pct is not None
+                    if line.acquisition_type is AcquisitionType.CONSIGNMENT
+                    else line.deal_cost is not None
+                )
+            ),
             deal_total=sum((cost(line, line.qty) for line in lines), Decimal(0)),
             accepted_item_count=sum(line.accepted_qty for line in accepted),
             accepted_total=sum((cost(line, line.accepted_qty) for line in accepted), Decimal(0)),

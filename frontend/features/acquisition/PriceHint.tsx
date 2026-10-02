@@ -6,7 +6,7 @@ import { useState } from "react";
 // 成色說明一律用共用那份：這裡原本自帶一份，S 寫「全新/未使用」、C 寫「有使用痕跡」，
 // 跟店員實際在選的收購下拉（S 超熱門搶手貨、C 普通）互相矛盾；加了全新未拆之後，
 // 同一頁出現兩個「全新」會讓人選錯（2026-09-16）。
-import { GRADE_LABEL } from "@/features/inventory/grades";
+import { GRADE_LABEL, gradeLabel } from "@/features/inventory/grades";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDate } from "@/lib/datetime";
@@ -156,7 +156,7 @@ export function PriceHint({
         <p className="price-hint-sub">
           {/* 一定要標成色：最近一次可能是別的成色，不標的話會跟上面那行的區間對不起來。 */}
           最近一次收這款 {formatTaipeiDate(latest.acquired_at)}（
-          {GRADE_LABEL[latest.grade] ?? latest.grade}）：
+          {gradeLabel(latest.grade)}）：
           {range(latest.cost, latest.cost) === null ? "未填收購價" : `收 ${range(latest.cost, latest.cost)}`}
           、上架 {range(latest.listed_price, latest.listed_price) ?? "未填上架價"}
           {latest.reference_price != null ? `、參考價 ${range(latest.reference_price, latest.reference_price)}` : ""}

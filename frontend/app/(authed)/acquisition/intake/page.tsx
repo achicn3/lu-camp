@@ -37,7 +37,13 @@ function CheckIn({ onCreated }: { onCreated: (batch: Batch) => Promise<void> }) 
       const declared = parseNtd(count);
       if (declared === null || declared < 1) throw new Error("件數至少 1 件");
       const { data, error: apiErr } = await api.POST("/api/v1/intake-batches", {
-        body: { contact_id: seller.id, declared_item_count: declared, note: note.trim() || null },
+        // 快速估價（docs/42 §13）：照件數建好每一件，估價時只填收購價。
+        body: {
+          contact_id: seller.id,
+          declared_item_count: declared,
+          note: note.trim() || null,
+          prefill_lines: true,
+        },
       });
       if (!data) throw new Error(detail(apiErr) ?? "報到失敗");
       return data;
@@ -62,12 +68,14 @@ function CheckIn({ onCreated }: { onCreated: (batch: Batch) => Promise<void> }) 
       <SellerSection seller={seller} onSelect={setSeller} />
       <form className="card intake-checkin-form" onSubmit={submit}>
         <h2>報到收件</h2>
-        <p className="hint">和客人一起點清實收件數；號碼牌與收件單會印兩份（一份給客人、一份放在商品上）。</p>
+        <p className="hint">
+          和客人一起點清收購幾件，估價時就會有幾個輸入框；號碼牌與收件單會印兩份（一份給客人、一份放在商品上）。
+        </p>
         <label className="field">
-          <span className="field-label">實收件數</span>
+          <span className="field-label">收購幾件</span>
           <input
             inputMode="numeric"
-            aria-label="實收件數"
+            aria-label="收購幾件"
             value={count}
             onChange={(e) => setCount(e.target.value)}
           />
@@ -129,7 +137,8 @@ const ESTIMATING_STATUSES = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING
 
 /** 已估幾件／實收幾件＋進度條；還沒估齊用橘色明講還差幾件（只看件數，不看幾項）。 */
 function EstimateCell({ batch }: { batch: Batch }) {
-  const { pct, missing, over } = estimateProgress(batch.declared_item_count, batch.item_count);
+  // 每件報到時就建好了，進度看「已填收購價」的件數（docs/42 §13）。
+  const { pct, missing, over } = estimateProgress(batch.declared_item_count, batch.priced_item_count);
   const open = ESTIMATING_STATUSES.has(batch.status);
   return (
     <div className="intake-progress-cell">
@@ -140,12 +149,12 @@ function EstimateCell({ batch }: { batch: Batch }) {
           aria-label="已估件數"
           aria-valuemin={0}
           aria-valuemax={batch.declared_item_count}
-          aria-valuenow={batch.item_count}
+          aria-valuenow={batch.priced_item_count}
         >
           <span style={{ width: `${pct}%` }} />
         </div>
         <span>
-          {batch.item_count}／{batch.declared_item_count} 件
+          {batch.priced_item_count}／{batch.declared_item_count} 件
         </span>
       </div>
       {open && missing > 0 && <span className="intake-missing">還差 {missing} 件沒估</span>}

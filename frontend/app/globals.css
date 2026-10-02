@@ -6108,3 +6108,229 @@ a.btn-ghost {
   word-break: break-all;
   user-select: all;
 }
+
+/* 排隊收購快速估價與客人勾選（docs/42 §13）：平板上操作，按得到、看得清楚。 */
+.intake-quick-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.intake-quick-head h2 {
+  margin: 0;
+}
+.intake-quick-progress {
+  font-size: var(--text-md);
+}
+.intake-quick-list {
+  list-style: none;
+  margin: var(--sp-3) 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.intake-quick-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+}
+.intake-quick-row.is-priced {
+  border-color: var(--accent);
+}
+.intake-quick-main {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(9rem, 12rem) auto auto;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.intake-quick-no {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.intake-quick-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.intake-quick-price {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 1.5rem;
+}
+.intake-quick-price input {
+  width: 100%;
+  min-height: 56px;
+  font-size: 1.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-3);
+  background: var(--surface);
+}
+.intake-quick-price input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.intake-quick-toggle {
+  min-height: 48px;
+}
+.intake-quick-consign {
+  color: var(--ink-soft);
+}
+.intake-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.intake-quick-actions button {
+  min-height: 52px;
+}
+.intake-quick-ready {
+  font-size: var(--text-md);
+  padding-inline: var(--sp-5);
+}
+@media (max-width: 640px) {
+  .intake-quick-main {
+    grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+  }
+  .intake-quick-price {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+.intake-confirm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.intake-confirm-head h2 {
+  margin: 0 auto 0 0;
+}
+.intake-confirm-open {
+  min-height: 52px;
+  font-size: var(--text-md);
+}
+.intake-confirm-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+.intake-confirm-list li {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto 7rem;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.intake-confirm-list li.is-kept {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+.intake-confirm-yes {
+  color: var(--accent);
+  font-weight: 600;
+}
+.intake-confirm-no {
+  color: var(--ink-soft);
+}
+
+/* 客人勾選：全螢幕、大字，只有號碼、名稱、收購價 */
+.intake-customer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+}
+.intake-customer-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--sp-4);
+}
+.intake-customer h2 {
+  margin: 0;
+  font-size: 2rem;
+}
+.intake-customer-hint {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--ink-soft);
+}
+.intake-customer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.intake-customer-row {
+  display: grid;
+  grid-template-columns: 2.5rem 5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 72px;
+  padding: var(--sp-2) var(--sp-4);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  font-size: 1.4rem;
+  cursor: pointer;
+  background: var(--surface);
+}
+.intake-customer-row.is-on {
+  border-color: var(--accent);
+}
+.intake-customer-row input {
+  width: 32px;
+  height: 32px;
+  accent-color: var(--accent);
+}
+.intake-customer-no {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.intake-customer-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.intake-customer-price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.intake-customer-total {
+  margin: 0;
+  font-size: 1.5rem;
+  text-align: right;
+}
+.intake-customer-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.intake-customer-btn {
+  min-height: 64px;
+  min-width: 12rem;
+  font-size: 1.4rem;
+}
+.intake-customer-done {
+  display: grid;
+  gap: var(--sp-3);
+  justify-items: center;
+  text-align: center;
+  font-size: 1.3rem;
+}
+.intake-customer-big {
+  font-size: 1.8rem;
+  margin: var(--sp-5) 0 0;
+}

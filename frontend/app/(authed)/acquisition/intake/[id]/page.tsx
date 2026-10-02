@@ -1,14 +1,16 @@
 "use client";
-// /acquisition/intake/[id] 一批收件的估價與叫號確認（docs/42 §4、§5）。
-// 估價隨時存檔、可中途離開再回來；估完送去叫號；叫號時逐列標處置（可部分接受）。
-// 客人同意後送顧客螢幕簽一次、付款；付款就成立收購、商品進「待整理」（I3）。
+// /acquisition/intake/[id] 一批收件的估價與客人確認（docs/42 §4、§13）。
+// 快速估價：報到時照件數建好每一件，逐件只填收購價（其他在「詳細」裡、可不填），隨時存檔。
+// 估完把平板交給客人勾要賣哪幾件；之後送顧客螢幕簽一次、付款；付款就成立收購、商品進「待整理」。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useEffect, useRef, useState } from "react";
 
 import { GRADE_LABEL } from "@/features/acquisition/labels";
+import { CustomerChecklist } from "@/features/intake/CustomerChecklist";
 import { LineForm, type LineFields } from "@/features/intake/LineForm";
+import { QuickEstimate, displayName } from "@/features/intake/QuickEstimate";
 import { pctToDiscount, pricingRates } from "@/features/intake/estimate";
 import { DISPOSITION_LABEL } from "@/features/intake/labels";
 import { PaymentPanel, useSignatureLock } from "@/features/intake/PaymentPanel";
@@ -27,6 +29,10 @@ const TYPE_LABEL = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝"
 const EDITABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING_CONFIRM"]);
 const DELETABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING"]);
 const PAID_STATUSES = new Set(["PAID", "PARTIALLY_LISTED", "LISTED"]);
+
+function stillEstimatingStatus(status: string): boolean {
+  return status === "PENDING_ESTIMATE" || status === "ESTIMATING";
+}
 
 function detail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -143,13 +149,13 @@ function IntakeBatchContent() {
   const batchId = Number(params.id);
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<number | null>(null);
-  const [formKey, setFormKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [askCancel, setAskCancel] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
   const [printNotice, setPrintNotice] = useState<string | null>(null);
+  const [customerMode, setCustomerMode] = useState(false);
   const autoPrinted = useRef(false);
 
   const settings = useQuery({
@@ -182,28 +188,6 @@ function IntakeBatchContent() {
     void queryClient.invalidateQueries({ queryKey: ["intake-batches"] });
   };
 
-  const addLine = useMutation({
-    mutationFn: async (fields: LineFields) => {
-      const { data, error: apiErr } = await api.POST("/api/v1/intake-batches/{batch_id}/lines", {
-        params: { path: { batch_id: batchId } },
-        body: {
-          ...fields,
-          short_name: fields.short_name ?? "",
-          qty: fields.qty ?? 1,
-          acquisition_type: fields.acquisition_type ?? "BUYOUT",
-        },
-      });
-      if (!data) throw new Error(detail(apiErr) ?? "儲存失敗");
-      return data;
-    },
-    onSuccess: () => {
-      setError(null);
-      setFormKey((k) => k + 1); // 清空表單、準備下一件
-      refresh();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
   const updateLine = useMutation({
     mutationFn: async ({ lineId, fields }: { lineId: number; fields: LineFields }) => {
       const { data, error: apiErr } = await api.PATCH(
@@ -230,21 +214,6 @@ function IntakeBatchContent() {
       if (!response.ok) throw new Error(detail(apiErr) ?? "刪除失敗");
     },
     onSuccess: refresh,
-    onError: (e: Error) => setError(e.message),
-  });
-
-  const markReady = useMutation({
-    mutationFn: async () => {
-      const { data, error: apiErr } = await api.POST("/api/v1/intake-batches/{batch_id}/ready", {
-        params: { path: { batch_id: batchId } },
-      });
-      if (!data) throw new Error(detail(apiErr) ?? "送出失敗");
-      return data;
-    },
-    onSuccess: () => {
-      setError(null);
-      refresh();
-    },
     onError: (e: Error) => setError(e.message),
   });
 
@@ -301,10 +270,12 @@ function IntakeBatchContent() {
   const editable = EDITABLE.has(batch.status);
   // 估完（待確認）時從清單按「編輯」進來＝編輯模式：回到新增／編輯商品，暫時收起叫號處置。
   const editMode = batch.status === "AWAITING_CONFIRM" && searchParams.get("mode") === "edit";
-  const confirming =
-    (batch.status === "AWAITING_CONFIRM" && !editMode) || batch.status === "CANCELLED";
+  // 叫號處置只留給「取消整批」記東西有沒有交還；估完後的成交與否改由客人勾選（docs/42 §13）。
+  const confirming = batch.status === "CANCELLED";
+  const quick = (stillEstimatingStatus(batch.status) || editMode) && batch.status !== "CANCELLED";
   // 估價中還沒估完是正常的：只提示還差幾件；估完（或估多了）才用紅字請店員再點一次。
-  const missingItems = batch.declared_item_count - batch.item_count;
+  // 快速估價每件報到時就建好了：估了幾件看「已填收購價」的件數（docs/42 §13）。
+  const missingItems = batch.declared_item_count - batch.priced_item_count;
   const stillEstimating = batch.status === "PENDING_ESTIMATE" || batch.status === "ESTIMATING";
   const consignmentAccepted = batch.lines
     .filter((l) => l.acquisition_type === "CONSIGNMENT" && l.disposition === "ACCEPTED")
@@ -326,7 +297,7 @@ function IntakeBatchContent() {
       <p className="intake-next" role="status">
         下一步：
         {editMode
-          ? "改好商品後按「回到叫號確認」。估完的商品不能刪除，客人不要的請在叫號時選「客人不售／店家不收」。"
+          ? "改好收購價後按「回到客人確認」。估完的商品不能刪除，客人不賣的請在客人確認時取消勾選。"
           : NEXT_STEP[batch.status]}
       </p>
       <div className="card intake-summary">
@@ -335,7 +306,7 @@ function IntakeBatchContent() {
         </span>
         <span>報到 {formatTaipeiDateTime(batch.created_at, { omitYear: true })}</span>
         <span>
-          實收 {batch.declared_item_count} 件・已估 {batch.item_count} 件
+          實收 {batch.declared_item_count} 件・已填收購價 {batch.priced_item_count} 件
         </span>
         {!confirming && (
           <span>
@@ -347,8 +318,8 @@ function IntakeBatchContent() {
       </div>
       {stillEstimating && missingItems > 0 && (
         <p className="intake-callout-warn" role="status">
-          還有 <strong>{missingItems} 件</strong>沒估（報到時點清 {batch.declared_item_count} 件、已估{" "}
-          {batch.item_count} 件）。
+          還有 <strong>{missingItems} 件</strong>沒填收購價（報到時點清 {batch.declared_item_count} 件、已填{" "}
+          {batch.priced_item_count} 件）。
         </p>
       )}
       {batch.status === "AWAITING_CONFIRM" && !editMode && (
@@ -366,7 +337,7 @@ function IntakeBatchContent() {
       )}
       {countMismatch && (
         <p className="form-error" role="status">
-          已估 {batch.item_count} 件，與報到時點清的 {batch.declared_item_count} 件不同，請再點一次。
+          共 {batch.item_count} 件，與報到時點清的 {batch.declared_item_count} 件不同，請再點一次。
         </p>
       )}
       <div className="intake-print">
@@ -398,6 +369,67 @@ function IntakeBatchContent() {
         </p>
       )}
 
+      {quick && (
+        <QuickEstimate
+          batch={batch}
+          rates={rates}
+          defaultCommissionPct={defaultCommission}
+          onChanged={refresh}
+          finish={
+            editMode
+              ? { label: "回到客人確認", onClick: () => router.push(`/acquisition/intake/${batch.id}`) }
+              : undefined
+          }
+        />
+      )}
+
+      {batch.status === "AWAITING_CONFIRM" && !editMode && (
+        <div className="card intake-confirm">
+          <div className="intake-confirm-head">
+            <h2>客人確認</h2>
+            <button
+              type="button"
+              className="btn-primary intake-confirm-open"
+              disabled={signature.locked}
+              onClick={() => setCustomerMode(true)}
+            >
+              交給客人勾選
+            </button>
+            <Link href={`/acquisition/intake/${batch.id}?mode=edit`} className="btn-ghost">
+              修改收購價
+            </Link>
+          </div>
+          {signature.locked && (
+            <p className="hint">已送顧客螢幕簽署；要改勾選請先撤回簽名。</p>
+          )}
+          <ul className="intake-confirm-list">
+            {batch.lines.map((line) => {
+              const selling = line.disposition !== "CUSTOMER_KEPT";
+              return (
+                <li key={line.id} className={selling ? undefined : "is-kept"}>
+                  <span className="intake-quick-no">{line.line_no} 號</span>
+                  <span>{displayName(line) ?? ""}</span>
+                  <span className="money">
+                    {line.acquisition_type === "CONSIGNMENT" ? "寄售" : money(line.deal_cost)}
+                  </span>
+                  <span className={selling ? "intake-confirm-yes" : "intake-confirm-no"}>
+                    {selling ? "要賣" : "不賣（已交還）"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {customerMode && (
+        <CustomerChecklist
+          batch={batch}
+          onDone={refresh}
+          onClose={() => setCustomerMode(false)}
+        />
+      )}
+
+      {!quick && batch.status !== "AWAITING_CONFIRM" && (
       <div className="card">
         <h2>估價明細</h2>
         {batch.lines.length === 0 ? (
@@ -494,25 +526,6 @@ function IntakeBatchContent() {
           </div>
         )}
       </div>
-
-      {editable && (batch.status !== "AWAITING_CONFIRM" || editMode) && (
-        <div className="card">
-          <h2>新增一件商品</h2>
-          <p className="hint">
-            填簡稱、原價、點折數（收購價會自動帶出，可改），按「＋ 加入這一件」就會出現在上面的估價明細；
-            {editMode
-              ? "改好後按最下面的「回到叫號確認」。"
-              : "可以一直加，全部估完再按最下面的「估完，送去叫號」。"}
-          </p>
-          <LineForm
-            key={formKey}
-            rates={rates}
-            defaultCommissionPct={defaultCommission}
-            submitLabel="＋ 加入這一件"
-            busy={addLine.isPending}
-            onSubmit={(fields) => addLine.mutate(fields)}
-          />
-        </div>
       )}
 
       {((batch.status === "AWAITING_CONFIRM" && !editMode) || PAID_STATUSES.has(batch.status)) && (
@@ -530,16 +543,6 @@ function IntakeBatchContent() {
       )}
 
       <div className="intake-footer">
-        {batch.status === "ESTIMATING" && (
-          <button type="button" className="btn-primary" disabled={markReady.isPending} onClick={() => markReady.mutate()}>
-            估完，送去叫號
-          </button>
-        )}
-        {editMode && (
-          <Link href={`/acquisition/intake/${batch.id}`} className="btn-primary">
-            回到叫號確認
-          </Link>
-        )}
         {editable && !askCancel && !signature.locked && (
           <button type="button" className="btn-ghost" onClick={() => setAskCancel(true)}>
             取消整批

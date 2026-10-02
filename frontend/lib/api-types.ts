@@ -1967,6 +1967,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/{batch_id}/customer-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Intake By Customer
+         * @description 客人勾選要賣哪幾件（docs/42 §13）：沒勾的＝客人不賣、交還客人，其餘全部成交。
+         */
+        post: operations["confirmIntakeByCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}/discrepancies": {
         parameters: {
             query?: never;
@@ -4218,7 +4238,7 @@ export interface components {
             category_id?: number | null;
             /** Commission Pct */
             commission_pct?: number | null;
-            grade: components["schemas"]["Grade"];
+            grade?: components["schemas"]["Grade"] | null;
             /** Listed Price */
             listed_price: number | string;
             /** Name */
@@ -6930,6 +6950,8 @@ export interface components {
             declared_item_count: number;
             /** Note */
             note?: string | null;
+            /** Prefill Lines */
+            prefill_lines?: boolean | null;
         };
         /** IntakeBatchRead */
         IntakeBatchRead: {
@@ -6969,6 +6991,8 @@ export interface components {
             note?: string | null;
             /** Paid At */
             paid_at?: string | null;
+            /** Priced Item Count */
+            priced_item_count: number;
             /** Signature Task Id */
             signature_task_id?: number | null;
             /** Slip Code */
@@ -6994,6 +7018,14 @@ export interface components {
         IntakeCancelRequest: {
             /** Reason */
             reason: string;
+        };
+        /**
+         * IntakeCustomerConfirmRequest
+         * @description 客人在平板上勾選要賣哪幾件（docs/42 §13）：列出「不賣」的那幾列，其餘都賣。
+         */
+        IntakeCustomerConfirmRequest: {
+            /** Kept Line Ids */
+            kept_line_ids: number[];
         };
         /** IntakeDiscrepancyRead */
         IntakeDiscrepancyRead: {
@@ -7763,7 +7795,7 @@ export interface components {
             cost?: string | null;
             /** Discount */
             discount?: string | null;
-            grade: components["schemas"]["Grade"];
+            grade: components["schemas"]["Grade"] | null;
             /** Listed Price */
             listed_price: string;
             /** Reference Price */
@@ -8556,7 +8588,7 @@ export interface components {
             cost?: string | null;
             /** Discount */
             discount?: string | null;
-            grade: components["schemas"]["Grade"];
+            grade: components["schemas"]["Grade"] | null;
             /** Listed Price */
             listed_price: string;
             /** Reference Price */
@@ -9697,7 +9729,7 @@ export interface components {
             category_id: number | null;
             /** Commission Pct */
             commission_pct: number | null;
-            grade: components["schemas"]["Grade"];
+            grade: components["schemas"]["Grade"] | null;
             /** History */
             history: components["schemas"]["ItemHistoryEvent"][];
             /** Id */
@@ -9740,7 +9772,7 @@ export interface components {
             commission_pct: number | null;
             /** Consignor Id */
             consignor_id: number | null;
-            grade: components["schemas"]["Grade"];
+            grade: components["schemas"]["Grade"] | null;
             /** Id */
             id: number;
             /**
@@ -14266,6 +14298,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["IntakeCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeBatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirmIntakeByCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeCustomerConfirmRequest"];
             };
         };
         responses: {

@@ -253,6 +253,8 @@ class IntakeBatchRead(BaseModel):
     line_count: int
     """幾項。"""
     item_count: int
+    # 已經有收購價的件數（寄售看抽成）：快速估價時每件都先建好了，進度要看這個（docs/42 §13）。
+    priced_item_count: int
     """幾件（各列數量加總）。"""
     deal_total: NTDOut
     """估價的收購總額（成交價 × 數量；寄售不付收購款）。"""

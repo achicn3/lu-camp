@@ -296,7 +296,14 @@
             "title": "Commission Pct"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "listed_price": {
             "anyOf": [
@@ -369,7 +376,6 @@
         },
         "required": [
           "name",
-          "grade",
           "listed_price"
         ],
         "title": "AcquisitionItemIn",
@@ -7464,6 +7470,17 @@
               }
             ],
             "title": "Note"
+          },
+          "prefill_lines": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefill Lines"
           }
         },
         "required": [
@@ -7565,6 +7582,10 @@
             ],
             "title": "Paid At"
           },
+          "priced_item_count": {
+            "title": "Priced Item Count",
+            "type": "integer"
+          },
           "signature_task_id": {
             "anyOf": [
               {
@@ -7610,6 +7631,7 @@
           "created_at",
           "line_count",
           "item_count",
+          "priced_item_count",
           "deal_total",
           "accepted_item_count",
           "accepted_total",
@@ -7646,6 +7668,25 @@
           "reason"
         ],
         "title": "IntakeCancelRequest",
+        "type": "object"
+      },
+      "IntakeCustomerConfirmRequest": {
+        "description": "客人在平板上勾選要賣哪幾件（docs/42 §13）：列出「不賣」的那幾列，其餘都賣。",
+        "properties": {
+          "kept_line_ids": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 999,
+            "title": "Kept Line Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kept_line_ids"
+        ],
+        "title": "IntakeCustomerConfirmRequest",
         "type": "object"
       },
       "IntakeDiscrepancyRead": {
@@ -10074,7 +10115,14 @@
             "title": "Discount"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "listed_price": {
             "title": "Listed Price",
@@ -12188,7 +12236,14 @@
             "title": "Discount"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "listed_price": {
             "title": "Listed Price",
@@ -15008,7 +15063,14 @@
             "title": "Commission Pct"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "history": {
             "items": {
@@ -15184,7 +15246,14 @@
             "title": "Consignor Id"
           },
           "grade": {
-            "$ref": "#/components/schemas/Grade"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "title": "Id",
@@ -24332,6 +24401,64 @@
           }
         ],
         "summary": "Cancel Intake Batch",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/customer-confirm": {
+      "post": {
+        "description": "客人勾選要賣哪幾件（docs/42 §13）：沒勾的＝客人不賣、交還客人，其餘全部成交。",
+        "operationId": "confirmIntakeByCustomer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeCustomerConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Intake By Customer",
         "tags": [
           "intake"
         ]

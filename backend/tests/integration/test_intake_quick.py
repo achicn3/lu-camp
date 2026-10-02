@@ -113,8 +113,10 @@ async def test_entering_a_price_starts_estimating(
 ) -> None:
     ctx = await _ctx(db_session, client)
     batch = await _quick_batch(client, ctx, 2)
+    assert (batch["item_count"], batch["priced_item_count"]) == (2, 0)
     after = await _price(client, ctx, {**batch, "lines": batch["lines"][:1]}, ["300"])
     assert after["status"] == "ESTIMATING"
+    assert after["priced_item_count"] == 1
 
 
 async def test_ready_with_only_prices_fills_listed_price_and_accepts_everything(
