@@ -3,7 +3,7 @@
 照片存在資料庫（店主 2026-10-02 裁示），每晚備份與還原演練自動涵蓋。
 
 Revision ID: 2e52d783ec0e
-Revises: edaa5e5ce783
+Revises: 3f2adaec554d
 """
 
 import sqlalchemy as sa
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.engine import Connection
 
 revision = "2e52d783ec0e"
-down_revision = "edaa5e5ce783"
+down_revision = "3f2adaec554d"
 branch_labels = None
 depends_on = None
 
