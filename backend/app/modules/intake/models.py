@@ -95,6 +95,11 @@ class IntakeLine(Base, TimestampMixin):
             " AND (deal_cost IS NULL OR deal_cost >= 0)",
             name="ck_intake_lines_amounts_nonneg",
         ),
+        CheckConstraint(
+            "bulk_piece_count IS NULL"
+            " OR (bulk_piece_count BETWEEN 1 AND 99999 AND acquisition_type = 'BULK_LOT')",
+            name="ck_intake_lines_bulk_piece_count",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -112,6 +117,9 @@ class IntakeLine(Base, TimestampMixin):
     suggested_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     deal_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     commission_pct: Mapped[int | None] = mapped_column()
+    # 散裝的件數（快速估價可不填＝整堆 1 件）；有填時 deal_cost 是整堆總價、
+    # 數量固定 1（docs/42 §13）。
+    bulk_piece_count: Mapped[int | None] = mapped_column()
     grade: Mapped[Grade | None] = mapped_column(_enum_col(Grade))
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"))
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))

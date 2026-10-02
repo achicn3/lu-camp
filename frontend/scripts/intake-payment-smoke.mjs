@@ -1,5 +1,5 @@
 // 排隊收購 I3 煙霧（docs/42 §6、§13）：估完（買斷 2＋散裝 10＋寄售 1）→ 交給客人勾選 → 同一台平板
-// 簽署頁看到品項金額（寄售不在內）、選現金、簽名 → 店員按付款 → 開錢櫃、已付款待整理、
+// 簽署頁看到品項金額（寄售列出售價與抽成、不進合計）、選現金、簽名 → 店員按付款 → 開錢櫃、已付款待整理、
 // 成立三張收購（買斷／寄售／散裝）且商品都是「待整理」→ 列印整批收購明細（含簽名）。
 // 另驗設定頁「收購一定要簽名」開關：打開後叫號確認頁不再出現「不簽名直接付款」（結束時還原）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-payment-smoke.mjs
@@ -158,12 +158,12 @@ try {
   await signing.waitFor({ timeout: 8000 });
   const signedItems = await signing.locator(".intake-sign-items").innerText();
   ok(
-    "簽署頁：買斷逐件、散裝帶件數、總額 550、寄售不在內",
-    // 只看收購明細那段：切結書條文（第六條材質老化）本身就提到「帳篷」。
+    "簽署頁：買斷逐件、散裝帶件數、寄售也列出（售價與抽成）、總額 550 不含寄售",
     signedItems.includes("黑色折疊椅") &&
       signedItems.includes("營釘 ×10") &&
-      (await signing.getByRole("button", { name: /現金/ }).innerText()).includes("550") &&
-      !signedItems.includes("帳篷"),
+      /帳篷\s+寄售・售價 \$6,000・抽成 40%/.test(signedItems) &&
+      (await signing.locator(".intake-customer-total").innerText()).includes("$550") &&
+      (await signing.getByRole("button", { name: /現金/ }).innerText()).includes("550"),
     signedItems.replace(/\n/g, " "),
   );
   await signing.getByRole("checkbox", { name: /同意/ }).check();

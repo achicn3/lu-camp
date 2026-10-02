@@ -116,11 +116,12 @@ class SignatureTask(Base, TimestampMixin):
             name="ck_signature_tasks_payout_binary",
         ),
         # 已簽的收購切結必有撥款選擇（docs/23 K4，Codex 第三輪）：杜絕 NULL 撥款的已簽
-        # 買斷切結成為可綁定的證據。
+        # 買斷切結成為可綁定的證據。只賣寄售（合計 0、現在不付錢）的排隊收購切結例外
+        # （docs/42 §13）。
         CheckConstraint(
             "NOT (status IN ('SIGNED','CONSUMED','FAILED') "
             "AND kind = 'ACQUISITION_AFFIDAVIT') "
-            "OR chosen_payout IS NOT NULL",
+            "OR chosen_payout IS NOT NULL OR (content->>'total') = '0'",
             name="ck_signature_tasks_signed_affidavit_payout",
         ),
         # 退貨的買受人常是臨櫃非會員（無 contacts 檔），故該類型允許無會員；其餘類型仍強制

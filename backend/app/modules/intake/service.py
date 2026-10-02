@@ -229,8 +229,11 @@ class IntakeService:
         ]
         if cleared:
             raise InvalidIntakeLine("商品簡稱、數量、類型不能清空")
+        previous_type = line.acquisition_type
         for name, value in changes.items():
             setattr(line, name, value)
+        if line.acquisition_type is not previous_type:
+            await self._switch_type(store_id, line, changes)
         await self._check_line(store_id, line)
         if line.accepted_qty > line.qty:
             raise InvalidIntakeLine("數量不能少於已接受的件數，請先改處置")
@@ -240,6 +243,25 @@ class IntakeService:
             batch.status = IntakeBatchStatus.ESTIMATING
         await self._session.flush()
         return line
+
+    async def _switch_type(
+        self, store_id: int, line: IntakeLine, changes: dict[str, object]
+    ) -> None:
+        """估價時換類型（docs/42 §13）：換成寄售帶預設抽成、收購價不適用；換走寄售清掉抽成；
+        換走散裝清掉件數。這次有一起帶的欄位以帶的為準。"""
+        if line.acquisition_type is AcquisitionType.CONSIGNMENT:
+            if "commission_pct" not in changes or line.commission_pct is None:
+                settings = await StoreSettingsService(self._session).get_effective_settings(
+                    store_id
+                )
+                line.commission_pct = settings.default_commission_pct
+            if "deal_cost" not in changes:
+                line.deal_cost = None
+        elif "commission_pct" not in changes:
+            line.commission_pct = None
+        not_bulk = line.acquisition_type is not AcquisitionType.BULK_LOT
+        if not_bulk and "bulk_piece_count" not in changes:
+            line.bulk_piece_count = None
 
     async def delete_line(self, store_id: int, batch_id: int, line_id: int) -> None:
         """估價中打錯的列可以刪；進入待確認後不刪，改用處置記錄。"""
@@ -272,18 +294,17 @@ class IntakeService:
         consignment = [
             line.line_no
             for line in lines
-            if line.acquisition_type is AcquisitionType.CONSIGNMENT
-            and (line.commission_pct is None or line.expected_listed_price is None)
+            if line.acquisition_type is AcquisitionType.CONSIGNMENT and not self._priced(line)
         ]
         if consignment:
-            raise IntakeConflict(f"第 {_numbers(consignment)} 件是寄售，要填售價與抽成")
+            raise IntakeConflict(f"第 {_numbers(consignment)} 件是寄售，要填寄售售價")
         pricing = await self._pricing(store_id)
         for line in lines:
             if line.expected_listed_price is None:
                 assert line.deal_cost is not None
-                line.expected_listed_price = Decimal(
-                    suggested_listed_price(Decimal(line.deal_cost), *pricing)
-                )
+                # 散裝有填件數：deal_cost 是整堆總價，售價照每件成本推算（每件售價）。
+                unit_cost = Decimal(line.deal_cost) / (line.bulk_piece_count or 1)
+                line.expected_listed_price = Decimal(suggested_listed_price(unit_cost, *pricing))
             if line.disposition is IntakeDisposition.PENDING:
                 line.disposition = IntakeDisposition.ACCEPTED
                 line.accepted_qty = line.qty
@@ -477,9 +498,8 @@ class IntakeService:
         content = self._affidavit_content(lines)
         if content is not None and batch.signature_task_id is not None:
             affidavit = await self._signed_affidavit(store_id, batch, content)
-        if affidavit is not None:
-            assert affidavit.chosen_payout is not None
-            payout_method = affidavit.chosen_payout  # 以客人在顧客螢幕選的為準
+        if affidavit is not None and affidavit.chosen_payout is not None:
+            payout_method = affidavit.chosen_payout  # 以客人簽署時選的為準（只賣寄售就沒得選）
 
         acquisitions = AcquisitionService(self._session)
         for n, data in enumerate(self._acquisition_requests(batch, accepted, payout_method)):
@@ -526,7 +546,11 @@ class IntakeService:
         task = await SigningService(self._session).get_signed_affidavit(
             store_id, batch.signature_task_id, contact_id=batch.contact_id
         )
-        signed = {"items": task.content.get("items"), "total": task.content.get("total")}
+        signed = {
+            key: task.content.get(key)
+            for key in ("items", "total", "consignments")
+            if key in task.content
+        }
         if signed != content:
             raise IntakeConflict("商品或金額在簽署後改過，請重新簽署")
         contact = await self._contacts.get_contact_for_update(store_id, batch.contact_id)
@@ -536,7 +560,7 @@ class IntakeService:
             or task.identity_fingerprint != contact.national_id_blind_index
         ):
             raise IntakeConflict("賣方身分與簽署時不同，請重新簽署")
-        if task.chosen_payout is None:
+        if task.chosen_payout is None and content["total"] != "0":
             raise IntakeConflict("簽署缺少客人選的撥款方式，請重新簽署")
         return task
 
@@ -554,17 +578,51 @@ class IntakeService:
     def _accepted(line: IntakeLine) -> bool:
         return line.disposition is IntakeDisposition.ACCEPTED and line.accepted_qty > 0
 
+    @staticmethod
+    def _priced(line: IntakeLine) -> bool:
+        """這一件估好了沒：寄售要有寄售售價與抽成，其他要有收購價（docs/42 §13）。"""
+        if line.acquisition_type is AcquisitionType.CONSIGNMENT:
+            return line.commission_pct is not None and line.expected_listed_price is not None
+        return line.deal_cost is not None
+
+    @staticmethod
+    def _bulk_name(line: IntakeLine) -> str:
+        """散裝在切結與收購上的名稱：有件數就帶件數（營釘 ×10）；沒填件數＝整堆，不帶。"""
+        pieces = (
+            line.bulk_piece_count * line.accepted_qty
+            if line.bulk_piece_count is not None
+            else line.accepted_qty
+        )
+        if line.bulk_piece_count is None and line.qty == 1:
+            return line.short_name
+        return f"{line.short_name} ×{pieces}"
+
     @classmethod
     def _affidavit_content(cls, lines: list[IntakeLine]) -> dict[str, object] | None:
-        """切結內容（客人簽的就是要付錢的東西）：買斷逐件、散裝一列一筆（名稱帶件數）。
+        """切結內容（客人簽的就是這次要成交的東西）：買斷逐件、散裝一列一筆（名稱帶件數），
+        金額加進合計；寄售另列 consignments（名稱、寄售售價、抽成），現在不付錢、不進合計。
 
-        格式同收購頁切結（items＝[{name, amount}]、total），簽署服務會再整理成標準形狀。
-        寄售不付現、不進切結；整批都沒有要付錢的回 None。
+        寄售品也要簽（店主 2026-10-02）。整批沒有成交的商品回 None。
         """
         items: list[dict[str, str]] = []
+        consignments: list[dict[str, object]] = []
         total = Decimal(0)
         for line in lines:
-            if not cls._accepted(line) or line.deal_cost is None:
+            if not cls._accepted(line):
+                continue
+            if line.acquisition_type is AcquisitionType.CONSIGNMENT:
+                if line.expected_listed_price is None or line.commission_pct is None:
+                    continue
+                for _ in range(line.accepted_qty):
+                    consignments.append(
+                        {
+                            "name": line.short_name,
+                            "listed_price": format_ntd(line.expected_listed_price),
+                            "commission_pct": line.commission_pct,
+                        }
+                    )
+                continue
+            if line.deal_cost is None:
                 continue
             if line.acquisition_type is AcquisitionType.BUYOUT:
                 for _ in range(line.accepted_qty):
@@ -572,16 +630,14 @@ class IntakeService:
                 total += Decimal(line.deal_cost) * line.accepted_qty
             elif line.acquisition_type is AcquisitionType.BULK_LOT:
                 amount = Decimal(line.deal_cost) * line.accepted_qty
-                items.append(
-                    {
-                        "name": f"{line.short_name} ×{line.accepted_qty}",
-                        "amount": format_ntd(amount),
-                    }
-                )
+                items.append({"name": cls._bulk_name(line), "amount": format_ntd(amount)})
                 total += amount
-        if not items:
+        if not items and not consignments:
             return None
-        return {"items": items, "total": format_ntd(total)}
+        content: dict[str, object] = {"items": items, "total": format_ntd(total)}
+        if consignments:
+            content["consignments"] = consignments
+        return content
 
     @staticmethod
     def _acquisition_requests(
@@ -652,7 +708,7 @@ class IntakeService:
                         name=line.short_name,
                         acquisition_cost=Decimal(line.deal_cost) * line.accepted_qty,
                         acquisition_basis=BulkAcquisitionBasis.UNSPECIFIED,
-                        total_qty=line.accepted_qty,
+                        total_qty=(line.bulk_piece_count or 1) * line.accepted_qty,
                         unit_price=line.expected_listed_price,
                         retail_price=line.reference_price,
                         brand_id=line.brand_id,
@@ -1153,15 +1209,7 @@ class IntakeService:
             cancel_reason=batch.cancel_reason,
             line_count=len(lines),
             item_count=sum(line.qty for line in lines),
-            priced_item_count=sum(
-                line.qty
-                for line in lines
-                if (
-                    line.commission_pct is not None
-                    if line.acquisition_type is AcquisitionType.CONSIGNMENT
-                    else line.deal_cost is not None
-                )
-            ),
+            priced_item_count=sum(line.qty for line in lines if IntakeService._priced(line)),
             deal_total=sum((cost(line, line.qty) for line in lines), Decimal(0)),
             accepted_item_count=sum(line.accepted_qty for line in accepted),
             accepted_total=sum((cost(line, line.accepted_qty) for line in accepted), Decimal(0)),
@@ -1205,6 +1253,11 @@ class IntakeService:
                 raise InvalidIntakeLine("寄售要填抽成 %")
         elif line.commission_pct is not None:
             raise InvalidIntakeLine("只有寄售有抽成 %")
+        if line.bulk_piece_count is not None:
+            if line.acquisition_type is not AcquisitionType.BULK_LOT:
+                raise InvalidIntakeLine("只有散裝要填件數")
+            if line.qty != 1:
+                raise InvalidIntakeLine("散裝填了件數，收購價就是整堆總價，數量要是 1")
         checks = [
             (line.category_id, self._inventory.get_category, "分類"),
             (line.brand_id, self._inventory.get_brand, "品牌"),

@@ -1,8 +1,8 @@
 "use client";
 // 排隊收購快速估價（docs/42 §13；店主 2026-10-02）：報到時照件數建好每一件，主畫面只填收購價。
 // 平板上要很快：大輸入框、數字鍵盤，按 Enter／鍵盤的「下一個」就存這件並跳到下一件。
-// 其他欄位（簡稱、類型、原價、折數、售價、成色、分類、品牌型號、備註）收在「詳細」裡，可填可不填，
-// 有填的上架時自動帶入。
+// 類型在每件直接點（二手／全新／散裝／寄售）；其他欄位（簡稱、原價、折數、售價、成色、分類、
+// 品牌型號、備註）收在「詳細」裡，可填可不填，有填的上架時自動帶入。
 import { useMutation } from "@tanstack/react-query";
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
@@ -31,13 +31,176 @@ export function displayName(line: Pick<Line, "short_name" | "line_no">): string 
 }
 
 function isPriced(line: Line): boolean {
-  return line.acquisition_type === "CONSIGNMENT" ? line.commission_pct != null : line.deal_cost != null;
+  return line.acquisition_type === "CONSIGNMENT"
+    ? line.commission_pct != null && line.expected_listed_price != null
+    : line.deal_cost != null;
+}
+
+/** 估價時直接選的類型（店主 2026-10-02）：全新＝買斷、成色全新。 */
+type Kind = "USED" | "NEW" | "BULK" | "CONSIGN";
+const KINDS: { kind: Kind; label: string }[] = [
+  { kind: "USED", label: "二手" },
+  { kind: "NEW", label: "全新" },
+  { kind: "BULK", label: "散裝" },
+  { kind: "CONSIGN", label: "寄售" },
+];
+
+function kindOf(line: Line): Kind {
+  if (line.acquisition_type === "CONSIGNMENT") return "CONSIGN";
+  if (line.acquisition_type === "BULK_LOT") return "BULK";
+  return line.grade === "N" ? "NEW" : "USED";
+}
+
+function kindFields(kind: Kind, line: Line): LineFields {
+  switch (kind) {
+    case "NEW":
+      return { acquisition_type: "BUYOUT", grade: "N" };
+    case "BULK":
+      return { acquisition_type: "BULK_LOT", grade: null };
+    case "CONSIGN":
+      return { acquisition_type: "CONSIGNMENT", grade: line.grade ?? null };
+    default:
+      return { acquisition_type: "BUYOUT", grade: line.grade === "N" ? null : (line.grade ?? null) };
+  }
+}
+
+type Field = "deal_cost" | "expected_listed_price" | "bulk_piece_count";
+
+/** 一個隨時存檔的數字欄：按 Enter／鍵盤的「下一個」或離開欄位就存。
+ *
+ * 存檔還沒回來又改了：畫面保留新打的值、不被舊結果蓋掉，「估完」也擋住，直到新值存好
+ * （Codex 對抗審查）。伺服器的值只有在沒改動、也沒在存的時候才帶回輸入框（例如「詳細」裡改了）。
+ */
+function SavedInput({
+  batchId,
+  lineId,
+  field,
+  saved,
+  label,
+  placeholder,
+  prefix,
+  suffix,
+  narrow,
+  onNext,
+  onSaved,
+  onUnsavedChange,
+}: {
+  batchId: number;
+  lineId: number;
+  field: Field;
+  saved: string;
+  label: string;
+  placeholder: string;
+  prefix?: string;
+  suffix?: string;
+  narrow?: boolean;
+  onNext: (el: HTMLInputElement) => void;
+  onSaved: () => void;
+  onUnsavedChange: (key: string, unsaved: boolean) => void;
+}) {
+  const [value, setValue] = useState(saved);
+  // 最後送出的值：按 Enter 存檔後焦點跳走會再觸發 blur，同一個值不重送；存檔失敗就退回，才能重試。
+  // 事件裡用 ref（Enter 與跟著來的 blur 在同一輪，state 還沒更新）；畫面判斷用同步的 state。
+  const sentRef = useRef(saved);
+  const [sent, setSentState] = useState(saved);
+  function setSent(text: string) {
+    sentRef.current = text;
+    setSentState(text);
+  }
+  const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const key = `${lineId}:${field}`;
+
+  const patch = useMutation({
+    mutationFn: async (body: LineFields) => {
+      const { data, error: apiErr } = await api.PATCH("/api/v1/intake-batches/{batch_id}/lines/{line_id}", {
+        params: { path: { batch_id: batchId, line_id: lineId } },
+        body,
+      });
+      if (!data) throw new Error(detail(apiErr) ?? "儲存失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      setFailed(false);
+      onSaved();
+    },
+    onError: (e: Error) => {
+      setSent(saved); // 沒存進去：下次 Enter／離開欄位要重送
+      setFailed(true);
+      setError(e.message);
+    },
+  });
+
+  // 伺服器的值變了（別處改的、或存好後重新讀取）：沒在改、沒在存才帶回來。
+  const [seen, setSeen] = useState(saved);
+  if (saved !== seen) {
+    setSeen(saved);
+    if (value.trim() === sent && !patch.isPending) {
+      setSentState(saved);
+      setValue(saved);
+    }
+  }
+  useEffect(() => {
+    sentRef.current = sent;
+  }, [sent]);
+
+  const unsaved = value.trim() !== saved || failed || patch.isPending;
+  useEffect(() => {
+    onUnsavedChange(key, unsaved);
+  }, [key, unsaved, onUnsavedChange]);
+  useEffect(() => () => onUnsavedChange(key, false), [key, onUnsavedChange]);
+
+  /** 存這格（有改才送）。回傳 false＝格式不對，不跳下一格。 */
+  function commit(): boolean {
+    const text = value.trim();
+    if (text === sentRef.current) return true;
+    const n = parseNtd(text);
+    if (text !== "" && (n === null || !/^\d+$/.test(text) || (field === "bulk_piece_count" && n < 1))) {
+      setError(field === "bulk_piece_count" ? "件數請填正整數" : `${placeholder}請填整數元`);
+      return false;
+    }
+    setError(null);
+    setSent(text);
+    if (field === "bulk_piece_count") patch.mutate({ bulk_piece_count: text === "" ? null : n });
+    else patch.mutate({ [field]: text === "" ? null : String(n) });
+    return true;
+  }
+
+  return (
+    <div className={`intake-quick-field${narrow ? " is-narrow" : ""}`}>
+      <label className="intake-quick-price">
+        {prefix && <span aria-hidden="true">{prefix}</span>}
+        <input
+          data-quick-input=""
+          aria-label={label}
+          inputMode="numeric"
+          enterKeyHint="next"
+          autoComplete="off"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            if (commit()) onNext(e.currentTarget);
+          }}
+          onBlur={() => commit()}
+        />
+        {suffix && <span aria-hidden="true">{suffix}</span>}
+      </label>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function PriceRow({
   batchId,
   line,
-  inputRef,
   onNext,
   onSaved,
   rates,
@@ -47,29 +210,19 @@ function PriceRow({
 }: {
   batchId: number;
   line: Line;
-  inputRef: (el: HTMLInputElement | null) => void;
-  onNext: () => void;
+  onNext: (el: HTMLInputElement) => void;
   onSaved: () => void;
   rates: PricingRates;
   defaultCommissionPct: number | null;
   deletable: boolean;
-  /** 這件的收購價改了還沒存好（含存檔失敗）：上層據此擋住「估完」，不讓舊價格成交。 */
-  onUnsavedChange: (lineId: number, unsaved: boolean) => void;
+  /** 這件的數字改了還沒存好（含存檔失敗、存檔中）：上層據此擋住「估完」，不讓舊價格成交。 */
+  onUnsavedChange: (key: string, unsaved: boolean) => void;
 }) {
-  const saved = line.deal_cost ?? "";
-  const [value, setValue] = useState(saved);
-  // 最後送出的值：按 Enter 存檔後焦點跳走會再觸發 blur，同一個值不重送；存檔失敗就退回，才能重試。
-  const sent = useRef(saved);
-  const [failed, setFailed] = useState(false);
-  const unsaved = value.trim() !== saved || failed;
-  useEffect(() => {
-    onUnsavedChange(line.id, unsaved);
-  }, [line.id, unsaved, onUnsavedChange]);
-  useEffect(() => () => onUnsavedChange(line.id, false), [line.id, onUnsavedChange]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const label = `${line.line_no} 號`;
   const name = displayName(line);
+  const kind = kindOf(line);
 
   const patch = useMutation({
     mutationFn: async (fields: LineFields) => {
@@ -82,15 +235,10 @@ function PriceRow({
     },
     onSuccess: () => {
       setError(null);
-      setFailed(false);
       setOpen(false);
       onSaved();
     },
-    onError: (e: Error) => {
-      sent.current = saved; // 沒存進去：下次 Enter／離開欄位要重送
-      setFailed(true);
-      setError(e.message);
-    },
+    onError: (e: Error) => setError(e.message),
   });
 
   const remove = useMutation({
@@ -105,58 +253,15 @@ function PriceRow({
     onError: (e: Error) => setError(e.message),
   });
 
-  /** 存這件（有改才送）。回傳 false＝格式不對，不跳下一件。 */
-  function commit(): boolean {
-    const text = value.trim();
-    if (text === sent.current) return true;
-    const price = parseNtd(text);
-    if (text !== "" && (price === null || price < 0 || !/^\d+$/.test(text))) {
-      setError("收購價請填整數元");
-      return false;
-    }
-    setError(null);
-    sent.current = text;
-    patch.mutate({ deal_cost: text === "" ? null : String(price) });
-    return true;
-  }
-
-  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    if (commit()) onNext();
-  }
-
-  const consignment = line.acquisition_type === "CONSIGNMENT";
+  const common = { batchId, lineId: line.id, onNext, onSaved, onUnsavedChange };
   return (
     <li className={`intake-quick-row${isPriced(line) ? " is-priced" : ""}`}>
       <div className="intake-quick-main">
         <span className="intake-quick-no">{label}</span>
         <span className="intake-quick-name">
           {name ?? <span className="hint">（未命名，可在詳細填）</span>}
-          {line.acquisition_type === "BULK_LOT" && <span className="row-sub">散裝 ×{line.qty}</span>}
+          {line.acquisition_type === "BULK_LOT" && line.qty > 1 && <span className="row-sub">×{line.qty}</span>}
         </span>
-        {consignment ? (
-          <span className="intake-quick-consign">
-            寄售・售價 ${formatNtd(parseNtd(line.expected_listed_price ?? "") ?? 0)}・抽成{" "}
-            {line.commission_pct ?? "—"}%
-          </span>
-        ) : (
-          <label className="intake-quick-price">
-            <span aria-hidden="true">$</span>
-            <input
-              ref={inputRef}
-              aria-label={`${label} 收購價`}
-              inputMode="numeric"
-              enterKeyHint="next"
-              autoComplete="off"
-              placeholder="收購價"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={onKeyDown}
-              onBlur={() => commit()}
-            />
-          </label>
-        )}
         <button
           type="button"
           className="btn-ghost intake-quick-toggle"
@@ -178,6 +283,84 @@ function PriceRow({
           </button>
         )}
       </div>
+      <div className="intake-quick-body">
+        <div className="intake-quick-types" role="group" aria-label={`${label} 類型`}>
+          {KINDS.map((k) => (
+            <button
+              key={k.kind}
+              type="button"
+              aria-pressed={kind === k.kind}
+              className={kind === k.kind ? "is-on" : undefined}
+              disabled={patch.isPending}
+              onClick={() => {
+                if (k.kind !== kind) patch.mutate(kindFields(k.kind, line));
+              }}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <div className="intake-quick-inputs">
+          {kind === "CONSIGN" ? (
+            <SavedInput
+              key="expected_listed_price"
+              {...common}
+              field="expected_listed_price"
+              saved={line.expected_listed_price ?? ""}
+              label={`${label} 寄售售價`}
+              placeholder="寄售售價"
+              prefix="$"
+            />
+          ) : kind === "BULK" ? (
+            <>
+              <SavedInput
+                key="deal_cost"
+                {...common}
+                field="deal_cost"
+                saved={line.deal_cost ?? ""}
+                label={`${label} 整堆總價`}
+                placeholder="整堆總價"
+                prefix="$"
+              />
+              {line.qty === 1 && (
+                <SavedInput
+                  key="bulk_piece_count"
+                  {...common}
+                  field="bulk_piece_count"
+                  saved={line.bulk_piece_count == null ? "" : String(line.bulk_piece_count)}
+                  label={`${label} 件數（可不填）`}
+                  placeholder="件數"
+                  prefix="共"
+                  suffix="件"
+                  narrow
+                />
+              )}
+            </>
+          ) : (
+            <SavedInput
+              key="deal_cost"
+              {...common}
+              field="deal_cost"
+              saved={line.deal_cost ?? ""}
+              label={`${label} 收購價`}
+              placeholder="收購價"
+              prefix="$"
+            />
+          )}
+        </div>
+      </div>
+      {kind === "BULK" && line.deal_cost != null && (
+        <p className="intake-quick-consign">
+          {line.bulk_piece_count
+            ? `整堆 $${formatNtd(parseNtd(line.deal_cost) ?? 0)}，共 ${line.bulk_piece_count} 件，每件約 $${((parseNtd(line.deal_cost) ?? 0) / line.bulk_piece_count).toLocaleString("en-US", {
+                maximumFractionDigits: 1,
+              })}`
+            : `整堆 $${formatNtd(parseNtd(line.deal_cost) ?? 0)}（沒填件數＝整堆算 1 件）`}
+        </p>
+      )}
+      {kind === "CONSIGN" && (
+        <p className="intake-quick-consign">寄售：賣出後分帳，抽成 {line.commission_pct ?? "—"}%（要改請按「詳細」）</p>
+      )}
       {error !== null && (
         <p role="alert" className="form-error">
           {error}
@@ -190,6 +373,7 @@ function PriceRow({
           defaultCommissionPct={defaultCommissionPct}
           submitLabel="儲存詳細"
           busy={patch.isPending}
+          quick
           onSubmit={(fields) => patch.mutate(fields)}
           onCancel={() => setOpen(false)}
         />
@@ -212,15 +396,15 @@ export function QuickEstimate({
   /** 估完後回來改價（編輯模式）：最下面的按鈕改成「回到客人確認」，不再送估完。 */
   finish?: { label: string; onClick: () => void };
 }) {
-  const inputs = useRef<(HTMLInputElement | null)[]>([]);
+  const list = useRef<HTMLOListElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [unsaved, setUnsaved] = useState<Set<number>>(new Set());
-  const onUnsavedChange = useCallback((lineId: number, isUnsaved: boolean) => {
+  const [unsaved, setUnsaved] = useState<Set<string>>(new Set());
+  const onUnsavedChange = useCallback((key: string, isUnsaved: boolean) => {
     setUnsaved((prev) => {
-      if (prev.has(lineId) === isUnsaved) return prev;
+      if (prev.has(key) === isUnsaved) return prev;
       const next = new Set(prev);
-      if (isUnsaved) next.add(lineId);
-      else next.delete(lineId);
+      if (isUnsaved) next.add(key);
+      else next.delete(key);
       return next;
     });
   }, []);
@@ -265,16 +449,16 @@ export function QuickEstimate({
     onError: (e: Error) => setError(e.message),
   });
 
-  function focusAfter(index: number) {
-    for (let i = index + 1; i < inputs.current.length; i++) {
-      const el = inputs.current[i];
-      if (el) {
-        el.focus();
-        el.select();
-        return;
-      }
+  /** 跳到下一格（下一件的收購價；散裝的總價之後是件數）。最後一格就收起鍵盤。 */
+  function focusAfter(current: HTMLInputElement) {
+    const all = Array.from(list.current?.querySelectorAll<HTMLInputElement>("input[data-quick-input]") ?? []);
+    const next = all[all.indexOf(current) + 1];
+    if (next) {
+      next.focus();
+      next.select();
+    } else {
+      current.blur();
     }
-    (document.activeElement as HTMLElement | null)?.blur();
   }
 
   return (
@@ -286,18 +470,15 @@ export function QuickEstimate({
         </span>
       </div>
       <p className="hint">
-        每件只要填收購價，按「下一個」跳到下一件。要記名稱、成色、分類、品牌等可以按「詳細」，不填也可以——上架時再補。
+        每件先點類型（預設二手），再填收購價，按「下一個」跳到下一件。散裝填整堆總價，件數可不填；寄售填寄售售價。要記名稱、成色、分類、品牌等可以按「詳細」，不填也可以——上架時再補。
       </p>
-      <ol className="intake-quick-list">
-        {lines.map((line, i) => (
+      <ol className="intake-quick-list" ref={list}>
+        {lines.map((line) => (
           <PriceRow
-            key={`${line.id}-${line.deal_cost ?? ""}`}
+            key={line.id}
             batchId={batch.id}
             line={line}
-            inputRef={(el) => {
-              inputs.current[i] = el;
-            }}
-            onNext={() => focusAfter(i)}
+            onNext={focusAfter}
             onSaved={onChanged}
             rates={rates}
             defaultCommissionPct={defaultCommissionPct}
@@ -312,7 +493,7 @@ export function QuickEstimate({
         </p>
       )}
       {unsaved.size > 0 && (
-        <p className="hint intake-quick-unsaved">還有收購價沒存好：按 Enter 存檔（存檔失敗的再按一次）。</p>
+        <p className="hint intake-quick-unsaved">還有價格沒存好：按 Enter 存檔（存檔中請稍等；失敗的再按一次）。</p>
       )}
       <div className="intake-quick-actions">
         <button type="button" className="btn-secondary" disabled={add.isPending} onClick={() => add.mutate()}>

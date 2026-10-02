@@ -44,7 +44,8 @@ export function CustomerChecklist({
   );
   // 進了簽署頁就是那份任務；回上一頁清掉，再確認會建新任務（內容照新的勾選）。
   const [task, setTask] = useState<Task | null>(null);
-  const [signedPayout, setSignedPayout] = useState<keyof typeof PAYOUT_LABEL | null>(null);
+  // 簽完選的收款方式；只賣寄售沒得選＝NONE。
+  const [signedPayout, setSignedPayout] = useState<keyof typeof PAYOUT_LABEL | "NONE" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selling = batch.lines.filter((l) => checked.has(l.id));
   const count = selling.reduce((n, l) => n + l.qty, 0);
@@ -88,7 +89,7 @@ export function CustomerChecklist({
         task={task}
         onBack={() => setTask(null)}
         onSigned={(payout) => {
-          setSignedPayout(payout);
+          setSignedPayout(payout ?? "NONE");
           onDone();
         }}
       />
@@ -103,7 +104,8 @@ export function CustomerChecklist({
           <div className="intake-customer-done">
             <p className="intake-customer-big">謝謝！請把平板交還給店員。</p>
             <p>
-              共 {count} 件，收購價合計 <strong>${formatNtd(total)}</strong>，選擇拿{PAYOUT_LABEL[signedPayout]}
+              共 {count} 件，收購價合計 <strong>${formatNtd(total)}</strong>
+              {signedPayout === "NONE" ? "（寄售，賣出後分帳）" : `，選擇拿${PAYOUT_LABEL[signedPayout]}`}
             </p>
             <button type="button" className="btn-primary intake-customer-btn" onClick={onClose}>
               交還店員
@@ -119,7 +121,7 @@ export function CustomerChecklist({
                 const name = displayName(line);
                 const price =
                   line.acquisition_type === "CONSIGNMENT"
-                    ? "寄售，賣出後分帳"
+                    ? `寄售 $${formatNtd(parseNtd(line.expected_listed_price ?? "") ?? 0)}`
                     : `$${formatNtd(amount(line))}`;
                 return (
                   <li key={line.id}>
@@ -133,6 +135,7 @@ export function CustomerChecklist({
                       <span className="intake-customer-name">
                         {name ?? ""}
                         {line.qty > 1 ? ` ×${line.qty}` : ""}
+                        {line.bulk_piece_count != null ? ` ×${line.bulk_piece_count}` : ""}
                       </span>
                       <span className="intake-customer-price">{price}</span>
                     </label>

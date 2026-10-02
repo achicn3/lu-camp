@@ -8114,6 +8114,19 @@
             ],
             "title": "Brand Id"
           },
+          "bulk_piece_count": {
+            "anyOf": [
+              {
+                "maximum": 99999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Piece Count"
+          },
           "category_id": {
             "anyOf": [
               {
@@ -8294,6 +8307,19 @@
               }
             ],
             "title": "Brand Id"
+          },
+          "bulk_piece_count": {
+            "anyOf": [
+              {
+                "maximum": 99999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Piece Count"
           },
           "category_id": {
             "anyOf": [
@@ -8480,6 +8506,17 @@
               }
             ],
             "title": "Brand Id"
+          },
+          "bulk_piece_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Piece Count"
           },
           "category_id": {
             "anyOf": [

@@ -211,7 +211,7 @@ describe("快速估價", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("網路斷了");
     const ready = screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement;
     expect(ready.disabled).toBe(true);
-    expect(screen.getByText(/還有收購價沒存好/)).toBeTruthy();
+    expect(screen.getByText(/還有價格沒存好/)).toBeTruthy();
     fail = false;
     await user.click(first);
     await user.keyboard("{Enter}");
@@ -239,18 +239,127 @@ describe("快速估價", () => {
     expect((screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("寄售的件不用填收購價（看抽成）", () => {
-    stubFetch();
+  it("寄售的件填寄售售價（不是收購價）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
     wrap(
       <QuickEstimate
-        batch={batch([line(1, { acquisition_type: "CONSIGNMENT", commission_pct: 50, expected_listed_price: "800" })])}
+        batch={batch([line(1, { acquisition_type: "CONSIGNMENT", commission_pct: 50 })])}
         rates={RATES}
         defaultCommissionPct={50}
         onChanged={() => {}}
       />,
     );
     expect(screen.queryByLabelText("1 號 收購價")).toBeNull();
-    expect(screen.getByText(/寄售/)).toBeTruthy();
+    await user.type(screen.getByLabelText("1 號 寄售售價"), "3000{Enter}");
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ expected_listed_price: "3000" }),
+    );
+    // 沒填寄售售價不算估好
+    expect(screen.getByText(/已填 0／1 件/)).toBeTruthy();
+  });
+});
+
+describe("估價時直接選類型", () => {
+  function typeButtons(n: number) {
+    return within(screen.getByRole("group", { name: `${n} 號 類型` }));
+  }
+
+  it("預設二手；四個類型按鈕，輸入框不跟著變窄", () => {
+    stubFetch();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    const group = typeButtons(1);
+    expect(group.getAllByRole("button").map((b) => b.textContent)).toEqual(["二手", "全新", "散裝", "寄售"]);
+    expect(group.getByRole("button", { name: "二手" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("按全新＝買斷、成色全新；再按二手把全新拿掉", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    const { rerender } = wrap(
+      <QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />,
+    );
+    await user.click(typeButtons(1).getByRole("button", { name: "全新" }));
+    await waitFor(() =>
+      expect(calls.at(-1)?.body).toEqual({ acquisition_type: "BUYOUT", grade: "N" }),
+    );
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QuickEstimate batch={batch([line(1, { grade: "N" })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(typeButtons(1).getByRole("button", { name: "全新" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(typeButtons(1).getByRole("button", { name: "二手" }));
+    await waitFor(() =>
+      expect(calls.at(-1)?.body).toEqual({ acquisition_type: "BUYOUT", grade: null }),
+    );
+  });
+
+  it("按寄售換類型；按散裝出現整堆總價與件數（件數可不填）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1), line(2, { acquisition_type: "BULK_LOT" })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    await user.click(typeButtons(1).getByRole("button", { name: "寄售" }));
+    await waitFor(() => expect(calls.at(-1)?.body).toEqual({ acquisition_type: "CONSIGNMENT", grade: null }));
+    expect(screen.getByLabelText("2 號 整堆總價")).toBeTruthy();
+    const pieces = screen.getByLabelText("2 號 件數（可不填）");
+    await user.type(pieces, "10{Enter}");
+    await waitFor(() => expect(calls.at(-1)?.body).toEqual({ bulk_piece_count: 10 }));
+  });
+
+  it("散裝的總價是整堆的，不是乘上件數：畫面寫出整堆多少、每件約多少", () => {
+    stubFetch();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { acquisition_type: "BULK_LOT", deal_cost: "55", bulk_piece_count: 10 })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.getByText("整堆 $55，共 10 件，每件約 $5.5")).toBeTruthy();
+    expect(screen.getByText(/收購價合計/).textContent).toContain("$55");
+  });
+
+  it("存檔還沒回來又改了價：新的值不會被舊結果蓋掉，也不能先估完", async () => {
+    const calls: { body: unknown }[] = [];
+    const pending: ((r: Response) => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const req = input as Request;
+        calls.push({ body: JSON.parse(await req.clone().text()) as unknown });
+        return new Promise<Response>((resolve) => pending.push(resolve));
+      }),
+    );
+    const user = userEvent.setup();
+    const { rerender } = wrap(
+      <QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />,
+    );
+    const input = screen.getByLabelText("1 號 收購價") as HTMLInputElement;
+    await user.type(input, "100{Enter}");
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, "200");
+    // 第一次存檔（100）現在才回來，畫面重新整理成伺服器上的 100
+    pending[0](json(line(1, { deal_cost: "100" })));
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QuickEstimate batch={batch([line(1, { deal_cost: "100" })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect((screen.getByLabelText("1 號 收購價") as HTMLInputElement).value).toBe("200");
+    expect((screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(calls.at(-1)?.body).toEqual({ deal_cost: "200" }));
   });
 });
 
@@ -283,7 +392,9 @@ describe("客人勾選要賣哪幾件", () => {
     expect(dialog.textContent).not.toContain("第 2 件");
   });
 
-  function task(id: number, total: string, names: string[]) {
+  function task(id: number, total: string, names: string[]): Omit<components["schemas"]["KioskTaskRead"], "content"> & {
+    content: Record<string, unknown>;
+  } {
     return {
       id,
       kind: "ACQUISITION_AFFIDAVIT",
@@ -402,6 +513,53 @@ describe("客人勾選要賣哪幾件", () => {
     await user.click(within(dialog).getByRole("button", { name: /確認並送出/ }));
     expect((await within(dialog).findByRole("alert")).textContent).toMatch(/逾時.*回上一頁/);
     expect(within(dialog).getByRole("button", { name: /回上一頁/ })).toBeTruthy();
+  });
+
+  it("寄售品也列在簽署頁（售價與抽成），不算進合計", async () => {
+    stubFetch(
+      signingRoutes([
+        {
+          ...task(55, "300", ["Coleman 營燈"]),
+          content: {
+            items: [{ name: "Coleman 營燈", amount: "300" }],
+            total: "300",
+            consignments: [{ name: "帳篷", listed_price: "6000", commission_pct: 50 }],
+          },
+        },
+      ]),
+    );
+    const user = userEvent.setup();
+    wrap(<CustomerChecklist batch={ready} onDone={() => {}} onClose={() => {}} />);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /確認/ }));
+    const dialog = await screen.findByRole("dialog", { name: /簽署切結書/ });
+    const row = within(dialog).getByRole("row", { name: /帳篷/ });
+    expect(row.textContent).toMatch(/寄售.*售價 \$6,000.*抽成 50%/);
+    expect(within(dialog).getByText(/合計/).textContent).toContain("$300");
+  });
+
+  it("只賣寄售：不用選現金或購物金，同意＋簽名就能送出", async () => {
+    const calls = stubFetch(
+      signingRoutes([
+        {
+          ...task(57, "0", []),
+          content: { items: [], total: "0", consignments: [{ name: "帳篷", listed_price: "6000", commission_pct: 50 }] },
+        },
+      ]),
+    );
+    const user = userEvent.setup();
+    wrap(<CustomerChecklist batch={ready} onDone={() => {}} onClose={() => {}} />);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /確認/ }));
+    const dialog = await screen.findByRole("dialog", { name: /簽署切結書/ });
+    expect(within(dialog).queryByText(/請選擇收款方式/)).toBeNull();
+    expect(within(dialog).getByText(/賣出後才分帳/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("checkbox", { name: /同意/ }));
+    await user.click(within(dialog).getByRole("button", { name: "模擬簽名" }));
+    await user.click(within(dialog).getByRole("button", { name: /確認並送出/ }));
+    await waitFor(() => {
+      const sent = calls.find((c) => c.url.endsWith("/signing/tasks/57/tablet-sign"));
+      expect(sent?.body).toMatchObject({ signature_image_base64: "signature-png-base64" });
+      expect((sent?.body as Record<string, unknown>).chosen_payout ?? null).toBeNull();
+    });
   });
 
   it("全部都不勾：不能確認，提示請店員處理", async () => {

@@ -13,7 +13,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 type Task = components["schemas"]["KioskTaskRead"];
 type Payout = "CASH" | "STORE_CREDIT";
 
-type Payload = { image: string; payout: Payout };
+type Payload = { image: string; payout: Payout | null };
 
 function detail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -37,6 +37,16 @@ function items(content: Task["content"]): { name: string; amount: unknown }[] {
   });
 }
 
+/** 寄售品（docs/42 §13）：現在不付錢、不進合計，但客人簽的要看得到寄售售價與抽成。 */
+function consignments(content: Task["content"]): { name: string; price: unknown; pct: unknown }[] {
+  const raw = content.consignments;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const rec = (item ?? {}) as Record<string, unknown>;
+    return { name: typeof rec.name === "string" ? rec.name : "", price: rec.listed_price, pct: rec.commission_pct };
+  });
+}
+
 function premium(content: Task["content"]): { amount: unknown; extra: unknown } | null {
   const p = content.store_credit_premium;
   if (p === null || typeof p !== "object") return null;
@@ -51,7 +61,7 @@ export function TabletSigning({
 }: {
   task: Task;
   onBack: () => void;
-  onSigned: (payout: Payout) => void;
+  onSigned: (payout: Payout | null) => void;
 }) {
   const canvas = useRef<SignatureCanvasHandle>(null);
   // 一個任務一把冪等鍵：回應遺失時用同一把鍵、同一份內容重送，後端回放同一結果。
@@ -63,6 +73,9 @@ export function TabletSigning({
   const [hasInk, setHasInk] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bonus = premium(task.content);
+  const consigned = consignments(task.content);
+  // 只賣寄售：現在不付錢，不用選現金或購物金。
+  const needsPayout = (parseNtd(String(task.content.total ?? "0")) ?? 0) > 0;
   const locked = pending !== null;
 
   const sign = useMutation({
@@ -73,7 +86,7 @@ export function TabletSigning({
           params: { path: { task_id: task.id } },
           body: {
             signature_image_base64: payload.image,
-            chosen_payout: payload.payout,
+            ...(payload.payout ? { chosen_payout: payload.payout } : {}),
             idempotency_key: key.current,
           },
         });
@@ -103,11 +116,11 @@ export function TabletSigning({
       return;
     }
     const image = canvas.current?.toBase64() ?? null;
-    if (!image || !payout) return;
-    sign.mutate({ image, payout });
+    if (!image || (needsPayout && !payout)) return;
+    sign.mutate({ image, payout: needsPayout ? payout : null });
   }
 
-  const canSubmit = !sign.isPending && (locked || (agreed && payout !== null && hasInk));
+  const canSubmit = !sign.isPending && (locked || (agreed && (!needsPayout || payout !== null) && hasInk));
   const seller = typeof task.content.seller_name === "string" ? task.content.seller_name : null;
   const nationalId =
     typeof task.content.national_id_masked === "string" ? task.content.national_id_masked : null;
@@ -148,11 +161,22 @@ export function TabletSigning({
                 <td className="kiosk-items-amount">{amount(item.amount)}</td>
               </tr>
             ))}
+            {consigned.map((item, i) => (
+              <tr key={`c${i}`} className="intake-sign-consign">
+                <td>{item.name}</td>
+                <td className="kiosk-items-amount">
+                  寄售・售價 {amount(item.price)}・抽成 {String(item.pct ?? "—")}%
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
         <p className="intake-customer-total">
           合計 <strong>{amount(task.content.total)}</strong>
         </p>
+        {consigned.length > 0 && (
+          <p className="intake-customer-hint">寄售品現在不付錢，賣出後才分帳（照寄售售價扣抽成）。</p>
+        )}
 
         <div className="kiosk-agreement">
           <h3 className="kiosk-agreement-title">{task.agreement_title ?? "切結書"}</h3>
@@ -168,6 +192,7 @@ export function TabletSigning({
           </label>
         </div>
 
+        {needsPayout && (
         <div className="kiosk-payout">
           <h3 className="kiosk-section-title">
             請選擇收款方式
@@ -201,6 +226,7 @@ export function TabletSigning({
             </button>
           </div>
         </div>
+        )}
 
         <div className="kiosk-signature">
           <h3 className="kiosk-section-title">簽名確認</h3>

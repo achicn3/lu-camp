@@ -33,6 +33,7 @@ export function LineForm({
   busy,
   onSubmit,
   onCancel,
+  quick = false,
 }: {
   initial?: Line;
   rates: PricingRates;
@@ -41,6 +42,8 @@ export function LineForm({
   busy: boolean;
   onSubmit: (fields: LineFields) => void;
   onCancel?: () => void;
+  /** 快速估價的「詳細」：類型、數量、收購價已經在那一列上填，這裡不重複、也不送出。 */
+  quick?: boolean;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
   const [qty, setQty] = useState(String(initial?.qty ?? 1));
@@ -86,6 +89,19 @@ export function LineForm({
       if (value.trim() !== "" && parseNtd(value) === null) return setError(`${label}請填整數元`);
     }
     if (isConsignment && commission.trim() === "") return setError("寄售要填抽成 %");
+    const inferred = grade === "" ? estimate.inferredGrade : grade;
+    if (quick) {
+      onSubmit({
+        short_name: shortName.trim(),
+        reference_price: money(reference),
+        discount_pct: pct,
+        expected_listed_price: money(listed),
+        ...(isConsignment ? { commission_pct: Number(commission) } : {}),
+        ...(type === "BULK_LOT" ? {} : { grade: inferred }),
+        note: note.trim() || null,
+      });
+      return;
+    }
     onSubmit({
       short_name: shortName.trim(),
       qty: count,
@@ -97,7 +113,7 @@ export function LineForm({
       deal_cost: isConsignment ? null : money(dealCost),
       commission_pct: isConsignment ? Number(commission) : null,
       // 成色沒點時依折數推斷（與收購頁同一支 gradeFromDiscount，裁示 10）。
-      grade: grade === "" ? estimate.inferredGrade : grade,
+      grade: inferred,
       note: note.trim() || null,
     });
   }
@@ -112,18 +128,22 @@ export function LineForm({
           <input aria-label="商品簡稱" value={shortName} maxLength={100} placeholder="例如：黑色折疊椅"
             onChange={(e) => setShortName(e.target.value)} />
         </label>
-        <label className="field">
-          <span className="field-label">數量</span>
-          <input aria-label="數量" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="field-label">類型</span>
-          <select aria-label="類型" value={type} onChange={(e) => setType(e.target.value as AcqType)}>
-            {TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </label>
+        {!quick && (
+          <>
+            <label className="field">
+              <span className="field-label">數量</span>
+              <input aria-label="數量" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field-label">類型</span>
+              <select aria-label="類型" value={type} onChange={(e) => setType(e.target.value as AcqType)}>
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         <label className="field">
           <span className="field-label">原價／件</span>
           <input aria-label="原價／件" inputMode="numeric" value={reference}
@@ -163,7 +183,7 @@ export function LineForm({
             <span className="field-label">寄售抽成 %</span>
             <input aria-label="寄售抽成 %" inputMode="numeric" value={commission} onChange={(e) => setCommission(e.target.value)} />
           </label>
-        ) : (
+        ) : quick ? null : (
           <label className="field">
             <span className="field-label">成交收購價／件</span>
             <input aria-label="成交收購價／件" inputMode="numeric" value={dealCost}
@@ -173,6 +193,7 @@ export function LineForm({
             )}
           </label>
         )}
+        {type !== "BULK_LOT" && (
         <label className="field">
           <span className="field-label">成色（選填）</span>
           <select aria-label="成色" value={grade} onChange={(e) => setGrade(e.target.value as Grade | "")}>
@@ -184,6 +205,7 @@ export function LineForm({
             ))}
           </select>
         </label>
+        )}
         <label className="field intake-field-wide">
           <span className="field-label">配件／特殊狀況（選填）</span>
           <input aria-label="配件／特殊狀況" value={note} maxLength={500} placeholder="例如：缺收納袋"
@@ -193,7 +215,7 @@ export function LineForm({
 
       {error !== null && <p role="alert" className="form-error">{error}</p>}
       <div className="intake-line-actions">
-        {!isConsignment && subtotal > 0 && (
+        {!quick && !isConsignment && subtotal > 0 && (
           <span className="hint">小計 <strong className="money">${formatNtd(subtotal)}</strong></span>
         )}
         {onCancel && <button type="button" className="btn-ghost" onClick={onCancel}>取消</button>}

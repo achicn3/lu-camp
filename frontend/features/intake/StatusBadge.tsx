@@ -17,8 +17,8 @@ const STEPS: { key: string; label: string; statuses: Status[] }[] = [
 
 /** 每個狀態的「下一步」提示（店員看了就知道要按什麼）。 */
 export const NEXT_STEP: Record<Status, string> = {
-  PENDING_ESTIMATE: "逐件填收購價（按「下一個」跳下一件）；全部填好按「估完，給客人確認」。",
-  ESTIMATING: "逐件填收購價（按「下一個」跳下一件）；全部填好按「估完，給客人確認」。",
+  PENDING_ESTIMATE: "逐件點類型、填價格（按「下一個」跳下一件）；全部填好按「估完，給客人確認」。",
+  ESTIMATING: "逐件點類型、填價格（按「下一個」跳下一件）；全部填好按「估完，給客人確認」。",
   AWAITING_CONFIRM:
     "叫號請客人過來，按「交給客人勾選」把平板給客人：勾要賣哪幾件、簽切結書、選現金或購物金；交還後按付款。",
   SIGNED: "客人已簽署，等待付款。",

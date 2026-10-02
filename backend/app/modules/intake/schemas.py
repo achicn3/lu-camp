@@ -54,6 +54,7 @@ class IntakeLineFields(BaseModel):
     suggested_cost: NTDInput | None = None
     deal_cost: NTDInput | None = None
     commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
+    bulk_piece_count: Annotated[int, Field(ge=1, le=99999)] | None = None
     grade: Grade | None = None
     category_id: Annotated[int, Field(gt=0)] | None = None
     brand_id: Annotated[int, Field(gt=0)] | None = None
@@ -225,6 +226,7 @@ class IntakeLineRead(BaseModel):
     suggested_cost: NTDOutOpt = None
     deal_cost: NTDOutOpt = None
     commission_pct: int | None = None
+    bulk_piece_count: int | None = None
     grade: Grade | None = None
     category_id: int | None = None
     brand_id: int | None = None

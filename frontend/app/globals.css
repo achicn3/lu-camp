@@ -6352,3 +6352,76 @@ a.btn-ghost {
 .intake-sign-items {
   font-size: 1.25rem;
 }
+
+/* 快速估價：每件直接點類型；輸入框在自己那一行，不被按鈕擠窄（店主 2026-10-02） */
+.intake-quick-main {
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto auto;
+}
+.intake-quick-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.intake-quick-types {
+  display: inline-flex;
+  flex: none;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.intake-quick-types button {
+  min-height: 56px;
+  min-width: 4.25rem;
+  padding: 0 var(--sp-3);
+  font-size: 1.1rem;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.intake-quick-types button:first-child {
+  border-left: none;
+}
+.intake-quick-types button.is-on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.intake-quick-inputs {
+  flex: 1 1 16rem;
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.intake-quick-field {
+  flex: 1 1 11rem;
+  min-width: 9rem;
+}
+.intake-quick-field.is-narrow {
+  flex: 0 1 10rem;
+  min-width: 8.5rem;
+}
+.intake-quick-consign {
+  margin: var(--sp-1) 0 0;
+}
+@media (max-width: 640px) {
+  .intake-quick-main {
+    grid-template-columns: 3.5rem minmax(0, 1fr) auto auto;
+  }
+  .intake-quick-types {
+    width: 100%;
+  }
+  .intake-quick-types button {
+    flex: 1;
+    min-width: 0;
+  }
+  .intake-quick-inputs {
+    flex-wrap: wrap;
+  }
+  .intake-quick-field.is-narrow {
+    flex: 1 1 100%;
+  }
+}

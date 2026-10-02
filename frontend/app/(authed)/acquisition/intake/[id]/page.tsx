@@ -406,7 +406,9 @@ function IntakeBatchContent() {
                   <span className="intake-quick-no">{line.line_no} 號</span>
                   <span>{displayName(line) ?? ""}</span>
                   <span className="money">
-                    {line.acquisition_type === "CONSIGNMENT" ? "寄售" : money(line.deal_cost)}
+                    {line.acquisition_type === "CONSIGNMENT"
+                      ? `寄售 ${money(line.expected_listed_price)}`
+                      : money(line.deal_cost)}
                   </span>
                   <span className={selling ? "intake-confirm-yes" : "intake-confirm-no"}>
                     {selling ? "要賣" : "不賣（已交還）"}

@@ -168,12 +168,10 @@ export function PaymentPanel({
   }
 
   const nothingToPay = payable <= 0;
-  const needsSignature = !nothingToPay && (requireSignature || signed);
+  // 寄售品也要簽切結（店主 2026-10-02）：只賣寄售時一樣照「收購一定要簽名」的設定。
+  const needsSignature = requireSignature || signed;
   const blocked = undecided.length > 0 || batch.accepted_item_count === 0;
-  const canPay =
-    !blocked &&
-    (nothingToPay || signed || !requireSignature) &&
-    !SIGN_IN_PROGRESS.has(status ?? "");
+  const canPay = !blocked && (signed || !requireSignature) && !SIGN_IN_PROGRESS.has(status ?? "");
   const cashNeeded = !nothingToPay && (signed ? signedPayout === "CASH" : payout === "CASH");
 
   return (
@@ -183,10 +181,10 @@ export function PaymentPanel({
         <p className="hint">第 {undecided.join("、")} 列還沒選處置，選好並儲存後才能請客人簽名。</p>
       )}
       {!blocked && batch.accepted_item_count > 0 && nothingToPay && (
-        <p className="hint">這一批只有寄售，現在不付錢、不用簽名；賣出後才分帳。</p>
+        <p className="hint">這一批只有寄售，現在不付錢；賣出後才分帳。客人一樣要簽切結書。</p>
       )}
 
-      {!nothingToPay && !blocked && (
+      {!blocked && (
         <div className="intake-sign">
           {noTask ? (
             <>
@@ -206,7 +204,9 @@ export function PaymentPanel({
           ) : signed ? (
             <>
               <p className="form-success" role="status">
-                ✓ 客人已簽名，選擇拿{PAYOUT_LABEL[signedPayout ?? ""] ?? "—"}。
+                {signedPayout
+                  ? `✓ 客人已簽名，選擇拿${PAYOUT_LABEL[signedPayout] ?? "—"}。`
+                  : "✓ 客人已簽名（只有寄售，不用選收款方式）。"}
               </p>
               <button
                 type="button"
@@ -260,7 +260,7 @@ export function PaymentPanel({
           {error}
         </p>
       )}
-      {canPay && (noTask || signed || nothingToPay) && (
+      {canPay && (noTask || signed) && (
         <button
           type="button"
           className="btn-primary intake-pay-button"

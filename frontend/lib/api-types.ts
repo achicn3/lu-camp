@@ -7206,6 +7206,8 @@ export interface components {
             acquisition_type: components["schemas"]["AcquisitionType"];
             /** Brand Id */
             brand_id?: number | null;
+            /** Bulk Piece Count */
+            bulk_piece_count?: number | null;
             /** Category Id */
             category_id?: number | null;
             /** Commission Pct */
@@ -7241,6 +7243,8 @@ export interface components {
             acquisition_type?: components["schemas"]["AcquisitionType"] | null;
             /** Brand Id */
             brand_id?: number | null;
+            /** Bulk Piece Count */
+            bulk_piece_count?: number | null;
             /** Category Id */
             category_id?: number | null;
             /** Commission Pct */
@@ -7272,6 +7276,8 @@ export interface components {
             acquisition_type: components["schemas"]["AcquisitionType"];
             /** Brand Id */
             brand_id?: number | null;
+            /** Bulk Piece Count */
+            bulk_piece_count?: number | null;
             /** Category Id */
             category_id?: number | null;
             /** Commission Pct */

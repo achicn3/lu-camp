@@ -678,7 +678,8 @@ class SigningService:
         形狀不合法即拒——客人簽的每個欄位都必須是綁定驗證或後端權威補齊的。
         """
         items_raw = content.get("items")
-        if not isinstance(items_raw, list) or not items_raw:
+        consignments = self._canonical_consignments(content.get("consignments"))
+        if not isinstance(items_raw, list) or not (items_raw or consignments):
             raise SignatureContentMismatch("收購切結必須帶品項清單（items）")
         items: list[dict[str, str]] = []
         for it in items_raw:
@@ -693,6 +694,8 @@ class SigningService:
         if total is None:
             raise SignatureContentMismatch("收購切結必須帶有效總額（total，非負整數元）")
         canonical: dict[str, object] = {"items": items, "total": format_ntd(total)}
+        if consignments:
+            canonical["consignments"] = consignments
         lot_raw = content.get("lot")
         if lot_raw is not None:
             if not isinstance(lot_raw, dict):
@@ -705,6 +708,34 @@ class SigningService:
                 raise SignatureContentMismatch("散裝批切結必須帶計價基準（acquisition_basis）")
             canonical["lot"] = {"total_qty": qty, "acquisition_basis": basis}
         return canonical
+
+    @classmethod
+    def _canonical_consignments(cls, raw: object) -> list[dict[str, object]]:
+        """排隊收購切結的寄售品（docs/42 §13）：[{name, listed_price, commission_pct}]。
+
+        寄售現在不付錢、不進合計，但客人簽的要看得到寄售售價與抽成。形狀不合法即拒、多餘鍵剝除。
+        """
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise SignatureContentMismatch("寄售品清單（consignments）必須是陣列")
+        rows: list[dict[str, object]] = []
+        for it in raw:
+            if not isinstance(it, dict):
+                raise SignatureContentMismatch("寄售品必須為物件（名稱、售價、抽成）")
+            name = str(it.get("name") or "").strip()
+            price = cls._whole_ntd(it.get("listed_price"))
+            pct = it.get("commission_pct")
+            if (
+                not name
+                or price is None
+                or not isinstance(pct, int)
+                or isinstance(pct, bool)
+                or not 0 <= pct <= 100
+            ):
+                raise SignatureContentMismatch("寄售品必須帶名稱、寄售售價與抽成 %")
+            rows.append({"name": name, "listed_price": format_ntd(price), "commission_pct": pct})
+        return rows
 
     @staticmethod
     def _whole_ntd(value: object) -> Decimal | None:
@@ -1189,13 +1220,18 @@ class SigningService:
             raise SignatureTaskInvalidated("簽署頁停留太久已逾時，請回上一頁再確認一次")
         if image is None:
             raise InvalidSignatureImage("請先簽名再送出")
-        if chosen_payout not in (PayoutMethod.CASH, PayoutMethod.STORE_CREDIT):
+        # 只賣寄售（合計 0、現在不付錢）不用選撥款，帶了也不記（docs/42 §13）。
+        nothing_to_pay = task.content.get("total") == "0"
+        if not nothing_to_pay and chosen_payout not in (
+            PayoutMethod.CASH,
+            PayoutMethod.STORE_CREDIT,
+        ):
             raise InvalidKioskPayout("請選擇拿現金或購物金")
         await self._seal_signature(
             store_id,
             task,
             image=image,
-            chosen_payout=chosen_payout,
+            chosen_payout=None if nothing_to_pay else chosen_payout,
             fingerprint=fingerprint,
             tap_device_id=None,
         )
