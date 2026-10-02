@@ -30,8 +30,8 @@
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body {
   font-family: var(--hand);
-  font-size: 17px;
-  line-height: 1.55;
+  font-size: 19px;
+  line-height: 1.6;
   min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
 }
@@ -80,8 +80,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 }
 .bar-logo { width: 30px; height: 40px; flex: none; }
 .bar-name { display: grid; line-height: 1.2; }
-.bar-name b { font-weight: 400; font-size: 21px; letter-spacing: 0.08em; }
-.bar-name small { font-family: var(--num); font-style: italic; font-size: 14px; color: var(--gold); letter-spacing: 0.04em; }
+.bar-name b { font-weight: 400; font-size: 25px; letter-spacing: 0.08em; }
+.bar-name small { font-family: var(--num); font-style: italic; font-size: 16px; color: var(--gold); letter-spacing: 0.04em; }
 .bar-table {
   margin-left: auto;
   padding: 3px 10px;
@@ -89,11 +89,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   border-radius: 2px;
   color: var(--gold);
   letter-spacing: 0.1em;
-  font-size: 15px;
+  font-size: 18px;
 }
 
 .page { max-width: 640px; margin: 0 auto; padding: 0 18px 120px; }
-.greeting { margin: 22px 0 8px; font-size: 23px; letter-spacing: 0.04em; text-wrap: balance; }
+.greeting { margin: 22px 0 8px; font-size: 28px; letter-spacing: 0.04em; text-wrap: balance; }
 .message { margin: 18px 0; padding: 12px 14px; border: 1px solid var(--gold); color: var(--ink); }
 
 .tabs { display: flex; gap: 20px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: none; }
@@ -104,7 +104,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   padding: 6px 0;
   min-height: 44px;
   color: var(--soft);
-  font-size: 18px;
+  font-size: 21px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -113,7 +113,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .list { display: grid; }
 .item {
   display: grid;
-  grid-template-columns: 76px 1fr auto;
+  grid-template-columns: 84px 1fr auto;
   gap: 14px;
   align-items: center;
   width: 100%;
@@ -126,21 +126,21 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   cursor: pointer;
 }
 .item-soldout { opacity: 0.5; }
-.item-photo { width: 76px; height: 76px; border-radius: 4px; background: var(--photo); overflow: hidden; }
+.item-photo { width: 84px; height: 84px; border-radius: 4px; background: var(--photo); overflow: hidden; }
 .item-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .item-text { display: grid; gap: 2px; min-width: 0; }
-.item-name { font-size: 19px; letter-spacing: 0.03em; }
-.item-desc { font-size: 15px; color: var(--soft); }
+.item-name { font-size: 23px; letter-spacing: 0.03em; }
+.item-desc { font-size: 17px; color: var(--soft); }
 .item-price, .sheet-price {
   font-family: var(--num);
   font-style: italic;
   font-weight: 600;
   font-variant-numeric: lining-nums tabular-nums;
   color: var(--gold);
-  font-size: 19px;
+  font-size: 22px;
 }
 .price-from { font-family: var(--hand); font-style: normal; font-weight: 400; font-size: 0.8em; }
-.item-badge { font-size: 14px; color: var(--gold); white-space: nowrap; }
+.item-badge { font-size: 17px; color: var(--gold); white-space: nowrap; }
 .item-badge-off { color: var(--soft); }
 
 .footer {
@@ -152,6 +152,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   background: var(--bg);
   border-top: 1px solid var(--gold);
   text-align: center;
+  font-size: 20px;
   letter-spacing: 0.06em;
 }
 
@@ -180,14 +181,14 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   cursor: pointer;
 }
 .sheet-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block; }
-.sheet-title { margin: 16px 0 4px; font-weight: 400; font-size: 26px; letter-spacing: 0.04em; }
+.sheet-title { margin: 16px 0 4px; font-weight: 400; font-size: 31px; letter-spacing: 0.04em; }
 .sheet-desc { margin: 0 0 6px; color: var(--soft); }
-.sheet-price { margin: 0 0 12px; font-size: 22px; }
+.sheet-price { margin: 0 0 12px; font-size: 25px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
 .opt-group { margin: 0; padding: 10px 0; border-top: 1px solid var(--line); line-height: 1.8; }
-.opt-group-name { font-size: 18px; }
-.opt-group-rule { font-size: 14px; color: var(--soft); }
+.opt-group-name { font-size: 21px; }
+.opt-group-rule { font-size: 16px; color: var(--soft); }
 .opt-off { color: var(--soft); }
 .opt-extra { font-family: var(--num); font-style: italic; color: var(--gold); }
 
