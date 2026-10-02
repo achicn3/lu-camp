@@ -93,6 +93,10 @@ class InvalidNationalId(DomainError):
     """national_id 格式/檢核碼不正確（避免手動輸入錯誤）。訊息不含輸入值（PII）。"""
 
 
+class MissingItemGrade(DomainError):
+    """序號品沒有成色。只有排隊收購的待整理商品可以晚點再選（docs/42 §13）。"""
+
+
 class InvalidAcquisitionCategory(DomainError):
     """收購品項的 category_id 不屬於本店（F6 additive 持久化的租戶守衛）。"""
 

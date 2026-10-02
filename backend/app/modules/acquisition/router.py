@@ -43,6 +43,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InvalidAcquisitionCategory,
     InvalidPayoutSplit,
+    MissingItemGrade,
     NoOpenCashSession,
     SignatureContentMismatch,
     SignatureTaskConflict,
@@ -66,6 +67,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     AcquisitionNotFound: status.HTTP_404_NOT_FOUND,
     AcquisitionRequiresNationalId: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidAcquisitionCategory: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    MissingItemGrade: status.HTTP_422_UNPROCESSABLE_CONTENT,
     NoOpenCashSession: status.HTTP_409_CONFLICT,
     # SC-2 撥款：拆分不合法/非會員 → 422；同來源衝突 → 409
     InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,

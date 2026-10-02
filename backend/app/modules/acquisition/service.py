@@ -73,6 +73,7 @@ from app.shared.exceptions import (
     InvalidAcquisitionCategory,
     InvalidCommissionPct,
     InvalidPayoutSplit,
+    MissingItemGrade,
     NoOpenCashSession,
     SignatureContentMismatch,
     SignatureTaskConflict,
@@ -1278,6 +1279,9 @@ class AcquisitionService:
                         f"抽成百分比須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}"
                     )
                 cost = None
+            if item.grade is None and not pending_listing:
+                # 只有排隊收購的待整理商品可以晚點再選成色（docs/42 §13）。
+                raise MissingItemGrade(f"「{item.name}」要選成色")
             created = await self._inventory.create_serialized_item(
                 store_id,
                 item_code=code,

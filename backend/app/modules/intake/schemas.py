@@ -32,6 +32,14 @@ class IntakeBatchCreateRequest(BaseModel):
     contact_id: Annotated[int, Field(gt=0)]
     declared_item_count: Annotated[int, Field(ge=1, le=999)]
     note: Note | None = None
+    # 快速估價（docs/42 §13）：報到時就照件數建好每一件（每件一列）。件數上限 200。
+    prefill_lines: bool | None = None
+
+
+class IntakeCustomerConfirmRequest(BaseModel):
+    """客人在平板上勾選要賣哪幾件（docs/42 §13）：列出「不賣」的那幾列，其餘都賣。"""
+
+    kept_line_ids: Annotated[list[Annotated[int, Field(gt=0)]], Field(max_length=999)]
 
 
 class IntakeLineFields(BaseModel):

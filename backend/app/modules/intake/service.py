@@ -11,7 +11,7 @@ from decimal import Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import format_ntd, round_ntd
+from app.core.money import format_ntd, round_ntd, suggested_listed_price
 from app.core.time import store_date, utc_now
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn, AcquisitionLotIn
 from app.modules.acquisition.service import AcquisitionService
@@ -40,6 +40,7 @@ from app.modules.intake.schemas import (
 )
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.inventory.service import InventoryService
+from app.modules.settings.service import StoreSettingsService
 from app.modules.signing.models import SignatureTask
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
@@ -77,6 +78,7 @@ _EDITABLE = frozenset(
 )
 # 進入「待確認」後就不刪列（改用處置記錄），之後才查得到當時收了什麼、退了什麼。
 _DELETABLE = frozenset({IntakeBatchStatus.PENDING_ESTIMATE, IntakeBatchStatus.ESTIMATING})
+_PREFILL_MAX = 200  # 快速估價一次預先建好的件數上限
 # 估價列的必填欄位：修改時帶 null 不能清掉（其他欄位帶 null＝清掉那個選填值）。
 _REQUIRED_LINE_FIELDS = ("short_name", "qty", "acquisition_type")
 OPEN_STATUSES = [
@@ -85,6 +87,10 @@ OPEN_STATUSES = [
     IntakeBatchStatus.AWAITING_CONFIRM,
     IntakeBatchStatus.SIGNED,
 ]
+
+
+def _numbers(line_nos: list[int]) -> str:
+    return "、".join(str(n) for n in line_nos)
 
 
 def ticket_label(ticket_no: int) -> str:
@@ -141,8 +147,15 @@ class IntakeService:
         actor_user_id: int,
         note: str | None = None,
         now: datetime | None = None,
+        prefill_lines: bool = False,
     ) -> IntakeBatch:
-        """建立批次並配當日號碼（同店同一台北營業日從 1 起）。`now` 僅供測試注入時點。"""
+        """建立批次並配當日號碼（同店同一台北營業日從 1 起）。`now` 僅供測試注入時點。
+
+        `prefill_lines`（快速估價，docs/42 §13）：照件數建好每一件——每件一列、數量 1、買斷、
+        名稱「第 N 件」，店員只要逐件填收購價。
+        """
+        if prefill_lines and declared_item_count > _PREFILL_MAX:
+            raise InvalidIntakeLine(f"一次最多 {_PREFILL_MAX} 件，請分批報到")
         if await self._contacts.get_contact(store_id, contact_id) is None:
             raise IntakeBatchNotFound(f"找不到這位賣方（id={contact_id}）")
         ticket_date = store_date(now if now is not None else utc_now())
@@ -166,6 +179,19 @@ class IntakeService:
                 if not _is_unique_violation(exc) or attempt == _ALLOCATION_RETRIES - 1:
                     raise
                 continue
+            if prefill_lines:
+                for n in range(1, declared_item_count + 1):
+                    self._repo.add(
+                        IntakeLine(
+                            store_id=store_id,
+                            batch_id=batch.id,
+                            line_no=n,
+                            short_name=f"第 {n} 件",
+                            qty=1,
+                            acquisition_type=AcquisitionType.BUYOUT,
+                        )
+                    )
+                await self._session.flush()
             return batch
         raise AssertionError("unreachable")  # pragma: no cover
 
@@ -204,6 +230,10 @@ class IntakeService:
         await self._check_line(store_id, line)
         if line.accepted_qty > line.qty:
             raise InvalidIntakeLine("數量不能少於已接受的件數，請先改處置")
+        batch = await self._batch(store_id, batch_id)
+        if batch.status is IntakeBatchStatus.PENDING_ESTIMATE:
+            # 預先建好的列填了第一個價格＝開始估價（同 add_line 的語意）。
+            batch.status = IntakeBatchStatus.ESTIMATING
         await self._session.flush()
         return line
 
@@ -215,38 +245,81 @@ class IntakeService:
         await self._repo.delete_line(await self._line(store_id, batch_id, line_id))
 
     async def mark_ready(self, store_id: int, batch_id: int) -> IntakeBatch:
-        """估完 → 待確認（等叫號議價）。每一列都要能報價：買斷／散裝有成交價、寄售有抽成。"""
+        """估完 → 待確認（給客人勾選要賣哪幾件，docs/42 §13）。
+
+        每件都要有收購價（寄售要有售價與抽成）。預計售價沒填的依收購價推算（§7.9，進位到 10）；
+        成色可以先不填，上架時再選。估完時每件預設成交，客人沒勾的再改成「客人不賣」。
+        """
         batch = await self._batch(store_id, batch_id, for_update=True)
         if batch.status is IntakeBatchStatus.AWAITING_CONFIRM:
             return batch
-        if batch.status is not IntakeBatchStatus.ESTIMATING:
-            raise IntakeConflict("這一批還沒有估價列，或已經不在估價階段")
+        if batch.status not in _DELETABLE:
+            raise IntakeConflict("這一批已經不在估價階段")
         lines = await self._repo.lines_for(store_id, [batch.id])
-        missing = [
+        if not lines:
+            raise IntakeConflict("這一批還沒有商品，不能估完")
+        no_price = [
             line.line_no
             for line in lines
-            if (
-                line.acquisition_type is AcquisitionType.CONSIGNMENT and line.commission_pct is None
-            )
-            or (line.acquisition_type is not AcquisitionType.CONSIGNMENT and line.deal_cost is None)
+            if line.acquisition_type is not AcquisitionType.CONSIGNMENT and line.deal_cost is None
         ]
-        if missing:
-            numbers = "、".join(str(n) for n in missing)
-            raise IntakeConflict(f"第 {numbers} 列還沒有收購價（寄售要填抽成），不能送去叫號")
-        # 付款當下就建庫存（店主 2026-09-25）：商品要有售價，序號品要有成色。
-        no_price = [line.line_no for line in lines if line.expected_listed_price is None]
         if no_price:
-            numbers = "、".join(str(n) for n in no_price)
-            raise IntakeConflict(f"第 {numbers} 列還沒有預計售價，不能送去叫號")
-        no_grade = [
+            raise IntakeConflict(f"第 {_numbers(no_price)} 件還沒有收購價")
+        consignment = [
             line.line_no
             for line in lines
-            if line.acquisition_type is not AcquisitionType.BULK_LOT and line.grade is None
+            if line.acquisition_type is AcquisitionType.CONSIGNMENT
+            and (line.commission_pct is None or line.expected_listed_price is None)
         ]
-        if no_grade:
-            numbers = "、".join(str(n) for n in no_grade)
-            raise IntakeConflict(f"第 {numbers} 列還沒有成色，不能送去叫號")
+        if consignment:
+            raise IntakeConflict(f"第 {_numbers(consignment)} 件是寄售，要填售價與抽成")
+        pricing = await self._pricing(store_id)
+        for line in lines:
+            if line.expected_listed_price is None:
+                assert line.deal_cost is not None
+                line.expected_listed_price = Decimal(
+                    suggested_listed_price(Decimal(line.deal_cost), *pricing)
+                )
+            if line.disposition is IntakeDisposition.PENDING:
+                line.disposition = IntakeDisposition.ACCEPTED
+                line.accepted_qty = line.qty
+                line.returned_to_customer = False
         batch.status = IntakeBatchStatus.AWAITING_CONFIRM
+        await self._session.flush()
+        return batch
+
+    async def _pricing(self, store_id: int) -> tuple[int, Decimal, Decimal]:
+        """定價計算機的參數（目標毛利、稅率、行動支付手續費取較高者；§7.9）。"""
+        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        fee = max(settings.linepay_fee_pct, settings.taiwanpay_fee_pct)
+        return settings.purchase_default_margin_pct, settings.tax_rate, fee
+
+    async def customer_confirm(
+        self, store_id: int, batch_id: int, *, kept_line_ids: list[int]
+    ) -> IntakeBatch:
+        """客人勾選要賣哪幾件（docs/42 §13）：列出的列＝客人不賣、交還客人，其餘全部成交。
+
+        可以反覆改（客人改主意）；全部都不賣就請店員取消整批。簽署後再改，付款時會要求重簽。
+        """
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        if batch.status is not IntakeBatchStatus.AWAITING_CONFIRM:
+            raise IntakeConflict("要先估完才能讓客人勾選")
+        lines = await self._repo.lines_for(store_id, [batch.id])
+        known = {line.id for line in lines}
+        kept = set(kept_line_ids)
+        if not kept <= known:
+            raise InvalidIntakeLine("勾選的商品不在這一批")
+        if kept == known:
+            raise IntakeConflict("客人每一件都不賣：請店員按「取消整批」")
+        for line in lines:
+            if line.id in kept:
+                line.disposition = IntakeDisposition.CUSTOMER_KEPT
+                line.accepted_qty = 0
+                line.returned_to_customer = True
+            else:
+                line.disposition = IntakeDisposition.ACCEPTED
+                line.accepted_qty = line.qty
+                line.returned_to_customer = False
         await self._session.flush()
         return batch
 
@@ -460,7 +533,8 @@ class IntakeService:
         note = f"排隊收購 A{batch.ticket_no:03d}（{batch.ticket_date.isoformat()}）"
 
         def item(line: IntakeLine, consignment: bool) -> AcquisitionItemIn:
-            assert line.grade is not None and line.expected_listed_price is not None
+            # 成色可以先空著（快速估價），上架時再選（docs/42 §13）。
+            assert line.expected_listed_price is not None
             return AcquisitionItemIn(
                 name=line.short_name,
                 grade=line.grade,
@@ -833,6 +907,9 @@ class IntakeService:
     ) -> IntakeItemRead:
         pending = cls._is_pending(item)
         missing: list[str] = []
+        # 成色排第一：快速估價可以先不選，但上架前一定要選（docs/42 §13）。
+        if pending and isinstance(item, SerializedItem) and item.grade is None:
+            missing.append("成色")
         if pending and item.category_id is None:
             missing.append("分類")
         if pending and item.brand_id is None:

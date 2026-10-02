@@ -154,9 +154,11 @@ async def _pay(
 # ── 估完要有預計售價（建庫存需要售價）────────────────────────────────
 
 
-async def test_ready_requires_expected_listed_price(
+async def test_ready_fills_missing_listed_price_but_consignment_must_have_one(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """2026-10-02 快速估價改版（docs/42 §13）：買斷沒填預計售價，估完時依收購價推算；
+    寄售沒有收購價可推，一定要填（原規則「估完一定要有預計售價」由此取代）。"""
     ctx = await _ctx(db_session, client)
     batch = (
         await client.post(
@@ -167,7 +169,26 @@ async def test_ready_requires_expected_listed_price(
         f"{PATH}/{batch['id']}/lines", json=_line(expected_listed_price=None), headers=ctx.auth
     )
     resp = await client.post(f"{PATH}/{batch['id']}/ready", headers=ctx.auth)
-    assert resp.status_code == 409 and "預計售價" in resp.text
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["lines"][0]["expected_listed_price"] is not None
+
+    other = (
+        await client.post(
+            PATH, json={"contact_id": ctx.contact_id, "declared_item_count": 1}, headers=ctx.auth
+        )
+    ).json()
+    await client.post(
+        f"{PATH}/{other['id']}/lines",
+        json=_line(
+            acquisition_type="CONSIGNMENT",
+            commission_pct=50,
+            deal_cost=None,
+            expected_listed_price=None,
+        ),
+        headers=ctx.auth,
+    )
+    refused = await client.post(f"{PATH}/{other['id']}/ready", headers=ctx.auth)
+    assert refused.status_code == 409 and "售價" in refused.text
 
 
 # ── 付款：成立收購、商品待整理 ──────────────────────────────────────

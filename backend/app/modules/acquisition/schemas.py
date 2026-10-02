@@ -50,7 +50,8 @@ class AcquisitionItemIn(BaseModel):
     """序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 N、S-D（E 走散裝）。"""
 
     name: str = Field(min_length=1)
-    grade: Grade
+    # 只有排隊收購的「待整理」商品可以先不給成色（上架時再選，docs/42 §13）；直接收購一定要有。
+    grade: Grade | None = None
     listed_price: NTDAmount
     brand_id: int | None = None
     product_model_id: int | None = None
@@ -70,7 +71,7 @@ class AcquisitionItemIn(BaseModel):
 
     @field_validator("grade")
     @classmethod
-    def _grade_not_e(cls, v: Grade) -> Grade:
+    def _grade_not_e(cls, v: Grade | None) -> Grade | None:
         if v == Grade.E:
             raise ValueError("E 級為散裝批，請改用 BULK_LOT 的 lot 欄位")
         return v

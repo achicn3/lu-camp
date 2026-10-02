@@ -1116,7 +1116,11 @@ class InventoryRepository:
                 func.min(SerializedItem.listed_price).label("listed_min"),
                 func.max(SerializedItem.listed_price).label("listed_max"),
             )
-            .where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+            # 還沒選成色的待整理商品不算進依成色的行情（docs/42 §13）。
+            .where(
+                *self._price_hint_scope(store_id, brand_id, product_model_id, since),
+                SerializedItem.grade.is_not(None),
+            )
             .group_by(SerializedItem.grade)
         )
         return list((await self._session.execute(stmt)).all())
@@ -1301,7 +1305,7 @@ class InventoryRepository:
         """回傳順序不保證，排序由 service 依成色好壞決定。"""
         stmt = (
             select(SerializedItem.grade)
-            .where(*self._used_scope(store_id, brand_id))
+            .where(*self._used_scope(store_id, brand_id), SerializedItem.grade.is_not(None))
             .distinct()
         )
-        return list((await self._session.scalars(stmt)).all())
+        return [g for g in (await self._session.scalars(stmt)).all() if g is not None]

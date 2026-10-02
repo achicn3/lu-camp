@@ -18,6 +18,7 @@ from app.modules.intake.schemas import (
     IntakeBatchCreateRequest,
     IntakeBatchRead,
     IntakeCancelRequest,
+    IntakeCustomerConfirmRequest,
     IntakeDiscrepancyRead,
     IntakeDiscrepancyRequest,
     IntakeDispositionRequest,
@@ -45,6 +46,7 @@ from app.shared.exceptions import (
     InvalidIntakeLine,
     InvalidPayoutSplit,
     InvalidStateTransition,
+    MissingItemGrade,
     NoOpenCashSession,
     OwnershipValidationError,
     SaleLineInvalid,
@@ -81,6 +83,7 @@ _STATUS: dict[type[DomainError], int] = {
     InvalidStateTransition: status.HTTP_409_CONFLICT,
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     OwnershipValidationError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    MissingItemGrade: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InsufficientStock: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
@@ -124,6 +127,7 @@ async def create_intake_batch(
             declared_item_count=payload.declared_item_count,
             note=payload.note,
             actor_user_id=user.id,
+            prefill_lines=payload.prefill_lines is True,
         )
     return await _read_batch(session, user.store_id, batch.id)
 
@@ -207,6 +211,22 @@ async def mark_intake_ready(batch_id: int, session: SessionDep, user: AuthDep) -
     """估完 → 待確認（等叫號議價）。"""
     async with _write(session):
         await IntakeService(session).mark_ready(user.store_id, batch_id)
+    return await _read_batch(session, user.store_id, batch_id)
+
+
+@router.post(
+    "/{batch_id}/customer-confirm",
+    response_model=IntakeBatchRead,
+    operation_id="confirmIntakeByCustomer",
+)
+async def confirm_intake_by_customer(
+    batch_id: int, payload: IntakeCustomerConfirmRequest, session: SessionDep, user: AuthDep
+) -> IntakeBatchRead:
+    """客人勾選要賣哪幾件（docs/42 §13）：沒勾的＝客人不賣、交還客人，其餘全部成交。"""
+    async with _write(session):
+        await IntakeService(session).customer_confirm(
+            user.store_id, batch_id, kept_line_ids=payload.kept_line_ids
+        )
     return await _read_batch(session, user.store_id, batch_id)
 
 

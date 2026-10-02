@@ -50,6 +50,7 @@ from app.shared.exceptions import (
     InsufficientStock,
     InvalidStateTransition,
     ItemDeleteBlocked,
+    MissingItemGrade,
     OwnershipValidationError,
     SaleLineInvalid,
 )
@@ -262,7 +263,7 @@ class InventoryService:
         *,
         item_code: str,
         name: str,
-        grade: Grade,
+        grade: Grade | None,
         ownership_type: OwnershipType,
         listed_price: Decimal,
         brand_id: int | None = None,
@@ -743,7 +744,7 @@ class InventoryService:
         before: dict[str, object] = {
             "item_code": item.item_code,
             "name": item.name,
-            "grade": item.grade.value,
+            "grade": item.grade.value if item.grade is not None else None,
         }
         await self._delete_guarded(
             self._repo.delete_serialized_item(store_id, item_id),
@@ -1140,6 +1141,9 @@ class InventoryService:
             raise InvalidStateTransition(f"「{item.name}」已經不在待整理（可能收購已作廢）")
         if changes.get("grade") == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
+        if publish and changes.get("grade", item.grade) is None:
+            # 排隊收購快速估價可以先不選成色，但上架（變成可賣）前一定要選（docs/42 §13）。
+            raise MissingItemGrade(f"「{changes.get('name', item.name)}」上架前要選成色")
         await self._validate_item_references(
             store_id,
             brand_id=changes.get("brand_id", item.brand_id),

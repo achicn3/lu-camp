@@ -151,6 +151,11 @@ class SerializedItem(Base, TimestampMixin):
         CheckConstraint(
             "resale_discount_pct BETWEEN 1 AND 100", name="ck_serialized_resale_discount"
         ),
+        # 只有待整理的可以先沒成色（排隊收購快速估價，docs/42 §13）；上架前一定要選。
+        CheckConstraint(
+            "grade IS NOT NULL OR status = 'PENDING_LISTING'",
+            name="ck_serialized_items_grade_required",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -159,7 +164,7 @@ class SerializedItem(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
     product_model_id: Mapped[int | None] = mapped_column(ForeignKey("product_models.id"))
-    grade: Mapped[Grade] = mapped_column(_enum_col(Grade))
+    grade: Mapped[Grade | None] = mapped_column(_enum_col(Grade))
     ownership_type: Mapped[OwnershipType] = mapped_column(_enum_col(OwnershipType))
     acquisition_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     consignor_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))

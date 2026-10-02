@@ -159,7 +159,7 @@ class SerializedItemRead(BaseModel):
     brand_id: int | None
     product_model_id: int | None
     category_id: int | None
-    grade: Grade
+    grade: Grade | None
     ownership_type: OwnershipType
     consignor_id: int | None
     commission_pct: int | None
@@ -199,7 +199,7 @@ class SerializedItemDetailRead(BaseModel):
     name: str
     brand_id: int | None
     category_id: int | None
-    grade: Grade
+    grade: Grade | None
     ownership_type: OwnershipType
     status: SerializedItemStatus
     commission_pct: int | None
@@ -397,7 +397,7 @@ class LatestAcquisitionRead(BaseModel):
     """最近一次收到這款東西時的實際數字；只看區間看不出行情有沒有在動。"""
 
     acquired_at: datetime
-    grade: Grade
+    grade: Grade | None
     cost: NTDAmountOpt = None
     listed_price: NTDAmount
     # 折數（一位小數，如 "6.5"）：收購時點選的優先，否則上架售價 ÷ 參考價 × 10；都沒有為 None。
@@ -465,7 +465,7 @@ class PriceHintRecord(BaseModel):
     """行情提示的一筆紀錄：哪天收的、什麼成色、收多少、上架多少、現在賣掉了沒。"""
 
     acquired_at: datetime
-    grade: Grade
+    grade: Grade | None
     cost: NTDAmountOpt = None
     listed_price: NTDAmount
     status: SerializedItemStatus
