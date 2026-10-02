@@ -19,9 +19,16 @@ TIMEOUT_SECONDS = 20.0
 
 class OnlineOrderClient:
     def __init__(
-        self, base_url: str, secret: str, *, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        base_url: str,
+        secret: str,
+        *,
+        store_id: int,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        # 這組雲端服務的店；其他店不得使用（service 會擋）。
+        self.store_id = store_id
         self._secret = secret
         self._transport = transport
 

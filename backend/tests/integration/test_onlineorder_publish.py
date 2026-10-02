@@ -91,7 +91,9 @@ async def client(db_session: AsyncSession, worker: FakeWorker) -> AsyncGenerator
         yield db_session
 
     def _client() -> OnlineOrderClient:
-        return OnlineOrderClient(BASE, SECRET, transport=httpx.MockTransport(worker.handler))
+        return OnlineOrderClient(
+            BASE, SECRET, store_id=_STORE["id"], transport=httpx.MockTransport(worker.handler)
+        )
 
     app.dependency_overrides[get_session] = _override
     app.dependency_overrides[get_online_order_client] = _client
@@ -101,10 +103,15 @@ async def client(db_session: AsyncSession, worker: FakeWorker) -> AsyncGenerator
     app.dependency_overrides.clear()
 
 
+# 雲端綁定的店：_seed 建好後填入（client fixture 在請求時才讀）。
+_STORE: dict[str, int] = {"id": 0}
+
+
 async def _seed(session: AsyncSession) -> tuple[str, str]:
     store = Store(name="露坑")
     session.add(store)
     await session.flush()
+    _STORE["id"] = store.id
     clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
     mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
     session.add_all([clerk, mgr])
@@ -298,3 +305,77 @@ async def test_rotate_unknown_table_is_404(
     resp = await client.post("/api/v1/online-order/tables/Z9/rotate", headers=_auth(mgr))
     assert resp.status_code == 404
     assert "Z9" in resp.json()["detail"]
+
+
+async def _outsider_call(
+    db_session: AsyncSession, worker: FakeWorker, method: str, path: str
+) -> tuple[httpx.Response, httpx.Response]:
+    """別家店的店長打這組雲端（雲端綁定的是「露坑」）。回 (狀態, 要測的請求)；失敗的請求會回滾
+    整個測試交易，所以只能放最後一步（docs/50 §8）。"""
+    await _seed(db_session)
+    own_store_id = _STORE["id"]
+    other = Store(name="別家店")
+    db_session.add(other)
+    await db_session.flush()
+    outsider = User(store_id=other.id, username="mgr2", password_hash="h", role=UserRole.MANAGER)
+    db_session.add(outsider)
+    await db_session.flush()
+    token = encode_access_token(user_id=outsider.id, role="MANAGER", store_id=other.id)
+    app = create_app()
+
+    async def _override() -> AsyncGenerator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_online_order_client] = lambda: OnlineOrderClient(
+        BASE, SECRET, store_id=own_store_id, transport=httpx.MockTransport(worker.handler)
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        status = await c.get("/api/v1/online-order/status", headers=_auth(token))
+        resp = await c.request(method, path, headers=_auth(token))
+    return status, resp
+
+
+async def test_other_store_cannot_publish_to_this_deployment(
+    db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """Codex 對抗審查 O3：雲端只服務一家店；別家店的店長不能蓋掉它的菜單。"""
+    status, resp = await _outsider_call(db_session, worker, "POST", "/api/v1/online-order/publish")
+    assert status.json()["configured"] is False
+    assert resp.status_code == 409
+    assert worker.calls == []
+
+
+async def test_other_store_cannot_rotate_this_deployments_tables(
+    db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, resp = await _outsider_call(
+        db_session, worker, "POST", "/api/v1/online-order/tables/A1/rotate"
+    )
+    assert resp.status_code == 409
+    assert worker.calls == []
+
+
+async def test_rotation_survives_lost_response(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """Codex 對抗審查 O3：雲端已換碼但回應遺失時，本機也要記住新碼；
+    下次發佈不能把被停用的舊碼推回去（否則被拍走的 QR 又能用）。"""
+    _, mgr = await _seed(db_session)
+    await _menu(client, mgr)
+    await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    old = {t["label"]: t["code"] for t in worker.tables()}["A1"]
+    worker.fail_on = "/integration/tables"  # 雲端出錯／回應遺失
+    resp = await client.post("/api/v1/online-order/tables/A1/rotate", headers=_auth(mgr))
+    assert resp.status_code == 502
+    assert "再按一次" in resp.json()["detail"]
+    status = (await client.get("/api/v1/online-order/status", headers=_auth(mgr))).json()
+    local = {t["label"]: t["code"] for t in status["tables"]}["A1"]
+    assert local != old  # 本機已記住新碼
+    worker.fail_on = None
+    await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    pushed = {t["label"]: t["code"] for t in worker.tables()}["A1"]
+    assert pushed == local
+    assert pushed != old

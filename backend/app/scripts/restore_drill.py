@@ -189,7 +189,8 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(md5(content), ',' ORDER BY store_id, sha256)), '-') "
         "FROM menu_photos",
     ),
-    # 線上點餐桌位碼（docs/44 §4.1）：印在桌上的 QR，弄丟就得全部重印；比對碼本身才知道有沒有還原對。
+    # 線上點餐桌位碼（docs/44 §4.1）：印在桌上的 QR，弄丟就得全部重印；
+    # 比對碼本身才知道有沒有還原對。
     (
         "線上點餐-桌位碼（使用中筆數／碼指紋）",
         "SELECT count(*)::text || '/' || COALESCE(md5(string_agg(code, ',' ORDER BY code)), '-') "

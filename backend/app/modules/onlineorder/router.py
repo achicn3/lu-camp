@@ -29,7 +29,11 @@ def get_online_order_client() -> OnlineOrderClient | None:
     settings = get_settings()
     if not settings.online_order_base_url or not settings.online_order_secret:
         return None
-    return OnlineOrderClient(settings.online_order_base_url, settings.online_order_secret)
+    return OnlineOrderClient(
+        settings.online_order_base_url,
+        settings.online_order_secret,
+        store_id=settings.online_order_store_id,
+    )
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -77,12 +81,22 @@ async def publish_online_menu(
 async def rotate_online_table_code(
     label: str, session: SessionDep, user: ManagerDep, client: ClientDep
 ) -> OnlineTableRead:
+    service = OnlineOrderService(session, client)
     try:
-        link = await OnlineOrderService(session, client).rotate_table(
-            user.store_id, label, actor_user_id=user.id
-        )
+        link = await service.rotate_table(user.store_id, label, actor_user_id=user.id)
     except _Errors as exc:
         await session.rollback()
         raise _http_error(exc) from exc
+    # 先把新碼存進本機再推雲端（Codex 對抗審查 O3）：雲端換了碼但回應遺失時，
+    # 本機也已經記住新碼，之後任何一次推送都帶新碼，被停用的舊碼不會再被推回去。
     await session.commit()
+    try:
+        await service.push_tables(user.store_id)
+    except OnlineOrderPushFailed as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="新的 QR 已產生，但還沒同步到雲端（舊的 QR 暫時還能用）；"
+            "請確認網路後再按一次「發佈到線上點餐」",
+        ) from exc
     return OnlineTableRead.from_link(link)

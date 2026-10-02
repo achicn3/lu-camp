@@ -68,10 +68,17 @@ class OnlineOrderService:
         self._client = client
         self._repo = OnlineOrderRepository(session)
 
-    def _require_client(self) -> OnlineOrderClient:
-        if self._client is None:
-            raise OnlineOrderNotConfigured(_NOT_CONFIGURED)
+    def _client_for(self, store_id: int) -> OnlineOrderClient | None:
+        """這家店有沒有自己的雲端：設定的雲端只服務一家店，別家店一律當作沒設定。"""
+        if self._client is None or self._client.store_id != store_id:
+            return None
         return self._client
+
+    def _require_client(self, store_id: int) -> OnlineOrderClient:
+        client = self._client_for(store_id)
+        if client is None:
+            raise OnlineOrderNotConfigured(_NOT_CONFIGURED)
+        return client
 
     async def _sync_tables(self, store_id: int) -> list[OnlineTableCode]:
         """讓桌位碼跟設定的桌號一致：新桌號給新碼、拿掉的桌號停用。
@@ -128,7 +135,7 @@ class OnlineOrderService:
 
     async def publish(self, store_id: int, *, actor_user_id: int) -> PublishResult:
         """把目前的菜單發佈到線上點餐。雲端失敗丟 `OnlineOrderPushFailed`，本機什麼都不記。"""
-        client = self._require_client()
+        client = self._require_client(store_id)
         published_at = datetime.now(UTC)
         # 版本＝發佈時間（毫秒）；時鐘倒退時仍保證比上一版大。
         version = max(
@@ -177,8 +184,9 @@ class OnlineOrderService:
         return PublishResult(version, published_at, len(items), photos_pushed, font_pushed)
 
     async def rotate_table(self, store_id: int, label: str, *, actor_user_id: int) -> TableLink:
-        """重發某桌的碼：舊碼立刻失效（馬上推到雲端），印好的舊 QR 不能再點餐。"""
-        client = self._require_client()
+        """重發某桌的碼（只改本機）：舊碼停用、產生新碼。呼叫端提交後再 `push_tables` 推到雲端，
+        推送成功的那一刻舊 QR 才真正失效。"""
+        client = self._require_client(store_id)
         tables = await self._sync_tables(store_id)
         target = next((t for t in tables if t.label == label), None)
         if target is None:
@@ -191,8 +199,6 @@ class OnlineOrderService:
             code=_new_code(),
         )
         await self._repo.add_table(fresh)
-        tables = [fresh if t is target else t for t in tables]
-        await self._push_tables(client, tables)
         await write_audit_log(
             self._session,
             store_id=store_id,
@@ -208,12 +214,18 @@ class OnlineOrderService:
             fresh.label, fresh.service_mode, fresh.code, f"{client.base_url}/t/{fresh.code}"
         )
 
+    async def push_tables(self, store_id: int) -> None:
+        """把本機目前使用中的桌位碼整份推到雲端（雲端整份取代）。"""
+        client = self._require_client(store_id)
+        await self._push_tables(client, await self._sync_tables(store_id))
+
     async def status(self, store_id: int) -> OnlineOrderStatus:
         latest = await self._repo.latest_publication(store_id)
-        base = self._client.base_url if self._client is not None else ""
+        client = self._client_for(store_id)
+        base = client.base_url if client is not None else ""
         tables = await self._repo.active_tables(store_id)
         return OnlineOrderStatus(
-            configured=self._client is not None,
+            configured=client is not None,
             last_version=latest.version if latest else None,
             last_published_at=latest.published_at if latest else None,
             tables=[

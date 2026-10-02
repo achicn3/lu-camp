@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     # 密鑰走環境變數、不入 repo；正式與測試用不同密鑰（§8.1 T7）。
     online_order_base_url: str = ""
     online_order_secret: str = ""
+    # 這組雲端屬於哪一家店：雲端只服務一家店，別家店的店長不能發佈或重發（Codex 對抗審查 O3）。
+    online_order_store_id: int = 1
     r2_endpoint: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
