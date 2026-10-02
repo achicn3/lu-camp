@@ -8719,6 +8719,30 @@
         "title": "IntakePayRequest",
         "type": "object"
       },
+      "IntakeReceiptConsignment": {
+        "description": "寄售品（客人一起簽了切結，docs/42 §13）：現在不付錢，印寄售售價與抽成。",
+        "properties": {
+          "commission_pct": {
+            "title": "Commission Pct",
+            "type": "integer"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "listed_price",
+          "commission_pct"
+        ],
+        "title": "IntakeReceiptConsignment",
+        "type": "object"
+      },
       "IntakeReceiptItem": {
         "properties": {
           "amount": {
@@ -8744,6 +8768,14 @@
             "title": "Acquisition Id",
             "type": "integer"
           },
+          "consignments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IntakeReceiptConsignment"
+            },
+            "title": "Consignments",
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/IntakeReceiptItem"
@@ -8752,7 +8784,14 @@
             "type": "array"
           },
           "payout_method": {
-            "$ref": "#/components/schemas/PayoutMethod"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reference": {
             "title": "Reference",

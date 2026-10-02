@@ -35,6 +35,7 @@ from app.modules.intake.schemas import (
     IntakeLineRead,
     IntakeListingRequest,
     IntakeListingResult,
+    IntakeReceiptConsignment,
     IntakeReceiptItem,
     IntakeReceiptRead,
 )
@@ -1092,7 +1093,7 @@ class IntakeService:
             task is None
             or task.status is not SignatureTaskStatus.CONSUMED
             or task.signed_at is None
-            or task.chosen_payout is None
+            or (task.chosen_payout is None and task.content.get("total") != "0")
         ):
             raise IntakeConflict("這一批付款時沒有請客人簽名，沒有收購明細（含簽名）可印")
         acquisition_ids = sorted(
@@ -1111,6 +1112,16 @@ class IntakeService:
             for item in (raw_items if isinstance(raw_items, list) else [])
             if isinstance(item, dict)
         ]
+        raw_consignments = content.get("consignments")
+        consignments = [
+            IntakeReceiptConsignment(
+                name=str(row.get("name", "")),
+                listed_price=str(row.get("listed_price", "")),
+                commission_pct=int(row.get("commission_pct", 0)),
+            )
+            for row in (raw_consignments if isinstance(raw_consignments, list) else [])
+            if isinstance(row, dict)
+        ]
         numbers = "、".join(f"#{n}" for n in acquisition_ids)
         return IntakeReceiptRead(
             store_id=store_id,
@@ -1118,6 +1129,7 @@ class IntakeService:
             reference=f"排隊收購 {ticket_label(batch.ticket_no)}，收購單 {numbers}",
             seller_name=str(content.get("seller_name", "")),
             items=items,
+            consignments=consignments,
             total=str(content.get("total", "")),
             payout_method=task.chosen_payout,
             signed_at=task.signed_at,

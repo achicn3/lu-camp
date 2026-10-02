@@ -311,10 +311,21 @@ class EscposReceiptPrinter:
                 _pad_left_field(item.name, _NAME_W + _UNIT_W)
                 + _pad_right_field(item.amount, _QTY_W + _TOTAL_W)
             )
+        if receipt.consignments:
+            out += emit("寄售（賣出後分帳）")
+            for row in receipt.consignments:
+                out += emit(_pad_left_field(row.name, _WIDTH))
+                out += emit(
+                    _pad_right_field(f"售價 {row.listed_price} 抽成 {row.commission_pct}%", _WIDTH)
+                )
         out += emit(_SEP)
-        out += emit(f"收購總額 {receipt.total}")
-        payout_label = "購物金" if receipt.payout_method == "STORE_CREDIT" else "現金"
-        out += emit(f"撥款方式：{payout_label}")
+        if receipt.payout_method is None:
+            # 只賣寄售（docs/42 §13）：現在不付錢，沒有收購總額與撥款方式。
+            out += emit("撥款方式：寄售，賣出後分帳")
+        else:
+            out += emit(f"收購總額 {receipt.total}")
+            payout_label = "購物金" if receipt.payout_method == "STORE_CREDIT" else "現金"
+            out += emit(f"撥款方式：{payout_label}")
         if receipt.store_credit_granted is not None:
             out += emit(f"撥入購物金 +{receipt.store_credit_granted}")
         if receipt.store_credit_balance_after is not None:

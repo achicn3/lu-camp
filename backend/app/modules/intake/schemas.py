@@ -91,6 +91,14 @@ class IntakeReceiptItem(BaseModel):
     amount: str
 
 
+class IntakeReceiptConsignment(BaseModel):
+    """寄售品（客人一起簽了切結，docs/42 §13）：現在不付錢，印寄售售價與抽成。"""
+
+    name: str
+    listed_price: str
+    commission_pct: int
+
+
 class IntakeReceiptRead(BaseModel):
     """整批的收購明細（含簽名）：印給客人的存證聯，內容就是客人在顧客螢幕上簽的那份。
 
@@ -104,8 +112,10 @@ class IntakeReceiptRead(BaseModel):
     reference: str
     seller_name: str
     items: list[IntakeReceiptItem]
+    consignments: list[IntakeReceiptConsignment] = []
     total: str
-    payout_method: PayoutMethod
+    payout_method: PayoutMethod | None
+    """只賣寄售（合計 0）沒有撥款方式。"""
     signed_at: datetime
     signature_task_id: int
     store_credit_granted: NTDOutOpt = None

@@ -58,9 +58,11 @@ try {
   await page.fill('input[name="password"]', "dev-test-123456");
   await page.click('button:has-text("登入")');
   await page.waitForURL(`${BASE}/`);
-  await page.route("**/print/**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ok"}' }),
-  );
+  const prints = [];
+  await page.route("**/print/**", (route) => {
+    prints.push({ url: route.request().url(), body: route.request().postDataJSON() });
+    return route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ok"}' });
+  });
   await page.goto(`${BASE}/acquisition/intake`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /建立新賣方/ }).click();
   await page.getByLabel("姓名", { exact: true }).fill(SELLER);
@@ -160,6 +162,18 @@ try {
   ).json();
   ok("簽署已用掉、沒有收款方式", task.status === "CONSUMED" && task.chosen_payout === null, `${task.status} ${task.chosen_payout}`);
   await page.screenshot({ path: join(SHOTS, "05-paid.png"), fullPage: true });
+  await page.getByLabel("付款結果").getByRole("button", { name: "列印收購明細（含簽名）" }).click();
+  await page.getByText("收購明細已送出列印").waitFor({ timeout: 8000 });
+  const receipt = prints.find((p) => p.url.endsWith("/print/acquisition"))?.body;
+  ok(
+    "只賣寄售也印得出收購明細：寄售品帶售價與抽成、沒有撥款方式",
+    receipt?.items.length === 0 &&
+      receipt.total === "0" &&
+      receipt.payout_method === null &&
+      receipt.consignments?.[0]?.listed_price === "3000" &&
+      receipt.signature_png_base64.length > 100,
+    JSON.stringify({ ...receipt, signature_png_base64: "…" }),
+  );
 
   ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));
   console.log(`\n${checks - failures.length}/${checks} PASS；截圖 ${SHOTS}`);

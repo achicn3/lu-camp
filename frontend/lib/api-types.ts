@@ -7336,6 +7336,18 @@ export interface components {
             /** @default CASH */
             payout_method: components["schemas"]["PayoutMethod"];
         };
+        /**
+         * IntakeReceiptConsignment
+         * @description 寄售品（客人一起簽了切結，docs/42 §13）：現在不付錢，印寄售售價與抽成。
+         */
+        IntakeReceiptConsignment: {
+            /** Commission Pct */
+            commission_pct: number;
+            /** Listed Price */
+            listed_price: string;
+            /** Name */
+            name: string;
+        };
         /** IntakeReceiptItem */
         IntakeReceiptItem: {
             /** Amount */
@@ -7354,9 +7366,14 @@ export interface components {
         IntakeReceiptRead: {
             /** Acquisition Id */
             acquisition_id: number;
+            /**
+             * Consignments
+             * @default []
+             */
+            consignments: components["schemas"]["IntakeReceiptConsignment"][];
             /** Items */
             items: components["schemas"]["IntakeReceiptItem"][];
-            payout_method: components["schemas"]["PayoutMethod"];
+            payout_method: components["schemas"]["PayoutMethod"] | null;
             /** Reference */
             reference: string;
             /** Seller Name */

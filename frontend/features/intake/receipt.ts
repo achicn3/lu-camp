@@ -30,6 +30,7 @@ export function useIntakeReceiptPrint(batchId: number) {
         reference: data.reference,
         sellerName: data.seller_name,
         items: data.items,
+        consignments: data.consignments ?? [],
         total: data.total,
         payoutMethod: data.payout_method,
         createdAt: data.signed_at,

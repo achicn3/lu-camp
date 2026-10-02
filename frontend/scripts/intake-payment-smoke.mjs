@@ -194,12 +194,15 @@ try {
   await result.getByText("收購明細已送出列印").waitFor({ timeout: 8000 });
   const printed = receiptPrints[0];
   ok(
-    "收購明細：整批品項、總額 550、現金、列出全部收購單號、附簽名",
+    "收購明細：整批品項、寄售帳篷（售價 6000）、總額 550、現金、列出全部收購單號、附簽名",
     receiptPrints.length === 1 &&
       printed.items.length === 3 &&
       printed.items[2].name === "營釘 ×10" &&
       printed.total === "550" &&
       printed.payout_method === "CASH" &&
+      printed.consignments?.length === 1 &&
+      printed.consignments[0].name === "帳篷" &&
+      printed.consignments[0].listed_price === "6000" &&
       /排隊收購 A\d{3}，收購單 #\d+、#\d+、#\d+/.test(printed.reference) &&
       printed.signature_png_base64.length > 100,
     JSON.stringify({ ...printed, signature_png_base64: "…" }),

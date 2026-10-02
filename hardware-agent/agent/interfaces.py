@@ -111,6 +111,14 @@ class AcquisitionReceiptItem(BaseModel):
     amount: str
 
 
+class AcquisitionReceiptConsignment(BaseModel):
+    """收購憑證聯的寄售品行（排隊收購，docs/42 §13）：現在不付錢，印寄售售價與抽成。"""
+
+    name: str = Field(min_length=1)
+    listed_price: str = Field(pattern=r"^\d+$")
+    commission_pct: int = Field(ge=0, le=100)
+
+
 class AcquisitionReceiptPayload(BaseModel):
     """收購憑證聯列印輸入（docs/23 K6）：收購完成後印給賣方的存證聯。
 
@@ -125,8 +133,8 @@ class AcquisitionReceiptPayload(BaseModel):
     items: list[AcquisitionReceiptItem]
     total: str
     # 僅收手持端可選的兩種撥款（Codex 第二輪）：其他值（SPLIT/未知）拒收，不得
-    # 被「非購物金」分支默默印成現金憑證。
-    payout_method: Literal["CASH", "STORE_CREDIT"]
+    # 被「非購物金」分支默默印成現金憑證。只賣寄售（合計 0、有寄售品）時沒有撥款方式（None）。
+    payout_method: Literal["CASH", "STORE_CREDIT"] | None
     created_at: datetime
     signature_png_base64: str = Field(max_length=MAX_SIGNATURE_B64_CHARS)
     # 撥入購物金實發額與撥入後購物金總額（2026-07-11 裁示加印）＝後端撥款分錄燒進帳本的
@@ -139,9 +147,14 @@ class AcquisitionReceiptPayload(BaseModel):
     # 排隊收購（docs/42）一批成立好幾張收購單：有值就印這行（列出全部單號）取代「收購單號 #id」。
     # 選填——舊版前端不帶照舊；舊版代理收到會忽略、只印 acquisition_id。
     reference: str | None = Field(default=None, max_length=120)
+    # 排隊收購的寄售品（docs/42 §13）：客人一起簽了切結，明細也要印；不進收購總額。
+    # 選填——舊版前端不帶就是沒有寄售品。
+    consignments: list[AcquisitionReceiptConsignment] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _credit_facts_match_payout(self) -> AcquisitionReceiptPayload:
+        if self.payout_method is None and (self.total != "0" or not self.consignments):
+            raise ValueError("沒有撥款方式只限只賣寄售（合計 0 且有寄售品）")
         credit = self.payout_method == "STORE_CREDIT"
         for label, value in (
             ("store_credit_granted", self.store_credit_granted),

@@ -297,3 +297,37 @@ async def test_changing_consignment_price_after_signing_requires_resigning(
     resp = await _pay(client, ctx, batch["id"])
     assert resp.status_code == 409
     assert "重新簽署" in resp.json()["detail"]
+
+
+# ── 收購明細（含簽名）也印寄售 ──────────────────────────────────────────
+
+
+async def test_receipt_lists_consignments_with_mixed_batch(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    batch = await _mixed(client, ctx)
+    task = await _confirm_and_start(client, ctx, batch["id"])
+    assert (await _sign(client, ctx, task["id"], "CASH")).status_code == 200
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    resp = await client.get(f"{PATH}/{batch['id']}/receipt", headers=ctx.auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["items"] == [{"name": "營燈", "amount": "300"}]
+    assert body["total"] == "300" and body["payout_method"] == "CASH"
+    assert body["consignments"] == [{"name": "帳篷", "listed_price": "6000", "commission_pct": 50}]
+
+
+async def test_receipt_for_consignment_only_batch(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    batch = await _mixed(client, ctx)
+    task = await _confirm_and_start(client, ctx, batch["id"], kept=[batch["lines"][0]["id"]])
+    assert (await _sign(client, ctx, task["id"], None)).status_code == 200
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    resp = await client.get(f"{PATH}/{batch['id']}/receipt", headers=ctx.auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["items"], body["total"], body["payout_method"]) == ([], "0", None)
+    assert [c["name"] for c in body["consignments"]] == ["帳篷"]

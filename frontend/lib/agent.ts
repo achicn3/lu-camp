@@ -198,7 +198,8 @@ export interface AcquisitionReceiptPrint {
   sellerName: string;
   items: { name: string; amount: string }[];
   total: string;
-  payoutMethod: string; // CASH | STORE_CREDIT
+  /** CASH | STORE_CREDIT；只賣寄售（合計 0）沒有撥款方式＝null。 */
+  payoutMethod: string | null;
   createdAt: string; // ISO
   signaturePngBase64: string;
   storeCreditGranted?: string;
@@ -206,6 +207,8 @@ export interface AcquisitionReceiptPrint {
   storeCreditBalanceAfter?: string;
   /** 排隊收購一批多張收購單時印在單號那行（例：排隊收購 A032，收購單 #43、#45）。 */
   reference?: string | null;
+  /** 排隊收購的寄售品（客人一起簽了切結）：不進總額，印寄售售價與抽成。 */
+  consignments?: { name: string; listed_price: string; commission_pct: number }[];
 }
 
 /** 列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名（存證聯）。 */
@@ -222,6 +225,7 @@ export async function printAcquisitionReceipt(r: AcquisitionReceiptPrint): Promi
     store_credit_granted: r.storeCreditGranted ?? null,
     store_credit_balance_after: r.storeCreditBalanceAfter ?? null,
     reference: r.reference ?? null,
+    consignments: r.consignments ?? [],
   });
 }
 
