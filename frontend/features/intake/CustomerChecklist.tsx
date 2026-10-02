@@ -1,17 +1,22 @@
 "use client";
 // 給客人勾選要賣哪幾件（docs/42 §13；店主 2026-10-02）：店員把平板遞給客人，全螢幕大字、
 // 只顯示號碼、名稱與收購價——不顯示預計售價、成本、毛利等店內資訊。預設照目前勾選（估完時全勾），
-// 沒勾＝客人不賣、交還客人。確認後請客人把平板交還店員，接著簽切結書、付款。
+// 沒勾＝客人不賣、交還客人。按「確認」直接進同一台平板的簽署頁（切結書、現金或購物金、簽名），
+// 簽署頁可以回上一頁重勾；簽完請客人把平板交還店員付款。
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { displayName } from "@/features/intake/QuickEstimate";
+import { TabletSigning } from "@/features/intake/TabletSigning";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type Batch = components["schemas"]["IntakeBatchRead"];
 type Line = components["schemas"]["IntakeLineRead"];
+type Task = components["schemas"]["KioskTaskRead"];
+
+const PAYOUT_LABEL = { CASH: "現金", STORE_CREDIT: "購物金" } as const;
 
 function detail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -37,7 +42,9 @@ export function CustomerChecklist({
   const [checked, setChecked] = useState<Set<number>>(
     () => new Set(batch.lines.filter((l) => l.disposition !== "CUSTOMER_KEPT").map((l) => l.id)),
   );
-  const [done, setDone] = useState(false);
+  // 進了簽署頁就是那份任務；回上一頁清掉，再確認會建新任務（內容照新的勾選）。
+  const [task, setTask] = useState<Task | null>(null);
+  const [signedPayout, setSignedPayout] = useState<keyof typeof PAYOUT_LABEL | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selling = batch.lines.filter((l) => checked.has(l.id));
   const count = selling.reduce((n, l) => n + l.qty, 0);
@@ -51,11 +58,15 @@ export function CustomerChecklist({
         body: { kept_line_ids: kept },
       });
       if (!data) throw new Error(detail(apiErr) ?? "確認失敗，請交給店員");
-      return data;
+      const started = await api.POST("/api/v1/intake-batches/{batch_id}/tablet-signature", {
+        params: { path: { batch_id: batch.id } },
+      });
+      if (!started.data) throw new Error(detail(started.error) ?? "沒辦法開始簽署，請交給店員");
+      return started.data;
     },
-    onSuccess: () => {
+    onSuccess: (started) => {
       setError(null);
-      setDone(true);
+      setTask(started);
       onDone();
     },
     onError: (e: Error) => setError(e.message),
@@ -70,15 +81,29 @@ export function CustomerChecklist({
     });
   }
 
+  if (task !== null && signedPayout === null) {
+    return (
+      <TabletSigning
+        key={task.id}
+        task={task}
+        onBack={() => setTask(null)}
+        onSigned={(payout) => {
+          setSignedPayout(payout);
+          onDone();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="intake-customer" role="dialog" aria-modal="true" aria-labelledby="intake-customer-title">
       <div className="intake-customer-inner">
-        <h2 id="intake-customer-title">請確認要賣的商品</h2>
-        {done ? (
+        <h2 id="intake-customer-title">{signedPayout ? "簽署完成" : "請確認要賣的商品"}</h2>
+        {signedPayout ? (
           <div className="intake-customer-done">
             <p className="intake-customer-big">謝謝！請把平板交還給店員。</p>
             <p>
-              共 {count} 件，收購價合計 <strong>${formatNtd(total)}</strong>
+              共 {count} 件，收購價合計 <strong>${formatNtd(total)}</strong>，選擇拿{PAYOUT_LABEL[signedPayout]}
             </p>
             <button type="button" className="btn-primary intake-customer-btn" onClick={onClose}>
               交還店員
@@ -124,10 +149,7 @@ export function CustomerChecklist({
                 {error}
               </p>
             )}
-            <div className="intake-customer-actions">
-              <button type="button" className="btn-ghost intake-customer-btn" onClick={onClose}>
-                交給店員
-              </button>
+            <div className="intake-customer-actions intake-customer-actions-end">
               <button
                 type="button"
                 className="btn-primary intake-customer-btn"

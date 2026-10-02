@@ -6334,3 +6334,21 @@ a.btn-ghost {
   font-size: 1.8rem;
   margin: var(--sp-5) 0 0;
 }
+
+/* 同一台平板簽切結書（docs/42 §13） */
+.intake-customer-actions-end {
+  justify-content: flex-end;
+}
+.intake-sign-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.intake-customer-back {
+  min-height: 56px;
+  font-size: 1.2rem;
+}
+.intake-sign-items {
+  font-size: 1.25rem;
+}

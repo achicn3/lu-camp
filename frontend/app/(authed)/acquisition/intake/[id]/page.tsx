@@ -1,7 +1,8 @@
 "use client";
 // /acquisition/intake/[id] 一批收件的估價與客人確認（docs/42 §4、§13）。
 // 快速估價：報到時照件數建好每一件，逐件只填收購價（其他在「詳細」裡、可不填），隨時存檔。
-// 估完把平板交給客人勾要賣哪幾件；之後送顧客螢幕簽一次、付款；付款就成立收購、商品進「待整理」。
+// 估完把平板交給客人勾要賣哪幾件，同一台平板接著簽切結書、選現金或購物金；交還店員付款，
+// 付款就成立收購、商品進「待整理」。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -387,20 +388,15 @@ function IntakeBatchContent() {
         <div className="card intake-confirm">
           <div className="intake-confirm-head">
             <h2>客人確認</h2>
-            <button
-              type="button"
-              className="btn-primary intake-confirm-open"
-              disabled={signature.locked}
-              onClick={() => setCustomerMode(true)}
-            >
-              交給客人勾選
+            <button type="button" className="btn-primary intake-confirm-open" onClick={() => setCustomerMode(true)}>
+              {signature.status === "SIGNED" ? "交給客人重新勾選與簽名" : "交給客人勾選"}
             </button>
             <Link href={`/acquisition/intake/${batch.id}?mode=edit`} className="btn-ghost">
               修改收購價
             </Link>
           </div>
-          {signature.locked && (
-            <p className="hint">已送顧客螢幕簽署；要改勾選請先撤回簽名。</p>
+          {signature.status === "SIGNED" && (
+            <p className="hint">客人已簽名。重新勾選會作廢這份簽名，要再簽一次。</p>
           )}
           <ul className="intake-confirm-list">
             {batch.lines.map((line) => {

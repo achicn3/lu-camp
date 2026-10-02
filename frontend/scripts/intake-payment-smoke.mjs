@@ -1,8 +1,8 @@
-// 排隊收購 I3 煙霧（docs/42 §6）：叫號確認（買斷 2＋散裝 10＋寄售 1）→ 送顧客螢幕 → 處置鎖住 →
-// 客人在顧客螢幕看到品項金額（寄售不在內）、選現金、簽名 → 店員按付款 → 開錢櫃、已付款待整理、
+// 排隊收購 I3 煙霧（docs/42 §6、§13）：估完（買斷 2＋散裝 10＋寄售 1）→ 交給客人勾選 → 同一台平板
+// 簽署頁看到品項金額（寄售不在內）、選現金、簽名 → 店員按付款 → 開錢櫃、已付款待整理、
 // 成立三張收購（買斷／寄售／散裝）且商品都是「待整理」→ 列印整批收購明細（含簽名）。
 // 另驗設定頁「收購一定要簽名」開關：打開後叫號確認頁不再出現「不簽名直接付款」（結束時還原）。
-// 需 backend + frontend 已起、已 seed（dev-manager、dev-kiosk）。執行：node scripts/intake-payment-smoke.mjs
+// 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-payment-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,6 @@ const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots",
 const RUN = String(Date.now()).slice(-6);
 const SELLER = `付款賣家-${RUN}`;
 const CHAIR = `黑色折疊椅${RUN}`;
-const INSTALLATION = crypto.randomUUID();
 let originalRequire = null;
 mkdirSync(SHOTS, { recursive: true });
 
@@ -72,32 +71,12 @@ async function drawSignature(page) {
 }
 
 const browser = await chromium.launch();
-const kiosk = await browser.newPage({ viewport: { width: 834, height: 1112 } });
-const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } });
+const page = await browser.newPage({ viewport: { width: 820, height: 1180 } });
 const pageErrors = [];
 page.on("pageerror", (err) => pageErrors.push(String(err)));
 
 try {
   const mgr = await apiLogin("dev-manager");
-
-  // 顧客螢幕：啟用裝置 → 配對到這台櫃檯（櫃檯的安裝碼預先寫進瀏覽器）
-  await kiosk.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
-  await kiosk.fill('input[name="username"]', "dev-kiosk");
-  await kiosk.fill('input[name="password"]', "dev-test-123456");
-  await kiosk.click('button:has-text("啟用裝置")');
-  await kiosk.waitForSelector(".kiosk-pairing-code", { timeout: 8000 });
-  const pairingCode = (await kiosk.textContent(".kiosk-pairing-code"))?.trim();
-  const terminal = await api(mgr, "POST", "/api/v1/customer-display/terminals", {
-    installation_id: INSTALLATION,
-    name: `排隊收購煙霧櫃檯 ${RUN}`,
-  });
-  const paired = await api(mgr, "POST", `/api/v1/customer-display/terminals/${terminal.json.id}/pair`, {
-    pairing_code: pairingCode,
-  });
-  ok("顧客螢幕與櫃檯配對", paired.status === 200, `status=${paired.status}`);
-  await page.addInitScript((id) => {
-    window.localStorage.setItem("lu-camp.pos-terminal.installation", id);
-  }, INSTALLATION);
 
   // 資料準備（估價與叫號畫面由 intake-queue-smoke 驗）：一批三種類型、全部接受
   await api(mgr, "POST", "/api/v1/cash-sessions/open", { opening_float: "1000" });
@@ -172,33 +151,34 @@ try {
   );
   await page.screenshot({ path: join(SHOTS, "01-confirm.png"), fullPage: true });
 
-  await panel.getByRole("button", { name: "送到顧客螢幕給客人簽名" }).click();
-  await panel.getByText(/已送到顧客螢幕|客人正在核對/).waitFor({ timeout: 8000 });
-  ok("送簽後客人勾選鎖住（改了就和客人簽的不一樣）", await page.getByRole("button", { name: "交給客人勾選" }).isDisabled());
-  ok("送簽後不能取消整批", (await page.getByRole("button", { name: "取消整批" }).count()) === 0);
-  await page.screenshot({ path: join(SHOTS, "02-waiting.png"), fullPage: true });
-
-  // 客人：顧客螢幕上核對並簽名（選現金）
-  await kiosk.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 10000 });
-  await kiosk.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
-  const body = await kiosk.textContent(".kiosk-task-body");
-  const signedItems = body.slice(0, body.indexOf("合計金額"));
+  await page.getByRole("button", { name: "交給客人勾選" }).click();
+  const sheet = page.getByRole("dialog", { name: /確認要賣的商品/ });
+  await sheet.getByRole("button", { name: "確認" }).click();
+  const signing = page.getByRole("dialog", { name: "簽署切結書" });
+  await signing.waitFor({ timeout: 8000 });
+  const signedItems = await signing.locator(".intake-sign-items").innerText();
   ok(
-    "顧客螢幕：買斷逐件、散裝帶件數、總額 550、寄售不在內",
+    "簽署頁：買斷逐件、散裝帶件數、總額 550、寄售不在內",
     // 只看收購明細那段：切結書條文（第六條材質老化）本身就提到「帳篷」。
     signedItems.includes("黑色折疊椅") &&
       signedItems.includes("營釘 ×10") &&
-      body.includes("550") &&
+      (await signing.getByRole("button", { name: /現金/ }).innerText()).includes("550") &&
       !signedItems.includes("帳篷"),
+    signedItems.replace(/\n/g, " "),
   );
-  await kiosk.screenshot({ path: join(SHOTS, "03-kiosk.png"), fullPage: true });
-  await kiosk.check('.kiosk-agree-check input[type="checkbox"]');
-  await kiosk.click('button.kiosk-payout-btn:has-text("現金")');
-  await drawSignature(kiosk);
-  await kiosk.click("button.kiosk-submit");
+  await signing.getByRole("checkbox", { name: /同意/ }).check();
+  await signing.getByRole("button", { name: /現金/ }).click();
+  await drawSignature(page);
+  await page.screenshot({ path: join(SHOTS, "03-tablet-signing.png"), fullPage: true });
+  await signing.getByRole("button", { name: "確認並送出" }).click();
+  await page.getByText(/請把平板交還給店員/).waitFor({ timeout: 8000 });
+  await page.screenshot({ path: join(SHOTS, "03b-hand-back.png") });
+  await page.getByRole("button", { name: "交還店員" }).click();
 
   await panel.getByText(/客人已簽名，選擇拿現金/).waitFor({ timeout: 10000 });
   ok("店員畫面：客人已簽名、選現金", true);
+  ok("簽完不能取消整批", (await page.getByRole("button", { name: "取消整批" }).count()) === 0);
+  ok("簽完仍可交給客人重新勾選與簽名", await page.getByRole("button", { name: "交給客人重新勾選與簽名" }).isEnabled());
   await page.screenshot({ path: join(SHOTS, "04-signed.png"), fullPage: true });
 
   await panel.getByRole("button", { name: /付款 \$550（現金）/ }).click();
@@ -238,7 +218,6 @@ try {
   if (failures.length > 0) process.exitCode = 1;
 } catch (error) {
   await page.screenshot({ path: join(SHOTS, "99-failure.png"), fullPage: true });
-  await kiosk.screenshot({ path: join(SHOTS, "99-kiosk.png"), fullPage: true });
   console.log(String(error));
   process.exitCode = 1;
 } finally {

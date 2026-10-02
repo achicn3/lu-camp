@@ -1,11 +1,10 @@
 "use client";
-// 排隊收購的簽署與付款（docs/42 §6）：整批要付錢的商品送顧客螢幕給客人簽一次，簽完按付款；
-// 付款就成立收購、商品進「待整理」。寄售不付錢、不進切結。
+// 排隊收購的簽署與付款（docs/42 §6、§13）：客人在店員平板上勾選後直接簽切結書、選現金或購物金，
+// 交還後按付款；付款就成立收購、商品進「待整理」。寄售不付錢、不進切結。
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { useIntakeReceiptPrint } from "@/features/intake/receipt";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -69,29 +68,6 @@ export function PaymentPanel({
   const signed = status === "SIGNED";
   const noTask = status === null || SIGN_ENDED.has(status);
   const signedPayout = task.data?.chosen_payout ?? null;
-
-  const requestSign = useMutation({
-    mutationFn: async () => {
-      const terminal = (
-        await api.POST("/api/v1/customer-display/terminals", {
-          body: { installation_id: terminalInstallationId(), name: "主要櫃檯" },
-        })
-      ).data;
-      if (!terminal?.paired_kiosk) throw new Error("請先將這台櫃檯電腦與顧客螢幕配對");
-      if (!terminal.paired_kiosk.online) throw new Error("顧客螢幕目前離線，沒辦法請客人簽名");
-      const { data, error: apiErr } = await api.POST(
-        "/api/v1/intake-batches/{batch_id}/signature",
-        { params: { path: { batch_id: batch.id } }, body: { terminal_id: terminal.id } },
-      );
-      if (!data) throw new Error(detail(apiErr) ?? "送出簽名失敗");
-      return data;
-    },
-    onSuccess: () => {
-      setError(null);
-      onChanged();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
 
   const withdraw = useMutation({
     mutationFn: async () => {
@@ -220,18 +196,12 @@ export function PaymentPanel({
                     ? "客人太久沒有簽名，請重新送出。"
                     : status === "FAILED"
                       ? "這份簽名失敗了，請重新送出。"
-                      : "簽名已撤回。改好後請重新送出給客人簽。"}
+                      : "簽名已撤回。改好後請再交給客人勾選並簽名。"}
                 </p>
               )}
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={requestSign.isPending}
-                onClick={() => requestSign.mutate()}
-              >
-                送到顧客螢幕給客人簽名
-              </button>
-              <span className="hint">客人會看到要賣的商品和金額，選拿現金或購物金，再簽名。</span>
+              <span className="hint">
+                按上面的「交給客人勾選」，客人勾完會在同一台平板上簽切結書、選拿現金或購物金。
+              </span>
             </>
           ) : signed ? (
             <>
@@ -250,7 +220,7 @@ export function PaymentPanel({
           ) : (
             <>
               <p role="status">
-                {status === "SIGNING" ? "客人正在核對內容並簽名…" : "已送到顧客螢幕，等客人打開簽名畫面…"}
+                客人還沒簽完（平板上的簽署頁）。客人不簽了可以按「撤回簽名並修改」。
               </p>
               <button
                 type="button"

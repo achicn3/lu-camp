@@ -1,5 +1,6 @@
 // 收購佇列煙霧（docs/42 §13 快速估價）：報到收件（新建賣方、收購 3 件；收件單送收據機印兩份）→ 補印一份
-// → 3 個收購價輸入框、Enter 跳下一件 → 詳細補名稱 → 估完 → 交給客人勾選（3 號不賣）→ 後端處置正確。硬體代理以 Playwright 攔截模擬（真機列印由代理測試守）。
+// → 3 個收購價輸入框、Enter 跳下一件 → 詳細補名稱 → 估完 → 交給客人勾選（3 號不賣）→ 同一台平板簽署
+// （回上一頁重勾、內容跟著換；選購物金）→ 後端處置正確。硬體代理以 Playwright 攔截模擬（真機列印由代理測試守）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-queue-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -23,6 +24,20 @@ function ok(name, pass, detail = "") {
   checks += 1;
   if (!pass) failures.push(name);
   console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `：${detail}` : ""}`);
+}
+
+async function drawSignature(target) {
+  const canvas = target.locator("canvas.kiosk-sign-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("找不到簽名畫布");
+  const pts = [[0.15, 0.5], [0.3, 0.25], [0.45, 0.7], [0.6, 0.3], [0.75, 0.6], [0.85, 0.4]];
+  await target.mouse.move(box.x + box.width * pts[0][0], box.y + box.height * pts[0][1]);
+  await target.mouse.down();
+  for (const [fx, fy] of pts.slice(1)) {
+    await target.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 12 });
+  }
+  await target.mouse.up();
 }
 
 const browser = await chromium.launch();
@@ -126,9 +141,34 @@ try {
   await sheet.getByRole("checkbox", { name: /3 號/ }).uncheck();
   ok("取消勾選後合計即時更新", /共 2 件.*\$800/.test(await sheet.getByRole("status").innerText()));
   await page.screenshot({ path: join(SHOTS, "03-customer-checklist.png") });
+  ok("勾選頁只有「確認」一個按鈕", (await sheet.getByRole("button").allInnerTexts()).join() === "確認");
   await sheet.getByRole("button", { name: "確認" }).click();
-  await sheet.getByText(/請把平板交還給店員/).waitFor();
-  await sheet.getByRole("button", { name: "交還店員" }).click();
+  // ④ 同一台平板直接進簽署頁；回上一頁重勾，再進來是新內容
+  let signing = page.getByRole("dialog", { name: "簽署切結書" });
+  await signing.waitFor();
+  ok("確認後直接進簽署頁、合計 $800", /\$800/.test(await signing.getByRole("button", { name: /現金/ }).innerText()));
+  await signing.getByRole("button", { name: /回上一頁/ }).click();
+  await sheet.waitFor();
+  ok("回上一頁保留剛才的勾選（3 號仍不賣）", !(await sheet.getByRole("checkbox", { name: /3 號/ }).isChecked()));
+  await sheet.getByRole("checkbox", { name: /1 號/ }).uncheck();
+  await sheet.getByRole("button", { name: "確認" }).click();
+  await signing.waitFor();
+  ok("重勾後簽署頁換成新內容（只剩 $500）", /\$500/.test(await signing.getByRole("button", { name: /現金/ }).innerText()));
+  await signing.getByRole("button", { name: /回上一頁/ }).click();
+  await sheet.getByRole("checkbox", { name: /1 號/ }).check();
+  await sheet.getByRole("button", { name: "確認" }).click();
+  await signing.waitFor();
+  ok("再勾回來又是 $800", /\$800/.test(await signing.getByRole("button", { name: /現金/ }).innerText()));
+  await signing.getByRole("checkbox", { name: /同意/ }).check();
+  await signing.getByRole("button", { name: /購物金/ }).click();
+  await drawSignature(page);
+  await page.screenshot({ path: join(SHOTS, "03b-tablet-signing.png") });
+  await signing.getByRole("button", { name: "確認並送出" }).click();
+  await page.getByText(/請把平板交還給店員/).waitFor();
+  ok("簽完請客人交還店員、寫出選了購物金", (await page.locator(".intake-customer-done").innerText()).includes("購物金"));
+  await page.getByRole("button", { name: "交還店員" }).click();
+  await page.getByText(/客人已簽名，選擇拿購物金/).waitFor({ timeout: 8000 });
+  ok("店員畫面：客人已簽名、選購物金", true);
   saved = await batchApi();
   ok(
     "後端：1、2 號要賣，3 號客人不賣且已交還",

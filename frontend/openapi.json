@@ -25134,6 +25134,100 @@
         ]
       }
     },
+    "/api/v1/intake-batches/{batch_id}/tablet-signature": {
+      "get": {
+        "description": "平板重新整理時讀回目前待簽的任務；沒有就 404。",
+        "operationId": "getIntakeTabletSignature",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Intake Tablet Signature",
+        "tags": [
+          "intake"
+        ]
+      },
+      "post": {
+        "description": "客人勾完 → 同一台平板直接簽切結書（docs/42 §13）。依目前勾選建新任務，舊任務作廢。",
+        "operationId": "startIntakeTabletSignature",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Intake Tablet Signature",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
     "/api/v1/invoices/{invoice_id}": {
       "get": {
         "description": "單張發票（店別範圍）。",
@@ -31304,6 +31398,64 @@
           }
         ],
         "summary": "Get Signature Image",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
+    "/api/v1/signing/tasks/{task_id}/tablet-sign": {
+      "post": {
+        "description": "客人在店員平板上簽切結書（docs/42 §13）。只限店內平板建立的任務；顧客螢幕的任務不行。",
+        "operationId": "signOnTablet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KioskSignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sign On Tablet",
         "tags": [
           "signing"
         ]
