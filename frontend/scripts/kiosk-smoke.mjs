@@ -180,6 +180,9 @@ try {
     bodyText.match(/多拿[^，。\n]*/)?.[0] ?? "",
   );
   await page.screenshot({ path: join(SHOTS, "01-task.png"), fullPage: true });
+  // 顧客螢幕全部靜態（店主 2026-10-03）：簽署畫面也不能有任何動畫在跑
+  const signingAnimations = await page.evaluate(() => document.getAnimations().length);
+  ok("簽署畫面沒有任何動畫", signingAnimations === 0, `動畫 ${signingAnimations}`);
   const agreementBody = page.locator(".kiosk-agreement-body");
   const agreementScroll = await agreementBody.evaluate((element) => ({
     clientHeight: element.clientHeight,
@@ -231,6 +234,8 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-done.png"), fullPage: true });
 
   // ── 完成畫面：感謝＋自動回待機倒數，且不再有店員帳密交回鎖（店主裁示）──────
+  const thanksAnimations = await page.evaluate(() => document.getAnimations().length);
+  ok("已完成簽署畫面沒有任何動畫（勾勾是靜態的）", thanksAnimations === 0, `動畫 ${thanksAnimations}`);
   const thanksText = (await page.textContent(".kiosk-thanks-inner"))?.trim() ?? "";
   ok(
     "完成畫面顯示感謝與自動回待機倒數",

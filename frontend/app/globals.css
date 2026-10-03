@@ -3208,24 +3208,7 @@ a.btn-ghost {
   color: var(--ink-soft);
   margin: 0;
 }
-.kiosk-standby-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: kiosk-pulse 1.4s ease-in-out infinite;
-}
-@keyframes kiosk-pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-}
+
 .kiosk-thanks-check {
   width: 96px;
   height: 96px;
@@ -3505,20 +3488,7 @@ a.btn-ghost {
   font-family: var(--font-display);
   font-size: clamp(28px, 4vw, 44px);
 }
-.kiosk-payment-spinner {
-  width: 0.72em;
-  height: 0.72em;
-  flex: 0 0 auto;
-  border: 3px solid rgba(71, 105, 79, 0.22);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: kiosk-payment-spin 0.9s linear infinite;
-}
-@keyframes kiosk-payment-spin {
-  to {
-    transform: rotate(1turn);
-  }
-}
+
 .kiosk-live {
   display: inline-flex;
   align-items: center;
@@ -3556,7 +3526,6 @@ a.btn-ghost {
   border-radius: 12px;
   background: rgba(46, 125, 79, 0.12);
   color: var(--success);
-  animation: kiosk-change-notice 2.8s ease forwards;
 }
 .kiosk-cart-change.is-removed {
   background: rgba(178, 58, 46, 0.1);
@@ -3615,12 +3584,7 @@ a.btn-ghost {
   border-bottom: 1px solid var(--border);
   scroll-snap-align: start;
 }
-.kiosk-cart-item.is-added {
-  animation: kiosk-item-added 1.5s ease-out;
-}
-.kiosk-cart-item.is-updated {
-  animation: kiosk-item-updated 1.5s ease-out;
-}
+
 .kiosk-cart-item h2 {
   margin: 0;
   font-size: clamp(19px, 2.6vw, 28px);
@@ -3731,54 +3695,6 @@ a.btn-ghost {
     flex-direction: row;
     align-items: baseline;
     justify-content: space-between;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .kiosk-standby-dot,
-  .kiosk-payment-spinner,
-  .kiosk-cart-change,
-  .kiosk-cart-item.is-added,
-  .kiosk-cart-item.is-updated {
-    animation: none;
-  }
-  .kiosk-payment-spinner {
-    border-color: var(--accent);
-    border-right-color: transparent;
-  }
-}
-
-@keyframes kiosk-change-notice {
-  0%,
-  68% {
-    max-height: 80px;
-    padding-block: 10px;
-    opacity: 1;
-    transform: translateY(0);
-  }
-  100% {
-    max-height: 0;
-    padding-block: 0;
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-}
-
-@keyframes kiosk-item-added {
-  0% {
-    background: rgba(46, 125, 79, 0.2);
-  }
-  100% {
-    background: transparent;
-  }
-}
-
-@keyframes kiosk-item-updated {
-  0% {
-    background: rgba(178, 142, 63, 0.18);
-  }
-  100% {
-    background: transparent;
   }
 }
 
