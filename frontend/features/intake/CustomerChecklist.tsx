@@ -46,6 +46,8 @@ export function CustomerChecklist({
   const [task, setTask] = useState<Task | null>(null);
   // 簽完選的收款方式；只賣寄售沒得選＝NONE。
   const [signedPayout, setSignedPayout] = useState<keyof typeof PAYOUT_LABEL | "NONE" | null>(null);
+  // 客人全部取消勾選、按了「確認都不賣」（店主 2026-10-03）。
+  const [declined, setDeclined] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selling = batch.lines.filter((l) => checked.has(l.id));
   const count = selling.reduce((n, l) => n + l.qty, 0);
@@ -68,6 +70,22 @@ export function CustomerChecklist({
     onSuccess: (started) => {
       setError(null);
       setTask(started);
+      onDone();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const decline = useMutation({
+    mutationFn: async () => {
+      const { data, error: apiErr } = await api.POST("/api/v1/intake-batches/{batch_id}/customer-decline", {
+        params: { path: { batch_id: batch.id } },
+      });
+      if (!data) throw new Error(detail(apiErr) ?? "送出失敗，請交給店員");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      setDeclined(true);
       onDone();
     },
     onError: (e: Error) => setError(e.message),
@@ -100,7 +118,15 @@ export function CustomerChecklist({
     <div className="intake-customer" role="dialog" aria-modal="true" aria-labelledby="intake-customer-title">
       <div className="intake-customer-inner">
         <h2 id="intake-customer-title">{signedPayout ? "簽署完成" : "請確認要賣的商品"}</h2>
-        {signedPayout ? (
+        {declined ? (
+          <div className="intake-customer-done">
+            <p className="intake-customer-big">好的，這次都不賣。</p>
+            <p>請把平板交還給店員，並取回您的商品。</p>
+            <button type="button" className="btn-primary intake-customer-btn" onClick={onClose}>
+              交還店員
+            </button>
+          </div>
+        ) : signedPayout ? (
           <div className="intake-customer-done">
             <p className="intake-customer-big">謝謝！請把平板交還給店員。</p>
             <p>
@@ -146,21 +172,32 @@ export function CustomerChecklist({
             <p className="intake-customer-total" role="status">
               共 {count} 件，收購價合計 <strong>${formatNtd(total)}</strong>
             </p>
-            {count === 0 && <p className="form-error">都不賣的話請把平板交給店員處理。</p>}
+            {count === 0 && <p className="intake-customer-hint">都沒有打勾＝這次都不賣，商品全部帶回。</p>}
             {error !== null && (
               <p role="alert" className="form-error">
                 {error}
               </p>
             )}
             <div className="intake-customer-actions intake-customer-actions-end">
-              <button
-                type="button"
-                className="btn-primary intake-customer-btn"
-                disabled={count === 0 || confirm.isPending}
-                onClick={() => confirm.mutate()}
-              >
-                {confirm.isPending ? "送出中…" : "確認"}
-              </button>
+              {count === 0 ? (
+                <button
+                  type="button"
+                  className="btn-danger intake-customer-btn"
+                  disabled={decline.isPending}
+                  onClick={() => decline.mutate()}
+                >
+                  {decline.isPending ? "送出中…" : "確認都不賣"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-primary intake-customer-btn"
+                  disabled={confirm.isPending}
+                  onClick={() => confirm.mutate()}
+                >
+                  {confirm.isPending ? "送出中…" : "確認"}
+                </button>
+              )}
             </div>
           </>
         )}

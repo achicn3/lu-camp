@@ -80,6 +80,7 @@ _EDITABLE = frozenset(
 # 進入「待確認」後就不刪列（改用處置記錄），之後才查得到當時收了什麼、退了什麼。
 _DELETABLE = frozenset({IntakeBatchStatus.PENDING_ESTIMATE, IntakeBatchStatus.ESTIMATING})
 _PREFILL_MAX = 200  # 快速估價一次預先建好的件數上限
+CUSTOMER_DECLINED_REASON = "客人確認都不賣"
 # 估價列的必填欄位：修改時帶 null 不能清掉（其他欄位帶 null＝清掉那個選填值）。
 _REQUIRED_LINE_FIELDS = ("short_name", "qty", "acquisition_type")
 OPEN_STATUSES = [
@@ -346,6 +347,41 @@ class IntakeService:
                 line.disposition = IntakeDisposition.ACCEPTED
                 line.accepted_qty = line.qty
                 line.returned_to_customer = False
+        await self._session.flush()
+        return batch
+
+    async def customer_decline(
+        self, store_id: int, batch_id: int, *, actor_user_id: int
+    ) -> IntakeBatch:
+        """客人在平板上全部取消勾選、按「確認都不賣」（店主 2026-10-03）。
+
+        店員不用自己想怎麼處理：每件記「客人不賣、已交還」，整批取消（原因寫明是客人確認的）；
+        之前進過簽署頁留下、還沒用掉的簽署一併作廢。已經取消再按＝不動。
+        """
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        if batch.status is IntakeBatchStatus.CANCELLED:
+            return batch
+        if batch.status is not IntakeBatchStatus.AWAITING_CONFIRM:
+            raise IntakeConflict("要先估完、讓客人勾選後才能確認都不賣")
+        for line in await self._repo.lines_for(store_id, [batch.id]):
+            line.disposition = IntakeDisposition.CUSTOMER_KEPT
+            line.accepted_qty = 0
+            line.returned_to_customer = True
+        if batch.signature_task_id is not None:
+            signing = SigningService(self._session)
+            previous = await signing.get_task(store_id, batch.signature_task_id)
+            if previous is not None and previous.status in _SIGNATURE_LIVE:
+                await signing.cancel_task(
+                    store_id,
+                    previous.id,
+                    actor_user_id=actor_user_id,
+                    reason_code="INTAKE_DECLINED",
+                    reason="客人確認都不賣",
+                )
+        batch.status = IntakeBatchStatus.CANCELLED
+        batch.cancelled_at = utc_now()
+        batch.cancelled_by_user_id = actor_user_id
+        batch.cancel_reason = CUSTOMER_DECLINED_REASON
         await self._session.flush()
         return batch
 

@@ -8,6 +8,7 @@ import { SignatureCanvas, type SignatureCanvasHandle } from "@/app/kiosk/Signatu
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { premiumLabel } from "@/lib/storeCreditPremium";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type Task = components["schemas"]["KioskTaskRead"];
@@ -47,11 +48,12 @@ function consignments(content: Task["content"]): { name: string; price: unknown;
   });
 }
 
-function premium(content: Task["content"]): { amount: unknown; extra: unknown } | null {
+function premium(content: Task["content"]): { amount: unknown; label: string | null } | null {
   const p = content.store_credit_premium;
   if (p === null || typeof p !== "object") return null;
   const rec = p as Record<string, unknown>;
-  return rec.amount === undefined ? null : { amount: rec.amount, extra: rec.extra };
+  if (rec.amount === undefined) return null;
+  return { amount: rec.amount, label: premiumLabel(rec.rate) };
 }
 
 export function TabletSigning({
@@ -221,7 +223,7 @@ export function TabletSigning({
               <span className="kiosk-payout-label">購物金</span>{" "}
               <span className="kiosk-payout-amount">
                 {amount(bonus ? bonus.amount : task.content.total)}
-                {bonus && <span className="kiosk-payout-bonus"> 多得 {amount(bonus.extra)}</span>}
+                {bonus?.label && <span className="kiosk-payout-bonus"> {bonus.label}</span>}
               </span>
             </button>
           </div>

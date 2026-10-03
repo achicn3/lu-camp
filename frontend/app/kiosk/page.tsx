@@ -23,6 +23,7 @@ import type { components } from "@/lib/api-types";
 import { verifyStaffCredentials } from "@/lib/auth";
 import { STORE_DISPLAY_NAME } from "@/lib/branding";
 import { formatTaipeiDateTime } from "@/lib/datetime";
+import { premiumLabel } from "@/lib/storeCreditPremium";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
@@ -1505,9 +1506,11 @@ function TaskScreen({
                 {storeCreditPremium(task.content) ? (
                   <span className="kiosk-payout-amount">
                     {formatAmount(storeCreditPremium(task.content)?.amount)}
-                    <span className="kiosk-payout-bonus">
-                      多得 {formatAmount(storeCreditPremium(task.content)?.extra)}
-                    </span>
+                    {storeCreditPremium(task.content)?.label && (
+                      <span className="kiosk-payout-bonus">
+                        {storeCreditPremium(task.content)?.label}
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="kiosk-payout-amount">{formatAmount(task.content.total)}</span>
@@ -1904,12 +1907,13 @@ function formatAmount(value: unknown): string {
 }
 
 // 後端於 AFFIDAVIT 內容補的購物金溢價預覽（客人選購物金可多得幾%；使用者裁示）。
+// 給客人看寫「多拿幾 % 購物金」，不寫多得多少錢（店主 2026-10-03）。
 function storeCreditPremium(
   content: Record<string, unknown>,
-): { amount: unknown; extra: unknown } | null {
+): { amount: unknown; label: string | null } | null {
   const p = content.store_credit_premium;
   if (p === null || typeof p !== "object") return null;
   const rec = p as Record<string, unknown>;
   if (rec.amount === undefined) return null;
-  return { amount: rec.amount, extra: rec.extra };
+  return { amount: rec.amount, label: premiumLabel(rec.rate) };
 }

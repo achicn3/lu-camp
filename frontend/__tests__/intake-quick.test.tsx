@@ -448,7 +448,11 @@ describe("客人勾選要賣哪幾件", () => {
     expect(within(dialog).getByText("Coleman 營燈")).toBeTruthy();
     expect(within(dialog).getByText(/本人保證出售之物品/)).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: /現金.*\$800/ })).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: /購物金.*\$880.*多得 \$80/ })).toBeTruthy();
+    // 不寫多得多少錢，固定寫多拿幾 %（店主 2026-10-03）
+    const credit = within(dialog).getByRole("button", { name: /購物金/ });
+    expect(credit.textContent).toMatch(/\$880/);
+    expect(credit.textContent).toMatch(/多拿 10% 購物金/);
+    expect(credit.textContent).not.toMatch(/多得|\$80\b/);
   });
 
   it("簽署頁：要同意條款、選收款方式、簽名才能送出；送出後請客人交還店員", async () => {
@@ -562,15 +566,26 @@ describe("客人勾選要賣哪幾件", () => {
     });
   });
 
-  it("全部都不勾：不能確認，提示請店員處理", async () => {
-    stubFetch();
+  it("全部都不勾：出現紅色「確認都不賣」，按了整批記成不賣、請客人交還平板（店主 2026-10-03）", async () => {
+    const calls = stubFetch((url) =>
+      url.endsWith("/customer-decline") ? json({ ...ready, status: "CANCELLED" }) : null,
+    );
+    const onDone = vi.fn();
     const user = userEvent.setup();
-    wrap(<CustomerChecklist batch={ready} onDone={() => {}} onClose={() => {}} />);
+    wrap(<CustomerChecklist batch={ready} onDone={onDone} onClose={() => {}} />);
     const dialog = screen.getByRole("dialog", { name: /確認要賣的商品/ });
     await user.click(within(dialog).getByRole("checkbox", { name: /1 號/ }));
     await user.click(within(dialog).getByRole("checkbox", { name: /2 號/ }));
-    expect((within(dialog).getByRole("button", { name: /確認/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(dialog).getByText(/都不賣.*店員/)).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "確認" })).toBeNull();
+    const decline = within(dialog).getByRole("button", { name: "確認都不賣" });
+    expect(decline.className).toContain("btn-danger");
+    await user.click(decline);
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith("/intake-batches/7/customer-decline") && c.method === "POST")).toBe(true),
+    );
+    expect(await screen.findByText(/這次都不賣/)).toBeTruthy();
+    expect(screen.getByText(/請把平板交還給店員/)).toBeTruthy();
+    expect(onDone).toHaveBeenCalled();
   });
 });
 

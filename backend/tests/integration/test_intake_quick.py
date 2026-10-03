@@ -22,7 +22,8 @@ from app.core.money import suggested_listed_price
 from app.main import create_app
 from app.modules.inventory.models import Category, SerializedItem
 from app.modules.settings.service import StoreSettingsService
-from app.shared.enums import SerializedItemStatus
+from app.modules.signing.models import SignatureTask
+from app.shared.enums import SerializedItemStatus, SignatureTaskStatus
 from tests.integration.test_intake_payment import PATH, Ctx, _ctx, _pay
 
 
@@ -360,3 +361,44 @@ async def test_database_refuses_sold_item_without_grade(
     item.status = SerializedItemStatus.SOLD
     with pytest.raises(IntegrityError):
         await db_session.flush()
+
+
+async def test_customer_declining_everything_cancels_and_returns_all(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """客人在平板上全部取消勾選、按「確認都不賣」（店主 2026-10-03）。
+
+    整批取消、每件記客人不賣且已交還，店員不用自己想怎麼處理。
+    之前進過簽署頁留下的待簽任務一併作廢。
+    """
+    ctx = await _ctx(db_session, client)
+    batch = await _quick_batch(client, ctx, 2)
+    await _price(client, ctx, batch, ["300", "500"])
+    await _ready(client, ctx, batch["id"])
+    await _confirm(client, ctx, batch["id"], [])
+    started = await client.post(f"{PATH}/{batch['id']}/tablet-signature", headers=ctx.auth)
+    assert started.status_code == 200, started.text
+    resp = await client.post(f"{PATH}/{batch['id']}/customer-decline", headers=ctx.auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "CANCELLED"
+    assert body["cancel_reason"] == "客人確認都不賣"
+    assert {(line["disposition"], line["returned_to_customer"]) for line in body["lines"]} == {
+        ("CUSTOMER_KEPT", True)
+    }
+    task = await db_session.get(SignatureTask, started.json()["id"])
+    assert task is not None
+    await db_session.refresh(task)
+    assert task.status is SignatureTaskStatus.VOIDED
+    # 再按一次＝不動
+    again = await client.post(f"{PATH}/{batch['id']}/customer-decline", headers=ctx.auth)
+    assert again.status_code == 200 and again.json()["status"] == "CANCELLED"
+
+
+async def test_customer_decline_only_while_customer_is_choosing(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    batch = await _quick_batch(client, ctx, 1)
+    resp = await client.post(f"{PATH}/{batch['id']}/customer-decline", headers=ctx.auth)
+    assert resp.status_code == 409

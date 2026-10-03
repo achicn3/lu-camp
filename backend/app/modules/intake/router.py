@@ -233,6 +233,22 @@ async def confirm_intake_by_customer(
 
 
 @router.post(
+    "/{batch_id}/customer-decline",
+    response_model=IntakeBatchRead,
+    operation_id="declineIntakeByCustomer",
+)
+async def decline_intake_by_customer(
+    batch_id: int, session: SessionDep, user: AuthDep
+) -> IntakeBatchRead:
+    """客人在平板上確認都不賣（店主 2026-10-03）：整批取消、每件記客人不賣且已交還。"""
+    async with _write(session):
+        await IntakeService(session).customer_decline(
+            user.store_id, batch_id, actor_user_id=user.id
+        )
+    return await _read_batch(session, user.store_id, batch_id)
+
+
+@router.post(
     "/{batch_id}/tablet-signature",
     response_model=KioskTaskRead,
     operation_id="startIntakeTabletSignature",

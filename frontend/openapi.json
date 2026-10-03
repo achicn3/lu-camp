@@ -24540,6 +24540,54 @@
         ]
       }
     },
+    "/api/v1/intake-batches/{batch_id}/customer-decline": {
+      "post": {
+        "description": "客人在平板上確認都不賣（店主 2026-10-03）：整批取消、每件記客人不賣且已交還。",
+        "operationId": "declineIntakeByCustomer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decline Intake By Customer",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
     "/api/v1/intake-batches/{batch_id}/discrepancies": {
       "get": {
         "description": "這一批上架時記過的差異。",
