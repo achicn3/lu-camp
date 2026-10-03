@@ -149,6 +149,64 @@ describe("快速估價", () => {
     expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
   });
 
+  it("「詳細」填原價、按折數：自動帶出建議收購價，存檔一起送出（店主 2026-10-04）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("原價／件"), "1000");
+    await user.click(within(form).getByRole("button", { name: "5折" }));
+    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("256");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+        reference_price: "1000",
+        discount_pct: 50,
+        expected_listed_price: "500",
+        suggested_cost: "256",
+        deal_cost: "256",
+      }),
+    );
+  });
+
+  it("「詳細」：已經填過收購價就不被建議價蓋掉，只顯示建議", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate batch={batch([line(1, { deal_cost: "300" })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />,
+    );
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("原價／件"), "1000");
+    await user.click(within(form).getByRole("button", { name: "5折" }));
+    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("300");
+    expect(within(form).getByText("建議 $256")).toBeTruthy();
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    // 沒在「詳細」改收購價就不送，免得蓋掉列上剛存的價
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
+    expect(calls.find((c) => c.method === "PATCH")?.body).not.toHaveProperty("deal_cost");
+  });
+
+  it("「詳細」：散裝與寄售不出現每件收購價（散裝在外面填整堆總價、寄售填寄售售價）", async () => {
+    stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { acquisition_type: "BULK_LOT" }), line(2, { acquisition_type: "CONSIGNMENT", commission_pct: 50 })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    await user.click(screen.getByRole("button", { name: "2 號 詳細" }));
+    for (const n of [1, 2]) {
+      const form = screen.getByRole("form", { name: new RegExp(`修改第 ${n} 列`) });
+      expect(within(form).queryByLabelText("收購價／件")).toBeNull();
+    }
+  });
+
   it("「詳細」展開現有欄位，存檔帶回所有填的內容", async () => {
     const calls = stubFetch();
     const user = userEvent.setup();

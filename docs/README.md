@@ -52,6 +52,7 @@
 - [MacBook 正式機：升級到 2026-10-01 版（POS 選項點餐＋菜單選項管理）](./52-macbook-upgrade-menu-options.md)
 - [MacBook 正式機：升級到 2026-10-02 版（發票撞號修正）](./53-macbook-upgrade-2026-10-02-einvoice-order-id.md)
 - [MacBook 正式機：升級到 2026-10-04 版（POS 結帳：備註末三碼、總件數、完成頁找零）](./59-macbook-upgrade-pos-checkout-notes.md)
+- [MacBook 正式機：升級到 2026-10-04 版（排隊收購「詳細」按折數帶出收購價）](./60-macbook-upgrade-intake-detail-cost.md)
 
 ## 評估與後續實作
 

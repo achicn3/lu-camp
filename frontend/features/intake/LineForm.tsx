@@ -42,7 +42,8 @@ export function LineForm({
   busy: boolean;
   onSubmit: (fields: LineFields) => void;
   onCancel?: () => void;
-  /** 快速估價的「詳細」：類型、數量、收購價已經在那一列上填，這裡不重複、也不送出。 */
+  /** 快速估價的「詳細」：類型、數量已經在那一列上填，這裡不重複、也不送出；買斷的收購價
+   * 兩邊都能填（「詳細」按折數會帶出建議價），只在這裡真的改了才送，免得蓋掉列上剛存的價。 */
   quick?: boolean;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
@@ -68,6 +69,9 @@ export function LineForm({
 
   const estimate = estimateLine(reference, discount, rates);
   const isConsignment = type === "CONSIGNMENT";
+  // 快速估價的「詳細」也帶收購價（店主 2026-10-04：填原價、按折數就要帶出收購價）——只限買斷：
+  // 散裝在列上填的是整堆總價、寄售填寄售售價，每件建議收購價對不上。
+  const showDealCost = quick ? type === "BUYOUT" : !isConsignment;
 
   function applyPricing(nextReference: string, nextDiscount: string) {
     const next = estimateLine(nextReference, nextDiscount, rates);
@@ -97,6 +101,12 @@ export function LineForm({
         discount_pct: pct,
         expected_listed_price: money(listed),
         ...(isConsignment ? { commission_pct: Number(commission) } : {}),
+        ...(showDealCost
+          ? {
+              suggested_cost: estimate.suggestedCost === null ? null : String(estimate.suggestedCost),
+              ...(dealCost.trim() !== (initial?.deal_cost ?? "") ? { deal_cost: money(dealCost) } : {}),
+            }
+          : {}),
         ...(type === "BULK_LOT" ? {} : { grade: inferred }),
         note: note.trim() || null,
       });
@@ -183,10 +193,10 @@ export function LineForm({
             <span className="field-label">寄售抽成 %</span>
             <input aria-label="寄售抽成 %" inputMode="numeric" value={commission} onChange={(e) => setCommission(e.target.value)} />
           </label>
-        ) : quick ? null : (
+        ) : !showDealCost ? null : (
           <label className="field">
-            <span className="field-label">成交收購價／件</span>
-            <input aria-label="成交收購價／件" inputMode="numeric" value={dealCost}
+            <span className="field-label">{quick ? "收購價／件" : "成交收購價／件"}</span>
+            <input aria-label={quick ? "收購價／件" : "成交收購價／件"} inputMode="numeric" value={dealCost}
               onChange={(e) => { setDealCost(e.target.value); setDealManual(true); }} />
             {estimate.suggestedCost !== null && (
               <span className="intake-field-hint">建議 ${formatNtd(estimate.suggestedCost)}</span>
