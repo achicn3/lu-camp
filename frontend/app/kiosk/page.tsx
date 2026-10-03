@@ -594,7 +594,7 @@ function KioskConsole({
     }
   }
 
-  // 顧客螢幕全部靜態（店主 2026-10-03）：露營動畫、手帳筆跡等在平板／手機上會讓頁面當掉，整個拿掉。
+  // 顧客螢幕拿掉 SVG／GSAP 動畫（店主 2026-10-03）：露營場景、手帳筆跡等在平板／手機上會讓頁面當掉。
   return currentView();
 
   function currentView(): ReactNode {
@@ -723,8 +723,8 @@ function SignedThanksScreen({ remainingSeconds }: { remainingSeconds: number | n
 }
 
 /**
- * 結帳畫面：靜態明細（店主 2026-10-03 取消所有動畫——平板／手機上會讓頁面當掉）。
- * 品項、數量、金額、折扣、會員、付款方式、總額與付款狀態照舊，沒有任何動畫。
+ * 結帳畫面：明細（店主 2026-10-03 拿掉 SVG／GSAP 的手帳、筆跡、印章——平板／手機上會讓頁面當掉）。
+ * 品項、數量、金額、折扣、會員、付款方式、總額與付款狀態照舊；只留 CSS 小效果（付款轉圈、新增／改數量閃一下）。
  */
 function CartScreen({
   cart,
@@ -784,7 +784,12 @@ function CartScreen({
       observer?.disconnect();
     };
   }, [snapshot.items.length, updateScrollState]);
-  // 新增的品項一看就知道（列表裡出現了），不另外跳通知；其他異動（移除、數量、折扣）照常告訴客人。
+  const changesByItem = new Map(
+    changes
+      .filter((change) => change.item_key !== "TOTAL")
+      .map((change) => [change.item_key, change.type]),
+  );
+  // 新增的品項那一行會閃一下（淡綠），不另外跳通知；其他異動（移除、數量、折扣）照常告訴客人。
   const visibleChanges = changes.filter((change) => change.type !== "ADDED");
   const title = completed
     ? "交易已完成"
@@ -798,7 +803,10 @@ function CartScreen({
       <header className="kiosk-cart-header">
         <div>
           <p className="kiosk-eyebrow">顧客購物明細</p>
-          <h1>{title}</h1>
+          <h1>
+            {cart.status === "PROCESSING" && <span className="kiosk-payment-spinner" aria-hidden />}
+            {title}
+          </h1>
         </div>
         {!completed && (
           <span className={streamConnected ? "kiosk-live is-online" : "kiosk-live"}>
@@ -840,7 +848,16 @@ function CartScreen({
         onScroll={updateScrollState}
       >
         {snapshot.items.map((item, index) => (
-          <article className="kiosk-cart-item" key={item.item_key}>
+          <article
+            className={`kiosk-cart-item${
+              changesByItem.get(item.item_key) === "ADDED"
+                ? " is-added"
+                : changesByItem.get(item.item_key) === "QUANTITY_CHANGED"
+                  ? " is-updated"
+                  : ""
+            }`}
+            key={item.item_key}
+          >
             <div>
               <h2>
                 {item.name}
@@ -1043,9 +1060,42 @@ function StaffGate({
   );
 }
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(REDUCED_MOTION_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** 不支援 matchMedia 的舊瀏覽器一律不做動畫（安全預設）。 */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia !== "function" || window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
+/** 待機畫面店名：純 CSS 逐字浮現（只動透明度與位移）；系統設定「減少動態效果」時直接顯示文字。 */
+function StandbyTitle() {
+  const reduceMotion = useSyncExternalStore(
+    subscribeReducedMotion,
+    prefersReducedMotion,
+    () => true, // 伺服器端先輸出靜態文字，瀏覽器接手後才決定要不要動畫
+  );
+  if (reduceMotion) return <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>;
+  return (
+    <h1 className="kiosk-standby-title split-parent" aria-label={STORE_DISPLAY_NAME}>
+      {Array.from(STORE_DISPLAY_NAME).map((ch, i) => (
+        <span key={i} className="split-char" aria-hidden="true" style={{ animationDelay: `${i * 90}ms` }}>
+          {ch}
+        </span>
+      ))}
+    </h1>
+  );
+}
+
 /**
  * 待機畫面（店主 2026-10-03 選 A）：米白底、店徽置中，下面「二手 · 選物 · 露營」與店名；
- * 底部的框只留提示一行。全部靜態，沒有任何動畫。
+ * 底部的框只留提示一行。不用 SVG／GSAP 動畫；店名的逐字浮現是純 CSS。
  */
 function Standby({
   message = "請稍候，店員將為您加入商品。",
@@ -1067,7 +1117,7 @@ function Standby({
           height={582}
         />
         <p className="kiosk-standby-tagline">二手 · 選物 · 露營</p>
-        <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>
+        <StandbyTitle />
         <span className="kiosk-standby-rule" aria-hidden />
       </div>
       <div className="kiosk-standby-card">

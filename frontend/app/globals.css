@@ -3208,7 +3208,6 @@ a.btn-ghost {
   color: var(--ink-soft);
   margin: 0;
 }
-
 .kiosk-thanks-check {
   width: 96px;
   height: 96px;
@@ -3488,7 +3487,20 @@ a.btn-ghost {
   font-family: var(--font-display);
   font-size: clamp(28px, 4vw, 44px);
 }
-
+.kiosk-payment-spinner {
+  width: 0.72em;
+  height: 0.72em;
+  flex: 0 0 auto;
+  border: 3px solid rgba(71, 105, 79, 0.22);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: kiosk-payment-spin 0.9s linear infinite;
+}
+@keyframes kiosk-payment-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
 .kiosk-live {
   display: inline-flex;
   align-items: center;
@@ -3526,6 +3538,7 @@ a.btn-ghost {
   border-radius: 12px;
   background: rgba(46, 125, 79, 0.12);
   color: var(--success);
+  animation: kiosk-change-notice 2.8s ease forwards;
 }
 .kiosk-cart-change.is-removed {
   background: rgba(178, 58, 46, 0.1);
@@ -3584,7 +3597,12 @@ a.btn-ghost {
   border-bottom: 1px solid var(--border);
   scroll-snap-align: start;
 }
-
+.kiosk-cart-item.is-added {
+  animation: kiosk-item-added 1.5s ease-out;
+}
+.kiosk-cart-item.is-updated {
+  animation: kiosk-item-updated 1.5s ease-out;
+}
 .kiosk-cart-item h2 {
   margin: 0;
   font-size: clamp(19px, 2.6vw, 28px);
@@ -3695,6 +3713,53 @@ a.btn-ghost {
     flex-direction: row;
     align-items: baseline;
     justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiosk-payment-spinner,
+  .kiosk-cart-change,
+  .kiosk-cart-item.is-added,
+  .kiosk-cart-item.is-updated {
+    animation: none;
+  }
+  .kiosk-payment-spinner {
+    border-color: var(--accent);
+    border-right-color: transparent;
+  }
+}
+
+@keyframes kiosk-change-notice {
+  0%,
+  68% {
+    max-height: 80px;
+    padding-block: 10px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    max-height: 0;
+    padding-block: 0;
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes kiosk-item-added {
+  0% {
+    background: rgba(46, 125, 79, 0.2);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@keyframes kiosk-item-updated {
+  0% {
+    background: rgba(178, 142, 63, 0.18);
+  }
+  100% {
+    background: transparent;
   }
 }
 
@@ -5853,15 +5918,9 @@ a.btn-ghost {
   }
 }
 
-/* ── 顧客螢幕：全部靜態（店主 2026-10-03）──
-   露營動畫、手帳筆跡等在平板／手機上會讓頁面當掉，整個拿掉；任何殘留的 CSS 動畫與轉場一律關掉，
-   客顯整天開著也不會有東西在背後持續重繪。 */
-.kiosk-root *,
-.kiosk-root *::before,
-.kiosk-root *::after {
-  animation: none !important;
-  transition: none !important;
-}
+/* ── 顧客螢幕：拿掉 SVG／GSAP 做的動畫（店主 2026-10-03）──
+   露營場景、結帳手帳的筆跡與印章在平板／手機上會讓頁面當掉，整個拿掉；
+   只改透明度、位移、底色的小效果（付款轉圈、新增／改數量閃一下、店名逐字浮現）保留，對效能沒負擔。 */
 
 /* 待機（店主選 A）：米白底、店徽置中，下面「二手 · 選物 · 露營」與店名；底部框只留提示一行 */
 .kiosk-standby-static {
@@ -5892,6 +5951,21 @@ a.btn-ghost {
   font-size: clamp(16px, 2.4vw, 22px);
   letter-spacing: 0.3em;
   color: var(--ink-soft);
+}
+.kiosk-standby-title .split-char {
+  display: inline-block;
+  animation: standby-char-rise 0.9s cubic-bezier(0.215, 0.61, 0.355, 1) both;
+}
+@keyframes standby-char-rise {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kiosk-standby-title .split-char {
+    animation: none;
+  }
 }
 .kiosk-standby-static .kiosk-standby-title {
   font-size: clamp(30px, 5.2vw, 52px);

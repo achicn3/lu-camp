@@ -8,12 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import KioskPage from "@/app/kiosk/page";
 import { STORE_DISPLAY_NAME } from "@/lib/branding";
 
-// 顧客螢幕全部靜態（店主 2026-10-03：動畫在平板／手機上會讓頁面當掉）：任何畫面都不能出現
-// 露營動畫、拿筆的手、逐字浮現的店名、手帳動畫狀態。
+// 顧客螢幕拿掉 SVG／GSAP 動畫（店主 2026-10-03：在平板／手機上會讓頁面當掉）：任何畫面都不能出現
+// 露營場景、拿筆的手、手帳動畫狀態、筆劃與印章。CSS 小效果（付款轉圈、閃一下、店名逐字浮現）可以有。
 function expectNoAnimation(): void {
   expect(
     document.querySelector(
-      ".camping-scene, .ledger-hand, .split-char, [data-anim-state], .ledger-strike, .ledger-stars",
+      ".camping-scene, .ledger-hand, [data-anim-state], .ledger-strike, .ledger-stars, .ledger-stamp",
     ),
   ).toBeNull();
 }
