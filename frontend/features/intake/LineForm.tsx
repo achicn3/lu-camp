@@ -42,8 +42,9 @@ export function LineForm({
   busy: boolean;
   onSubmit: (fields: LineFields) => void;
   onCancel?: () => void;
-  /** 快速估價的「詳細」：類型、數量已經在那一列上填，這裡不重複、也不送出；買斷的收購價
-   * 兩邊都能填（「詳細」按折數會帶出建議價），只在這裡真的改了才送，免得蓋掉列上剛存的價。 */
+  /** 快速估價的「詳細」：類型、數量已經在那一列上填，這裡不重複、也不送出。買斷的收購價兩邊都能填
+   * （「詳細」按折數會帶出建議價）；表單開著時列上也可能存了新價或換了類型，所以類型、收購價、
+   * 成色在這裡沒動過就跟著 `initial`（列上最新的值）顯示、也不送，免得用打開時的舊值蓋掉。 */
   quick?: boolean;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
@@ -54,8 +55,10 @@ export function LineForm({
   const [customDiscount, setCustomDiscount] = useState(false);
   const [listed, setListed] = useState(initial?.expected_listed_price ?? "");
   const [dealCost, setDealCost] = useState(initial?.deal_cost ?? "");
-  // 店員動過成交價就不再被建議價覆蓋（裁示 5：可改，建議與成交都留）。
-  const [dealManual, setDealManual] = useState(initial?.deal_cost != null);
+  // 收購價在這張表單裡有沒有動過（按折數帶出建議價，或店員手打）。按折數／改原價一律照新算的
+  // 建議價蓋掉（同收購頁，店主 2026-10-04）；之後店員再手打的就保留到下一次按折數。
+  const [dealTouched, setDealTouched] = useState(false);
+  const [gradeTouched, setGradeTouched] = useState(false);
   const [commission, setCommission] = useState(
     initial?.commission_pct != null
       ? String(initial.commission_pct)
@@ -63,20 +66,37 @@ export function LineForm({
         ? ""
         : String(defaultCommissionPct),
   );
-  const [grade, setGrade] = useState<Grade | "">(initial?.grade ?? "");
+  const [gradeInput, setGrade] = useState<Grade | "">(initial?.grade ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   const [error, setError] = useState<string | null>(null);
 
+  // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
+  const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
+  const shownDealCost = quick && !dealTouched ? (initial?.deal_cost ?? "") : dealCost;
+  const grade: Grade | "" = quick && !gradeTouched ? (initial?.grade ?? "") : gradeInput;
+
   const estimate = estimateLine(reference, discount, rates);
-  const isConsignment = type === "CONSIGNMENT";
+  const isConsignment = effectiveType === "CONSIGNMENT";
   // 快速估價的「詳細」也帶收購價（店主 2026-10-04：填原價、按折數就要帶出收購價）——只限買斷：
   // 散裝在列上填的是整堆總價、寄售填寄售售價，每件建議收購價對不上。
-  const showDealCost = quick ? type === "BUYOUT" : !isConsignment;
+  const showDealCost = quick ? effectiveType === "BUYOUT" : !isConsignment;
 
   function applyPricing(nextReference: string, nextDiscount: string) {
     const next = estimateLine(nextReference, nextDiscount, rates);
     if (next.listed !== null) setListed(String(next.listed));
-    if (!dealManual && next.suggestedCost !== null) setDealCost(String(next.suggestedCost));
+    if (next.suggestedCost !== null) {
+      setDealCost(String(next.suggestedCost));
+      setDealTouched(true);
+    }
+  }
+
+  /** 快速估價要送的成色：在這裡選過就送；沒選過、列上也還沒有成色，才依折數推斷（裁示 10）。
+   * 列上已有成色（例如按了「全新」）就不送，不被推斷值蓋掉。 */
+  function quickGrade(): { grade?: Grade | null } {
+    if (effectiveType === "BULK_LOT") return {};
+    if (gradeTouched) return { grade: grade === "" ? estimate.inferredGrade : grade };
+    if (initial?.grade == null && estimate.inferredGrade !== null) return { grade: estimate.inferredGrade };
+    return {};
   }
 
   function submit(event: FormEvent) {
@@ -89,7 +109,7 @@ export function LineForm({
     if (discount !== "" && pct === null) return setError("折數請填 0.1–10，最多一位小數");
     if (pct !== null && reference.trim() === "") return setError("用折數估價要先填原價");
     const money = (value: string) => (value.trim() === "" ? null : value.trim());
-    for (const [label, value] of [["原價", reference], ["預計售價", listed], ["成交收購價", dealCost]]) {
+    for (const [label, value] of [["原價", reference], ["預計售價", listed], ["成交收購價", shownDealCost]]) {
       if (value.trim() !== "" && parseNtd(value) === null) return setError(`${label}請填整數元`);
     }
     if (isConsignment && commission.trim() === "") return setError("寄售要填抽成 %");
@@ -101,13 +121,11 @@ export function LineForm({
         discount_pct: pct,
         expected_listed_price: money(listed),
         ...(isConsignment ? { commission_pct: Number(commission) } : {}),
-        ...(showDealCost
-          ? {
-              suggested_cost: estimate.suggestedCost === null ? null : String(estimate.suggestedCost),
-              ...(dealCost.trim() !== (initial?.deal_cost ?? "") ? { deal_cost: money(dealCost) } : {}),
-            }
+        ...(showDealCost && estimate.suggestedCost !== null
+          ? { suggested_cost: String(estimate.suggestedCost) }
           : {}),
-        ...(type === "BULK_LOT" ? {} : { grade: inferred }),
+        ...(showDealCost && dealTouched ? { deal_cost: money(dealCost) } : {}),
+        ...quickGrade(),
         note: note.trim() || null,
       });
       return;
@@ -196,17 +214,17 @@ export function LineForm({
         ) : !showDealCost ? null : (
           <label className="field">
             <span className="field-label">{quick ? "收購價／件" : "成交收購價／件"}</span>
-            <input aria-label={quick ? "收購價／件" : "成交收購價／件"} inputMode="numeric" value={dealCost}
-              onChange={(e) => { setDealCost(e.target.value); setDealManual(true); }} />
+            <input aria-label={quick ? "收購價／件" : "成交收購價／件"} inputMode="numeric" value={shownDealCost}
+              onChange={(e) => { setDealCost(e.target.value); setDealTouched(true); }} />
             {estimate.suggestedCost !== null && (
               <span className="intake-field-hint">建議 ${formatNtd(estimate.suggestedCost)}</span>
             )}
           </label>
         )}
-        {type !== "BULK_LOT" && (
+        {effectiveType !== "BULK_LOT" && (
         <label className="field">
           <span className="field-label">成色（選填）</span>
-          <select aria-label="成色" value={grade} onChange={(e) => setGrade(e.target.value as Grade | "")}>
+          <select aria-label="成色" value={grade} onChange={(e) => { setGrade(e.target.value as Grade | ""); setGradeTouched(true); }}>
             <option value="">
               {estimate.inferredGrade ? `依折數：${GRADE_LABEL[estimate.inferredGrade]}` : "不點"}
             </option>

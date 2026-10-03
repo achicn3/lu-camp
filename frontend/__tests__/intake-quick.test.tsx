@@ -170,7 +170,7 @@ describe("快速估價", () => {
     );
   });
 
-  it("「詳細」：已經填過收購價就不被建議價蓋掉，只顯示建議", async () => {
+  it("「詳細」：按折數一律照新折數重算、蓋掉已填的收購價（同收購頁，店主 2026-10-04）", async () => {
     const calls = stubFetch();
     const user = userEvent.setup();
     wrap(
@@ -178,14 +178,110 @@ describe("快速估價", () => {
     );
     await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
     const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("300");
     await user.type(within(form).getByLabelText("原價／件"), "1000");
     await user.click(within(form).getByRole("button", { name: "5折" }));
-    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("300");
-    expect(within(form).getByText("建議 $256")).toBeTruthy();
+    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("256");
     await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
-    // 沒在「詳細」改收購價就不送，免得蓋掉列上剛存的價
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ deal_cost: "256" }),
+    );
+  });
+
+  it("「詳細」：按完折數再手動改收購價，存的是手動的價", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("原價／件"), "1000");
+    await user.click(within(form).getByRole("button", { name: "5折" }));
+    const deal = within(form).getByLabelText("收購價／件") as HTMLInputElement;
+    await user.clear(deal);
+    await user.type(deal, "240");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ deal_cost: "240", suggested_cost: "256" }),
+    );
+  });
+
+  it("「詳細」開著時列上存了收購價：詳細跟著顯示新價；只改名稱存檔不會清掉它（審查 2026-10-04）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (lines: Line[]) => (
+      <QueryClientProvider client={client}>
+        <QuickEstimate batch={batch(lines)} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view([line(1)]));
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    rerender(view([line(1, { deal_cost: "300" })]));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    expect((within(form).getByLabelText("收購價／件") as HTMLInputElement).value).toBe("300");
+    const name = within(form).getByLabelText("商品簡稱");
+    await user.clear(name);
+    await user.type(name, "營燈");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
-    expect(calls.find((c) => c.method === "PATCH")?.body).not.toHaveProperty("deal_cost");
+    const body = calls.find((c) => c.method === "PATCH")?.body;
+    expect(body).toMatchObject({ short_name: "營燈" });
+    expect(body).not.toHaveProperty("deal_cost");
+  });
+
+  it("「詳細」開著時列上改成散裝：不送每件收購價、成色與建議價（不會蓋掉整堆總價）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (lines: Line[]) => (
+      <QueryClientProvider client={client}>
+        <QuickEstimate batch={batch(lines)} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view([line(1, { deal_cost: "300" })]));
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = () => screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form()).getByLabelText("原價／件"), "1000");
+    await user.click(within(form()).getByRole("button", { name: "5折" }));
+    rerender(view([line(1, { acquisition_type: "BULK_LOT", deal_cost: "1000" })]));
+    expect(within(form()).queryByLabelText("收購價／件")).toBeNull();
+    await user.click(within(form()).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
+    const body = calls.find((c) => c.method === "PATCH")?.body;
+    expect(body).not.toHaveProperty("deal_cost");
+    expect(body).not.toHaveProperty("suggested_cost");
+    expect(body).not.toHaveProperty("grade");
+  });
+
+  it("「詳細」：全新的件按折數不會把成色改掉（仍是全新）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1, { grade: "N" })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("原價／件"), "1000");
+    await user.click(within(form).getByRole("button", { name: "5折" }));
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
+    expect(calls.find((c) => c.method === "PATCH")?.body).not.toHaveProperty("grade");
+  });
+
+  it("「詳細」：算不出建議價（設定讀不到）時不送建議價，不會清掉已存的", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { suggested_cost: "256", deal_cost: "256" })])}
+        rates={{ taxRate: null, feeRate: 0, marginPct: null }}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
+    expect(calls.find((c) => c.method === "PATCH")?.body).not.toHaveProperty("suggested_cost");
   });
 
   it("「詳細」：散裝與寄售不出現每件收購價（散裝在外面填整堆總價、寄售填寄售售價）", async () => {

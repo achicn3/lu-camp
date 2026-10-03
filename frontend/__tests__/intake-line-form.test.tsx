@@ -51,17 +51,25 @@ describe("收購佇列估價表單", () => {
     );
   });
 
-  it("店員改過成交價，再換折數也不會被建議價蓋掉", async () => {
-    renderForm();
+  it("換折數一律照新折數重算成交價（同收購頁，店主 2026-10-04）；之後手動改的保留", async () => {
+    const onSubmit = renderForm();
     const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "黑色折疊椅");
     await user.type(screen.getByLabelText("原價／件"), "1000");
     await user.click(screen.getByRole("button", { name: "5折" }));
     const deal = screen.getByLabelText("成交收購價／件") as HTMLInputElement;
     await user.clear(deal);
     await user.type(deal, "200");
     await user.click(screen.getByRole("button", { name: "4折" }));
-    expect(deal.value).toBe("200");
     expect((screen.getByLabelText("預計售價／件") as HTMLInputElement).value).toBe("400");
+    const suggested4 = deal.value;
+    expect(suggested4).not.toBe("200");
+    await user.clear(deal);
+    await user.type(deal, "180");
+    await user.click(screen.getByRole("button", { name: "存這一件" }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ deal_cost: "180", suggested_cost: suggested4 }),
+    );
   });
 
   it("六折以上紅字提醒確認成色", async () => {

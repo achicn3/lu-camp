@@ -1,6 +1,7 @@
 // 排隊收購「詳細」按折數帶出收購價（店主 2026-10-04）。報到 2 件 →
 // 1 號：「詳細」填原價、按 5 折 → 收購價自動帶出建議價 → 存檔 → 列上的收購價跟著更新、後端 deal_cost＝suggested_cost；
-// 2 號：列上先填 300 → 「詳細」填原價、按折數 → 收購價仍是 300、旁邊顯示建議價 → 存檔 → 後端仍是 300。
+// 2 號：列上先填 300 → 「詳細」先顯示 300 → 填原價、按折數 → 照新折數重算、蓋掉 300（同收購頁）→ 存檔 → 後端是建議價；
+// 再開「詳細」手動改成 240 → 存檔 → 後端是 240（手動的保留）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/intake-detail-cost-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -77,25 +78,41 @@ try {
     JSON.stringify([saved.lines[0].deal_cost, saved.lines[0].suggested_cost, saved.lines[0].expected_listed_price]),
   );
 
-  // 2 號：列上已填 300 → 詳細按折數不蓋掉
+  // 2 號：列上已填 300 → 詳細按折數照收購頁重算蓋掉
   await page.getByLabel("2 號 收購價").fill("300");
   await page.getByLabel("2 號 收購價").press("Enter");
   await page.getByText(/已填 2／2 件/).waitFor({ timeout: 8000 });
   await page.getByRole("button", { name: "2 號 詳細" }).click();
   const form2 = page.getByRole("form", { name: /修改第 2 列/ });
+  ok("2 號詳細：先顯示列上的 300", (await form2.getByLabel("收購價／件").inputValue()) === "300");
   await form2.getByLabel("原價／件").fill("1000");
   await form2.getByRole("button", { name: "5折" }).click();
-  ok("2 號詳細：已填的 300 不被建議價蓋掉", (await form2.getByLabel("收購價／件").inputValue()) === "300");
-  ok("2 號詳細：旁邊顯示建議價", await form2.getByText(`建議 $${filled}`).isVisible());
-  await page.screenshot({ path: join(SHOTS, "02-detail-keeps-manual.png") });
+  ok("2 號詳細：按折數照收購頁重算、蓋掉 300", (await form2.getByLabel("收購價／件").inputValue()) === filled);
+  await page.screenshot({ path: join(SHOTS, "02-detail-recomputed.png") });
   await form2.getByRole("button", { name: "儲存詳細" }).click();
-  await page.waitForTimeout(1200);
+  await page.waitForFunction(
+    (value) => document.querySelector('input[aria-label="2 號 收購價"]')?.value === value,
+    filled,
+    { timeout: 8000 },
+  );
   saved = await batchApi();
   ok(
-    "2 號後端：收購價仍是 300、原價與折數有存",
-    saved.lines[1].deal_cost === "300" && saved.lines[1].reference_price === "1000" && saved.lines[1].discount_pct === 50,
+    "2 號後端：收購價＝建議價、原價與折數有存",
+    saved.lines[1].deal_cost === filled && saved.lines[1].reference_price === "1000" && saved.lines[1].discount_pct === 50,
     JSON.stringify([saved.lines[1].deal_cost, saved.lines[1].reference_price, saved.lines[1].discount_pct]),
   );
+  // 詳細裡手動改價：保留手動的
+  const deal2 = form2.getByLabel("收購價／件");
+  if (!(await deal2.isVisible().catch(() => false))) await page.getByRole("button", { name: "2 號 詳細" }).click();
+  await page.getByRole("form", { name: /修改第 2 列/ }).getByLabel("收購價／件").fill("240");
+  await page.getByRole("form", { name: /修改第 2 列/ }).getByRole("button", { name: "儲存詳細" }).click();
+  await page.waitForFunction(
+    () => document.querySelector('input[aria-label="2 號 收購價"]')?.value === "240",
+    null,
+    { timeout: 8000 },
+  );
+  saved = await batchApi();
+  ok("2 號後端：詳細手動改的 240 有存", saved.lines[1].deal_cost === "240", saved.lines[1].deal_cost);
   await page.screenshot({ path: join(SHOTS, "03-saved.png"), fullPage: true });
   ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));
 } catch (error) {
