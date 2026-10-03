@@ -19,27 +19,42 @@ LOG="$(mktemp)"
 # 只排除最上層的 dev/cache/lock（Next 清 .next 時保留的那三個），不誤傷名為 dev 的路由。
 SYNC_EXCLUDES=(--exclude /dev --exclude /cache --exclude /lock)
 BACKUP_OK=0
+RESTORE_MSG=""
+
+# 上次還原途中失敗留下的備份，可能是唯一完好的一份：不要刪掉它，先人工確認。
+if [[ -e "$BACKUP" ]]; then
+  echo "中止：frontend/$BACKUP 還在（上次重建沒有正常結束），請先確認前端狀態再處理這個備份" >&2
+  exit 1
+fi
 
 restore() {
   # 只有備份完整（先抄到暫存、成功才改名）才還原；否則 .next 根本還沒被動過，不能拿殘缺的備份蓋回去。
   if [[ "$BACKUP_OK" == 1 && -d "$BACKUP" ]]; then
-    rsync -a --delete "${SYNC_EXCLUDES[@]}" "$BACKUP/" "$DIST/"
-    rm -rf "$BACKUP"
-    echo "已還原成上一版前端，未重啟 frontend（目前的前端照常可用）" >&2
+    if rsync -a --delete "${SYNC_EXCLUDES[@]}" "$BACKUP/" "$DIST/"; then
+      rm -rf "$BACKUP"
+      RESTORE_MSG="已還原成上一版前端，未重啟 frontend（目前的前端照常可用）"
+    else
+      RESTORE_MSG="還原失敗：上一版前端備份留在 frontend/$BACKUP，請勿重啟 frontend，把這段訊息給店主看"
+    fi
   fi
 }
 fail() {
+  # 先還原、最後才印訊息：遠端斷線時 stderr 可能已經寫不進去（寫入失敗或 SIGPIPE 會讓 shell
+  # 在還原之前就結束，留下半套 .next）。這裡關掉 errexit、忽略 SIGPIPE，確保還原一定跑完。
   trap - ERR INT TERM HUP
-  echo "中止：$1" >&2
+  trap '' PIPE
+  set +e
   restore
   rm -rf "$BACKUP_TMP" "$LOG"
+  echo "中止：$1" >&2
+  [[ -n "$RESTORE_MSG" ]] && echo "$RESTORE_MSG" >&2
   exit 1
 }
 trap 'fail "執行失敗（見上方輸出）"' ERR
 # build 要跑好幾分鐘且一開始就清掉 .next：Ctrl-C、遠端斷線也要還原，不能留半套。
 trap 'fail "被中斷"' INT TERM HUP
 
-rm -rf "$BACKUP" "$BACKUP_TMP"
+rm -rf "$BACKUP_TMP"
 if [[ -d "$DIST" ]]; then
   rsync -a "${SYNC_EXCLUDES[@]}" "$DIST/" "$BACKUP_TMP/"
   mv "$BACKUP_TMP" "$BACKUP"
