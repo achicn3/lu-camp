@@ -14,6 +14,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+
 // 前端與 API 必須同站（same-site），否則 SameSite=strict 的裝置 cookie 根本不會被送出，
 // 測出來的「被登出」是煙霧環境自己造成的假象。正式機兩者同 host、只差 port＝同站，
 // 所以這裡預設也讓 BASE 跟著 API 的 host 走。
@@ -94,6 +96,8 @@ try {
   // 否則 POS 畫面看到的仍是「尚未配對」。
   const posContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const pos = await posContext.newPage();
+  // 今天還沒做開店前檢查時，登入會被導去檢查頁；這支只測配對，略過它（同其他 POS 煙霧）。
+  await skipOpeningCheckRedirect(pos);
   await pos.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await pos.fill('input[name="username"]', MGR_USER);
   await pos.fill('input[name="password"]', MGR_PASS);
@@ -126,9 +130,7 @@ try {
 
   if (hasUnpairEntry) {
     await unpairButton.first().click();
-    // 標籤必須是螢幕閱讀器專用，不能變成畫面上的一般文字（.sr-only 曾經沒定義）。
-    const reasonInput = pos.locator('input[placeholder*="解除配對原因"]');
-    await reasonInput.fill("煙霧測試換裝置");
+    // 解除配對不用填原因（之前拿掉了原因欄），確認前仍可取消。
     await pos.screenshot({ path: join(SHOTS, "04-pos-unpair-form.png"), fullPage: true });
     await pos.click('button:has-text("確認解除配對")');
     await pos.waitForSelector('strong:has-text("顧客螢幕尚未配對")', { timeout: 8000 });

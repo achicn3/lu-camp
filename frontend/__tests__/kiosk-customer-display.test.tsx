@@ -8,14 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import KioskPage from "@/app/kiosk/page";
 import { STORE_DISPLAY_NAME } from "@/lib/branding";
 
-// 露營動畫本身在真瀏覽器由 kiosk-camping-scene-smoke 驗；這裡只記下每個畫面交給它的模式，
-// 並確認換畫面時它沒有被重掛（重掛＝動畫從頭播，結帳就接不上當下的畫面）。
-vi.mock("@/features/customer-display/CampingScene", () => ({
-  CampingScene: ({ mode }: { mode: string }) => <div data-testid="camping-scene" data-mode={mode} />,
-}));
-
-function sceneMode(): string | null {
-  return screen.getByTestId("camping-scene").getAttribute("data-mode");
+// 顧客螢幕全部靜態（店主 2026-10-03：動畫在平板／手機上會讓頁面當掉）：任何畫面都不能出現
+// 露營動畫、拿筆的手、逐字浮現的店名、手帳動畫狀態。
+function expectNoAnimation(): void {
+  expect(
+    document.querySelector(
+      ".camping-scene, .ledger-hand, .split-char, [data-anim-state], .ledger-strike, .ledger-stars",
+    ),
+  ).toBeNull();
 }
 
 vi.mock("@/app/kiosk/SignatureCanvas", async () => {
@@ -245,7 +245,7 @@ describe("/kiosk 客顯", () => {
       "折扣已重新計算，應付總額已更新",
     );
     // 開始結帳：動畫不關掉，鏡頭帶到營桌（cart 模式）
-    expect(sceneMode()).toBe("cart");
+    expectNoAnimation();
     expect(screen.getByText("原價 $140")).toBeTruthy();
     expect(screen.getByText("優惠價 $120")).toBeTruthy();
     expect(screen.getByText("折扣 $40")).toBeTruthy();
@@ -479,14 +479,12 @@ describe("/kiosk 客顯", () => {
 
       await user.click(await screen.findByRole("button", { name: "模擬簽名" }));
       // 簽署內容要完整閱讀：動畫暫停藏起來
-      expect(sceneMode()).toBe("hidden");
-      const scene = screen.getByTestId("camping-scene");
+      expectNoAnimation();
       await user.click(screen.getByRole("button", { name: "確認並送出" }));
       expect(await screen.findByText("已完成簽署")).toBeTruthy();
       expect(screen.getByText(/10 秒後自動回到待機畫面/)).toBeTruthy();
       // 簽完：動畫回來舉杯慶祝，而且是同一份（沒有重掛）
-      expect(sceneMode()).toBe("celebrate");
-      expect(screen.getByTestId("camping-scene")).toBe(scene);
+      expectNoAnimation();
 
       // 倒數結束：不需任何店員操作即恢復輪詢；此筆仍為 SIGNED 時只顯示等待訊息。
       await act(async () => {
@@ -503,8 +501,7 @@ describe("/kiosk 客顯", () => {
       });
       expect(await screen.findByText("折疊露營椅")).toBeTruthy();
       expect(screen.queryByText("已完成簽署")).toBeNull();
-      expect(sceneMode()).toBe("hidden");
-      expect(screen.getByTestId("camping-scene")).toBe(scene);
+      expectNoAnimation();
       expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -847,7 +844,7 @@ describe("/kiosk 客顯", () => {
     expect(await screen.findByText("交易已完成")).toBeTruthy();
     expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
     // 付款完成留在第一人稱手帳：勾勾、印章，背景的人舉杯（paid），不是整片營地的慶祝
-    expect(sceneMode()).toBe("paid");
+    expectNoAnimation();
   });
 
   it("升級後殘留的舊交回鎖不得讓下一張任務要求店員帳密", async () => {
@@ -973,6 +970,13 @@ describe("/kiosk 客顯", () => {
 
     expect(await screen.findByText(STORE_DISPLAY_NAME)).toBeTruthy();
     expect(await screen.findByText("櫃檯 · 主櫃檯")).toBeTruthy();
+    // 待機（店主 2026-10-03 選 A）：店徽、二手 · 選物 · 露營、店名由上往下；底下的框只留提示一行
+    expect(screen.getByRole("img", { name: STORE_DISPLAY_NAME })).toBeTruthy();
+    expect(screen.getByText("二手 · 選物 · 露營")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: STORE_DISPLAY_NAME })).toBeTruthy();
+    const card = screen.getByText("請稍候，店員將為您加入商品。").closest(".kiosk-standby-card");
+    expect(card?.textContent).toBe("請稍候，店員將為您加入商品。");
+    expectNoAnimation();
     await waitFor(() => {
       expect(window.localStorage.getItem("lu-camp.kiosk-signing")).toBeNull();
       expect(window.localStorage.getItem("lu-camp.kiosk-engaged")).toBeNull();
@@ -1123,8 +1127,7 @@ describe("/kiosk 客顯", () => {
 
     renderPage();
     expect(await screen.findByText("顧客螢幕同步中斷，正在重新連線…")).toBeTruthy();
-    expect(sceneMode()).toBe("idle");
-    const scene = screen.getByTestId("camping-scene");
+    expectNoAnimation();
 
     backendUp = true;
     await act(async () => {
@@ -1135,8 +1138,7 @@ describe("/kiosk 客顯", () => {
       expect(screen.getByText("瓦斯罐三入組")).toBeTruthy();
     });
     // 待機→結帳：同一份動畫從當下接過去，不是重新掛一份
-    expect(sceneMode()).toBe("cart");
-    expect(screen.getByTestId("camping-scene")).toBe(scene);
+    expectNoAnimation();
     vi.useRealTimers();
   });
 
@@ -1211,6 +1213,6 @@ describe("/kiosk 客顯", () => {
     });
     expect(await screen.findByText("付款未完成，請重新操作")).toBeTruthy();
     expect(screen.queryByText("交易已完成")).toBeNull();
-    expect(sceneMode()).toBe("cart");
+    expectNoAnimation();
   });
 });

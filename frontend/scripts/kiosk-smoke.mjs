@@ -165,29 +165,19 @@ try {
       bodyText.includes(address) &&
       bodyText.includes(masked),
   );
-  const agreementTitle = await page.textContent(".kiosk-agreement-title");
+  // 切結書全文可在設定頁改（內容在資料庫），不寫死標題與小節：標題寫明是切結書、全文完整顯示。
+  const agreementTitle = (await page.textContent(".kiosk-agreement-title"))?.trim() ?? "";
+  const agreementText = (await page.locator(".kiosk-agreement-body").innerText()).trim();
   ok(
-    "顯示正式切結書標題",
-    agreementTitle === "二手商品讓售切結書 暨 個人資料告知同意書",
-    agreementTitle ?? "",
+    "顯示完整切結書（標題＋全文）",
+    agreementTitle.includes("切結書") && agreementText.length > 300,
+    `${agreementTitle}／全文 ${agreementText.length} 字`,
   );
-  const agreementSections = [
-    "一、物品來源保證（非贓物切結）",
-    "二、交易確認",
-    "三、售出概不退還",
-    "四、瑕疵告知",
-    "五、個人資料告知與同意（個人資料保護法第 8 條）",
-    "六、其他",
-  ];
+  // 購物金加碼（店主 2026-10-03）：寫「多拿 X% 購物金」，不寫多得多少錢
   ok(
-    "顯示完整六節切結條款",
-    agreementSections.every((section) => bodyText.includes(section)),
-  );
-  // 購物金溢價（使用者裁示）：預設 10% → 1800 現金 → 購物金多得 $180
-  ok(
-    "購物金按鈕顯示溢價（多得）",
-    bodyText.includes("多得") && bodyText.includes("180"),
-    bodyText.match(/多得[^，。]*/)?.[0] ?? "",
+    "購物金按鈕寫多拿 X% 購物金",
+    /多拿 [\d.]+% 購物金/.test(bodyText) && !bodyText.includes("多得"),
+    bodyText.match(/多拿[^，。\n]*/)?.[0] ?? "",
   );
   await page.screenshot({ path: join(SHOTS, "01-task.png"), fullPage: true });
   const agreementBody = page.locator(".kiosk-agreement-body");
