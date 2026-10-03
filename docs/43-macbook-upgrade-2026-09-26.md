@@ -70,8 +70,9 @@ scripts/launchd/install-launchd.sh
 
 - `pnpm install` 若問要不要重建 `node_modules`（非互動模式會直接中止），改用 `CI=true /opt/homebrew/bin/pnpm install`。
 - `rebuild-frontend.sh` 的前端位址**一律以 `frontend/.env.local` 為準**（2026-10-04 起）：3.3 `source ../.env` 過的
-  shell 裡若帶著別的 `NEXT_PUBLIC_*`，以前會被寫進前端、整店連不到後端；現在腳本會蓋回 `.env.local` 的值，
-  建完也會檢查，不對就中止、不重啟前端（舊前端照常可用）。
+  shell 裡若帶著別的 `NEXT_PUBLIC_*`，以前會被寫進前端、整店連不到後端；現在腳本 build 前會拿掉這兩個變數，
+  build 前也先備份目前的前端。build 失敗或建出來的位址不對，就還原備份、不重啟前端（舊前端照常可用），
+  畫面會寫「中止：…」與「已還原成上一版前端」——把訊息給店主看、修好 `.env.local` 再重跑。
 - `alembic upgrade head` 失敗：**不要重跑、不要降版**，把錯誤原文給店主，然後照 §6 退回。
 
 ## 4. 驗證（每一項都回報結果）

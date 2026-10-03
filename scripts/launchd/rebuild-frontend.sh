@@ -2,31 +2,53 @@
 # IP 換了、或改了 frontend/.env.local 之後要跑這支：NEXT_PUBLIC_* 是 build 當下
 # 寫死進 JS 的，不重新 build 不會生效。跑完會自動重啟 launchd 管的 frontend 服務。
 #
-# 位址一律以 frontend/.env.local 為準：Next 建置時「shell 環境變數」優先於 .env.local，
+# 位址一律交給 Next 自己讀 frontend/.env.local：Next 建置時「shell 環境變數」優先於 .env.local，
 # 升級步驟前面 `source ../.env` 過的話，那份檔案裡的舊位址會被寫進 JS、整台店連不到後端
-# （2026-10-04 實際發生）。所以這裡先把 .env.local 的值明確 export 蓋掉，建完再驗一次。
+# （2026-10-04 實際發生）。所以先把 shell 裡的這兩個變數拿掉再 build。
+#
+# Next build 一開始就會清掉 .next（只留 cache/dev/lock），所以先備份目前的前端：
+# build 失敗、或建出來的位址不對，就還原成備份、不重啟——正在跑的前端才真的照常可用。
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_DIR/frontend"
 
-ENV_LOCAL=".env.local"
-read_local() { grep -E "^$1=" "$ENV_LOCAL" | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'"; }
-API_URL="$(read_local NEXT_PUBLIC_API_BASE_URL || true)"
-AGENT_URL="$(read_local NEXT_PUBLIC_AGENT_URL || true)"
-if [[ -z "$API_URL" || -z "$AGENT_URL" ]]; then
-  echo "中止：$REPO_DIR/frontend/$ENV_LOCAL 沒有 NEXT_PUBLIC_API_BASE_URL／NEXT_PUBLIC_AGENT_URL" >&2
+DIST=".next"
+BACKUP=".next.prev"
+LOG="$(mktemp)"
+SYNC_EXCLUDES=(--exclude dev --exclude cache --exclude lock)
+
+restore() {
+  if [[ -d "$BACKUP" ]]; then
+    rsync -a --delete "${SYNC_EXCLUDES[@]}" "$BACKUP/" "$DIST/"
+    rm -rf "$BACKUP"
+    echo "已還原成上一版前端，未重啟 frontend（目前的前端照常可用）" >&2
+  fi
+}
+fail() {
+  echo "中止：$1" >&2
+  restore
+  rm -f "$LOG"
   exit 1
-fi
-export NEXT_PUBLIC_API_BASE_URL="$API_URL"
-export NEXT_PUBLIC_AGENT_URL="$AGENT_URL"
+}
+trap 'fail "build 失敗（見上方輸出）"' ERR
 
-/opt/homebrew/bin/pnpm run build
-
-# 建出來的 JS 裡必須是 .env.local 的位址；不是就不要重啟（舊的前端還能用，換上去整店斷線）。
-if ! grep -rqF "$API_URL" .next/static/chunks || ! grep -rqF "$AGENT_URL" .next/static/chunks; then
-  echo "中止：建出來的前端沒有寫入 $API_URL／$AGENT_URL（位址被別的設定蓋掉），未重啟 frontend" >&2
-  exit 1
+rm -rf "$BACKUP"
+if [[ -d "$DIST" ]]; then
+  rsync -a "${SYNC_EXCLUDES[@]}" "$DIST/" "$BACKUP/"
 fi
 
+env -u NEXT_PUBLIC_API_BASE_URL -u NEXT_PUBLIC_AGENT_URL /opt/homebrew/bin/pnpm run build 2>&1 | tee "$LOG"
+trap - ERR
+
+# 驗 Next 實際用的位址（check-build-env.mjs 印出的「建置位址」）確實寫進了 JS。
+API_URL="$(sed -n 's/^  NEXT_PUBLIC_API_BASE_URL=//p' "$LOG" | tail -1)"
+AGENT_URL="$(sed -n 's/^  NEXT_PUBLIC_AGENT_URL=//p' "$LOG" | tail -1)"
+URL_RE='^https?://[^[:space:]#]+$'
+[[ "${API_URL}" =~ $URL_RE && "${AGENT_URL}" =~ $URL_RE ]] \
+  || fail "讀不到建置位址，或位址格式不對（API='${API_URL}'、AGENT='${AGENT_URL}'）"
+grep -rqF -- "${API_URL}" "$DIST/static/chunks" && grep -rqF -- "${AGENT_URL}" "$DIST/static/chunks" \
+  || fail "建出來的前端沒有寫入 ${API_URL}／${AGENT_URL}"
+
+rm -rf "$BACKUP" "$LOG"
 launchctl kickstart -k "gui/$(id -u)/com.lucamp.frontend"
-echo "frontend 已重新 build 並重啟（後端 $API_URL、硬體代理 $AGENT_URL）"
+echo "frontend 已重新 build 並重啟（後端 ${API_URL}、硬體代理 ${AGENT_URL}）"
