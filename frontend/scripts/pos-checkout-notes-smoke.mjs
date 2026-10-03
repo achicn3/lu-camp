@@ -129,7 +129,7 @@ try {
   const brand = await api(token, "POST", "/api/v1/brands", { name: BRAND });
   ok("建立品牌", brand.status === 200, String(brand.status));
   const serialized = rows(
-    (await api(token, "GET", "/api/v1/serialized-items?status=IN_STOCK&limit=20")).json,
+    (await api(token, "GET", "/api/v1/serialized-items?status=IN_STOCK&ownership=OWNED&limit=20")).json,
   ).find((item) => item.ownership_type === "OWNED");
   if (!serialized) throw new Error("沒有在庫的買斷序號品——請重建 lucamp_e2e 並重跑 seed_dev_demo");
   const patched = await api(token, "PATCH", `/api/v1/serialized-items/${serialized.id}`, {

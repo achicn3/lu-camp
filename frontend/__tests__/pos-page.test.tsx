@@ -1002,6 +1002,61 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 8000 });
   }, 20000);
 
+  it("還原時自動帶入的實收現金（＝應收）不算店員輸入：完成頁不顯示實收／找零（審查 2026-10-04）", async () => {
+    let currentCart: Record<string, unknown> = restoreCart;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") return json(currentCart);
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(currentCart);
+      if (url.endsWith("/terminals/9/cart/begin-checkout") && method === "POST") {
+        currentCart = { ...restoreCart, status: "PROCESSING", revision: 2 };
+        return json(currentCart);
+      }
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        return json(
+          {
+            id: 52,
+            store_id: 1,
+            total: "1800",
+            payment_method: "CASH",
+            invoice_status: "NOT_ISSUED",
+            lines: [],
+            tenders: [{ tender_type: "CASH", amount: "1800" }],
+          },
+          201,
+        );
+      }
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(), { timeout: 8000 });
+    // 還原會把實收欄預填成應收的現金——那不是客人實際給的錢
+    await waitFor(() =>
+      expect((screen.getByLabelText(/實收現金/) as HTMLInputElement).value).toBe("1800"),
+    );
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 8000 });
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+    expect(screen.queryByRole("group", { name: "現金找零" })).toBeNull();
+  }, 20000);
+
   it("查詢卡住不回：期限到期後仍必須放行（寧可退回原本的風險，也不能鎖死）", async () => {
     stubFetch((url, method) => {
       if (url.includes("/settings")) return json(SETTINGS);

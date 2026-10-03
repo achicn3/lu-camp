@@ -96,11 +96,6 @@ export function noteAckFingerprint(lines: CartLine[]): string {
     .join("\u0001");
 }
 
-/**
- * 結帳提醒用：挑出需要提醒的行（保持購物車順序）。
- * 包含兩種——有備註的，以及**還原時沒問到備註的**（`unknown`）。
- * 空白備註不算；把讀不到當成沒有，正是要避免的靜默漏提醒。
- */
 /** 結帳提醒的一列：note 已接上「-條碼末三碼」；unknown＝還原時沒問到備註。 */
 export interface NotedLine {
   key: string;
@@ -110,6 +105,11 @@ export interface NotedLine {
   unknown?: true;
 }
 
+/**
+ * 結帳提醒用：挑出需要提醒的行（保持購物車順序）。
+ * 包含兩種——有備註的，以及**還原時沒問到備註的**（`unknown`）。
+ * 空白備註不算；把讀不到當成沒有，正是要避免的靜默漏提醒。
+ */
 export function linesWithNotes(lines: CartLine[]): NotedLine[] {
   return lines.flatMap((line): NotedLine[] => {
     const note = lineNoteText(line);

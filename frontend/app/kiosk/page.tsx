@@ -958,9 +958,11 @@ function CartScreen({
           <span>{completed ? "本次金額" : "應付總額"}</span>
           {/* 金額左側列總件數（各行數量加總），客人核對拿了幾樣（店主 2026-10-04）。 */}
           <div className="kiosk-cart-grand-amount">
-            <span className="kiosk-cart-item-count" data-testid="kiosk-item-count">
-              共 {snapshot.items.reduce((sum, item) => sum + item.qty, 0)} 件
-            </span>
+            {snapshot.items.length > 0 && (
+              <span className="kiosk-cart-item-count" data-testid="kiosk-item-count">
+                共 {snapshot.items.reduce((sum, item) => sum + item.qty, 0)} 件
+              </span>
+            )}
             <strong>${formatNtd(parseNtd(snapshot.total) ?? 0)}</strong>
           </div>
         </div>

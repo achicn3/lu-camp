@@ -39,7 +39,11 @@ import {
   togglePromoFree,
   unmarkGift,
 } from "@/features/pos/cart";
-import { CompletedCashChange, CompletedNotedItems } from "@/features/pos/CompletedSummary";
+import {
+  CompletedCashChange,
+  type CompletedNotedItem,
+  CompletedNotedItems,
+} from "@/features/pos/CompletedSummary";
 import { withFreshNotes } from "@/features/pos/restoreNotes";
 import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 import {
@@ -1291,6 +1295,14 @@ export default function PosPage() {
     useState<MixedRemainderMethod>("CASH");
   const [taiwanPayConfirmed, setTaiwanPayConfirmed] = useState(false);
   const [receivedInput, setReceivedInput] = useState("");
+  // 實收欄是不是店員這一單親手打的：還原購物車會把它預填成**應收**現金，那不是客人給的錢，
+  // 拿來在完成頁算「找零 $0」會誤導找錢（審查 2026-10-04）。
+  const [receivedTyped, setReceivedTyped] = useState(false);
+  // 完成頁的補充資訊在**成交當下**定格，不跟著之後的狀態變動。
+  const [completedExtras, setCompletedExtras] = useState<{
+    received: string;
+    notedItems: CompletedNotedItem[];
+  }>({ received: "", notedItems: [] });
   // 餐飲內用/外帶與桌號（docs/35）：不預設任一邊——預設哪邊都會被慣性按過去，
   // 而桌號錯的代價是東西送錯桌。
   // 購物車還有變更沒同步到伺服器嗎（送簽前必須同步完成）。初始為 true：還沒收到
@@ -1485,6 +1497,7 @@ export default function PosPage() {
       setReceivedInput(
         remainder?.tender_type === "CASH" ? remainder.amount : "",
       );
+      setReceivedTyped(false);
       setLinePayKey("");
       setTaiwanPayConfirmed(false);
       // 會員查詢留在鎖內，但**加上期限**。
@@ -2020,6 +2033,7 @@ export default function PosPage() {
     clearPersistedIdemKey("pos-checkout");
     // 每日限量的份數剛被扣掉，磚上的「剩 N 份」要跟著更新。
     void queryClient.invalidateQueries({ queryKey: ["menu-items"] });
+    captureCompletedExtras();
     setCompleted(sale);
     setCompletedCampaign(cart.snapshot.campaign_name ?? null);
     setCompletedSignature(
@@ -2282,6 +2296,7 @@ export default function PosPage() {
     onSuccess: ({ sale, sig }) => {
       // 結帳成立 → 清除持久化冪等鍵（Codex 第二輪 #2），下一筆換新鍵。
       clearPersistedIdemKey("pos-checkout");
+      captureCompletedExtras();
       setCompleted(sale);
       setCompletedCampaign(campaignNote);
       // 簽署證據快照＝mutationFn 於送出當下擷取的不可變值（非 callback 時的活狀態）。
@@ -2384,6 +2399,14 @@ export default function PosPage() {
     return true;
   }
 
+  /** 成交當下定格完成頁要列的：店員親手打的實收、帶備註的商品（讀不到備註的不是商品備註，不列）。 */
+  function captureCompletedExtras() {
+    setCompletedExtras({
+      received: receivedTyped ? receivedInput : "",
+      notedItems: notedLines.filter((line) => line.unknown !== true),
+    });
+  }
+
   function resetSale() {
     clerkAddedRef.current = false;
     setNoteAck("");
@@ -2403,6 +2426,8 @@ export default function PosPage() {
     setMixedRemainder("CASH");
     setTaiwanPayConfirmed(false);
     setReceivedInput("");
+    setReceivedTyped(false);
+    setCompletedExtras({ received: "", notedItems: [] });
     setLinePayKey(""); // 一次性付款碼用畢清空、不重用（下一單重新掃）
     setNotice(null);
     setCompleted(null);
@@ -2434,9 +2459,7 @@ export default function PosPage() {
 
   // 完成畫面（結帳成功後）
   if (completed !== null) {
-    const cashChange = completedCashChange(completed, receivedInput);
-    // 只列真的有備註的；還原時讀不到備註的那種提醒結帳前已處理過，不是商品備註。
-    const notedItems = notedLines.filter((line) => line.unknown !== true);
+    const cashChange = completedCashChange(completed, completedExtras.received);
     return (
       <section>
         <h1 className="page-title">POS 結帳</h1>
@@ -2460,7 +2483,7 @@ export default function PosPage() {
           {cashChange !== null && (
             <CompletedCashChange received={cashChange.received} change={cashChange.change} />
           )}
-          <CompletedNotedItems items={notedItems} />
+          <CompletedNotedItems items={completedExtras.notedItems} />
           {drawerNotice !== null && (
             <p role="alert" className="form-error">
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
@@ -3105,7 +3128,10 @@ export default function PosPage() {
             taiwanPayConfirmed={taiwanPayConfirmed}
             setTaiwanPayConfirmed={setTaiwanPayConfirmed}
             receivedInput={receivedInput}
-            setReceivedInput={setReceivedInput}
+            setReceivedInput={(value) => {
+              setReceivedInput(value);
+              setReceivedTyped(true);
+            }}
             disabled={cartMutationLocked}
           />
 
