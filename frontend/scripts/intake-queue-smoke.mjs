@@ -160,6 +160,8 @@ try {
   await signing.waitFor();
   ok("再勾回來又是 $800", /\$800/.test(await signing.getByRole("button", { name: /現金/ }).innerText()));
   await signing.getByRole("checkbox", { name: /同意/ }).check();
+  const creditText = await signing.getByRole("button", { name: /購物金/ }).innerText();
+  ok("購物金寫「多拿 X% 購物金」、不寫多得多少錢", /多拿 [\d.]+% 購物金/.test(creditText) && !creditText.includes("多得"), creditText.replace(/\n/g, " "));
   await signing.getByRole("button", { name: /購物金/ }).click();
   await drawSignature(page);
   await page.screenshot({ path: join(SHOTS, "03b-tablet-signing.png") });
@@ -179,6 +181,40 @@ try {
   );
   ok("店員畫面標出 3 號不賣", (await page.locator(".intake-confirm-list li.is-kept").innerText()).includes("3 號"));
   await page.screenshot({ path: join(SHOTS, "04-confirmed.png"), fullPage: true });
+
+  // 客人全部不賣：紅色「確認都不賣」→ 整批取消、每件已交還
+  {
+    const res = await fetch(`${API}/api/v1/intake-batches`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: saved.contact_id, declared_item_count: 2, prefill_lines: true }),
+    });
+    const other = await res.json();
+    for (const [i, line] of other.lines.entries()) {
+      await fetch(`${API}/api/v1/intake-batches/${other.id}/lines/${line.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ deal_cost: String(100 * (i + 1)) }),
+      });
+    }
+    await fetch(`${API}/api/v1/intake-batches/${other.id}/ready`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    await page.goto(`${BASE}/acquisition/intake/${other.id}`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "交給客人勾選" }).click();
+    const declineSheet = page.getByRole("dialog", { name: /確認要賣的商品/ });
+    await declineSheet.getByRole("checkbox", { name: /1 號/ }).uncheck();
+    await declineSheet.getByRole("checkbox", { name: /2 號/ }).uncheck();
+    ok("全部取消勾選：只剩紅色「確認都不賣」", (await declineSheet.getByRole("button").allInnerTexts()).join() === "確認都不賣");
+    await page.screenshot({ path: join(SHOTS, "07-decline.png") });
+    await declineSheet.getByRole("button", { name: "確認都不賣" }).click();
+    await page.getByText("好的，這次都不賣。").waitFor();
+    await page.getByRole("button", { name: "交還店員" }).click();
+    const after = await (await fetch(`${API}/api/v1/intake-batches/${other.id}`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    ok(
+      "都不賣：整批取消、每件記客人不賣且已交還",
+      after.status === "CANCELLED" && after.cancel_reason === "客人確認都不賣" && after.lines.every((l) => l.disposition === "CUSTOMER_KEPT" && l.returned_to_customer),
+      `${after.status} ${after.cancel_reason}`,
+    );
+  }
 
   // 代理連不上：照樣進估價頁並提示補印
   await page.goto(`${BASE}/acquisition/intake`, { waitUntil: "networkidle" });
