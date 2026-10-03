@@ -14,27 +14,36 @@ cd "$REPO_DIR/frontend"
 
 DIST=".next"
 BACKUP=".next.prev"
+BACKUP_TMP=".next.prev.partial"
 LOG="$(mktemp)"
-SYNC_EXCLUDES=(--exclude dev --exclude cache --exclude lock)
+# 只排除最上層的 dev/cache/lock（Next 清 .next 時保留的那三個），不誤傷名為 dev 的路由。
+SYNC_EXCLUDES=(--exclude /dev --exclude /cache --exclude /lock)
+BACKUP_OK=0
 
 restore() {
-  if [[ -d "$BACKUP" ]]; then
+  # 只有備份完整（先抄到暫存、成功才改名）才還原；否則 .next 根本還沒被動過，不能拿殘缺的備份蓋回去。
+  if [[ "$BACKUP_OK" == 1 && -d "$BACKUP" ]]; then
     rsync -a --delete "${SYNC_EXCLUDES[@]}" "$BACKUP/" "$DIST/"
     rm -rf "$BACKUP"
     echo "已還原成上一版前端，未重啟 frontend（目前的前端照常可用）" >&2
   fi
 }
 fail() {
+  trap - ERR INT TERM HUP
   echo "中止：$1" >&2
   restore
-  rm -f "$LOG"
+  rm -rf "$BACKUP_TMP" "$LOG"
   exit 1
 }
-trap 'fail "build 失敗（見上方輸出）"' ERR
+trap 'fail "執行失敗（見上方輸出）"' ERR
+# build 要跑好幾分鐘且一開始就清掉 .next：Ctrl-C、遠端斷線也要還原，不能留半套。
+trap 'fail "被中斷"' INT TERM HUP
 
-rm -rf "$BACKUP"
+rm -rf "$BACKUP" "$BACKUP_TMP"
 if [[ -d "$DIST" ]]; then
-  rsync -a "${SYNC_EXCLUDES[@]}" "$DIST/" "$BACKUP/"
+  rsync -a "${SYNC_EXCLUDES[@]}" "$DIST/" "$BACKUP_TMP/"
+  mv "$BACKUP_TMP" "$BACKUP"
+  BACKUP_OK=1
 fi
 
 env -u NEXT_PUBLIC_API_BASE_URL -u NEXT_PUBLIC_AGENT_URL /opt/homebrew/bin/pnpm run build 2>&1 | tee "$LOG"
