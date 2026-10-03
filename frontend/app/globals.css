@@ -3683,6 +3683,17 @@ a.btn-ghost {
   font-size: clamp(36px, 7vw, 68px);
   line-height: 1;
 }
+.kiosk-cart-grand-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.kiosk-cart-grand-total .kiosk-cart-item-count {
+  color: #f8f4e8;
+  font-size: clamp(18px, 2.6vw, 26px);
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 @media (max-width: 640px) {
   .kiosk-cart-header {
@@ -6016,4 +6027,59 @@ a.btn-ghost {
   color: #ffc9bf;
   font-weight: 700;
   opacity: 1;
+}
+
+/* POS 結帳改善（店主 2026-10-04）：應付總額旁的總件數、完成頁的實收／找零與帶備註商品。 */
+.pos-item-count {
+  margin-left: var(--sp-2);
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.pos-complete-cash {
+  margin-top: var(--sp-3);
+}
+.pos-complete-change dd {
+  color: var(--success);
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+.pos-complete-notes {
+  margin-top: var(--sp-4);
+}
+.pos-complete-notes h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--text-md);
+}
+.pos-complete-notes ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pos-complete-notes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+}
+.pos-complete-note-brand {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.pos-complete-note-name {
+  font-weight: 600;
+}
+.pos-complete-note-body {
+  flex-basis: 100%;
+  color: var(--warn);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -455,6 +455,70 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
   });
 
+  it("結帳改善（店主 2026-10-04）：備註接條碼末三碼、總件數、完成頁列實收找零與帶備註商品", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/S1-9B5D254CAE"))
+        return json({
+          ...TENT,
+          item_code: "S1-9B5D254CAE",
+          brand_id: 3,
+          note: "缺營釘一支",
+        });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/brands/3")) return json({ id: 3, store_id: 1, name: "Snow Peak" });
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "3600",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "3600",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        return json(
+          { id: 11, store_id: 1, total: "3600", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/print/detail")) return json({ status: "ok" });
+      if (url.includes("/print-detail")) return json({ id: 11 });
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+
+    await scan(user, "S1-9B5D254CAE");
+    await waitFor(() => expect(screen.getByText(/備註：缺營釘一支-CAE/)).toBeTruthy());
+    await scan(user, "TENT1");
+    await waitFor(() => expect(screen.getAllByText("雙人帳篷(測試)").length).toBe(2));
+    // 總共幾件：顯示在應付總額旁
+    expect(screen.getByTestId("pos-item-count").textContent).toBe("共 2 件");
+
+    await user.type(screen.getByLabelText(/實收現金/), "4000");
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    const reminder = await screen.findByRole("dialog", { name: "商品備註提醒" });
+    expect(within(reminder).getByText("缺營釘一支-CAE")).toBeTruthy();
+    await user.click(within(reminder).getByRole("button", { name: "已確認，繼續結帳" }));
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+
+    // 完成頁：實收與找零
+    const cash = screen.getByRole("group", { name: "現金找零" });
+    expect(within(cash).getByText(/實收現金/).parentElement?.textContent).toContain("$4,000");
+    expect(within(cash).getByText(/^找零$/).parentElement?.textContent).toContain("$400");
+    // 完成頁：帶備註的商品列品牌、品名、備註（含末三碼）；沒備註的那件不列
+    const noted = screen.getByRole("region", { name: "帶備註的商品" });
+    await waitFor(() => expect(within(noted).getByText("Snow Peak")).toBeTruthy());
+    expect(within(noted).getByText("雙人帳篷(測試)")).toBeTruthy();
+    expect(within(noted).getByText("缺營釘一支-CAE")).toBeTruthy();
+    expect(within(noted).getAllByRole("listitem").length).toBe(1);
+  });
+
   it("商品沒有備註：結帳不跳提醒，直接成交", async () => {
     let saleCalls = 0;
     stubFetch((url, method) => {

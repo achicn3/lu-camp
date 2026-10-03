@@ -1,6 +1,7 @@
 // POS 收款純邏輯（docs/16 §3.2）：現金 / 購物金 / 混合。金額整數元。
 // 後端規則：Σ tenders = total；購物金扣買方餘額（不足 409）；純購物金不需開帳。
 import type { components } from "@/lib/api-types";
+import { parseNtd } from "@/lib/money";
 
 export type TenderMode =
   | "CASH"
@@ -233,6 +234,33 @@ export function toTenders(
 /** 收銀台找零輔助：實收現金 − 應收現金部分（負數代表不足，不影響貼到後端的 tender）。 */
 export function changeDue(received: number, cashPart: number): number {
   return received - cashPart;
+}
+
+/** 結帳完成頁要用到的成交資料（只取收款相關欄位，方便測試）。 */
+interface CompletedSalePayment {
+  total: string;
+  payment_method: string;
+  tenders: ReadonlyArray<{ tender_type: string; amount: string }>;
+}
+
+/**
+ * 結帳完成頁的「實收現金／找零」（店主 2026-10-04）：以**成交的現金金額**計，不用結帳前的試算。
+ * 沒輸入實收、輸入不足、或這筆沒收現金 → null（不顯示）。
+ */
+export function completedCashChange(
+  sale: CompletedSalePayment,
+  receivedInput: string,
+): { received: number; change: number } | null {
+  const received = parseNtd(receivedInput.trim());
+  if (received === null) return null;
+  const cash =
+    sale.tenders.length === 0 && sale.payment_method === "CASH"
+      ? (parseNtd(sale.total) ?? 0)
+      : sale.tenders
+          .filter((tender) => tender.tender_type === "CASH")
+          .reduce((sum, tender) => sum + (parseNtd(tender.amount) ?? 0), 0);
+  if (cash <= 0 || received < cash) return null;
+  return { received, change: changeDue(received, cash) };
 }
 
 function clampInt(n: number): number {

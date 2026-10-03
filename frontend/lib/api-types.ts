@@ -330,6 +330,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/brands/{brand_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Brand
+         * @description 以 id 取單一品牌（POS 結帳完成頁顯示帶備註商品的品牌）；他店或不存在一律 404。
+         */
+        get: operations["getBrand"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-baskets": {
         parameters: {
             query?: never;
@@ -11214,6 +11234,37 @@ export interface operations {
                 "application/json": components["schemas"]["BrandCreate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

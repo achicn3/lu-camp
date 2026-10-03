@@ -18773,6 +18773,54 @@
         ]
       }
     },
+    "/api/v1/brands/{brand_id}": {
+      "get": {
+        "description": "以 id 取單一品牌（POS 結帳完成頁顯示帶備註商品的品牌）；他店或不存在一律 404。",
+        "operationId": "getBrand",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brand_id",
+            "required": true,
+            "schema": {
+              "title": "Brand Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Brand",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/bulk-baskets": {
       "get": {
         "description": "販售籃清單（收購選籃、庫存管理）。預設只列啟用中的。",

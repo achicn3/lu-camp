@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   changeDue,
+  completedCashChange,
   resolvePlan,
   toTenders,
   validatePlan,
@@ -355,5 +356,54 @@ describe("空車 vs 折後零元（Codex 波次三 P2）", () => {
     });
     expect(v.ok).toBe(false);
     expect(v.error).toMatch(/折後總額為 0/);
+  });
+});
+
+describe("completedCashChange（結帳完成頁的實收／找零，店主 2026-10-04）", () => {
+  const cashSale = {
+    total: "3600",
+    payment_method: "CASH",
+    tenders: [{ tender_type: "CASH", amount: "3600" }],
+  };
+
+  it("有輸入實收現金：列實收與找零，以成交的現金金額計", () => {
+    expect(completedCashChange(cashSale, "4000")).toEqual({ received: 4000, change: 400 });
+  });
+
+  it("混合付款只拿現金那一段算找零", () => {
+    const mixed = {
+      total: "1000",
+      payment_method: "MIXED",
+      tenders: [
+        { tender_type: "STORE_CREDIT", amount: "300" },
+        { tender_type: "CASH", amount: "700" },
+      ],
+    };
+    expect(completedCashChange(mixed, "1000")).toEqual({ received: 1000, change: 300 });
+  });
+
+  it("剛好收足：找零 0 也要寫出來", () => {
+    expect(completedCashChange(cashSale, "3600")).toEqual({ received: 3600, change: 0 });
+  });
+
+  it("後端沒回收款明細的純現金單：以總額當現金", () => {
+    expect(
+      completedCashChange({ total: "500", payment_method: "CASH", tenders: [] }, "1000"),
+    ).toEqual({ received: 1000, change: 500 });
+  });
+
+  it("沒輸入、輸入不足或不是數字：不顯示", () => {
+    expect(completedCashChange(cashSale, "")).toBeNull();
+    expect(completedCashChange(cashSale, "3000")).toBeNull();
+    expect(completedCashChange(cashSale, "abc")).toBeNull();
+  });
+
+  it("沒有收現金（LINE Pay）：不顯示", () => {
+    const linePay = {
+      total: "800",
+      payment_method: "LINE_PAY",
+      tenders: [{ tender_type: "LINE_PAY", amount: "800" }],
+    };
+    expect(completedCashChange(linePay, "1000")).toBeNull();
   });
 });

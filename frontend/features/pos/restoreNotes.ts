@@ -13,9 +13,9 @@ import { basketNote, type CartLine } from "@/features/pos/cart";
 import { api } from "@/lib/api";
 import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 
-/** 單行的備註查詢結果：拿到內容、確定沒有、或**沒問到**。 */
+/** 單行的備註查詢結果：拿到內容（連同條碼與品牌）、確定沒有、或**沒問到**。 */
 type NoteLookup =
-  | { kind: "resolved"; note: string | null }
+  | { kind: "resolved"; note: string | null; barcode?: string; brandId?: number | null }
   | { kind: "absent" }
   | { kind: "unknown" };
 
@@ -26,14 +26,14 @@ async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLooku
         params: { path: { item_code: line.itemCode } },
         signal,
       });
-      return classify(data?.note, response.status);
+      return classify(data?.note, response.status, data?.item_code, data?.brand_id);
     }
     if (line.lineType === "CATALOG" && line.catalogProductId != null) {
       const { data, response } = await api.GET("/api/v1/catalog-products/{product_id}", {
         params: { path: { product_id: line.catalogProductId } },
         signal,
       });
-      return classify(data?.note, response.status);
+      return classify(data?.note, response.status, data?.sku, data?.brand_id);
     }
     if (line.lineType === "BULK_LOT" && line.bulkBasketId != null) {
       const { data, response } = await api.GET("/api/v1/bulk-baskets/{basket_id}", {
@@ -41,14 +41,14 @@ async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLooku
         signal,
       });
       // 與掃碼加入時同一套組法（籃子＋還有貨的各批），還原後提醒才不會變少。
-      return classify(data ? basketNote(data) : null, response.status);
+      return classify(data ? basketNote(data) : null, response.status, data?.code, data?.brand_id);
     }
     if (line.lineType === "BULK_LOT" && line.bulkLotId != null) {
       const { data, response } = await api.GET("/api/v1/bulk-lots/{lot_id}", {
         params: { path: { lot_id: line.bulkLotId } },
         signal,
       });
-      return classify(data?.note, response.status);
+      return classify(data?.note, response.status, data?.lot_code, data?.brand_id);
     }
   } catch {
     // 網路層失敗（斷線、CORS、被 abort）：問不到，不能當成沒有備註。
@@ -58,8 +58,13 @@ async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLooku
   return { kind: "absent" };
 }
 
-function classify(note: string | null | undefined, status: number): NoteLookup {
-  if (status === 200) return { kind: "resolved", note: note ?? null };
+function classify(
+  note: string | null | undefined,
+  status: number,
+  barcode?: string,
+  brandId?: number | null,
+): NoteLookup {
+  if (status === 200) return { kind: "resolved", note: note ?? null, barcode, brandId };
   // 商品查無（已刪／他店）：確定沒有備註可顯示，不必要求店員查證。
   if (status === 404) return { kind: "absent" };
   return { kind: "unknown" };
@@ -86,7 +91,14 @@ export async function withFreshNotes(
         { kind: "unknown" } as NoteLookup,
         () => controller.abort(),
       );
-      if (lookup.kind === "resolved") return { ...line, note: lookup.note };
+      if (lookup.kind === "resolved") {
+        return {
+          ...line,
+          note: lookup.note,
+          barcode: lookup.barcode ?? line.barcode,
+          brandId: lookup.brandId ?? line.brandId ?? null,
+        };
+      }
       if (lookup.kind === "unknown") return { ...line, noteUnknown: true };
       return line;
     }),

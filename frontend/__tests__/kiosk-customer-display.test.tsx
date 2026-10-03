@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -257,6 +257,10 @@ describe("/kiosk 客顯", () => {
     const total = screen.getByTestId("kiosk-total-bar");
     expect(total.classList.contains("kiosk-cart-total")).toBe(true);
     expect(total.textContent).toContain("$350");
+    // 金額左側顯示總件數（數量加總：瓦斯罐 2＋補充品 11＝13 件；店主 2026-10-04）
+    const count = within(total).getByTestId("kiosk-item-count");
+    expect(count.textContent).toBe("共 13 件");
+    expect(count.nextElementSibling?.textContent).toBe("$350");
     const itemList = screen.getByLabelText("商品明細");
     Object.defineProperties(itemList, {
       clientHeight: { configurable: true, value: 400 },

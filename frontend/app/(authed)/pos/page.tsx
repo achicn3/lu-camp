@@ -24,8 +24,10 @@ import {
   type CartLine,
   addLine,
   basketCartLine,
+  cartItemCount,
   cartTotal,
   isGift,
+  lineNoteText,
   lineTotal,
   linesWithNotes,
   markAsGift,
@@ -37,6 +39,7 @@ import {
   togglePromoFree,
   unmarkGift,
 } from "@/features/pos/cart";
+import { CompletedCashChange, CompletedNotedItems } from "@/features/pos/CompletedSummary";
 import { withFreshNotes } from "@/features/pos/restoreNotes";
 import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 import {
@@ -57,6 +60,7 @@ import {
   type MixedRemainderMethod,
   type TenderMode,
   changeDue,
+  completedCashChange,
   resolvePlan,
   toTenders,
   validatePlan,
@@ -194,6 +198,7 @@ function ScanBar({
           itemCode: item.item_code,
           maxQty: 1,
           note: item.note,
+          brandId: item.brand_id,
         };
       }
       // 僅 404 才視為「非序號品」改試散裝；其他狀態（401/403/500）如實回報，
@@ -221,6 +226,8 @@ function ScanBar({
           bulkLotId: lot.id,
           maxQty: lot.remaining_qty,
           note: lot.note,
+          barcode: lot.lot_code,
+          brandId: lot.brand_id,
         };
       }
       if (bulk.response.status !== 404) {
@@ -246,6 +253,8 @@ function ScanBar({
           catalogProductId: product.id,
           maxQty: product.quantity_on_hand,
           note: product.note,
+          barcode: product.sku,
+          brandId: product.brand_id,
         };
       }
       if (catalog.response.status !== 404) {
@@ -2425,6 +2434,9 @@ export default function PosPage() {
 
   // 完成畫面（結帳成功後）
   if (completed !== null) {
+    const cashChange = completedCashChange(completed, receivedInput);
+    // 只列真的有備註的；還原時讀不到備註的那種提醒結帳前已處理過，不是商品備註。
+    const notedItems = notedLines.filter((line) => line.unknown !== true);
     return (
       <section>
         <h1 className="page-title">POS 結帳</h1>
@@ -2445,6 +2457,10 @@ export default function PosPage() {
               <dd>{formatSalePaymentSummary(completed)}</dd>
             </div>
           </dl>
+          {cashChange !== null && (
+            <CompletedCashChange received={cashChange.received} change={cashChange.change} />
+          )}
+          <CompletedNotedItems items={notedItems} />
           {drawerNotice !== null && (
             <p role="alert" className="form-error">
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
@@ -2669,8 +2685,8 @@ export default function PosPage() {
                           {isGift(line) && (
                             <span className="pos-gift-badge">贈品</span>
                           )}
-                          {line.note != null && line.note.trim() !== "" && (
-                            <span className="pos-line-note">備註：{line.note.trim()}</span>
+                          {lineNoteText(line) !== null && (
+                            <span className="pos-line-note">備註：{lineNoteText(line)}</span>
                           )}
                           {(ql?.campaigns?.length ?? 0) > 0 && (
                             <span className="pos-line-campaigns">
@@ -2920,7 +2936,14 @@ export default function PosPage() {
             </dl>
           )}
           <div className="pos-total">
-            <span>應付總額</span>
+            <span>
+              應付總額
+              {lines.length > 0 && (
+                <span className="pos-item-count" data-testid="pos-item-count">
+                  共 {cartItemCount(lines)} 件
+                </span>
+              )}
+            </span>
             <strong>
               <Money value={total} />
             </strong>

@@ -585,6 +585,15 @@ async def list_brands(
     return [BrandRead.model_validate(brand) for brand in brands]
 
 
+@router.get("/brands/{brand_id}", response_model=BrandRead, operation_id="getBrand")
+async def get_brand(brand_id: int, session: SessionDep, user: CurrentUserDep) -> BrandRead:
+    """以 id 取單一品牌（POS 結帳完成頁顯示帶備註商品的品牌）；他店或不存在一律 404。"""
+    brand = await InventoryService(session).get_brand(user.store_id, brand_id)
+    if brand is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此品牌")
+    return BrandRead.model_validate(brand)
+
+
 @router.post("/brands", response_model=BrandRead, operation_id="createBrand")
 async def create_brand(
     payload: BrandCreate, session: SessionDep, user: CurrentUserDep

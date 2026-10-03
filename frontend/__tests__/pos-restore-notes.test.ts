@@ -65,6 +65,33 @@ describe("withFreshNotes", () => {
     expect(out.every((l) => l.noteUnknown !== true)).toBe(true);
   });
 
+  it("一併帶回條碼與品牌：還原後備註仍接得上末三碼、完成頁查得到品牌", async () => {
+    setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
+    stubFetch((url) => {
+      if (url.includes("/serialized-items/by-code/S1-A"))
+        return json({ item_code: "S1-A", note: "缺充電線", brand_id: 4 });
+      if (url.includes("/catalog-products/12"))
+        return json({ id: 12, sku: "SKU-000123", note: "效期短", brand_id: null });
+      if (url.includes("/bulk-lots/34"))
+        return json({ id: 34, lot_code: "L1-ABC", note: "請客人自己點", brand_id: 6 });
+      if (url.includes("/bulk-baskets/56"))
+        return json({ id: 56, code: "K1-000056", note: "彎了", sources: [], brand_id: 7 });
+      return null;
+    });
+    const out = await withFreshNotes([
+      { ...BASE, key: "S:S1-A", itemCode: "S1-A" },
+      { ...BASE, key: "C:12", lineType: "CATALOG", catalogProductId: 12 },
+      { ...BASE, key: "B:34", lineType: "BULK_LOT", bulkLotId: 34 },
+      { ...BASE, key: "K:56", lineType: "BULK_LOT", bulkBasketId: 56 },
+    ]);
+    expect(out.map((l) => [l.barcode, l.brandId])).toEqual([
+      ["S1-A", 4],
+      ["SKU-000123", null],
+      ["L1-ABC", 6],
+      ["K1-000056", 7],
+    ]);
+  });
+
   it("備註被清空時還原成沒有備註（不留下過期提醒）", async () => {
     setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
     stubFetch((url) =>

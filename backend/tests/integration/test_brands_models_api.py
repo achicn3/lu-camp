@@ -128,3 +128,24 @@ async def test_cross_store_isolation(client: httpx.AsyncClient, db_session: Asyn
         "/api/v1/product-models", json={"brand_id": brand_a, "name": "X"}, headers=_auth(token_b)
     )
     assert resp.status_code == 404
+
+
+async def test_get_brand_by_id_and_store_scope(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """POS 結帳完成頁以商品的 brand_id 取品牌名稱（品牌清單有筆數上限，不能靠整份清單對照）。"""
+    _a, token_a = await _store_token(db_session, "店A")
+    _b, token_b = await _store_token(db_session, "店B")
+    created = await client.post(
+        "/api/v1/brands", json={"name": "Snow Peak"}, headers=_auth(token_a)
+    )
+    brand_id = created.json()["id"]
+
+    got = await client.get(f"/api/v1/brands/{brand_id}", headers=_auth(token_a))
+    assert got.status_code == 200, got.text
+    assert got.json()["name"] == "Snow Peak"
+    # 他店的品牌一律 404，不洩漏存在與否
+    assert (
+        await client.get(f"/api/v1/brands/{brand_id}", headers=_auth(token_b))
+    ).status_code == 404
+    assert (await client.get("/api/v1/brands/999999", headers=_auth(token_a))).status_code == 404

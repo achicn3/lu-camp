@@ -42,6 +42,13 @@ export interface CartLine {
    * 列出來請店員自行查證，而不是靜默放行。
    */
   noteUnknown?: boolean;
+  /**
+   * 掃到的條碼（序號品可省略，用 itemCode）。備註後面接「-末三碼」——店員靠條碼末三碼
+   * 找包裝放在哪（店主 2026-10-04）。
+   */
+  barcode?: string;
+  /** 商品品牌（結帳完成頁列出帶備註商品的品牌）；沒有品牌為 null。 */
+  brandId?: number | null;
 }
 
 /** 讀不到備註時顯示的文字：明說是讀取失敗，不要讓店員誤以為「這件沒事」。 */
@@ -53,9 +60,39 @@ export const NOTE_UNKNOWN_TEXT = "備註讀取失敗，請到庫存頁確認這�
  * 否則後加入的「缺充電線」會被前一次的確認默默吃掉。改數量不算變動。
  * 讀取失敗的行也算在內：之後真的讀到備註時內容改變，會再問一次。
  */
+/** 條碼末三碼（不足三碼整個照列）。 */
+export function barcodeTail(code: string): string {
+  return code.trim().slice(-3);
+}
+
+/**
+ * 顯示用的商品備註：備註後面接「-條碼末三碼」。沒有備註回 null（沒備註的商品不加末三碼）；
+ * 不知道條碼（例如還原時沒取到）就只顯示備註。
+ */
+export function lineNoteText(line: CartLine): string | null {
+  const note = trimmedNote(line);
+  if (note === null) return null;
+  const code = (line.barcode ?? line.itemCode ?? "").trim();
+  return code === "" ? note : `${note}-${barcodeTail(code)}`;
+}
+
+function trimmedNote(line: CartLine): string | null {
+  const note = typeof line.note === "string" ? line.note.trim() : "";
+  return note === "" ? null : note;
+}
+
+/** 購物車總件數：每一行的數量加總（一頂帳篷＋3 罐瓦斯＝4 件）。 */
+export function cartItemCount(lines: CartLine[]): number {
+  return lines.reduce((sum, line) => sum + line.qty, 0);
+}
+
 export function noteAckFingerprint(lines: CartLine[]): string {
-  return linesWithNotes(lines)
-    .map((line) => `${line.key}\u0000${line.note}`)
+  // 認原始備註、不認顯示用的「-末三碼」：條碼是商品本身的屬性，不是要重新確認的內容。
+  return lines
+    .flatMap((line) => {
+      const note = trimmedNote(line) ?? (line.noteUnknown === true ? NOTE_UNKNOWN_TEXT : null);
+      return note === null ? [] : [`${line.key}\u0000${note}`];
+    })
     .join("\u0001");
 }
 
@@ -64,12 +101,20 @@ export function noteAckFingerprint(lines: CartLine[]): string {
  * 包含兩種——有備註的，以及**還原時沒問到備註的**（`unknown`）。
  * 空白備註不算；把讀不到當成沒有，正是要避免的靜默漏提醒。
  */
-export function linesWithNotes(
-  lines: CartLine[],
-): { key: string; description: string; note: string; unknown?: true }[] {
-  return lines.flatMap((line) => {
-    if (typeof line.note === "string" && line.note.trim() !== "") {
-      return [{ key: line.key, description: line.description, note: line.note.trim() }];
+/** 結帳提醒的一列：note 已接上「-條碼末三碼」；unknown＝還原時沒問到備註。 */
+export interface NotedLine {
+  key: string;
+  description: string;
+  note: string;
+  brandId?: number | null;
+  unknown?: true;
+}
+
+export function linesWithNotes(lines: CartLine[]): NotedLine[] {
+  return lines.flatMap((line): NotedLine[] => {
+    const note = lineNoteText(line);
+    if (note !== null) {
+      return [{ key: line.key, description: line.description, note, brandId: line.brandId }];
     }
     if (line.noteUnknown === true) {
       return [
@@ -187,6 +232,8 @@ export function basketCartLine(basket: BulkBasket): CartLine {
     bulkBasketId: basket.id,
     maxQty: basket.remaining_qty,
     note: basketNote(basket),
+    barcode: basket.code,
+    brandId: basket.brand_id,
   };
 }
 
