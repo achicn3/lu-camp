@@ -10,7 +10,9 @@ import {
   lineNoteText,
   linesWithNotes,
   noteAckFingerprint,
+  packCartLines,
 } from "@/features/pos/cart";
+import type { components } from "@/lib/api-types";
 
 const base: CartLine = {
   key: "S:S1-9B5D254CAE",
@@ -116,5 +118,57 @@ describe("cartItemCount（總共幾件）", () => {
 
   it("空車是 0", () => {
     expect(cartItemCount([])).toBe(0);
+  });
+});
+
+describe("packCartLines（組合包袋裝條碼，ADR-028）", () => {
+  const scan = (items: Partial<components["schemas"]["BundlePackScanItemRead"]>[]) => ({
+    id: 1,
+    code: "P1-ABCDEF0123",
+    name: "濾掛 12 入袋",
+    campaign_id: 9,
+    campaign_name: "濾掛 12 入",
+    bundle_price: "500",
+    campaign_effective: true,
+    items: items.map((item) => ({
+      item_type: "CATALOG" as const,
+      target_id: 7,
+      qty: 6,
+      code: "BIRD",
+      name: "天堂鳥濾掛",
+      unit_price: "50",
+      note: null,
+      brand_id: null,
+      stock: 144,
+      available: true,
+      unavailable_reason: null,
+      ...item,
+    })),
+  });
+
+  it("袋裡每項轉成一行，鍵與單掃時相同（之後再掃同一件會合併）", () => {
+    const lines = packCartLines(
+      scan([
+        { target_id: 7, code: "BIRD" },
+        { target_id: 8, code: "PEACH", name: "蜜桃", note: "效期短", brand_id: 3 },
+        { item_type: "SERIALIZED", target_id: 21, code: "S1-ABCDEF0123", qty: 1, stock: 1, name: "帳篷", unit_price: "3000" },
+        { item_type: "BULK_BASKET", target_id: 5, code: "K1-ABCDEF0123", qty: 10, stock: 30, name: "營釘", unit_price: "20" },
+      ]),
+    );
+    expect(lines.map((l) => [l.key, l.lineType, l.qty, l.unitPrice, l.maxQty])).toEqual([
+      ["C:7", "CATALOG", 6, 50, 144],
+      ["C:8", "CATALOG", 6, 50, 144],
+      ["S:S1-ABCDEF0123", "SERIALIZED", 1, 3000, 1],
+      ["K:5", "BULK_LOT", 10, 20, 30],
+    ]);
+    expect(lines[1]).toMatchObject({ catalogProductId: 8, barcode: "PEACH", note: "效期短", brandId: 3 });
+    expect(lines[2]).toMatchObject({ itemCode: "S1-ABCDEF0123" });
+    expect(lines[3]).toMatchObject({ bulkBasketId: 5, barcode: "K1-ABCDEF0123" });
+  });
+
+  it("袋裡有任何一件不能賣：整袋不加，說清楚是哪一件", () => {
+    expect(() =>
+      packCartLines(scan([{}, { name: "蜜桃", available: false, unavailable_reason: "庫存只剩 5" }])),
+    ).toThrow("這袋不完整，不能照組合價賣：蜜桃（庫存只剩 5）");
   });
 });

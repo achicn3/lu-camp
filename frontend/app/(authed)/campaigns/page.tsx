@@ -12,6 +12,7 @@ import {
   statusLabel,
   targetSummary,
 } from "@/features/campaigns/campaigns";
+import { BundlePacksPanel } from "@/features/campaigns/BundlePacksPanel";
 import { type PickedTarget, TargetPicker } from "@/features/campaigns/TargetPicker";
 import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
@@ -492,12 +493,20 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
 function CampaignActions({
   campaign,
   onAction,
+  onPacks,
 }: {
   campaign: CampaignRead;
   onAction: (action: "activate" | "end" | "cancel", id: number) => void;
+  /** 組合價才有：打開「袋裝條碼」（ADR-028）。 */
+  onPacks: (campaign: CampaignRead) => void;
 }) {
   return (
     <div className="campaign-actions">
+      {campaign.kind === "BUNDLE" && (
+        <button type="button" className="btn-ghost" onClick={() => onPacks(campaign)}>
+          袋裝條碼
+        </button>
+      )}
       {campaign.status === "DRAFT" && (
         <button
           type="button"
@@ -544,6 +553,7 @@ export default function CampaignsPage() {
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "ALL">("ALL");
   const [page, setPage] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [packCampaign, setPackCampaign] = useState<CampaignRead | null>(null);
 
   // Access probe: use the list endpoint itself to detect 403/401.
   const listQuery = useQuery({
@@ -712,6 +722,7 @@ export default function CampaignsPage() {
                     <CampaignActions
                       campaign={c}
                       onAction={handleAction}
+                      onPacks={setPackCampaign}
                     />
                   </td>
                 </tr>
@@ -720,6 +731,13 @@ export default function CampaignsPage() {
           </table>
           {campaigns.length === 0 && <p className="hint">尚無活動</p>}
         </div>
+        {packCampaign !== null && (
+          <BundlePacksPanel
+            key={packCampaign.id}
+            campaign={packCampaign}
+            onClose={() => setPackCampaign(null)}
+          />
+        )}
         <Pagination
           page={page}
           count={campaigns.length}

@@ -1,6 +1,6 @@
 # ADR-028：組合包袋裝條碼（掃一次＝整袋加進購物車）
 
-日期：2026-10-04。狀態：實作中（分支 feat/bundle-packs）。
+日期：2026-10-04。狀態：已實作（分支 feat/bundle-packs；migration `c4e8a2f6b1d3`、煙霧 `bundle-pack-smoke.mjs`）。
 
 ## 需求（店主 2026-10-04）
 

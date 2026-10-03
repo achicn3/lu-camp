@@ -2157,6 +2157,293 @@
         "title": "BulkLotStatus",
         "type": "string"
       },
+      "BundlePackCreateRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BundlePackItemInput"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "title": "BundlePackCreateRequest",
+        "type": "object"
+      },
+      "BundlePackItemInput": {
+        "description": "袋裡的一項：一般商品／販售籃 × 件數，或一件序號品（件數只能 1）。",
+        "properties": {
+          "item_type": {
+            "$ref": "#/components/schemas/BundlePackItemType"
+          },
+          "qty": {
+            "default": 1,
+            "maximum": 99.0,
+            "minimum": 1.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "target_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_type",
+          "target_id"
+        ],
+        "title": "BundlePackItemInput",
+        "type": "object"
+      },
+      "BundlePackItemRead": {
+        "properties": {
+          "item_type": {
+            "$ref": "#/components/schemas/BundlePackItemType"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_type",
+          "target_id",
+          "qty",
+          "label"
+        ],
+        "title": "BundlePackItemRead",
+        "type": "object"
+      },
+      "BundlePackItemType": {
+        "description": "組合包袋裝條碼裡的一項是什麼（ADR-028）：一般商品×件數、販售籃×件數、或一件自有序號品。",
+        "enum": [
+          "SERIALIZED",
+          "CATALOG",
+          "BULK_BASKET"
+        ],
+        "title": "BundlePackItemType",
+        "type": "string"
+      },
+      "BundlePackRead": {
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/AwareDateTime"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BundlePackItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "campaign_id",
+          "code",
+          "name",
+          "is_active",
+          "created_at",
+          "items"
+        ],
+        "title": "BundlePackRead",
+        "type": "object"
+      },
+      "BundlePackScanItemRead": {
+        "description": "POS 掃袋裝條碼時袋裡一項的現況：前端據此一件件加進購物車。",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "item_type": {
+            "$ref": "#/components/schemas/BundlePackItemType"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "stock": {
+            "title": "Stock",
+            "type": "integer"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "integer"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "item_type",
+          "target_id",
+          "qty",
+          "code",
+          "name",
+          "unit_price",
+          "note",
+          "brand_id",
+          "stock",
+          "available",
+          "unavailable_reason"
+        ],
+        "title": "BundlePackScanItemRead",
+        "type": "object"
+      },
+      "BundlePackScanRead": {
+        "properties": {
+          "bundle_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundle Price"
+          },
+          "campaign_effective": {
+            "title": "Campaign Effective",
+            "type": "boolean"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "campaign_name": {
+            "title": "Campaign Name",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BundlePackScanItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "campaign_id",
+          "campaign_name",
+          "bundle_price",
+          "campaign_effective",
+          "items"
+        ],
+        "title": "BundlePackScanRead",
+        "type": "object"
+      },
       "BundleSlotInput": {
         "description": "組合包的一個格子：符合任一範圍的商品要湊 qty 件。",
         "properties": {
@@ -19823,6 +20110,102 @@
         ]
       }
     },
+    "/api/v1/bundle-packs/by-code/{code}": {
+      "get": {
+        "description": "POS 掃袋裝條碼：袋裡每件商品的現況與組合價是否生效。停用／他店 → 404。",
+        "operationId": "getBundlePackByCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundlePackScanRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bundle Pack By Code",
+        "tags": [
+          "bundle-packs"
+        ]
+      }
+    },
+    "/api/v1/bundle-packs/{pack_id}/deactivate": {
+      "post": {
+        "description": "停用：之後掃不到（袋子拆了、標籤作廢）。",
+        "operationId": "deactivateBundlePack",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pack_id",
+            "required": true,
+            "schema": {
+              "title": "Pack Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundlePackRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Deactivate Bundle Pack",
+        "tags": [
+          "bundle-packs"
+        ]
+      }
+    },
     "/api/v1/call-tickets": {
       "get": {
         "description": "候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。\n\n`ticket_date`（台北營業日）指定時改查那一天的全部，依取號順序——量大的日子\n才撈得完。搭配 `offset` 翻頁；不指定日期時 `offset` 也已能翻到歷史。",
@@ -20440,6 +20823,113 @@
         "summary": "End Campaign",
         "tags": [
           "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/packs": {
+      "get": {
+        "operationId": "listBundlePacks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BundlePackRead"
+                  },
+                  "title": "Response Listbundlepacks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bundle Packs",
+        "tags": [
+          "bundle-packs"
+        ]
+      },
+      "post": {
+        "description": "建一袋：袋裡內容單獨結帳必須剛好湊成這個組合價的一組（ADR-028）。",
+        "operationId": "createBundlePack",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BundlePackCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundlePackRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Bundle Pack",
+        "tags": [
+          "bundle-packs"
         ]
       }
     },

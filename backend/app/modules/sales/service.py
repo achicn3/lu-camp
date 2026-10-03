@@ -25,7 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.audit import write_audit_log
 from app.core.canonical import canonical_json_bytes
 from app.core.money import MAX_NTD, round_ntd, split_tax_inclusive
-from app.modules.campaigns.pricing import CartLine, LinePrice, PromoCampaign, PromoItem, price_cart
+from app.modules.campaigns.pricing import CartLine, LinePrice, PromoCampaign, price_cart
+from app.modules.campaigns.promo_items import (
+    basket_promo_item,
+    bulk_promo_item,
+    catalog_promo_item,
+    serialized_promo_item,
+)
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -34,7 +40,7 @@ from app.modules.customerdisplay.models import CartSession, CartSessionEvent
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.basket_service import BulkBasketService
-from app.modules.inventory.models import BulkBasket, BulkLot, CatalogProduct, SerializedItem
+from app.modules.inventory.models import BulkBasket
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
@@ -87,7 +93,6 @@ from app.modules.user.service import UserService
 from app.shared.enums import (
     AdjustmentScope,
     BulkLotStatus,
-    CampaignItemKind,
     CartSessionStatus,
     CashMovementType,
     EInvoiceIssueChannel,
@@ -313,52 +318,6 @@ def _campaign_discount(priced: LinePrice, original_unit: Decimal, qty: int) -> _
         priced.buy_n_get_m_units,
         priced.buy_n_get_m_eligible,
         priced.bundle_groups,
-    )
-
-
-def _serialized_promo_item(item: SerializedItem) -> PromoItem:
-    return PromoItem(
-        kind=(
-            CampaignItemKind.CONSIGNMENT_SERIALIZED
-            if item.ownership_type == OwnershipType.CONSIGNMENT
-            else CampaignItemKind.OWNED_SERIALIZED
-        ),
-        category_id=item.category_id,
-        brand_id=item.brand_id,
-        product_model_id=item.product_model_id,
-        serialized_item_id=item.id,
-    )
-
-
-def _catalog_promo_item(product: CatalogProduct) -> PromoItem:
-    return PromoItem(
-        kind=CampaignItemKind.CATALOG,
-        category_id=product.category_id,
-        brand_id=product.brand_id,
-        product_model_id=product.product_model_id,
-        catalog_product_id=product.id,
-    )
-
-
-def _bulk_promo_item(lot: BulkLot) -> PromoItem | None:
-    """散裝只折自有；寄售散裝無抽成模型、永不折（docs/21 §2）。已入籃的來源依籃子比對。"""
-    if lot.consignor_id is not None:
-        return None
-    return PromoItem(
-        kind=CampaignItemKind.OWNED_BULK,
-        category_id=lot.category_id,
-        brand_id=lot.brand_id,
-        bulk_basket_id=lot.basket_id,
-    )
-
-
-def _basket_promo_item(basket: BulkBasket) -> PromoItem:
-    """籃內只有自有散裝（寄售不入籃）。"""
-    return PromoItem(
-        kind=CampaignItemKind.OWNED_BULK,
-        category_id=basket.category_id,
-        brand_id=basket.brand_id,
-        bulk_basket_id=basket.id,
     )
 
 
@@ -3425,7 +3384,7 @@ class SalesService:
             if item is None:
                 return skip
             return CartLine(  # 序號品一件一行
-                _serialized_promo_item(item), item.listed_price, 1, free_requested=chosen
+                serialized_promo_item(item), item.listed_price, 1, free_requested=chosen
             )
         if line.line_type == SaleLineType.CATALOG:
             if line.catalog_product_id is None:
@@ -3434,7 +3393,7 @@ class SalesService:
             if product is None:
                 return skip
             return CartLine(
-                _catalog_promo_item(product), product.unit_price, line.qty, free_requested=chosen
+                catalog_promo_item(product), product.unit_price, line.qty, free_requested=chosen
             )
         if line.line_type == SaleLineType.MENU:
             return skip
@@ -3443,7 +3402,7 @@ class SalesService:
             if view is None:
                 return skip
             return CartLine(
-                _basket_promo_item(view.basket),
+                basket_promo_item(view.basket),
                 view.basket.unit_price,
                 line.qty,
                 free_requested=chosen,
@@ -3453,7 +3412,7 @@ class SalesService:
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             return skip
-        return CartLine(_bulk_promo_item(lot), lot.unit_price, line.qty, free_requested=chosen)
+        return CartLine(bulk_promo_item(lot), lot.unit_price, line.qty, free_requested=chosen)
 
     async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:
         """贈品的前置驗證：必須帶原因、原因必須屬本店且啟用。

@@ -6083,3 +6083,60 @@ a.btn-ghost {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 組合包袋裝條碼（ADR-028）：活動頁「袋裝條碼」面板。 */
+.bundle-packs {
+  /* 一般 .card 限寬 520px；這裡有袋子清單表格，放寬才不會把操作鈕擠出去。 */
+  max-width: 960px;
+  margin-top: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.bundle-packs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.bundle-packs-head h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.bundle-pack-form {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.bundle-pack-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.bundle-pack-candidates li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.bundle-pack-candidates .row-sub {
+  margin-left: var(--sp-2);
+}
+.bundle-pack-qty {
+  width: 6.5rem;
+  text-align: right;
+}
+.bundle-pack-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}

@@ -24,7 +24,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
-from app.shared.enums import CampaignKind, CampaignStatus, CampaignTargetMode, CampaignTargetType
+from app.shared.enums import (
+    BundlePackItemType,
+    CampaignKind,
+    CampaignStatus,
+    CampaignTargetMode,
+    CampaignTargetType,
+)
 
 
 def _enum_col(enum_type: type) -> Enum:
@@ -155,3 +161,48 @@ class CampaignBundleSlotTarget(Base, TimestampMixin):
     slot_id: Mapped[int] = mapped_column(ForeignKey("campaign_bundle_slots.id"), index=True)
     target_type: Mapped[CampaignTargetType] = mapped_column(_enum_col(CampaignTargetType))
     target_id: Mapped[int] = mapped_column(Integer)
+
+
+class BundlePack(Base, TimestampMixin):
+    """組合包的袋裝條碼（ADR-028）：一張條碼代表一袋，掃了就把袋裡的商品加進購物車。
+
+    價錢不存在這裡——由所屬組合價活動決定（散買湊齊也算，裁示 3）。
+    """
+
+    __tablename__ = "bundle_packs"
+    __table_args__ = (UniqueConstraint("code", name="uq_bundle_packs_code"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    code: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(100))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+
+class BundlePackItem(Base, TimestampMixin):
+    """袋裡的一項：依 item_type 恰好指向一張表（DB CHECK 擋），序號品件數只能是 1。"""
+
+    __tablename__ = "bundle_pack_items"
+    __table_args__ = (
+        CheckConstraint("qty BETWEEN 1 AND 99", name="ck_bundle_pack_items_qty"),
+        CheckConstraint(
+            "(item_type = 'SERIALIZED' AND serialized_item_id IS NOT NULL AND qty = 1"
+            " AND catalog_product_id IS NULL AND bulk_basket_id IS NULL)"
+            " OR (item_type = 'CATALOG' AND catalog_product_id IS NOT NULL"
+            " AND serialized_item_id IS NULL AND bulk_basket_id IS NULL)"
+            " OR (item_type = 'BULK_BASKET' AND bulk_basket_id IS NOT NULL"
+            " AND serialized_item_id IS NULL AND catalog_product_id IS NULL)",
+            name="ck_bundle_pack_items_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    pack_id: Mapped[int] = mapped_column(ForeignKey("bundle_packs.id"), index=True)
+    item_type: Mapped[BundlePackItemType] = mapped_column(_enum_col(BundlePackItemType))
+    serialized_item_id: Mapped[int | None] = mapped_column(ForeignKey("serialized_items.id"))
+    catalog_product_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_products.id"))
+    bulk_basket_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_baskets.id"))
+    qty: Mapped[int] = mapped_column(Integer)

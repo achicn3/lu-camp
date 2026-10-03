@@ -152,6 +152,8 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     # 弄丟了就擋不住只退一部分（組合折扣白拿）。
     ("活動-組合格子數", "SELECT count(*) FROM campaign_bundle_slots"),
     ("活動-組合格子範圍數", "SELECT count(*) FROM campaign_bundle_slot_targets"),
+    ("活動-組合包袋裝條碼數", "SELECT count(*) FROM bundle_packs"),
+    ("活動-組合包袋內品項數", "SELECT count(*) FROM bundle_pack_items"),
     (
         "交易-組合價（組數/組合價合計）",
         "SELECT count(*)::text || '/' || COALESCE(SUM(bundle_price),0)::text"

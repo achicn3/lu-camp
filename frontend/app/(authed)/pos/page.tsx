@@ -33,6 +33,7 @@ import {
   markAsGift,
   menuLineKey,
   noteAckFingerprint,
+  packCartLines,
   removeLine,
   setQty,
   toSaleLines,
@@ -125,10 +126,35 @@ function Money({ value }: { value: number }) {
 
 // ── 掃碼加入購物車 ──
 // 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）、散裝販售籃
-// K{店}-{10碼HEX}（inventory/basket_service.py）；掃描到完整碼即自動加入。
+// K{店}-{10碼HEX}（inventory/basket_service.py）、組合包袋裝條碼 P{店}-{10碼HEX}
+// （campaigns/pack_service.py，ADR-028）；掃描到完整碼即自動加入。
 // 一般商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 一般商品 一格通吃。
-const ITEM_CODE_RE = /^[SLK]\d+-[0-9A-F]{10}$/;
+const ITEM_CODE_RE = /^[SLKP]\d+-[0-9A-F]{10}$/;
 const BASKET_CODE_RE = /^K\d+-[0-9A-F]{10}$/;
+const PACK_CODE_RE = /^P\d+-[0-9A-F]{10}$/;
+
+/** 掃一次的結果：一般是一行；袋裝條碼是袋裡每項各一行，外加要告訴店員的話。 */
+interface ScanResult {
+  lines: CartLine[];
+  notice: string | null;
+}
+
+/** 組合包袋裝條碼：整袋加入；組合價沒生效要講（會照原價計），袋子不完整就整袋不加。 */
+async function resolvePack(code: string): Promise<ScanResult> {
+  const { data, error, response } = await api.GET("/api/v1/bundle-packs/by-code/{code}", {
+    params: { path: { code } },
+  });
+  if (!data) {
+    if (response.status === 404) throw new Error(`找不到此袋裝條碼（可能已停用）：${code}`);
+    throw new Error(extractDetail(error) ?? `查詢袋裝條碼失敗（代碼 ${response.status}）`);
+  }
+  return {
+    lines: packCartLines(data),
+    notice: data.campaign_effective
+      ? null
+      : `「${data.campaign_name}」組合價目前沒有生效，這袋會照原價計`,
+  };
+}
 
 /** 取販售籃並轉成購物車行；查不到或整籃賣完都如實回報。 */
 async function basketLineById(basketId: number): Promise<CartLine> {
@@ -156,7 +182,7 @@ function ScanBar({
   disabled = false,
   disabledReason,
 }: {
-  onResolved: (line: CartLine) => void;
+  onResolved: (result: ScanResult) => void;
   disabled?: boolean;
   /** 停用的原因。**掃碼槍打進停用的輸入框會整個消失**（沒有錯誤、什麼都沒有），
    *  店員只會覺得「掃了沒反應」，所以一定要說出為什麼、要等什麼。 */
@@ -167,115 +193,118 @@ function ScanBar({
   const [composing, setComposing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const mutation = useMutation({
-    mutationFn: async (code: string): Promise<CartLine> => {
-      // 販售籃碼制明確，直接查籃子，不必先問序號品與散裝（ADR-025）。
-      if (BASKET_CODE_RE.test(code)) {
-        const basket = await api.GET("/api/v1/bulk-baskets/by-code/{code}", {
-          params: { path: { code } },
-        });
-        if (basket.data) return basketCartLine(basket.data);
-        if (basket.response.status === 404) throw new Error(`找不到此條碼：${code}`);
-        throw new Error(
-          extractDetail(basket.error) ?? `查詢失敗（代碼 ${basket.response.status}）`,
-        );
-      }
-      // 先試序號品，再試散裝堆，最後試一般商品 SKU（一格掃碼通吃，docs/10 §3）。
-      const serialized = await api.GET(
-        "/api/v1/serialized-items/by-code/{item_code}",
-        {
-          params: { path: { item_code: code } },
-        },
-      );
-      if (serialized.response.status === 200 && serialized.data) {
-        const item = serialized.data;
-        if (item.status === "PENDING_LISTING")
-          throw new Error(`${item.item_code} 還在待整理，上架後才能賣`);
-        if (item.status !== "IN_STOCK")
-          throw new Error(`${item.item_code} 非在庫（不可售）`);
-        const price = parseNtd(item.listed_price) ?? 0;
-        return {
-          key: `S:${item.item_code}`,
-          lineType: "SERIALIZED",
-          description: item.name,
-          unitPrice: price,
-          qty: 1,
-          itemCode: item.item_code,
-          maxQty: 1,
-          note: item.note,
-          brandId: item.brand_id,
-        };
-      }
-      // 僅 404 才視為「非序號品」改試散裝；其他狀態（401/403/500）如實回報，
-      // 不可把後端錯誤偽裝成「找不到此條碼」（Codex F3 P3）。
-      if (serialized.response.status !== 404) {
-        throw new Error(
-          extractDetail(serialized.error) ??
-            `查詢失敗（代碼 ${serialized.response.status}）`,
-        );
-      }
-      const bulk = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
-        params: { path: { lot_code: code } },
-      });
-      if (bulk.response.status === 200 && bulk.data) {
-        const lot = bulk.data;
-        // 已入籃的舊來源標籤：改賣整籃。這批賣完了籃裡可能還有別批，不能報售罄。
-        if (lot.basket_id != null) return await basketLineById(lot.basket_id);
-        if (lot.remaining_qty <= 0) throw new Error(`${lot.lot_code} 已售罄`);
-        return {
-          key: `B:${lot.id}`,
-          lineType: "BULK_LOT",
-          description: lot.name,
-          unitPrice: parseNtd(lot.unit_price) ?? 0,
-          qty: 1,
-          bulkLotId: lot.id,
-          maxQty: lot.remaining_qty,
-          note: lot.note,
-          barcode: lot.lot_code,
-          brandId: lot.brand_id,
-        };
-      }
-      if (bulk.response.status !== 404) {
-        throw new Error(
-          extractDetail(bulk.error) ??
-            `查詢失敗（代碼 ${bulk.response.status}）`,
-        );
-      }
-      // 最後試一般商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
-      const catalog = await api.GET("/api/v1/catalog-products/by-sku/{sku}", {
-        params: { path: { sku: code } },
-      });
-      if (catalog.response.status === 200 && catalog.data) {
-        const product = catalog.data;
-        if (product.quantity_on_hand <= 0)
-          throw new Error(`${product.sku} 已無庫存`);
-        return {
-          key: `C:${product.id}`,
-          lineType: "CATALOG",
-          description: product.name,
-          unitPrice: parseNtd(product.unit_price) ?? 0,
-          qty: 1,
-          catalogProductId: product.id,
-          maxQty: product.quantity_on_hand,
-          note: product.note,
-          barcode: product.sku,
-          brandId: product.brand_id,
-        };
-      }
-      if (catalog.response.status !== 404) {
-        throw new Error(
-          extractDetail(catalog.error) ??
-            `查詢失敗（代碼 ${catalog.response.status}）`,
-        );
-      }
-      throw new Error(`找不到此條碼：${code}`);
-    },
-    onSuccess: (line) => {
+    mutationFn: async (code: string): Promise<ScanResult> =>
+      PACK_CODE_RE.test(code) ? resolvePack(code) : { lines: [await resolveLine(code)], notice: null },
+    onSuccess: (result) => {
       setError(null);
       setCode("");
-      onResolved(line);
+      onResolved(result);
     },
     onError: (err: Error) => setError(err.message),
   });
+
+  async function resolveLine(code: string): Promise<CartLine> {
+    // 販售籃碼制明確，直接查籃子，不必先問序號品與散裝（ADR-025）。
+    if (BASKET_CODE_RE.test(code)) {
+      const basket = await api.GET("/api/v1/bulk-baskets/by-code/{code}", {
+        params: { path: { code } },
+      });
+      if (basket.data) return basketCartLine(basket.data);
+      if (basket.response.status === 404) throw new Error(`找不到此條碼：${code}`);
+      throw new Error(
+        extractDetail(basket.error) ?? `查詢失敗（代碼 ${basket.response.status}）`,
+      );
+    }
+    // 先試序號品，再試散裝堆，最後試一般商品 SKU（一格掃碼通吃，docs/10 §3）。
+    const serialized = await api.GET(
+      "/api/v1/serialized-items/by-code/{item_code}",
+      {
+        params: { path: { item_code: code } },
+      },
+    );
+    if (serialized.response.status === 200 && serialized.data) {
+      const item = serialized.data;
+      if (item.status === "PENDING_LISTING")
+        throw new Error(`${item.item_code} 還在待整理，上架後才能賣`);
+      if (item.status !== "IN_STOCK")
+        throw new Error(`${item.item_code} 非在庫（不可售）`);
+      const price = parseNtd(item.listed_price) ?? 0;
+      return {
+        key: `S:${item.item_code}`,
+        lineType: "SERIALIZED",
+        description: item.name,
+        unitPrice: price,
+        qty: 1,
+        itemCode: item.item_code,
+        maxQty: 1,
+        note: item.note,
+        brandId: item.brand_id,
+      };
+    }
+    // 僅 404 才視為「非序號品」改試散裝；其他狀態（401/403/500）如實回報，
+    // 不可把後端錯誤偽裝成「找不到此條碼」（Codex F3 P3）。
+    if (serialized.response.status !== 404) {
+      throw new Error(
+        extractDetail(serialized.error) ??
+          `查詢失敗（代碼 ${serialized.response.status}）`,
+      );
+    }
+    const bulk = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
+      params: { path: { lot_code: code } },
+    });
+    if (bulk.response.status === 200 && bulk.data) {
+      const lot = bulk.data;
+      // 已入籃的舊來源標籤：改賣整籃。這批賣完了籃裡可能還有別批，不能報售罄。
+      if (lot.basket_id != null) return await basketLineById(lot.basket_id);
+      if (lot.remaining_qty <= 0) throw new Error(`${lot.lot_code} 已售罄`);
+      return {
+        key: `B:${lot.id}`,
+        lineType: "BULK_LOT",
+        description: lot.name,
+        unitPrice: parseNtd(lot.unit_price) ?? 0,
+        qty: 1,
+        bulkLotId: lot.id,
+        maxQty: lot.remaining_qty,
+        note: lot.note,
+        barcode: lot.lot_code,
+        brandId: lot.brand_id,
+      };
+    }
+    if (bulk.response.status !== 404) {
+      throw new Error(
+        extractDetail(bulk.error) ??
+          `查詢失敗（代碼 ${bulk.response.status}）`,
+      );
+    }
+    // 最後試一般商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
+    const catalog = await api.GET("/api/v1/catalog-products/by-sku/{sku}", {
+      params: { path: { sku: code } },
+    });
+    if (catalog.response.status === 200 && catalog.data) {
+      const product = catalog.data;
+      if (product.quantity_on_hand <= 0)
+        throw new Error(`${product.sku} 已無庫存`);
+      return {
+        key: `C:${product.id}`,
+        lineType: "CATALOG",
+        description: product.name,
+        unitPrice: parseNtd(product.unit_price) ?? 0,
+        qty: 1,
+        catalogProductId: product.id,
+        maxQty: product.quantity_on_hand,
+        note: product.note,
+        barcode: product.sku,
+        brandId: product.brand_id,
+      };
+    }
+    if (catalog.response.status !== 404) {
+      throw new Error(
+        extractDetail(catalog.error) ??
+          `查詢失敗（代碼 ${catalog.response.status}）`,
+      );
+    }
+    throw new Error(`找不到此條碼：${code}`);
+  }
 
   function submit(raw: string) {
     const value = raw.trim();
@@ -2356,20 +2385,27 @@ export default function PosPage() {
   }
 
   function addToCart(line: CartLine) {
+    addScanned({ lines: [line], notice: null });
+  }
+
+  /** 掃到的一行或一整袋（袋裝條碼）一起加入；每行的提醒（重複、到上限）跟袋子的提醒一併講。 */
+  function addScanned(scanned: ScanResult) {
     if (cartMutationLocked) {
       setNotice("簽署或付款處理期間，購物車已由伺服器鎖定。");
       return;
     }
-    const result = addLine(lines, line);
+    let next = lines;
+    const notices: string[] = scanned.notice === null ? [] : [scanned.notice];
+    for (const line of scanned.lines) {
+      const result = addLine(next, line);
+      next = result.lines;
+      if (result.duplicateSerialized) notices.push(`${line.description} 已在購物車（序號品不可重複）`);
+      else if (result.cappedAt !== null)
+        notices.push(`${line.description} 庫存只剩 ${result.cappedAt} 件，已加到上限`);
+    }
     markCartEdited();
-    setLines(result.lines);
-    setNotice(
-      result.duplicateSerialized
-        ? `${line.description} 已在購物車（序號品不可重複）`
-        : result.cappedAt !== null
-          ? `${line.description} 庫存只剩 ${result.cappedAt} 件，已加到上限`
-          : null,
-    );
+    setLines(next);
+    setNotice(notices.length > 0 ? notices.join("；") : null);
   }
 
   /**
@@ -2640,7 +2676,7 @@ export default function PosPage() {
       <div className="pos-grid">
         <div className="pos-left">
           <ScanBar
-            onResolved={addToCart}
+            onResolved={addScanned}
             disabled={cartMutationLocked}
             disabledReason={
               restoring

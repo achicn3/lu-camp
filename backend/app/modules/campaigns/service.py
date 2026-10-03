@@ -321,7 +321,10 @@ class CampaignService:
 
     async def effective_promos(self, store_id: int, now: datetime) -> list[PromoCampaign]:
         """目前生效中的全部活動，整理成定價輸入（含範圍條件）；結帳／報價／客顯共用。"""
-        campaigns = await self._repo.list_effective(store_id, now)
+        return await self.promos_for(store_id, await self._repo.list_effective(store_id, now))
+
+    async def promos_for(self, store_id: int, campaigns: list[Campaign]) -> list[PromoCampaign]:
+        """把指定的活動整理成定價輸入（不看狀態與期間）；組合包袋裝條碼建立時拿來試算（ADR-028）。"""
         targets = await self._repo.targets_for(store_id, [c.id for c in campaigns])
         slots_by_campaign = await self._slots_by_campaign(store_id, campaigns)
         by_campaign: dict[int, list[CampaignTarget]] = {}

@@ -45,6 +45,14 @@ class CampaignNotFound(DomainError):
     """指定的門市活動不存在（或非本店）。"""
 
 
+class BundlePackInvalid(DomainError):
+    """組合包袋裝條碼的內容不合法（湊不成一組、多放、商品不能賣等；ADR-028）。"""
+
+
+class BundlePackNotFound(DomainError):
+    """袋裝條碼不存在、不屬本店或已停用。"""
+
+
 class InvalidStateTransition(DomainError):
     """狀態機不允許的轉移（如已 SOLD 又要售出）。"""
 

@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field, PlainSerializer, model_validator
 
 from app.core.money import format_ntd
 from app.core.time import AwareDateTime
-from app.shared.enums import CampaignKind, CampaignStatus, CampaignTargetMode, CampaignTargetType
+from app.shared.enums import (
+    BundlePackItemType,
+    CampaignKind,
+    CampaignStatus,
+    CampaignTargetMode,
+    CampaignTargetType,
+)
 
 # 含稅整數元（特價、折金額）：輸入必須 > 0、無小數；輸出為字串（§6 前端傳輸一律字串）。
 NTDPositive = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=0)]
@@ -156,3 +162,79 @@ class CampaignRead(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: datetime
+
+
+# ── 組合包袋裝條碼（ADR-028）──
+
+# 一袋最多幾項（不同商品）；件數另由每項的 qty（1–99）限制。
+BUNDLE_PACK_ITEMS_MAX = 50
+
+
+class BundlePackItemInput(BaseModel):
+    """袋裡的一項：一般商品／販售籃 × 件數，或一件序號品（件數只能 1）。"""
+
+    item_type: BundlePackItemType
+    target_id: Annotated[int, Field(gt=0)]
+    qty: PromoQty = 1
+
+    @model_validator(mode="after")
+    def _serialized_is_single(self) -> Self:
+        if self.item_type is BundlePackItemType.SERIALIZED and self.qty != 1:
+            raise ValueError("序號品一袋只能放 1 件")
+        return self
+
+
+class BundlePackCreateRequest(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=100)]
+    items: Annotated[
+        list[BundlePackItemInput], Field(min_length=1, max_length=BUNDLE_PACK_ITEMS_MAX)
+    ]
+
+
+class BundlePackItemRead(BaseModel):
+    item_type: BundlePackItemType
+    target_id: int
+    qty: int
+    label: str
+    """顯示用名稱（序號品含條碼）。"""
+
+
+class BundlePackRead(BaseModel):
+    id: int
+    store_id: int
+    campaign_id: int
+    code: str
+    name: str
+    is_active: bool
+    created_at: AwareDateTime
+    items: list[BundlePackItemRead]
+
+
+class BundlePackScanItemRead(BaseModel):
+    """POS 掃袋裝條碼時袋裡一項的現況：前端據此一件件加進購物車。"""
+
+    item_type: BundlePackItemType
+    target_id: int
+    qty: int
+    code: str
+    """這項商品自己的條碼（序號品 item_code、一般商品 sku、販售籃 code）。"""
+    name: str
+    unit_price: NTDAmountOpt
+    note: str | None
+    brand_id: int | None
+    stock: int
+    """目前可賣幾件（序號品在庫為 1、否則 0）：前端當購物車的數量上限。"""
+    available: bool
+    unavailable_reason: str | None
+
+
+class BundlePackScanRead(BaseModel):
+    id: int
+    code: str
+    name: str
+    campaign_id: int
+    campaign_name: str
+    bundle_price: NTDAmountOpt
+    campaign_effective: bool
+    """所屬組合價活動現在生效中；否則照原價計（前端要提示）。"""
+    items: list[BundlePackScanItemRead]

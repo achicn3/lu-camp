@@ -605,6 +605,46 @@ export interface paths {
         patch: operations["updateBulkPrice"];
         trace?: never;
     };
+    "/api/v1/bundle-packs/by-code/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bundle Pack By Code
+         * @description POS 掃袋裝條碼：袋裡每件商品的現況與組合價是否生效。停用／他店 → 404。
+         */
+        get: operations["getBundlePackByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bundle-packs/{pack_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate Bundle Pack
+         * @description 停用：之後掃不到（袋子拆了、標籤作廢）。
+         */
+        post: operations["deactivateBundlePack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/call-tickets": {
         parameters: {
             query?: never;
@@ -772,6 +812,27 @@ export interface paths {
         put?: never;
         /** End Campaign */
         post: operations["endCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Bundle Packs */
+        get: operations["listBundlePacks"];
+        put?: never;
+        /**
+         * Create Bundle Pack
+         * @description 建一袋：袋裡內容單獨結帳必須剛好湊成這個組合價的一組（ADR-028）。
+         */
+        post: operations["createBundlePack"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4950,6 +5011,107 @@ export interface components {
          * @enum {string}
          */
         BulkLotStatus: "PENDING_LISTING" | "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
+        /** BundlePackCreateRequest */
+        BundlePackCreateRequest: {
+            /** Items */
+            items: components["schemas"]["BundlePackItemInput"][];
+            /** Name */
+            name: string;
+        };
+        /**
+         * BundlePackItemInput
+         * @description 袋裡的一項：一般商品／販售籃 × 件數，或一件序號品（件數只能 1）。
+         */
+        BundlePackItemInput: {
+            item_type: components["schemas"]["BundlePackItemType"];
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
+            /** Target Id */
+            target_id: number;
+        };
+        /** BundlePackItemRead */
+        BundlePackItemRead: {
+            item_type: components["schemas"]["BundlePackItemType"];
+            /** Label */
+            label: string;
+            /** Qty */
+            qty: number;
+            /** Target Id */
+            target_id: number;
+        };
+        /**
+         * BundlePackItemType
+         * @description 組合包袋裝條碼裡的一項是什麼（ADR-028）：一般商品×件數、販售籃×件數、或一件自有序號品。
+         * @enum {string}
+         */
+        BundlePackItemType: "SERIALIZED" | "CATALOG" | "BULK_BASKET";
+        /** BundlePackRead */
+        BundlePackRead: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Code */
+            code: string;
+            created_at: components["schemas"]["AwareDateTime"];
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Items */
+            items: components["schemas"]["BundlePackItemRead"][];
+            /** Name */
+            name: string;
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * BundlePackScanItemRead
+         * @description POS 掃袋裝條碼時袋裡一項的現況：前端據此一件件加進購物車。
+         */
+        BundlePackScanItemRead: {
+            /** Available */
+            available: boolean;
+            /** Brand Id */
+            brand_id: number | null;
+            /** Code */
+            code: string;
+            item_type: components["schemas"]["BundlePackItemType"];
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Qty */
+            qty: number;
+            /** Stock */
+            stock: number;
+            /** Target Id */
+            target_id: number;
+            /** Unavailable Reason */
+            unavailable_reason: string | null;
+            /** Unit Price */
+            unit_price: string | null;
+        };
+        /** BundlePackScanRead */
+        BundlePackScanRead: {
+            /** Bundle Price */
+            bundle_price: string | null;
+            /** Campaign Effective */
+            campaign_effective: boolean;
+            /** Campaign Id */
+            campaign_id: number;
+            /** Campaign Name */
+            campaign_name: string;
+            /** Code */
+            code: string;
+            /** Id */
+            id: number;
+            /** Items */
+            items: components["schemas"]["BundlePackScanItemRead"][];
+            /** Name */
+            name: string;
+        };
         /**
          * BundleSlotInput
          * @description 組合包的一個格子：符合任一範圍的商品要湊 qty 件。
@@ -11814,6 +11976,68 @@ export interface operations {
             };
         };
     };
+    getBundlePackByCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundlePackScanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deactivateBundlePack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pack_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundlePackRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listCallTickets: {
         parameters: {
             query?: {
@@ -12152,6 +12376,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listBundlePacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundlePackRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createBundlePack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BundlePackCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundlePackRead"];
                 };
             };
             /** @description Validation Error */

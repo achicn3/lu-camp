@@ -519,6 +519,46 @@ describe("/pos 結帳頁", () => {
     expect(within(noted).getAllByRole("listitem").length).toBe(1);
   });
 
+  it("掃組合包袋裝條碼：袋裡每項一行加進購物車；組合價沒生效要提示；袋子不完整整袋不加（ADR-028）", async () => {
+    const pack = (effective: boolean, peachAvailable = true) => ({
+      id: 1,
+      code: "P1-ABCDEF0123",
+      name: "濾掛 12 入袋",
+      campaign_id: 9,
+      campaign_name: "濾掛 12 入",
+      bundle_price: "500",
+      campaign_effective: effective,
+      items: [
+        { item_type: "CATALOG", target_id: 7, qty: 6, code: "BIRD", name: "天堂鳥濾掛", unit_price: "50", note: null, brand_id: null, stock: 144, available: true, unavailable_reason: null },
+        { item_type: "CATALOG", target_id: 8, qty: 6, code: "PEACH", name: "蜜桃蹦蹦濾掛", unit_price: "50", note: null, brand_id: null, stock: peachAvailable ? 144 : 5, available: peachAvailable, unavailable_reason: peachAvailable ? null : "庫存只剩 5" },
+      ],
+    });
+    let current = pack(false, false);
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/bundle-packs/by-code/P1-ABCDEF0123")) return json(current);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({ total: "500", campaign_id: null, campaign_name: null, lines: [], food_subtotal: "0", store_credit_max: "500" });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+
+    await scan(user, "P1-ABCDEF0123");
+    await waitFor(() => expect(screen.getByText(/這袋不完整，不能照組合價賣：蜜桃蹦蹦濾掛（庫存只剩 5）/)).toBeTruthy());
+    expect(screen.queryByText("天堂鳥濾掛")).toBeNull();
+
+    current = pack(false);
+    await scan(user, "P1-ABCDEF0123");
+    await waitFor(() => expect(screen.getByText("天堂鳥濾掛")).toBeTruthy());
+    expect(screen.getByText("蜜桃蹦蹦濾掛")).toBeTruthy();
+    expect(screen.getByTestId("pos-item-count").textContent).toBe("共 12 件");
+    expect(screen.getByText(/「濾掛 12 入」組合價目前沒有生效，這袋會照原價計/)).toBeTruthy();
+  });
+
   it("商品沒有備註：結帳不跳提醒，直接成交", async () => {
     let saleCalls = 0;
     stubFetch((url, method) => {

@@ -5,6 +5,7 @@ import { parseNtd } from "@/lib/money";
 
 type SaleLineType = components["schemas"]["SaleLineType"];
 type BulkBasket = components["schemas"]["BulkBasketRead"];
+type BundlePackScan = components["schemas"]["BundlePackScanRead"];
 
 /** 購物車一行。serialized 數量固定 1；catalog/bulk 可調量。 */
 export interface CartLine {
@@ -235,6 +236,40 @@ export function basketCartLine(basket: BulkBasket): CartLine {
     barcode: basket.code,
     brandId: basket.brand_id,
   };
+}
+
+/**
+ * 組合包袋裝條碼（ADR-028）→ 購物車行：袋裡每項一行，鍵與單掃那件商品時相同（之後再掃會合併）。
+ * 價錢不在這裡算——照原價放進購物車，組合價由後端的組合價活動套用（散買湊齊也一樣）。
+ * 袋裡有任何一件不能賣（賣掉了、庫存不夠、下架）就整袋不加：袋子不完整，不能照組合價賣。
+ */
+export function packCartLines(pack: BundlePackScan): CartLine[] {
+  const missing = pack.items.filter((item) => !item.available);
+  if (missing.length > 0) {
+    throw new Error(
+      `這袋不完整，不能照組合價賣：${missing
+        .map((item) => `${item.name}（${item.unavailable_reason ?? "不能賣"}）`)
+        .join("、")}`,
+    );
+  }
+  return pack.items.map((item): CartLine => {
+    const common = {
+      description: item.name,
+      unitPrice: parseNtd(item.unit_price ?? "0") ?? 0,
+      qty: item.qty,
+      maxQty: item.stock,
+      note: item.note,
+      barcode: item.code,
+      brandId: item.brand_id,
+    };
+    if (item.item_type === "SERIALIZED") {
+      return { ...common, key: `S:${item.code}`, lineType: "SERIALIZED", itemCode: item.code };
+    }
+    if (item.item_type === "BULK_BASKET") {
+      return { ...common, key: `K:${item.target_id}`, lineType: "BULK_LOT", bulkBasketId: item.target_id };
+    }
+    return { ...common, key: `C:${item.target_id}`, lineType: "CATALOG", catalogProductId: item.target_id };
+  });
 }
 
 /**

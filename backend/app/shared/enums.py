@@ -501,6 +501,14 @@ class CampaignTargetType(StrEnum):
     BULK_BASKET = "BULK_BASKET"
 
 
+class BundlePackItemType(StrEnum):
+    """組合包袋裝條碼裡的一項是什麼（ADR-028）：一般商品×件數、販售籃×件數、或一件自有序號品。"""
+
+    SERIALIZED = "SERIALIZED"
+    CATALOG = "CATALOG"
+    BULK_BASKET = "BULK_BASKET"
+
+
 class CampaignTargetMode(StrEnum):
     """範圍條件是「包含」還是「排除」：符合任一包含、且不符合任何排除，才算適用。"""
 
