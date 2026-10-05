@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
+import { SelectVoidDialog } from "@/features/acquisition/SelectVoidDialog";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 
 function json(data: unknown, status = 200): Response {
@@ -173,5 +174,17 @@ describe("VoidAcquisitionSection", () => {
     expect(await screen.findByText(/有效的收購單號/)).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "作廢收購" })).toBeNull();
+  });
+});
+
+
+describe("SelectVoidDialog", () => {
+  it("商品載入失敗時仍能從視窗標頭關閉", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ detail: "找不到收購單" }, 404)));
+    const onClose = vi.fn();
+    wrap(<SelectVoidDialog acquisitionId={5} preselectAll onClose={onClose} onVoided={vi.fn()} />);
+    await screen.findByRole("alert");
+    await userEvent.click(screen.getByRole("button", { name: "關閉作廢視窗" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

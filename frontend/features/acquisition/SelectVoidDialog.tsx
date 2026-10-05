@@ -52,10 +52,21 @@ export function SelectVoidDialog({
       aria-label={`作廢收購 #${acquisitionId}`}
     >
       <div ref={panelRef} className="acq-select-void-dialog" tabIndex={-1}>
+        <div className="acq-select-void-header">
+          <div className="acq-select-void-title">
+            <h2>作廢收購</h2>
+            <span>收購單 #{acquisitionId}</span>
+          </div>
+          <button type="button" className="acq-select-void-close" aria-label="關閉作廢視窗" title="關閉" onClick={onClose}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
         <VoidAcquisitionSection
           acquisitionId={acquisitionId}
           preselectAll={preselectAll}
-          onClose={onClose}
+          showHeading={false}
           onVoided={onVoided}
         />
       </div>

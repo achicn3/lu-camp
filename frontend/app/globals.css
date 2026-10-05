@@ -2585,11 +2585,65 @@ a.btn-ghost {
 .acq-select-void-dialog {
   width: min(720px, 100%);
   max-height: calc(100vh - 2 * var(--sp-4));
-  max-height: calc(100dvh - 2 * var(--sp-4)); /* 手機網址列伸縮時以實際可視高度為準 */
+  max-height: calc(100dvh - 2 * var(--sp-4));
   overflow-y: auto;
   outline: none;
+  background: var(--surface);
+  border-radius: calc(var(--radius) + 6px);
+  box-shadow: var(--shadow);
+}
+.acq-select-void-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-5) clamp(16px, 4vw, 24px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.acq-select-void-title h2 {
+  margin: 0 0 var(--sp-1);
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  line-height: 1.3;
+}
+.acq-select-void-title span {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.acq-select-void-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 var(--tap-min);
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.acq-select-void-close:hover,
+.acq-select-void-close:active {
+  background: var(--bg);
+  color: var(--ink);
+}
+.acq-select-void-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .acq-select-void-dialog .acq-void-section {
+  margin: 0;
+  padding: var(--sp-5) clamp(16px, 4vw, 24px) var(--sp-6);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.acq-select-void-dialog .acq-void-section > .hint {
   margin-top: 0;
 }
 .acq-void-lookup {
@@ -5747,6 +5801,12 @@ a.btn-ghost {
   color: var(--ink-soft);
 }
 
+/* 全螢幕勾選與作廢視窗開啟時只捲動視窗，關閉後自動恢復背景捲動。 */
+html:has(.intake-customer, .acq-select-void-dialog),
+body:has(.intake-customer, .acq-select-void-dialog) {
+  overflow: hidden;
+}
+
 /* 客人勾選：全螢幕、大字，只有號碼、名稱、收購價 */
 .intake-customer {
   position: fixed;
@@ -5754,6 +5814,7 @@ a.btn-ghost {
   z-index: 60;
   background: var(--bg);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: var(--sp-5) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
 }
 .intake-customer-inner {

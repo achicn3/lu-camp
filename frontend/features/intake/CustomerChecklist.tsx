@@ -117,6 +117,16 @@ export function CustomerChecklist({
   return (
     <div className="intake-customer" role="dialog" aria-modal="true" aria-labelledby="intake-customer-title">
       <div className="intake-customer-inner">
+        {!declined && signedPayout === null && (
+          <button
+            type="button"
+            className="btn-ghost intake-customer-back"
+            disabled={confirm.isPending || decline.isPending}
+            onClick={onClose}
+          >
+            返回店員頁面
+          </button>
+        )}
         <h2 id="intake-customer-title">{signedPayout ? "簽署完成" : "請確認要賣的商品"}</h2>
         {declined ? (
           <div className="intake-customer-done">

@@ -527,6 +527,18 @@ describe("客人勾選要賣哪幾件", () => {
     { status: "AWAITING_CONFIRM" },
   );
 
+  it("可返回店員頁面，未確認的勾選不送出也不作廢", async () => {
+    const calls = stubFetch();
+    const onClose = vi.fn();
+    const onDone = vi.fn();
+    wrap(<CustomerChecklist batch={ready} onDone={onDone} onClose={onClose} />);
+    await userEvent.click(screen.getAllByRole("checkbox")[0]);
+    await userEvent.click(screen.getByRole("button", { name: "返回店員頁面" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+
   it("逐件列出號碼與收購價、預設照目前勾選；取消勾選總額即時更新", async () => {
     stubFetch();
     const user = userEvent.setup();
@@ -577,12 +589,12 @@ describe("客人勾選要賣哪幾件", () => {
     };
   }
 
-  it("勾選頁只有「確認」一個按鈕（不再有交給店員）", () => {
+  it("勾選頁提供返回與確認，不用提交就能退出", () => {
     stubFetch();
     wrap(<CustomerChecklist batch={ready} onDone={() => {}} onClose={() => {}} />);
     const dialog = screen.getByRole("dialog", { name: /確認要賣的商品/ });
     expect(within(dialog).queryByRole("button", { name: /交給店員/ })).toBeNull();
-    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["確認"]);
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["返回店員頁面", "確認"]);
   });
 
   it("按確認：送出不賣的那幾件，直接進簽署頁，顯示要賣的商品、合計與切結書", async () => {

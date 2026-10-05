@@ -290,7 +290,7 @@ it("作廢的商品勾選以對話視窗開在畫面上（不是加在清單最�
   expect(dialog.getAttribute("aria-modal")).toBe("true");
   expect(await within(dialog).findByRole("checkbox", { name: /待整理帳篷/ })).toBeTruthy();
 
-  await user.click(within(dialog).getByRole("button", { name: "關閉" }));
+  await user.click(within(dialog).getByRole("button", { name: "關閉作廢視窗" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "作廢收購 #10" })).toBeNull());
 
   await user.click(screen.getByRole("button", { name: "作廢" }));

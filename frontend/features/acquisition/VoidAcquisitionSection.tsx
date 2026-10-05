@@ -24,8 +24,9 @@ function ntd(value: string | null): string {
   return formatNtd(parseNtd(value) ?? 0);
 }
 
-export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, preselectAll = false }: {
+export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, preselectAll = false, showHeading = true }: {
   acquisitionId?: number;
+  showHeading?: boolean;
   onVoided?: (result: VoidResult) => void;
   onClose?: () => void;
   /** 一開始就勾好所有可作廢的商品（收購紀錄的「作廢」＝預設整張，取消勾選的保留）。 */
@@ -96,7 +97,7 @@ export function VoidAcquisitionSection({ acquisitionId, onVoided, onClose, prese
 
   return (
     <div className="card acq-void-section">
-      <h2>作廢收購（限管理者）</h2>
+      {showHeading && <h2>作廢收購（限管理者）</h2>}
       <p className="hint">
         {acquisitionId === undefined ? "輸入收購單號，" : ""}
         勾選要作廢的商品（沒勾的保留）。現金與購物金按原付款比例沖回，購物金含原溢價；散裝收購以整批作廢。
