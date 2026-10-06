@@ -25,6 +25,18 @@ export interface MenuItemView {
   available: boolean;
   remaining: number | null;
   option_groups: OptionGroupView[];
+  presentation?: MenuPresentation;
+}
+
+export interface MenuPresentation {
+  flavor_description: string | null;
+  audience_description: string | null;
+  is_recommended: boolean;
+  is_new: boolean;
+  limited_on: string | null;
+  show_remaining: boolean;
+  low_stock_threshold: number;
+  hide_sold_out: boolean;
 }
 
 export interface MenuSnapshot {

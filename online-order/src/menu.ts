@@ -15,15 +15,57 @@ function isWholeYuan(v: unknown): boolean {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function keysAre(value: Record<string, unknown>, required: string[], optional: string[] = []): boolean {
+  return required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
+
+function validDate(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return value >= "0001-01-01" && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validPresentation(value: unknown): boolean {
+  if (!isRecord(value) || !keysAre(value, [
+    "flavor_description", "audience_description", "is_recommended", "is_new",
+    "limited_on", "show_remaining", "low_stock_threshold", "hide_sold_out",
+  ])) return false;
+  const shortText = (text: unknown) => text === null ||
+    (typeof text === "string" && [...text].length <= 120);
+  return shortText(value.flavor_description) && shortText(value.audience_description) &&
+    [value.is_recommended, value.is_new, value.show_remaining, value.hide_sold_out]
+      .every((flag) => typeof flag === "boolean") &&
+    validDate(value.limited_on) && Number.isInteger(value.low_stock_threshold) &&
+    (value.low_stock_threshold as number) >= 0 && (value.low_stock_threshold as number) <= 9999;
+}
+
+function validGroups(value: unknown): boolean {
+  return Array.isArray(value) && value.every((group: unknown) =>
+    isRecord(group) && keysAre(group, ["id", "name", "min_select", "max_select", "options"]) &&
+    Array.isArray(group.options) && group.options.every((option: unknown) =>
+      isRecord(option) && keysAre(option, ["id", "name", "price_delta", "available", "remaining"])),
+  );
+}
+
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
   if (!isPositiveInt(o.version) || typeof o.published_at !== "string") return false;
   if (!Array.isArray(o.categories) || !Array.isArray(o.items)) return false;
   return o.items.every((item: unknown) => {
-    if (typeof item !== "object" || item === null) return false;
+    if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;
-    return isPositiveInt(i.id) && typeof i.name === "string" && isWholeYuan(i.unit_price);
+    return keysAre(i, ["id", "name", "description", "category_id", "unit_price", "photo",
+      "available", "remaining", "option_groups"], ["presentation"]) &&
+      isPositiveInt(i.id) && typeof i.name === "string" && isWholeYuan(i.unit_price) &&
+      validGroups(i.option_groups) &&
+      (!Object.hasOwn(i, "presentation") || validPresentation(i.presentation));
   });
 }
 
