@@ -704,7 +704,7 @@ async def test_idempotent_replay_rejects_changed_online_order(
 ) -> None:
     first = await _pulled(db_session, ctx, _rid(71), [_line(1, ctx.latte, "拿鐵", 150)])
     second = await _pulled(db_session, ctx, _rid(72), [_line(1, ctx.latte, "拿鐵", 150)])
-    body = {
+    body: dict[str, Any] = {
         "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
         "service_mode": "TAKEOUT",
     }

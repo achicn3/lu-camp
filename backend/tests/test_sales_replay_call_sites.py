@@ -25,6 +25,7 @@ _FINGERPRINT_KWARGS = (
     "table_no",
     # 「這筆不套用」的門市活動（docs/40 P1c）。
     "disabled_campaigns",
+    "online_order_id",
 )
 
 

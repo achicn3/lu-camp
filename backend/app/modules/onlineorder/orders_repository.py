@@ -43,7 +43,7 @@ class OnlineOrdersRepository:
             OnlineOrder.store_id == store_id, OnlineOrder.id == order_id
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         row: OnlineOrder | None = await self._session.scalar(stmt)
         return row
 

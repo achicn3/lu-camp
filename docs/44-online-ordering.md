@@ -174,6 +174,7 @@ menu_item_option_groups  品項 ↔ 群組（多對多＋排序）：一個群�
 - 保留只因下列事件結束：成立銷售（轉成正式扣減）、取消、到期。到期時間：LINE Pay 未付款
   10 分鐘、現金單 30 分鐘（到期只放掉保留，**單子不取消**；客人之後來付時，帶入結帳會重新檢查庫存）。
 - 每次 POS 數量或保留有變 → 立即推一則「可售數量」更新到雲端（失敗排入重試）。
+  O4 實作以每 5 秒重取當前狀態達成，避免各銷售／退款路徑漏送；先持久化 revision 與內容再傳送，晚到版本拒收、失敗重試。客人菜單每 15 秒刷新，真正庫存仍由 POS 匯入時原子保留。
 
 **O4 實作定案（2026-10-02）**：保留＝POS 拉到單時在同一交易內**直接扣每日限量份數**並記一筆
 `stock_reservations`（記下扣到的份數版本），回報 `HELD`／`REJECTED`。櫃台看到的剩餘份數立刻少了，不會把線上
@@ -327,7 +328,7 @@ secret 放 Worker secrets 和 backend `.env`，不進 repo。**一組雲端只�
 | 端點 | 說明 |
 |------|------|
 | `PUT /integration/menu` | 發佈菜單快照 |
-| `PATCH /integration/menu/availability` | 售完／恢復 |
+| `PUT /integration/menu/availability` | 帶菜單版本與遞增 revision 的完整可售狀態覆蓋（售完／恢復） |
 | `PUT /integration/photos/:hash` | 上傳照片（已存在則 204） |
 | `GET /integration/orders?after=<cursor>` | 拉新單／狀態有變的單（游標分頁，只掃索引） |
 | `POST /integration/orders/:id/status` | 回報 IMPORTED／PAID／SETTLED／CANCELLED／REFUNDED（冪等） |

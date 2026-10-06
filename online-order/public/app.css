@@ -35,8 +35,8 @@ body {
   min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
 }
-button { font: inherit; color: inherit; }
-button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+button, input, textarea { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 .logo {
   background-color: var(--ink);
@@ -155,6 +155,28 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   font-size: 20px;
   letter-spacing: 0.06em;
 }
+.footer-action { width: min(100%, 604px); border: 0; background: none; color: var(--gold); cursor: pointer; }
+
+.view-title { margin: 4px 0 18px; font-weight: 400; font-size: 38px; letter-spacing: .06em; }
+.eyebrow { margin: 28px 0 0; color: var(--gold); font-family: var(--num); font-style: italic; }
+.back-link { margin: 18px 0 0; padding: 8px 0; border: 0; background: none; color: var(--gold); cursor: pointer; }
+.action { display: block; width: 100%; margin: 20px 0; padding: 13px 18px; border: 1px solid var(--gold); border-radius: 3px; background: var(--gold); color: var(--bg); cursor: pointer; text-align: center; }
+.action:hover { background: #dfc084; }
+.quiet-action { padding: 8px; border: 0; background: none; color: var(--gold); cursor: pointer; }
+.empty-state, .order-hint { color: var(--soft); }
+.cart-line { display: flex; justify-content: space-between; gap: 15px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.cart-line > div:first-child { display: grid; align-content: start; gap: 5px; }
+.cart-line b { font-weight: 400; }
+.cart-controls { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.qty-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 2px; background: var(--photo); cursor: pointer; }
+.cart-total { margin: 22px 0; padding-top: 14px; border-top: 1px solid var(--gold); color: var(--gold); font-size: 27px; text-align: right; }
+.note-label { display: grid; gap: 8px; margin: 26px 0 8px; }
+.note-label textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); resize: vertical; }
+.payment-note { color: var(--soft); }
+.turnstile { margin: 16px 0; }
+.field-error { color: #f4aaa2; }
+.order-state { margin: 20px 0; padding: 20px; border-left: 2px solid var(--gold); background: var(--photo); font-size: 23px; }
+.order-line { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
 .sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.6); display: grid; align-items: end; }
 .sheet {
@@ -186,11 +208,23 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .sheet-price { margin: 0 0 12px; font-size: 25px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
-.opt-group { margin: 0; padding: 10px 0; border-top: 1px solid var(--line); line-height: 1.8; }
+.opt-group { margin: 0; padding: 10px 0; border: 0; border-top: 1px solid var(--line); line-height: 1.8; }
 .opt-group-name { font-size: 21px; }
 .opt-group-rule { font-size: 16px; color: var(--soft); }
 .opt-off { color: var(--soft); }
 .opt-extra { font-family: var(--num); font-style: italic; color: var(--gold); }
+.opt-choice { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 3px 0; cursor: pointer; }
+.opt-choice:has(input:disabled) { cursor: default; opacity: .55; }
+.opt-choice input { width: 20px; height: 20px; accent-color: var(--gold); }
+.opt-choice .opt-extra { margin-left: auto; }
+.detail-controls { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
+.detail-controls .action { margin: 0; }
+.qty-input { width: 68px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); text-align: center; }
+
+@media (max-width: 390px) {
+  .cart-line { flex-wrap: wrap; }
+  .cart-controls { width: 100%; justify-content: flex-end; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .splash { transition: none; }

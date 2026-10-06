@@ -2,4 +2,5 @@
 interface Env {
   INTEGRATION_SECRET: string;
   TURNSTILE_SECRET: string;
+  TURNSTILE_SITE_KEY?: string;
 }

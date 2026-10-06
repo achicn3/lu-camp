@@ -17,12 +17,25 @@
       <span id="table" class="bar-table" hidden></span>
     </header>
     <main class="page">
-      <p id="greeting" class="greeting"></p>
       <p id="message" class="message" role="status" hidden></p>
-      <nav id="tabs" class="tabs" role="tablist" aria-label="分類" hidden></nav>
-      <div id="list" class="list"></div>
+      <section id="menu-view">
+        <p id="greeting" class="greeting"></p>
+        <nav id="tabs" class="tabs" role="tablist" aria-label="分類" hidden></nav>
+        <div id="list" class="list"></div>
+      </section>
+      <section id="cart-view" hidden>
+        <button id="back-menu" class="back-link" type="button">← 返回菜單</button>
+        <h1 class="view-title">購物車</h1>
+        <div id="cart-body"></div>
+        <div id="challenge-widget" class="turnstile" aria-label="安全驗證"></div>
+      </section>
+      <section id="order-view" hidden>
+        <p class="eyebrow">露坑 · 訂單</p>
+        <h1 class="view-title">你的訂單</h1>
+        <div id="order-body"></div>
+      </section>
     </main>
-    <footer id="footer" class="footer" hidden>線上點餐即將開放，請先至櫃台點餐。</footer>
+    <footer id="footer" class="footer" hidden></footer>
     <div id="sheet" class="sheet-backdrop" hidden>
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
         <button id="sheet-close" class="sheet-close" type="button" aria-label="關閉">×</button>

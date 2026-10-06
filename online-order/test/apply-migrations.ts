@@ -7,7 +7,7 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 // 每項測試從乾淨的 D1／R2 開始（測試之間不共用狀態）。
 beforeEach(async () => {
   await env.DB.batch(
-    ["stores_meta", "menu_snapshots", "tables", "integration_nonces", "orders", "order_lines", "order_events", "rate_counters"].map((t) =>
+    ["stores_meta", "menu_snapshots", "menu_availability", "tables", "integration_nonces", "orders", "order_lines", "order_events", "rate_counters"].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );
