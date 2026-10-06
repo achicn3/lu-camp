@@ -14,14 +14,14 @@ describe("菜單", () => {
     expect(await resp.json()).toEqual({ error: "menu_not_published" });
   });
 
-  it("發佈後客人讀得到，ETag 是版本號，帶 If-None-Match 回 304", async () => {
+  it("發佈後客人讀得到，ETag 包含菜單與可售版本，帶 If-None-Match 回 304", async () => {
     expect((await publish(SNAPSHOT)).status).toBe(200);
     const resp = await get("/api/menu");
     expect(resp.status).toBe(200);
-    expect(resp.headers.get("ETag")).toBe('"menu-v1"');
+    expect(resp.headers.get("ETag")).toBe('"menu-v1-a0"');
     expect(resp.headers.get("Cache-Control")).toBe("no-cache");
     expect(await resp.json()).toEqual(SNAPSHOT);
-    const again = await get("/api/menu", { "If-None-Match": '"menu-v1"' });
+    const again = await get("/api/menu", { "If-None-Match": '"menu-v1-a0"' });
     expect(again.status).toBe(304);
   });
 

@@ -40,6 +40,26 @@ class OnlineMenuPublication(Base, TimestampMixin):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class OnlineMenuAvailability(Base, TimestampMixin):
+    """One durable current availability payload and monotonically increasing revision per store."""
+
+    __tablename__ = "online_menu_availability"
+    __table_args__ = (
+        CheckConstraint("revision >= 0", name="ck_online_menu_availability_revision"),
+        CheckConstraint(
+            "delivery_state IN ('PENDING', 'DELIVERED', 'CONFLICT')",
+            name="ck_online_menu_availability_delivery",
+        ),
+    )
+
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), primary_key=True)
+    menu_version: Mapped[int] = mapped_column(BigInteger)
+    revision: Mapped[int] = mapped_column(BigInteger)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    delivery_state: Mapped[str] = mapped_column(String(10))
+    last_error: Mapped[str | None] = mapped_column(String(200))
+
+
 class OnlineTableCode(Base, TimestampMixin):
     """桌位碼（docs/44 §4.1）：QR 網址 `/t/<code>`。重發＝舊碼 retired、產生新碼。"""
 

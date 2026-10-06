@@ -1,10 +1,11 @@
 // 露坑線上點餐 Worker 進入點（docs/44）。路由：
 //   客人（公開）：GET /api/menu、GET /api/status、GET /api/tables/:code、POST /api/orders、
 //                GET /api/orders/:token、GET /photos/:hash.webp、GET /fonts/:hash.woff2
-//   店內 backend（HMAC 簽章）：PUT /integration/menu、/integration/tables、/integration/photos/:hash、
+//   店內 backend（HMAC 簽章）：PUT /integration/menu、/integration/menu/availability、/integration/tables、/integration/photos/:hash、
 //                              /integration/fonts/:hash
 // 其餘交給靜態資產（點餐頁）。每個回應都加安全標頭。
 import { verifyIntegration } from "./auth";
+import { AVAILABILITY_MAX_BYTES, publishAvailability } from "./availability";
 import { pullOrders, reportOrder, setStoreStatus } from "./integration-orders";
 import { BodyTooLarge, error, readBody, withSecurityHeaders } from "./http";
 import { type MediaKind, getMedia, mediaLimit, putMedia } from "./media";
@@ -16,6 +17,7 @@ const TABLES_MAX_BYTES = 64 * 1024;
 
 const ROUTES: { method: string; pattern: RegExp; limit: number }[] = [
   { method: "PUT", pattern: /^\/integration\/menu$/, limit: MENU_MAX_BYTES },
+  { method: "PUT", pattern: /^\/integration\/menu\/availability$/, limit: AVAILABILITY_MAX_BYTES },
   { method: "PUT", pattern: /^\/integration\/tables$/, limit: TABLES_MAX_BYTES },
   { method: "PUT", pattern: /^\/integration\/photos\/[^/]+$/, limit: mediaLimit("photos") },
   { method: "PUT", pattern: /^\/integration\/fonts\/[^/]+$/, limit: mediaLimit("fonts") },
@@ -40,6 +42,7 @@ async function integrationRoute(req: Request, env: Env, storeId: number, path: s
   const media = /^\/integration\/(photos|fonts)\/([^/]+)$/.exec(path);
   if (media) return putMedia(env, media[1] as MediaKind, media[2] ?? "", body);
   if (path === "/integration/menu") return publishMenu(env, storeId, body);
+  if (path === "/integration/menu/availability") return publishAvailability(env, storeId, body);
   if (path === "/integration/tables") return publishTables(env, storeId, body);
   if (path === "/integration/orders") return pullOrders(env, storeId);
   if (path === "/integration/store-status") return setStoreStatus(env, storeId, body);

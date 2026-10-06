@@ -1460,8 +1460,10 @@ async def test_stale_processing_cart_recovers_to_draft(
 
 
 @pytest.mark.parametrize("from_online_order", [False, True])
+@pytest.mark.parametrize("confirmed", [False, True])
 async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     from_online_order: bool,
+    confirmed: bool,
     client: httpx.AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1552,6 +1554,41 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     )
     assert created.status_code == 200, created.text
 
+    processing = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout",
+        headers=_auth(seeded.manager_token),
+        json={"expected_revision": created.json()["revision"], "signature_task_id": None},
+    )
+    assert processing.status_code == 200, processing.text
+
+    async def assert_online_payment_protected() -> None:
+        assert online_order_id is not None
+        cancelled = await client.post(
+            f"/api/v1/online-orders/{online_order_id}/cancel",
+            headers=_auth(seeded.manager_token),
+        )
+        assert cancelled.status_code == 409, cancelled.text
+        assert "付款" in cancelled.json()["detail"]
+        from app.shared.exceptions import OnlineOrderConflict
+
+        with pytest.raises(OnlineOrderConflict, match="付款"):
+            await OnlineOrdersService(db_session, None).check_payment_available(
+                manager.store_id, online_order_id
+            )
+        assert (
+            await OnlineOrdersService(db_session, None).expire_reservations(
+                manager.store_id, now=utc_now() + timedelta(minutes=31)
+            )
+            == 0
+        )
+        await db_session.refresh(menu_item)
+        assert menu_item.stock_qty == 1
+
+    if from_online_order:
+        from app.core.time import utc_now
+
+        await assert_online_payment_protected()
+
     transport = _UncertainLinePayTransport()
     linepay_client = _uncertain_linepay_client(transport)
     monkeypatch.setattr("app.modules.sales.router._linepay_client", lambda: linepay_client)
@@ -1566,7 +1603,7 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
             "lines": [{"line_type": "MENU", "menu_item_id": menu_item.id, "qty": 1}],
             "tenders": cart_payload["tenders"],
             "cart_session_id": created.json()["id"],
-            "cart_revision": created.json()["revision"],
+            "cart_revision": processing.json()["revision"],
             "expected_einvoice_enabled": False,
             "online_order_id": online_order_id,
             "service_mode": "DINE_IN",
@@ -1575,6 +1612,44 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     )
     assert uncertain.status_code == 409, uncertain.text
     assert "PAYMENT_UNCERTAIN" in uncertain.text
+    if from_online_order:
+        await assert_online_payment_protected()
+
+    if not confirmed:
+        transport.check_response = {
+            "returnCode": "0000",
+            "returnMessage": "Success.",
+            "info": {"status": "AUTH_READY"},
+        }
+        failed = await client.post(
+            f"/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
+            headers=_auth(seeded.manager_token),
+            json={
+                "action": "MANUAL_FAILED",
+                "reason": "後台確認未扣款",
+                "evidence_type": "LINE_PAY_CONSOLE",
+                "evidence_reference": "online-not-paid",
+            },
+        )
+        assert failed.status_code == 200, failed.text
+        assert failed.json()["outcome"] == "FAILED_CONFIRMED"
+        assert failed.json()["cart"]["status"] == "DRAFT"
+        assert await db_session.scalar(select(Sale)) is None
+        if from_online_order:
+            assert (
+                await OnlineOrdersService(db_session, None).expire_reservations(
+                    manager.store_id, now=utc_now() + timedelta(minutes=31)
+                )
+                == 1
+            )
+            cancelled = await client.post(
+                f"/api/v1/online-orders/{online_order_id}/cancel",
+                headers=_auth(seeded.manager_token),
+            )
+            assert cancelled.status_code == 200, cancelled.text
+            await db_session.refresh(menu_item)
+            assert menu_item.stock_qty == 2
+        return
 
     transport.check_response = {
         "returnCode": "0000",
@@ -1599,6 +1674,7 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     assert sale.table_no == "A1"
 
     if from_online_order:
+        assert online_order is not None
         await db_session.refresh(online_order)
         assert online_order.sale_id == sale.id
         assert online_order.sync_status == "SETTLED"

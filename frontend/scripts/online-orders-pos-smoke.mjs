@@ -184,18 +184,20 @@ try {
   const after = (await api("GET", "/api/v1/menu-daily-stock")).body.find((s) => s.id === cake.id);
   ok("戚風仍剩 1 份（保留轉成正式扣減，只扣一次）", after?.remaining === 1, JSON.stringify(after));
 
-  // ③ 雲端照發佈時的份數判斷：明顯不夠的直接擋（不用等 POS）
+  // ③ 不重發菜單，也會同步保留／結帳與店內報廢後的份數。
+  await waitFor(async () => {
+    const menu = await (await fetch(`${ORDER}/api/menu`)).json();
+    return menu.items.find((item) => item.id === cake.id)?.remaining === 1;
+  }, "雲端可售份數更新為 1");
   const tooMany = await placeOrder(tableCode, [{ item_id: cake.id, option_ids: [], qty: 5 }]);
-  ok("要 5 份（發佈時只有 2 份）：雲端直接擋下", tooMany.status === 422 && tooMany.body?.error === "sold_out", JSON.stringify(tooMany.body));
-  // 雲端以為還有、POS 其實沒了（店員剛報廢最後一份）：POS 拉到時拒絕
+  ok("超過現有份數：雲端直接擋下", tooMany.status === 422 && tooMany.body?.error === "sold_out", JSON.stringify(tooMany.body));
   await api("POST", `/api/v1/menu-daily-stock/item/${cake.id}/adjust`, { delta: -1, reason: "WASTE" });
+  await waitFor(async () => {
+    const menu = await (await fetch(`${ORDER}/api/menu`)).json();
+    return menu.items.find((item) => item.id === cake.id)?.remaining === 0;
+  }, "最後一份報廢後雲端更新為售完");
   const second = await placeOrder(tableCode, [{ item_id: cake.id, option_ids: [], qty: 1 }]);
-  ok("雲端以為還有：先收下等 POS 確認", second.status === 201 && second.body?.status === "HOLD_REQUESTED", JSON.stringify(second.body));
-  const rejected = await waitFor(async () => {
-    const v = await customerView(second.body.token);
-    return v.status === "REJECTED" ? v : null;
-  }, "POS 拒絕庫存不足的單");
-  ok("POS 發現沒了：客人那邊顯示被拒", rejected.status === "REJECTED");
+  ok("店內售完自動同步，客人不能再送出", second.status === 422 && second.body?.error === "sold_out", JSON.stringify(second.body));
 
   // ④ 第三張取消
   const third = await placeOrder(tableCode, [{ item_id: latte.id, option_ids: [], qty: 2 }]);
@@ -218,7 +220,7 @@ try {
   await dialog.getByRole("button", { name: "暫停接單" }).click();
   await dialog.getByText("暫停接單中").waitFor();
   const refused = await placeOrder(tableCode, [{ item_id: latte.id, option_ids: [], qty: 1 }]);
-  ok("暫停中客人送不出單", refused.status >= 400, `${refused.status} ${JSON.stringify(refused.body)}`);
+  ok("暫停中客人送不出單", refused.status === 503 && refused.body?.error === "not_accepting", `${refused.status} ${JSON.stringify(refused.body)}`);
   await page.screenshot({ path: join(SHOTS, "03-paused.png") });
   await dialog.getByRole("button", { name: "恢復接單" }).click();
   await dialog.getByText("接單中").first().waitFor();

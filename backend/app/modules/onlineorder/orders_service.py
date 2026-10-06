@@ -223,6 +223,9 @@ class OnlineOrdersService:
         moment = now or utc_now()
         expired = 0
         for order in await self._repo.expired_orders(store_id, moment):
+            # 可能已扣款的商品不能釋放給下一位客人；明確未付款後才恢復到期處理。
+            if await self._payment_pending(store_id, order.id):
+                continue
             reservation = await self._repo.reservation(store_id, order.id, for_update=True)
             if (
                 reservation is None
@@ -357,6 +360,25 @@ class OnlineOrdersService:
         if order.hold_status == OnlineOrderHold.REJECTED:
             raise OnlineOrderConflict("這張線上單庫存不足、已被拒絕，請請客人重新點")
 
+    async def _payment_pending(
+        self, store_id: int, order_id: int, *, excluding_cart_id: int | None = None
+    ) -> bool:
+        from app.modules.customerdisplay.service import CustomerDisplayService
+
+        return await CustomerDisplayService(self._session).has_pending_online_payment(
+            store_id, order_id, excluding_cart_id=excluding_cart_id
+        )
+
+    async def check_payment_available(
+        self, store_id: int, order_id: int, *, cart_session_id: int | None = None
+    ) -> None:
+        """Lock the open order and reject a payment owned by another cart."""
+        # 與取消／到期共用訂單鎖；購物車先鎖、訂單後鎖，且此處只讀其他購物車狀態。
+        order = await self._order(store_id, order_id, for_update=True)
+        self._ensure_open(order)
+        if await self._payment_pending(store_id, order_id, excluding_cart_id=cart_session_id):
+            raise OnlineOrderConflict("此線上單正在付款或付款結果待確認，請先完成原櫃檯的付款對帳")
+
     async def cancel(self, store_id: int, order_id: int, *, actor_user_id: int) -> OnlineOrder:
         """店員取消（客人沒來、點錯）：保留的份數加回，回報雲端已取消。已取消再按＝不動。"""
         order = await self._order(store_id, order_id, for_update=True)
@@ -364,6 +386,10 @@ class OnlineOrdersService:
             return order
         if order.sync_status == OnlineOrderSync.SETTLED:
             raise OnlineOrderConflict("這張線上單已經結帳，要退請到交易紀錄作廢或退貨")
+        if await self._payment_pending(store_id, order_id):
+            raise OnlineOrderConflict(
+                "此線上單正在付款或付款結果待確認，不能取消；請先完成付款對帳"
+            )
         reservation = await self._repo.reservation(store_id, order.id, for_update=True)
         if reservation is not None and reservation.status == StockReservationStatus.ACTIVE:
             await self._release(store_id, reservation, StockReservationStatus.RELEASED)
@@ -378,12 +404,13 @@ class OnlineOrdersService:
         await self._repo.flush()
         return order
 
-    async def begin_checkout(self, store_id: int, order_id: int) -> None:
+    async def begin_checkout(
+        self, store_id: int, order_id: int, *, cart_session_id: int | None = None
+    ) -> None:
         """結帳交易內、扣份數之前呼叫：鎖住這張單（同一張單只能成立一筆銷售），保留的份數先加回，
         接著由一般結帳照常扣——淨額只扣一次，交易內持鎖、別人插不進來。"""
-        order = await self._order(store_id, order_id, for_update=True)
-        self._ensure_open(order)
-        reservation = await self._repo.reservation(store_id, order.id, for_update=True)
+        await self.check_payment_available(store_id, order_id, cart_session_id=cart_session_id)
+        reservation = await self._repo.reservation(store_id, order_id, for_update=True)
         if reservation is not None and reservation.status == StockReservationStatus.ACTIVE:
             await self._release(store_id, reservation, StockReservationStatus.CONVERTED)
         await self._repo.flush()

@@ -1141,6 +1141,14 @@ class CustomerDisplayService:
         )
         return current
 
+    async def has_pending_online_payment(
+        self, store_id: int, order_id: int, *, excluding_cart_id: int | None = None
+    ) -> bool:
+        """Whether another cart still owns an in-flight or uncertain online payment."""
+        return await self._repo.pending_online_payment(
+            store_id, order_id, excluding_cart_id=excluding_cart_id
+        )
+
     async def begin_checkout(
         self,
         store_id: int,
@@ -1189,6 +1197,17 @@ class CustomerDisplayService:
                 or task.cart_session_id != cart.id
             ):
                 raise CartSessionConflict("購物金簽署尚未完成或不屬於目前購物車")
+        online_order_id = _online_order_of(cart)
+        if online_order_id is not None:
+            from app.modules.onlineorder.orders_service import OnlineOrdersService
+            from app.shared.exceptions import OnlineOrderConflict, OnlineOrderNotFound
+
+            try:
+                await OnlineOrdersService(self._session, None).check_payment_available(
+                    store_id, online_order_id, cart_session_id=cart.id
+                )
+            except (OnlineOrderConflict, OnlineOrderNotFound) as exc:
+                raise CartSessionConflict(str(exc)) from exc
         now = datetime.now(UTC)
         cart.status = CartSessionStatus.PROCESSING
         cart.revision += 1

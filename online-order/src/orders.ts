@@ -5,7 +5,7 @@
 // 同時湧進來的請求也不會超過上限。
 import { error, hex, json, sha256Hex } from "./http";
 import { type OrderLineInput, priceOrder } from "./pricing";
-import type { MenuSnapshot } from "./client/types";
+import { currentEffectiveMenu } from "./menu";
 import { TABLE_CODE } from "./tables";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
@@ -144,15 +144,6 @@ async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boo
   }
 }
 
-async function currentMenu(env: Env, storeId: number): Promise<MenuSnapshot | null> {
-  const row = await env.DB.prepare(
-    "SELECT s.json FROM stores_meta m JOIN menu_snapshots s " +
-      "ON s.store_id = m.store_id AND s.version = m.menu_version WHERE m.store_id = ?",
-  )
-    .bind(storeId)
-    .first<{ json: string }>();
-  return row === null ? null : (JSON.parse(row.json) as MenuSnapshot);
-}
 
 function customerStatus(row: { payment_status: string; hold_status: string }): string {
   if (row.hold_status === "REJECTED") return "REJECTED";
@@ -231,7 +222,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     serviceMode = table.service_mode;
   }
 
-  const menu = await currentMenu(env, storeId);
+  const menu = await currentEffectiveMenu(env, storeId);
   if (menu === null) return error("menu_not_published", 503);
   const priced = priceOrder(menu, body.lines);
   if (!priced.ok) return json({ error: priced.reason, item_id: priced.item_id ?? null }, 422);
@@ -389,5 +380,5 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
 }
 
 export async function storeStatus(env: Env, storeId: number): Promise<Response> {
-  return json({ accepting: await accepting(env, storeId) }, 200, { "Cache-Control": "no-store" });
+  return json({ accepting: await accepting(env, storeId), turnstile_site_key: env.TURNSTILE_SITE_KEY ?? null }, 200, { "Cache-Control": "no-store" });
 }

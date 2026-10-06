@@ -1066,6 +1066,16 @@ class SalesService:
         #   先 check(orderId) 防重複扣款。無鍵則無法安全重試 → 擋。
         # ②每筆 LINE_PAY 須帶 oneTimeKey（掃客人碼）。③client 必須注入（router 依 config 建）。
         if line_pay_tenders:
+            if online_order_id is not None and cart is not None:
+                saved_online_id = (cart.staff_payload or {}).get("online_order_id")
+                if saved_online_id != online_order_id:
+                    raise SignatureContentMismatch("POS 購物車的線上訂單與實際結帳不一致")
+            if (
+                online_order_id is not None
+                and reconciled_linepay_result is None
+                and (cart is None or cart.status is not CartSessionStatus.PROCESSING)
+            ):
+                raise InvalidSaleTender("線上訂單請先開始結帳，再進行 LINE Pay 付款")
             if cart is None:
                 raise InvalidSaleTender("LINE Pay 收款必須使用已配對的客顯購物車")
             # 一般請款仍要求原客顯保持配對，避免拿別台購物車的一次性碼扣款。
@@ -1135,7 +1145,9 @@ class SalesService:
         # 加回，下面的餐飲明細再照一般結帳扣——淨額只扣一次。線上單編號也納入指紋，
         # 同鍵重送必須仍綁同一張線上單。
         if online_order_id is not None:
-            await OnlineOrdersService(self._session, None).begin_checkout(store_id, online_order_id)
+            await OnlineOrdersService(self._session, None).begin_checkout(
+                store_id, online_order_id, cart_session_id=cart_session_id
+            )
         # 發票設定確認（docs/24；Codex 第廿二〜廿四輪）：**一律**先取該店設定的交易級共享
         # 鎖，再讀設定——鎖持有至本交易 commit，與並發 PATCH（writer）互斥，使
         # 「read→發票決策→commit」期間設定不可被改，杜絕 TOCTOU（read/writer 讓並發結帳

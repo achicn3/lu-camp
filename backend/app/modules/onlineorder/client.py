@@ -104,6 +104,14 @@ class OnlineOrderClient:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
         await self._put(path, body, "application/json")
 
+    async def put_availability(self, payload: object) -> tuple[int, str, int | None]:
+        """Send signed full current availability; caller persists and interprets the result."""
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        code, data = await self._send("PUT", "/integration/menu/availability", body)
+        revision = data.get("current_revision")
+        current_revision = revision if type(revision) is int and 0 <= revision < 2**53 else None
+        return code, str(data.get("error", "")), current_revision
+
     async def put_photo(self, sha256: str, content: bytes) -> None:
         await self._put(f"/integration/photos/{sha256}", content, "image/webp")
 

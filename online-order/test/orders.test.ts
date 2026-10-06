@@ -142,6 +142,34 @@ describe("送單", () => {
     expect(((await resp.json()) as { status: string }).status).toBe("HOLD_REQUESTED");
   });
 
+  it("送單依最新可售狀態擋售罄及超過剩餘份數", async () => {
+    const availability = (revision: number, remaining: number) => integration(
+      "PUT", "/integration/menu/availability", JSON.stringify({
+        menu_version: MENU.version,
+        revision,
+        items: [
+          { id: 5, available: true, remaining: null },
+          { id: 6, available: true, remaining },
+        ],
+        options: [],
+      }),
+    );
+    expect((await availability(1, 0)).status).toBe(200);
+    const soldOut = await order({ lines: [{ item_id: 6, option_ids: [], qty: 1 }] });
+    expect(soldOut.status).toBe(422);
+    expect(await soldOut.json()).toMatchObject({ error: "sold_out", item_id: 6 });
+
+    expect((await availability(2, 1)).status).toBe(200);
+    const tooMany = await order({ lines: [{ item_id: 6, option_ids: [], qty: 2 }] });
+    expect(tooMany.status).toBe(422);
+    expect(await tooMany.json()).toMatchObject({ error: "sold_out", item_id: 6 });
+    const oneLeft = await order({ lines: [{ item_id: 6, option_ids: [], qty: 1 }] });
+    expect(oneLeft.status).toBe(201);
+    expect(await oneLeft.json()).toMatchObject({ status: "HOLD_REQUESTED", total: 90 });
+    const count = await env.DB.prepare("SELECT count(*) AS n FROM orders").first<{ n: number }>();
+    expect(count?.n).toBe(1);
+  });
+
   it("桌位碼無效：404；沒帶桌位碼＝外帶也可以", async () => {
     expect((await order({ table_code: "zzzzzzzzzzzzzzzz" })).status).toBe(404);
     const takeout = await order({ table_code: null });
@@ -187,6 +215,15 @@ describe("接單狀態", () => {
   it("店家按了暫停：503", async () => {
     await env.DB.prepare("UPDATE stores_meta SET accepting_orders = 0 WHERE store_id = 1").run();
     expect((await order()).status).toBe(503);
+  });
+
+  it("公開設定只提供 Turnstile site key，不洩漏驗證密鑰", async () => {
+    const response = await exports.default.fetch(new Request("https://order.test/api/status"));
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.turnstile_site_key).toBe("test-public-site-key");
+    expect(JSON.stringify(body)).not.toContain("test-turnstile-secret");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Content-Security-Policy")).toContain("frame-src https://challenges.cloudflare.com");
   });
 
   it("GET /api/status 告訴客人頁現在能不能點", async () => {

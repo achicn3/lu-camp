@@ -12,6 +12,7 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             INTEGRATION_SECRET: "test-integration-secret",
             TURNSTILE_SECRET: "test-turnstile-secret",
+            TURNSTILE_SITE_KEY: "test-public-site-key",
           },
         },
       }),

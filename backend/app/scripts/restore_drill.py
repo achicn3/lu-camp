@@ -199,6 +199,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "FROM online_table_codes WHERE retired_at IS NULL",
     ),
     ("線上點餐-發佈紀錄筆數", "SELECT count(*) FROM online_menu_publications"),
+    (
+        "線上點餐-可售狀態（版本／修訂／交付）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(store_id::text || menu_version::text || revision::text || "
+        "delivery_state || payload::text, ',' ORDER BY store_id)), '-') "
+        "FROM online_menu_availability",
+    ),
     # 線上訂單（docs/44 §4.3）：已收錢的單掛著銷售單，弄丟就對不回哪張線上單付過了。
     (
         "線上點餐-訂單（筆數／狀態指紋）",
