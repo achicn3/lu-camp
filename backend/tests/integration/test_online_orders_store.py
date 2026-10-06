@@ -316,6 +316,11 @@ async def test_reservation_expires_after_30_minutes_but_order_stays(
     assert await _cake_left(db_session, ctx) == 3
     row = await _order_row(db_session, _rid(4))
     assert (row.sync_status, row.payment_status) == ("IMPORTED", "UNPAID")
+    assert row.hold_status == "NONE"
+    await svc.flush_outbox(ctx.store_id)
+    await svc.flush_outbox(ctx.store_id)
+    assert ctx.worker.reports[-1] == (_rid(4), {"hold_status": "NONE"})
+    assert await svc.expire_reservations(ctx.store_id, now=utc_now() + timedelta(minutes=32)) == 0
 
 
 # ── 回報佇列 ──────────────────────────────────────────────────────────
@@ -691,3 +696,28 @@ async def test_cart_resend_check_compares_online_order(
         await display.upsert_cart(
             ctx.store_id, terminal.id, body(1, 5), actor_user_id=ctx.clerk_id
         )
+
+
+@pytest.mark.parametrize("first_online", [False, True])
+async def test_idempotent_replay_rejects_changed_online_order(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx, first_online: bool
+) -> None:
+    first = await _pulled(db_session, ctx, _rid(71), [_line(1, ctx.latte, "拿鐵", 150)])
+    second = await _pulled(db_session, ctx, _rid(72), [_line(1, ctx.latte, "拿鐵", 150)])
+    body = {
+        "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+        "service_mode": "TAKEOUT",
+    }
+    if first_online:
+        body["online_order_id"] = first.id
+    response = await client.post("/api/v1/sales", json=body, headers=_h(ctx.clerk, "online-replay"))
+    assert response.status_code == 201, response.text
+    replay = await client.post("/api/v1/sales", json=body, headers=_h(ctx.clerk, "online-replay"))
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == response.json()["id"]
+    changed = await client.post(
+        "/api/v1/sales",
+        json={**body, "online_order_id": second.id},
+        headers=_h(ctx.clerk, "online-replay"),
+    )
+    assert changed.status_code == 409, changed.text

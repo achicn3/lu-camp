@@ -105,6 +105,16 @@ describe("POS 拉單", () => {
 });
 
 describe("回報狀態", () => {
+  it("保留到期可從 HELD 回 NONE；重送冪等，不可重新保留", async () => {
+    await place([{ item_id: 6, option_ids: [], qty: 1 }]);
+    const [order] = (await pull()).orders;
+    expect((await report(order!.id, { sync_status: "IMPORTED", hold_status: "HELD" })).status).toBe(200);
+    expect((await report(order!.id, { hold_status: "NONE" })).status).toBe(200);
+    expect((await report(order!.id, { hold_status: "NONE" })).status).toBe(200);
+    expect((await report(order!.id, { hold_status: "HELD" })).status).toBe(409);
+    expect((await report(order!.id, { sync_status: "SETTLED", payment_status: "PAID" })).status).toBe(200);
+  });
+
   it("限量品項：POS 保留成功 HELD／不夠 REJECTED，客人看得到", async () => {
     const t1 = await place([{ item_id: 6, option_ids: [], qty: 1 }]);
     const t2 = await place([{ item_id: 6, option_ids: [], qty: 1 }]);

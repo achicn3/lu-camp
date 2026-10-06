@@ -220,11 +220,22 @@ class OnlineOrdersService:
 
     async def expire_reservations(self, store_id: int, *, now: datetime | None = None) -> int:
         """現金單保留到期就加回份數；單子不取消（客人之後來付，結帳會重新檢查份數）。"""
-        rows = await self._repo.expired_reservations(store_id, now or utc_now())
-        for reservation in rows:
+        moment = now or utc_now()
+        expired = 0
+        for order in await self._repo.expired_orders(store_id, moment):
+            reservation = await self._repo.reservation(store_id, order.id, for_update=True)
+            if (
+                reservation is None
+                or reservation.status != StockReservationStatus.ACTIVE
+                or reservation.expires_at > moment
+            ):
+                continue
             await self._release(store_id, reservation, StockReservationStatus.EXPIRED)
+            order.hold_status = OnlineOrderHold.NONE
+            self._enqueue(order, {"hold_status": OnlineOrderHold.NONE})
+            expired += 1
         await self._repo.flush()
-        return len(rows)
+        return expired
 
     # ── 回報佇列 ──
 

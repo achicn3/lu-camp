@@ -550,6 +550,7 @@ def _cart_fingerprint(
     table_no: str | None = None,
     *,
     disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
+    online_order_id: int | None = None,
 ) -> str:
     """購物車＋收款＋發票資訊＋折扣組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
 
@@ -625,6 +626,9 @@ def _cart_fingerprint(
     # 原因不影響金額、不進指紋；依活動 id 排序，按的順序不影響。
     if disabled_campaigns:
         canonical["disabled_campaigns"] = sorted({d.campaign_id for d in disabled_campaigns})
+    # 線上單關聯決定哪張單結清；省略時維持既有非線上交易的指紋。
+    if online_order_id is not None:
+        canonical["online_order_id"] = online_order_id
     return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
 
 
@@ -1027,6 +1031,7 @@ class SalesService:
             service_mode,
             normalized_table_no,  # 用正規化值：落庫的是它，重算才對得上
             disabled_campaigns=disabled_campaigns,
+            online_order_id=online_order_id,
         )
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
@@ -1041,6 +1046,7 @@ class SalesService:
                 invoice_info=invoice_info,
                 adjustments=adjustments,
                 disabled_campaigns=disabled_campaigns,
+                online_order_id=online_order_id,
                 service_mode=service_mode,
                 table_no=normalized_table_no,
             )
@@ -1065,6 +1071,7 @@ class SalesService:
                     invoice_info=invoice_info,
                     adjustments=adjustments,
                     disabled_campaigns=disabled_campaigns,
+                    online_order_id=online_order_id,
                     service_mode=service_mode,
                     table_no=normalized_table_no,
                 )
@@ -1166,8 +1173,8 @@ class SalesService:
             raise CrossStoreReference(f"buyer contact {buyer_contact_id} 不屬於 store {store_id}")
 
         # 線上訂單帶入結帳（docs/44 §4.3）：先鎖住那張單（同一張只能成立一筆銷售），保留的份數
-        # 加回，下面的餐飲明細再照一般結帳扣——淨額只扣一次。不在指紋裡：成立時已同交易掛上
-        # 銷售單，同鍵重送回放的就是那筆。
+        # 加回，下面的餐飲明細再照一般結帳扣——淨額只扣一次。線上單編號也納入指紋，
+        # 同鍵重送必須仍綁同一張線上單。
         if online_order_id is not None:
             await OnlineOrdersService(self._session, None).begin_checkout(store_id, online_order_id)
         # 發票設定確認（docs/24；Codex 第廿二〜廿四輪）：**一律**先取該店設定的交易級共享
@@ -2154,6 +2161,7 @@ class SalesService:
         disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
         service_mode: ServiceMode | None = None,
         table_no: str | None = None,
+        online_order_id: int | None = None,
     ) -> Sale | None:
         """同 key 且購物車＋收款相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
@@ -2175,6 +2183,7 @@ class SalesService:
             service_mode,
             table_no,
             disabled_campaigns=disabled_campaigns,
+            online_order_id=online_order_id,
         ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
@@ -2198,6 +2207,7 @@ class SalesService:
         disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
         service_mode: ServiceMode | None = None,
         table_no: str | None = None,
+        online_order_id: int | None = None,
     ) -> Sale:
         """簽署綁定的「回應遺失重試」回放（docs/23 K5，Codex 第一輪；同 K4 第九/十/十三/十五輪）。
 
@@ -2224,6 +2234,7 @@ class SalesService:
             service_mode,
             table_no,
             disabled_campaigns=disabled_campaigns,
+            online_order_id=online_order_id,
         ):
             raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing
