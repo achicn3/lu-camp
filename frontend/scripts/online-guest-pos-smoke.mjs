@@ -61,6 +61,9 @@ try {
   await page.getByRole("button", { name: "送出現金訂單" }).click();
   await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
   await page.getByText("合計 $150").waitFor();
+  assert.equal(await page.getByRole("button", { name: /取消/ }).count(), 0, "客人送單後不能自行取消");
+  const guestCancel = await fetch(`${page.url().replace("/order/", "/api/orders/")}/cancel`, { method: "POST" });
+  assert.equal(guestCancel.status, 405, "公開 API 不提供客人取消訂單");
   const order = await waitFor(async () => (await api("GET", "/online-orders")).orders.find((o) => o.note === note), "POS import");
   assert.equal(order.table_label, "A1");
   assert.equal(order.total, "150");
