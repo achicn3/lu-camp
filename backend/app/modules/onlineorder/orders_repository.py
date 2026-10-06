@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.onlineorder.models import (
     OnlineOrder,
@@ -67,34 +68,47 @@ class OnlineOrdersRepository:
             StockReservation.store_id == store_id, StockReservation.online_order_id == order_id
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         row: StockReservation | None = await self._session.scalar(stmt)
         return row
 
-    async def expired_reservations(
-        self, store_id: int, now: datetime
-    ) -> Sequence[StockReservation]:
+    async def expired_orders(self, store_id: int, now: datetime) -> Sequence[OnlineOrder]:
+        # 與結帳／取消一致：先鎖訂單，再鎖保留，避免互相等待。
         return (
             await self._session.scalars(
-                select(StockReservation)
+                select(OnlineOrder)
+                .join(StockReservation, StockReservation.online_order_id == OnlineOrder.id)
                 .where(
-                    StockReservation.store_id == store_id,
+                    OnlineOrder.store_id == store_id,
                     StockReservation.status == StockReservationStatus.ACTIVE,
                     StockReservation.expires_at <= now,
                 )
-                .order_by(StockReservation.id)
-                .with_for_update(skip_locked=True)
+                .order_by(OnlineOrder.id)
+                .with_for_update(of=OnlineOrder, skip_locked=True)
+                .execution_options(populate_existing=True)
             )
         ).all()
 
     async def pending_outbox(self, store_id: int) -> Sequence[OnlineOrderOutbox]:
-        """待送的回報，照 id 先後（同一張單要依序送）。別的程序正在送的跳過。"""
+        """每張單只取最早待送的一筆；前筆被其他程序鎖住時不可越過它。"""
+        earlier = aliased(OnlineOrderOutbox)
+        predecessor = (
+            select(earlier.id)
+            .where(
+                earlier.store_id == OnlineOrderOutbox.store_id,
+                earlier.online_order_id == OnlineOrderOutbox.online_order_id,
+                earlier.id < OnlineOrderOutbox.id,
+                earlier.status == OnlineOutboxStatus.PENDING,
+            )
+            .exists()
+        )
         return (
             await self._session.scalars(
                 select(OnlineOrderOutbox)
                 .where(
                     OnlineOrderOutbox.store_id == store_id,
                     OnlineOrderOutbox.status == OnlineOutboxStatus.PENDING,
+                    ~predecessor,
                 )
                 .order_by(OnlineOrderOutbox.id)
                 .with_for_update(skip_locked=True)

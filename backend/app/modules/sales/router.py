@@ -291,6 +291,7 @@ async def create_sale(
                     # 的並發重送必然 409。
                     service_mode=payload.service_mode,
                     table_no=payload.table_no,
+                    online_order_id=payload.online_order_id,
                 )
             except SignatureTaskConflict as conflict:
                 raise HTTPException(
@@ -319,6 +320,7 @@ async def create_sale(
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
                 table_no=payload.table_no,
+                online_order_id=payload.online_order_id,
             )
         except IdempotencyKeyConflict as conflict:
             raise HTTPException(
@@ -381,6 +383,7 @@ async def create_sale(
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
                 table_no=payload.table_no,
+                online_order_id=payload.online_order_id,
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)
@@ -423,6 +426,7 @@ async def create_sale(
                 # 誤判成「同鍵不同內容」而回 409。
                 service_mode=payload.service_mode,
                 table_no=payload.table_no,
+                online_order_id=payload.online_order_id,
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)

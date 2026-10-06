@@ -1459,7 +1459,9 @@ async def test_stale_processing_cart_recovers_to_draft(
     assert event.event_type == "PAYMENT_PROCESSING_RECOVERED"
 
 
+@pytest.mark.parametrize("from_online_order", [False, True])
 async def test_uncertain_menu_checkout_reconciles_with_service_mode(
+    from_online_order: bool,
     client: httpx.AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1484,8 +1486,52 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     await db_session.flush()
     await db_session.commit()
 
+    online_order_id = None
+    if from_online_order:
+        from app.modules.menu.service import MenuService
+        from app.modules.onlineorder.orders_service import OnlineOrdersService
+        from tests.integration.test_online_orders_store import (
+            FakeWorker,
+            _client,
+            _line,
+            _order,
+            _rid,
+        )
+
+        menu = MenuService(db_session)
+        await menu.update_menu_item(
+            manager.store_id, menu_item.id, daily_limited=True, actor_user_id=manager.id
+        )
+        await menu.set_daily_stock(
+            manager.store_id,
+            "item",
+            menu_item.id,
+            qty=2,
+            expected_remaining=0,
+            actor_user_id=manager.id,
+        )
+        worker = FakeWorker(
+            orders=[
+                _order(
+                    _rid(35),
+                    [_line(1, menu_item.id, "手沖-耶加", 180, limited=True)],
+                    hold="HOLD_REQUESTED",
+                )
+            ]
+        )
+        await OnlineOrdersService(db_session, _client(worker, manager.store_id)).pull_once(
+            manager.store_id
+        )
+        from app.modules.onlineorder.models import OnlineOrder
+
+        online_order = await db_session.scalar(select(OnlineOrder))
+        assert online_order is not None
+        online_order_id = online_order.id
+        await db_session.commit()
+
     cart_payload: dict[str, object] = {
         "expected_revision": None,
+        "online_order_id": online_order_id,
         "lines": [{"line_type": "MENU", "menu_item_id": menu_item.id, "qty": 1}],
         "tenders": [
             {
@@ -1522,6 +1568,7 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
             "cart_session_id": created.json()["id"],
             "cart_revision": created.json()["revision"],
             "expected_einvoice_enabled": False,
+            "online_order_id": online_order_id,
             "service_mode": "DINE_IN",
             "table_no": "A1",
         },
@@ -1550,6 +1597,13 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     assert sale is not None
     assert sale.service_mode is ServiceMode.DINE_IN
     assert sale.table_no == "A1"
+
+    if from_online_order:
+        await db_session.refresh(online_order)
+        assert online_order.sale_id == sale.id
+        assert online_order.sync_status == "SETTLED"
+        await db_session.refresh(menu_item)
+        assert menu_item.stock_qty == 1
 
 
 async def test_uncertain_checkout_reconciles_even_if_product_was_discontinued(

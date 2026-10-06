@@ -9,7 +9,7 @@ const PULL_LIMIT = 50;
 const ORDER_ID = /^[0-9a-f]{32}$/;
 
 const SYNC_TARGETS = new Set(["IMPORTED", "SETTLED", "VOIDED"]);
-const HOLD_TARGETS = new Set(["HELD", "REJECTED"]);
+const HOLD_TARGETS = new Set(["HELD", "REJECTED", "NONE"]);
 const PAYMENT_TARGETS = new Set(["PAID", "CANCELLED"]);
 
 interface OrderRow {
@@ -125,7 +125,9 @@ function transitionError(row: OrderRow, t: Target): string | null {
     if (!SYNC_FROM[t.sync_status]?.includes(row.sync_status)) return "invalid_transition";
   }
   if (t.hold_status !== undefined && t.hold_status !== row.hold_status) {
-    if (row.hold_status !== "HOLD_REQUESTED") return "invalid_transition";
+    const reserving = row.hold_status === "HOLD_REQUESTED" && (t.hold_status === "HELD" || t.hold_status === "REJECTED");
+    const expiring = row.hold_status === "HELD" && t.hold_status === "NONE" && row.payment_status === "UNPAID";
+    if (!reserving && !expiring) return "invalid_transition";
   }
   if (t.payment_status !== undefined && t.payment_status !== row.payment_status) {
     if (row.payment_status !== "UNPAID") return "invalid_transition";
