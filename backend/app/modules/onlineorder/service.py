@@ -20,6 +20,7 @@ from app.modules.menu.service import MenuService, today
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.font import subset_font
 from app.modules.onlineorder.models import OnlineMenuPublication, OnlineTableCode
+from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.repository import OnlineOrderRepository
 from app.modules.onlineorder.snapshot import Snapshot, build_snapshot, snapshot_text
 from app.modules.settings.service import StoreSettingsService
@@ -138,6 +139,9 @@ class OnlineOrderService:
             published_at=published_at,
             font_sha256=None,
             day=today(),
+            presentations=await MenuPresentationService(self._session).snapshot_settings(
+                store_id, [item.id for item in items]
+            ),
         )
         return snapshot
 

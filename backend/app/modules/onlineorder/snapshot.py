@@ -4,7 +4,7 @@
 金額一律整數元（int）。售完／剩幾份是發佈當下的數字，即時更新在 O4 處理。
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 
@@ -46,6 +46,7 @@ def build_snapshot(
     published_at: datetime,
     font_sha256: str | None,
     day: date,
+    presentations: Mapping[int, dict[str, Any]] | None = None,
 ) -> Snapshot:
     """組快照。品項依傳入順序（菜單排序）；分類只列有品項的，依分類排序。"""
     shown = [d for d in details if d.item.archived_at is None and d.item.is_available]
@@ -71,6 +72,11 @@ def build_snapshot(
                 "available": True,
                 "remaining": remaining_today(d.item, day),
                 "option_groups": _option_groups(d, day),
+                **(
+                    {"presentation": presentations[d.item.id]}
+                    if presentations is not None and d.item.id in presentations
+                    else {}
+                ),
             }
             for d in shown
         ],
@@ -83,6 +89,12 @@ def snapshot_text(snapshot: Snapshot) -> str:
     parts += [str(c["name"]) for c in snapshot["categories"]]
     for item in snapshot["items"]:
         parts += [str(item["name"]), str(item["description"] or "")]
+        presentation = item.get("presentation")
+        if presentation is not None:
+            parts += [
+                str(presentation.get("flavor_description") or ""),
+                str(presentation.get("audience_description") or ""),
+            ]
         for group in item["option_groups"]:
             parts.append(str(group["name"]))
             parts += [str(o["name"]) for o in group["options"]]

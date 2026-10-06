@@ -200,6 +200,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ),
     ("線上點餐-發佈紀錄筆數", "SELECT count(*) FROM online_menu_publications"),
     (
+        "線上點餐-呈現設定（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(row_to_json(p)::text, ',' ORDER BY store_id, menu_item_id)), '-') "
+        "FROM online_menu_presentations p",
+    ),
+    (
         "線上點餐-可售狀態（版本／修訂／交付）",
         "SELECT count(*)::text || '/' || "
         "COALESCE(md5(string_agg(store_id::text || menu_version::text || revision::text || "

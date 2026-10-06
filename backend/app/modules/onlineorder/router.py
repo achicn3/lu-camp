@@ -7,8 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.core.deps import CurrentUser, require_role
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.presentation_schemas import (
+    MenuPresentationRead,
+    MenuPresentationUpdateRequest,
+)
+from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.schemas import (
     OnlineMenuPublishRead,
     OnlineOrderStatusRead,
@@ -16,6 +21,7 @@ from app.modules.onlineorder.schemas import (
 )
 from app.modules.onlineorder.service import OnlineOrderService
 from app.shared.exceptions import (
+    MenuItemNotFound,
     OnlineOrderNotConfigured,
     OnlineOrderPushFailed,
     OnlineTableNotFound,
@@ -37,6 +43,7 @@ def get_online_order_client() -> OnlineOrderClient | None:
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+AuthDep = Annotated[CurrentUser, Depends(get_current_user)]
 ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
 ClientDep = Annotated[OnlineOrderClient | None, Depends(get_online_order_client)]
 
@@ -100,3 +107,39 @@ async def rotate_online_table_code(
             "請確認網路後再按一次「發佈到線上點餐」",
         ) from exc
     return OnlineTableRead.from_link(link)
+
+
+@router.get(
+    "/menu-items/{item_id}/presentation",
+    response_model=MenuPresentationRead,
+    operation_id="getMenuPresentation",
+)
+async def get_menu_presentation(
+    item_id: int, session: SessionDep, user: AuthDep
+) -> MenuPresentationRead:
+    try:
+        return await MenuPresentationService(session).get(user.store_id, item_id)
+    except MenuItemNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.put(
+    "/menu-items/{item_id}/presentation",
+    response_model=MenuPresentationRead,
+    operation_id="updateMenuPresentation",
+)
+async def update_menu_presentation(
+    item_id: int,
+    body: MenuPresentationUpdateRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> MenuPresentationRead:
+    try:
+        result = await MenuPresentationService(session).update(
+            user.store_id, item_id, body, actor_user_id=user.id
+        )
+    except MenuItemNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return result

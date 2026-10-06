@@ -443,7 +443,12 @@ class MenuService:
         )
 
     # ── 查詢 ──
-    async def get(self, store_id: int, item_id: int) -> MenuItem | None:
+    async def get(
+        self, store_id: int, item_id: int, *, for_update: bool = False
+    ) -> MenuItem | None:
+        """Read a store-scoped item, optionally locking it for coordinated updates."""
+        if for_update:
+            return await self._repo.get_for_update(store_id, item_id)
         return await self._repo.get(store_id, item_id)
 
     async def list_items(self, store_id: int, *, include_unavailable: bool) -> list[MenuItem]:

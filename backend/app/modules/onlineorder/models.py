@@ -1,7 +1,7 @@
 """線上點餐（店內端）模型（docs/44 §5.3）：發佈紀錄、桌位碼、已推到雲端的媒體；
 O4 起加線上訂單、份數保留、回報雲端的重試佇列、雲端連線狀態。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -21,6 +22,31 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+
+
+class OnlineMenuPresentation(Base, TimestampMixin):
+    """Customer-facing copy and display settings for an existing menu item."""
+
+    __tablename__ = "online_menu_presentations"
+    __table_args__ = (
+        UniqueConstraint("store_id", "menu_item_id", name="uq_online_menu_presentations_item"),
+        CheckConstraint(
+            "low_stock_threshold BETWEEN 0 AND 9999",
+            name="ck_online_menu_presentations_threshold",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    menu_item_id: Mapped[int] = mapped_column(ForeignKey("menu_items.id", ondelete="CASCADE"))
+    flavor_description: Mapped[str | None] = mapped_column(String(120))
+    audience_description: Mapped[str | None] = mapped_column(String(120))
+    is_recommended: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    is_new: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    limited_on: Mapped[date | None] = mapped_column(Date)
+    show_remaining: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    low_stock_threshold: Mapped[int] = mapped_column(default=5, server_default=text("5"))
+    hide_sold_out: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
 
 
 class OnlineMenuPublication(Base, TimestampMixin):
