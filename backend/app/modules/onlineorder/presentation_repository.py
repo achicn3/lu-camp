@@ -13,12 +13,14 @@ class MenuPresentationRepository:
         self._session = session
 
     async def get(self, store_id: int, item_id: int) -> OnlineMenuPresentation | None:
-        return await self._session.scalar(
+        row: OnlineMenuPresentation | None = await self._session.scalar(
             select(OnlineMenuPresentation).where(
                 OnlineMenuPresentation.store_id == store_id,
                 OnlineMenuPresentation.menu_item_id == item_id,
             )
         )
+
+        return row
 
     async def for_items(
         self, store_id: int, item_ids: Sequence[int]

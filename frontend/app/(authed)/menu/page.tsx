@@ -8,6 +8,8 @@ import { type FormEvent, useState } from "react";
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
+import { MenuOrderingSection } from "@/features/menu/MenuOrderingSection";
+import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
@@ -223,6 +225,7 @@ function MenuItemRow({
   const [editingCost, setEditingCost] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [editingOptions, setEditingOptions] = useState(false);
+  const [editingPresentation, setEditingPresentation] = useState(false);
   const [cost, setCost] = useState(item.unit_cost ?? "");
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -389,6 +392,8 @@ function MenuItemRow({
             設定
           </button>
         </span>
+        <button type="button" className="btn-ghost" aria-label={`${item.name} 線上呈現`} onClick={() => setEditingPresentation(true)}>線上呈現</button>
+        {editingPresentation && <MenuPresentationDialog itemId={item.id} itemName={item.name} onDone={() => setEditingPresentation(false)} onClose={() => setEditingPresentation(false)} />}
         {editingOptions && (
           <MenuItemOptionsDialog
             item={item}
@@ -548,6 +553,7 @@ export default function MenuPage() {
           )}
         </div>
       </div>
+      <MenuOrderingSection items={listQuery.data ?? []} onChanged={refresh} />
       <OptionGroupsSection />
     </section>
   );

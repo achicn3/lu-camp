@@ -141,7 +141,7 @@ async def test_presentation_store_scope(
         method,
         path(item_id),
         headers=auth(outsider),
-        **({"json": DEFAULTS} if method == "PUT" else {}),
+        json=DEFAULTS if method == "PUT" else None,
     )
     assert response.status_code == 404
 
@@ -158,13 +158,13 @@ async def test_missing_and_archived_items_are_not_configurable(
         assert (
             await client.put(path(item_id), headers=auth(manager), json=SETTINGS)
         ).status_code == 200
-        response = await client.post(f"/api/v1/menu-items/{item_id}/archive", headers=auth(manager))
+        response = await client.delete(f"/api/v1/menu-items/{item_id}", headers=auth(manager))
         assert response.status_code == 200, response.text
     response = await client.request(
         method,
         path(item_id),
         headers=auth(manager),
-        **({"json": SETTINGS} if method == "PUT" else {}),
+        json=SETTINGS if method == "PUT" else None,
     )
     assert response.status_code == 404
 
@@ -233,6 +233,6 @@ async def test_menu_item_hard_delete_cascades_presentation(
     assert (
         await client.put(path(item_id), headers=auth(manager), json=SETTINGS)
     ).status_code == 200
-    response = await client.delete(f"/api/v1/menu-items/{item_id}", headers=auth(manager))
+    response = await client.delete(f"/api/v1/menu-items/{item_id}/delete", headers=auth(manager))
     assert response.status_code == 204, response.text
     assert (await client.get(path(item_id), headers=auth(manager))).status_code == 404
