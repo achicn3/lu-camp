@@ -399,3 +399,41 @@ async def test_dine_in_table_named_takeout_does_not_break_publishing(
     assert second.status_code == 200, second.text
     labels = sorted((t["label"], t["service_mode"]) for t in worker.tables())
     assert labels == [("A1", "DINE_IN"), ("外帶", "TAKEOUT")]
+
+
+async def test_publish_includes_only_public_presentation_without_altering_stock(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, manager = await _seed(db_session)
+    ids = await _menu(client, manager)
+    item_id = ids["拿鐵"]
+    settings = {
+        "flavor_description": "蜜桃、花香",
+        "audience_description": "喜歡清爽果香的你",
+        "is_recommended": True,
+        "is_new": True,
+        "limited_on": "2026-10-06",
+        "show_remaining": False,
+        "low_stock_threshold": 3,
+        "hide_sold_out": True,
+    }
+    response = await client.put(
+        f"/api/v1/online-order/menu-items/{item_id}/presentation",
+        json=settings,
+        headers=_auth(manager),
+    )
+    assert response.status_code == 200, response.text
+    response = await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"daily_limited": True}, headers=_auth(manager)
+    )
+    assert response.status_code == 200, response.text
+    response = await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert response.status_code == 200, response.text
+    items = {row["id"]: row for row in worker.menu()["items"]}
+    assert items[item_id]["presentation"] == settings
+    assert items[item_id]["unit_price"] == 150
+    assert items[item_id]["remaining"] == 0  # hide quantity does not mean unlimited
+    assert "presentation" not in items[ids["戚風"]]  # conservative legacy defaults
+    encoded = json.dumps(worker.menu())
+    for forbidden in ("unit_cost", "store_id", "created_at", "actor_user_id", "menu_item_id"):
+        assert forbidden not in encoded
