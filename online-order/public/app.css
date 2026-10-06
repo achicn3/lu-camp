@@ -230,3 +230,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   .splash { transition: none; }
   .splash-logo { animation: none; }
 }
+
+.item-flavor, .item-audience, .item-labels { display: block; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6; margin-top: 5px; }
+.item-flavor { color: var(--ink); }
+.item-audience { color: var(--soft); }
+.item-labels { color: var(--gold); font-size: 12px; letter-spacing: .04em; }

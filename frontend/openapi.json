@@ -11690,6 +11690,154 @@
         "title": "MenuOptionUpdateRequest",
         "type": "object"
       },
+      "MenuPresentationRead": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_description": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audience Description"
+          },
+          "flavor_description": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flavor Description"
+          },
+          "hide_sold_out": {
+            "default": false,
+            "title": "Hide Sold Out",
+            "type": "boolean"
+          },
+          "is_new": {
+            "default": false,
+            "title": "Is New",
+            "type": "boolean"
+          },
+          "is_recommended": {
+            "default": false,
+            "title": "Is Recommended",
+            "type": "boolean"
+          },
+          "limited_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limited On"
+          },
+          "low_stock_threshold": {
+            "default": 5,
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Low Stock Threshold",
+            "type": "integer"
+          },
+          "menu_item_id": {
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "show_remaining": {
+            "default": true,
+            "title": "Show Remaining",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "menu_item_id"
+        ],
+        "title": "MenuPresentationRead",
+        "type": "object"
+      },
+      "MenuPresentationUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Replace all presentation settings; omitted fields restore conservative defaults.",
+        "properties": {
+          "audience_description": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audience Description"
+          },
+          "flavor_description": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flavor Description"
+          },
+          "hide_sold_out": {
+            "default": false,
+            "title": "Hide Sold Out",
+            "type": "boolean"
+          },
+          "is_new": {
+            "default": false,
+            "title": "Is New",
+            "type": "boolean"
+          },
+          "is_recommended": {
+            "default": false,
+            "title": "Is Recommended",
+            "type": "boolean"
+          },
+          "limited_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limited On"
+          },
+          "low_stock_threshold": {
+            "default": 5,
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Low Stock Threshold",
+            "type": "integer"
+          },
+          "show_remaining": {
+            "default": true,
+            "title": "Show Remaining",
+            "type": "boolean"
+          }
+        },
+        "title": "MenuPresentationUpdateRequest",
+        "type": "object"
+      },
       "MenuStockAdjustReason": {
         "description": "每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。",
         "enum": [
@@ -27596,6 +27744,108 @@
         "summary": "Get Menu Photo",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/online-order/menu-items/{item_id}/presentation": {
+      "get": {
+        "operationId": "getMenuPresentation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuPresentationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Menu Presentation",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "put": {
+        "operationId": "updateMenuPresentation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuPresentationUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuPresentationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Menu Presentation",
+        "tags": [
+          "online-order"
         ]
       }
     },

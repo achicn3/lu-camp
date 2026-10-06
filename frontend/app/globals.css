@@ -6604,3 +6604,21 @@ a.btn-ghost {
   justify-content: flex-end;
   gap: var(--sp-2);
 }
+
+/* 線上菜單呈現與排序：管理操作沿用 POS 表單，單一捲動容器。 */
+.menu-presentation-dialog { width: min(560px, 100%); max-height: 90dvh; overflow-y: auto; }
+.menu-presentation-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.menu-presentation-heading h2 { margin: 0; }
+.menu-presentation-heading button { min-width: 44px; min-height: 44px; font-size: 24px; }
+.menu-presentation-form fieldset { border: 0; padding: 0; margin: var(--sp-4) 0; min-width: 0; }
+.menu-presentation-form input:not([type="checkbox"]) { width: 100%; min-height: 44px; }
+.menu-presentation-form .field { margin-bottom: var(--sp-3); }
+.menu-presentation-checks { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin: var(--sp-3) 0; }
+.menu-presentation-checks label { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; }
+.menu-presentation-checks input { width: 18px; height: 18px; }
+.menu-ordering { margin: var(--sp-5) 0; }
+.menu-ordering summary { cursor: pointer; min-height: 44px; align-content: center; font-weight: 600; }
+.menu-order-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.menu-order-row label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex: 1; min-width: 180px; }
+.menu-order-row input { width: 90px; min-height: 44px; }
+.menu-order-row .form-error { flex-basis: 100%; }

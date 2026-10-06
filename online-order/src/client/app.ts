@@ -1,6 +1,6 @@
 // 客人掃碼點餐頁（docs/44 §4.2）。菜單文字一律 textContent，不拼 HTML。
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
-import { greeting, itemBadge, money, priceText, tableCodeFromPath } from "./logic";
+import { greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, tableCodeFromPath, visibleItems } from "./logic";
 import type { MenuItemView, MenuSnapshot, TableView } from "./types";
 
 const SPLASH_MS = 1200;
@@ -33,6 +33,8 @@ let tableCode: string | null = null;
 let cart: CartLine[] = [];
 let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
+let activeCategory = ALL;
+let activeDetail: number | null = null;
 let pollTimer: number | null = null;
 let widgetId: string | null = null;
 let challengeToken = "";
@@ -114,16 +116,23 @@ function priceNode(item: MenuItemView): HTMLElement {
   return node;
 }
 function closeDetail(): void {
+  activeDetail = null;
   $("sheet").hidden = true;
   document.body.classList.remove("sheet-open");
 }
 function openDetail(item: MenuItemView): void {
   if (menu === null) return;
+  activeDetail = item.id;
   const body = $("sheet-body"); body.replaceChildren();
   if (item.photo) {
     const img = el("img", "sheet-photo"); img.src = `/photos/${item.photo}.webp`; img.alt = item.name; body.append(img);
   }
   const title = el("h2", "sheet-title", item.name); title.id = "sheet-title"; body.append(title);
+  if (item.presentation?.flavor_description) body.append(el("p", "item-flavor", item.presentation.flavor_description));
+  if (item.presentation?.audience_description) body.append(el("p", "item-audience", item.presentation.audience_description));
+  const labels = presentationBadges(item, new Date());
+  const labelNode = el("p", "item-labels", labels.join(" · "));
+  labelNode.hidden = labels.length === 0; body.append(labelNode);
   if (item.description) body.append(el("p", "sheet-desc", item.description));
   const price = priceNode(item); price.classList.add("sheet-price"); body.append(price);
   const groups = el("div");
@@ -147,7 +156,7 @@ function openDetail(item: MenuItemView): void {
     groups.append(field);
   }
   body.append(groups);
-  if (item.remaining === 0 || !item.available) {
+  if (itemSoldOut(item)) {
     body.append(el("p", "sheet-note", "今日售完，請選其他品項。"));
   } else {
     const controls = el("div", "detail-controls");
@@ -175,7 +184,7 @@ function cartError(reason: unknown): string {
   return "購物車已變動，請重新確認菜單。";
 }
 function itemRow(item: MenuItemView): HTMLElement {
-  const soldOut = item.remaining === 0 || !item.available;
+  const soldOut = itemSoldOut(item);
   const row = button("", () => openDetail(item), soldOut ? "item item-soldout" : "item");
   const photo = el("span", "item-photo");
   if (item.photo) {
@@ -183,21 +192,26 @@ function itemRow(item: MenuItemView): HTMLElement {
     img.loading = "lazy"; img.decoding = "async"; photo.append(img);
   }
   const copy = el("span", "item-text"); copy.append(el("span", "item-name", item.name));
-  if (item.description) copy.append(el("span", "item-desc", item.description));
+  if (item.presentation?.flavor_description) copy.append(el("span", "item-flavor", item.presentation.flavor_description));
+  if (item.presentation?.audience_description) copy.append(el("span", "item-audience", item.presentation.audience_description));
+  if (item.description && !item.presentation?.flavor_description) copy.append(el("span", "item-desc", item.description));
+  const labels = presentationBadges(item, new Date());
+  if (labels.length) copy.append(el("span", "item-labels", labels.join(" · ")));
   copy.append(priceNode(item)); row.append(photo, copy);
   const badge = soldOut ? "今日售完" : itemBadge(item);
   if (badge) row.append(el("span", soldOut ? "item-badge item-badge-off" : "item-badge", badge));
   return row;
 }
 function renderMenu(snapshot: MenuSnapshot): void {
-  const tabs = $("tabs"); const list = $("list"); let current = ALL;
+  const tabs = $("tabs"); const list = $("list");
+  if (!snapshot.categories.some((category) => category.id === activeCategory)) activeCategory = ALL;
   const categories = [{ id: ALL, name: "全部" }, ...snapshot.categories];
   const draw = () => {
     tabs.replaceChildren(...categories.map((category) => {
-      const tab = button(category.name, () => { current = category.id; draw(); }, category.id === current ? "tab tab-on" : "tab");
-      tab.setAttribute("role", "tab"); tab.setAttribute("aria-selected", String(category.id === current)); return tab;
+      const tab = button(category.name, () => { activeCategory = category.id; draw(); }, category.id === activeCategory ? "tab tab-on" : "tab");
+      tab.setAttribute("role", "tab"); tab.setAttribute("aria-selected", String(category.id === activeCategory)); return tab;
     }));
-    list.replaceChildren(...snapshot.items.filter((item) => current === ALL || item.category_id === current).map(itemRow));
+    list.replaceChildren(...visibleItems(snapshot.items).filter((item) => activeCategory === ALL || item.category_id === activeCategory).map(itemRow));
   };
   tabs.hidden = snapshot.categories.length < 2; draw();
 }
@@ -383,10 +397,18 @@ async function refreshAvailability(): Promise<void> {
   if (nextStatus.body) status = nextStatus.body;
   if (nextMenu.body && JSON.stringify(nextMenu.body) !== JSON.stringify(menu)) {
     menu = nextMenu.body;
-    renderMenu(menu);
     const current = checkCart(menu, cart);
     if (!$("cart-view").hidden && readDraft() === null && !submitting && !checkoutStarting) renderCart();
     if (cart.length && !current.ok) showMessage("菜單供應狀態已更新，請檢查購物車。");
+  }
+  renderMenu(menu); // 限定標籤跨台北午夜失效，無須重發快照。
+  if (activeDetail !== null) {
+    const item = menu.items.find((entry) => entry.id === activeDetail);
+    const node = $("sheet-body").querySelector<HTMLElement>(".item-labels");
+    if (node) {
+      const labels = item ? presentationBadges(item, new Date()) : [];
+      node.textContent = labels.join(" · "); node.hidden = labels.length === 0;
+    }
   }
 }
 async function openOrder(token: string): Promise<void> {

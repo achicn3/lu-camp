@@ -2730,6 +2730,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/menu-items/{item_id}/presentation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Menu Presentation */
+        get: operations["getMenuPresentation"];
+        /** Update Menu Presentation */
+        put: operations["updateMenuPresentation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/publish": {
         parameters: {
             query?: never;
@@ -8445,6 +8463,79 @@ export interface components {
             sort_order?: number | null;
             /** Unit Cost */
             unit_cost?: number | string | null;
+        };
+        /** MenuPresentationRead */
+        MenuPresentationRead: {
+            /** Audience Description */
+            audience_description?: string | null;
+            /** Flavor Description */
+            flavor_description?: string | null;
+            /**
+             * Hide Sold Out
+             * @default false
+             */
+            hide_sold_out: boolean;
+            /**
+             * Is New
+             * @default false
+             */
+            is_new: boolean;
+            /**
+             * Is Recommended
+             * @default false
+             */
+            is_recommended: boolean;
+            /** Limited On */
+            limited_on?: string | null;
+            /**
+             * Low Stock Threshold
+             * @default 5
+             */
+            low_stock_threshold: number;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /**
+             * Show Remaining
+             * @default true
+             */
+            show_remaining: boolean;
+        };
+        /**
+         * MenuPresentationUpdateRequest
+         * @description Replace all presentation settings; omitted fields restore conservative defaults.
+         */
+        MenuPresentationUpdateRequest: {
+            /** Audience Description */
+            audience_description?: string | null;
+            /** Flavor Description */
+            flavor_description?: string | null;
+            /**
+             * Hide Sold Out
+             * @default false
+             */
+            hide_sold_out: boolean;
+            /**
+             * Is New
+             * @default false
+             */
+            is_new: boolean;
+            /**
+             * Is Recommended
+             * @default false
+             */
+            is_recommended: boolean;
+            /** Limited On */
+            limited_on?: string | null;
+            /**
+             * Low Stock Threshold
+             * @default 5
+             */
+            low_stock_threshold: number;
+            /**
+             * Show Remaining
+             * @default true
+             */
+            show_remaining: boolean;
         };
         /**
          * MenuStockAdjustReason
@@ -16210,6 +16301,72 @@ export interface operations {
                 };
                 content: {
                     "image/webp": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getMenuPresentation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuPresentationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuPresentation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuPresentationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuPresentationRead"];
                 };
             };
             /** @description Validation Error */
