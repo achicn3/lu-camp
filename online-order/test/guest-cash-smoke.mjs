@@ -62,7 +62,8 @@ page.on("pageerror", (error) => errors.push(String(error)));
 let firstToken = "";
 try {
   await page.goto(base, { waitUntil: "networkidle" });
-  await page.locator(".item", { hasText: `拿鐵 ${run}` }).click();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.locator(".item", { hasText: `拿鐵 ${run}` }).locator(".item-detail").click();
   await page.getByRole("button", { name: "加入購物車" }).click();
   await page.getByText("請依每組規則選好選項。").waitFor();
   await page.getByLabel("冰").check();

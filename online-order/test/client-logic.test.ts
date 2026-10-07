@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuItemView, MenuPresentation } from "../src/client/types";
-import { greeting, itemBadge, itemSoldOut, presentationBadges, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import { homeSelection, greeting, itemBadge, itemSoldOut, presentationBadges, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -125,5 +125,34 @@ describe("售完展示", () => {
       .toEqual([3, 5, 1]);
     expect(items.map((entry) => entry.id)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(items[0]?.remaining).toBe(0);
+  });
+});
+
+
+describe("首頁選擇", () => {
+  it("只推薦人工指定且可售品項，依原順序最多三項，不改來源", () => {
+    const featured = { ...item, presentation: { ...presentation, is_recommended: true } };
+    const items = [{ ...featured, id: 0, remaining: 0 }, ...[1, 2, 3, 4].map((id) => ({ ...featured, id })),
+      { ...featured, id: 5, option_groups: [required] }];
+    expect(homeSelection({ categories: [], items }).recommended.map((entry) => entry.id)).toEqual([1, 2, 3]);
+    expect(items).toHaveLength(6);
+  });
+  it("不同分類交錯且首項售完時，推薦仍依發布順序", () => {
+    const featured = { ...item, presentation: { ...presentation, is_recommended: true } };
+    const items = [{ ...featured, id: 1, remaining: 0 }, { ...featured, id: 2, category_id: 2 }, { ...featured, id: 3 }];
+    expect(homeSelection({ categories: [], items }).recommended.map((entry) => entry.id)).toEqual([2, 3]);
+  });
+  it("略過沒有可展示品項的分類；不把未設定商品假稱推薦", () => {
+    const selection = homeSelection({ categories: [{ id: 1, name: "咖啡" }, { id: 2, name: "甜點" }],
+      items: [item, { ...item, id: 2, category_id: 2, remaining: 0,
+        presentation: { ...presentation, hide_sold_out: true } }] });
+    expect(selection.recommended).toEqual([]);
+    expect(selection.categories).toEqual([{ id: 1, name: "咖啡" }]);
+  });
+  it("保留售完分類入口，未分類品項仍可透過全部選取", () => {
+    const selection = homeSelection({ categories: [{ id: 1, name: "咖啡" }],
+      items: [{ ...item, remaining: 0 }, { ...item, id: 2, category_id: null }] });
+    expect(selection.categories).toHaveLength(1);
+    expect(selection.recommended).toEqual([]);
   });
 });

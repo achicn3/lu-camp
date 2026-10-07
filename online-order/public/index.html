@@ -10,7 +10,6 @@
     <script type="module" src="/app.js"></script>
   </head>
   <body>
-    <div id="splash" class="splash" aria-hidden="true"><div class="logo splash-logo"></div><span class="splash-rule"></span></div>
     <header class="bar">
       <div class="logo bar-logo" role="img" aria-label="露坑 logo"></div>
       <div class="bar-name"><b>露坑</b><small>Camp &amp; Coffee</small></div>
@@ -19,8 +18,20 @@
     <main class="page">
       <p id="message" class="message" role="status" hidden></p>
       <section id="menu-view">
-        <p id="greeting" class="greeting"></p>
-        <nav id="tabs" class="tabs" role="tablist" aria-label="分類" hidden></nav>
+        <div id="menu-home">
+          <div class="welcome">
+            <p id="greeting" class="greeting"></p>
+            <h1 class="welcome-title">在露坑坐一下<span class="welcome-dot">。</span></h1>
+            <nav id="shortcuts" class="shortcuts" aria-label="今天想喝什麼"></nav>
+          </div>
+          <section id="recommendations" aria-labelledby="recommendation-title" hidden>
+            <div class="section-heading"><h2 id="recommendation-title">露坑推薦</h2><span>慢慢選，慢慢喝。</span></div>
+            <div id="recommended-list" class="list recommended-list"></div>
+          </section>
+        </div>
+        <button id="back-home" class="back-link" type="button" hidden>← 返回首頁</button>
+        <h2 id="catalog-title" class="catalog-title">完整菜單</h2>
+        <nav id="tabs" class="tabs" aria-label="分類" hidden></nav>
         <div id="list" class="list"></div>
       </section>
       <section id="cart-view" hidden>
@@ -35,6 +46,7 @@
         <div id="order-body"></div>
       </section>
     </main>
+    <p id="cart-feedback" class="cart-feedback" role="status" aria-live="polite"></p>
     <footer id="footer" class="footer" hidden></footer>
     <div id="sheet" class="sheet-backdrop" hidden>
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
