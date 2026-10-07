@@ -7,6 +7,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
 mkdirSync(SHOTS, { recursive: true });
@@ -21,6 +23,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
 try {
+  await skipOpeningCheckRedirect(page, BASE);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
@@ -32,7 +35,8 @@ try {
   await page.click('a:has-text("POS")');
   await page.waitForURL(`${BASE}/pos`);
   await page.waitForSelector(".pos-menu-tiles");
-  const tile = page.locator(".pos-menu-tile").first();
+  // 挑沒有每日限量的品項：前面別的煙霧可能把限量品項賣到只剩 1 份，點 2 份會（正確地）被擋
+  const tile = page.locator(".pos-menu-tile").filter({ hasNotText: /剩|售完/ }).first();
   await tile.waitFor();
   const tileName = (await tile.locator(".pos-menu-tile-name").textContent()) ?? "";
   ok("餐飲菜單磚出現", true, tileName);
@@ -57,6 +61,8 @@ try {
   );
 
   // 結帳（現金，已開帳）
+  // 有餐飲就要先選內用／外帶（docs/35）才能結帳
+  await page.getByRole("radio", { name: "外帶", exact: true }).click();
   await page.waitForSelector('.pos-checkout:not([disabled])', { timeout: 10000 });
   await page.click(".pos-checkout");
   await page.waitForSelector("text=已完成");
