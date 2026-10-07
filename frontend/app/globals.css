@@ -6441,6 +6441,8 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   outline-offset: 3px;
 }
 .menu-items-filters {
+  width: 100%;
+  max-width: none;
   display: grid;
   grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(130px, 1fr)) auto;
   align-items: end;
@@ -6451,6 +6453,7 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   width: 100%;
   min-height: var(--tap-min);
 }
+.menu-items-filters > button { white-space: nowrap; }
 .menu-items-count {
   grid-column: 1 / -1;
   margin: 0;

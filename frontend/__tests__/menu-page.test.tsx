@@ -74,6 +74,29 @@ afterEach(() => {
 });
 
 describe("/menu 餐飲菜單管理頁", () => {
+  it("刪除分類最後一項後仍明確保留所選篩選", async () => {
+    let items = [...ITEMS];
+    stubFetch((url, method) => {
+      if (url.includes("/menu-items/1/delete") && method === "DELETE") {
+        items = items.filter((item) => item.id !== 1);
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("/menu-items")) return json(items);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("手沖-耶加");
+    await user.selectOptions(screen.getByLabelText("品項分類"), "category:咖啡");
+    await user.click(screen.getByRole("button", { name: "刪除" }));
+    const dialog = await screen.findByRole("dialog", { name: "刪除品項" });
+    await user.click(within(dialog).getByRole("button", { name: "刪除" }));
+    await screen.findByText("沒有符合條件的品項，請調整或清除篩選。");
+    expect((screen.getByLabelText("品項分類") as HTMLSelectElement).value).toBe("category:咖啡");
+    await user.click(screen.getByRole("button", { name: "清除篩選" }));
+    expect(screen.getByText("季節限定").closest("tr")?.hidden).toBe(false);
+  });
+
   it("CLERK 無權限：顯示需管理者權限", () => {
     stubFetch(() => json([]));
     renderPage("CLERK");
