@@ -33,11 +33,11 @@ async function check(page, label, width, capture = false) {
       const rect = node.getBoundingClientRect();
       if (rect.left < -1 || rect.right > innerWidth + 1 || node.scrollWidth > node.clientWidth + 1) problems.push(`overflow ${node.className || node.tagName}`);
     }
-    for (const node of document.querySelectorAll("button,input,textarea,.item-price,.item-flavor,.item-audience,.item-labels,.item-badge,.opt-group-name,.opt-choice,.cart-total,.order-line,.order-hint,.order-state,.empty-state,.field-error,.message")) {
+    for (const node of document.querySelectorAll("button:not(.tab):not(.shortcut),input,textarea,.item-price,.item-labels,.item-badge,.opt-group-name,.opt-choice,.cart-total,.order-line,.order-hint,.order-state,.empty-state,.field-error,.message")) {
       if (!node.getClientRects().length) continue;
       if (getComputedStyle(node).fontFamily !== ui) problems.push(`UI font ${node.className || node.tagName}`);
     }
-    for (const node of document.querySelectorAll("h1,h2,.item-name,.cart-line b")) {
+    for (const node of document.querySelectorAll("h1,h2,.item-name,.cart-line b,.tab,.shortcut,.item-flavor,.item-audience,.item-desc,.sheet-desc")) {
       if (node.getClientRects().length && getComputedStyle(node).fontFamily !== hand) problems.push(`display font ${node.className || node.tagName}`);
     }
     return [...new Set(problems)];

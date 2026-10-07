@@ -188,7 +188,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 }
 .sheet-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block; }
 .sheet-title { margin: 16px 0 4px; font-weight: 400; font-size: 31px; letter-spacing: 0.04em; }
-.sheet-desc { margin: 0 0 6px; color: var(--soft); }
+.sheet-desc { margin: 0 0 6px; color: var(--soft); font-family: var(--hand); font-size: 20px; line-height: 1.5; letter-spacing: .03em; }
 .sheet-price { margin: 0 0 12px; font-size: 20px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
@@ -217,6 +217,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 }
 
 .item-flavor, .item-audience, .item-labels { display: block; font-family: var(--ui); font-size: 14px; line-height: 1.6; margin-top: 5px; }
+.item-flavor, .item-audience { font-family: var(--hand); font-size: 19px; line-height: 1.5; letter-spacing: .03em; }
 .item-flavor { color: var(--ink); }
 .item-audience { color: var(--soft); }
 .item-labels { color: var(--gold); font-size: 12px; letter-spacing: .04em; }
@@ -243,7 +244,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .item-text { flex: 1; overflow-wrap: anywhere; }
 .item-photo { flex: none; width: 76px; height: 76px; }
 .item-name, .cart-line b { font-family: var(--hand); font-size: 25px; line-height: 1.4; letter-spacing: .03em; }
-.item-desc { font-family: var(--ui); font-size: 14px; }
+.item-desc { font-family: var(--hand); font-size: 19px; line-height: 1.5; letter-spacing: .03em; }
 .item-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
 .item-actions > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
 .item-badge { font-family: var(--ui); font-size: 12px; }
@@ -256,9 +257,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sheet-title { padding-right: 34px; overflow-wrap: anywhere; }
 .sheet { overscroll-behavior: contain; }
 
-.shortcut, .tab, .footer-action, .back-link { font-family: var(--ui); }
+.footer-action, .back-link { font-family: var(--ui); }
+/* 分類（首頁入口、分類分頁）也用手寫體（店主 2026-10-08）。 */
+.shortcut, .tab { font-family: var(--hand); letter-spacing: .03em; }
+.tab { font-size: 22px; }
+.shortcut { font-size: 21px; }
 
-/* 手寫體只承擔品牌與商品名稱；操作、數量與金額共用同一套字體基線。 */
+/* 手寫體：品牌、標題、分類、商品名稱與內容說明；價格、數量、按鈕與標籤共用 UI 字型（店主 2026-10-08）。 */
 .bar-name b, .welcome-title, .view-title, .section-heading h2, .catalog-title, .sheet-title { font-family: var(--hand); line-height: 1.4; }
 .cart-controls { font-variant-numeric: tabular-nums; line-height: 1.5; }
 .cart-controls > span { min-width: 2ch; text-align: center; }

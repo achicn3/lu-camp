@@ -45,7 +45,11 @@ try {
     await phone.locator("#tabs").getByRole("button", { name: category?.name ?? "全部", exact: true }).click();
     assert.equal((await typeOf(phone.locator("#catalog-title"))).family, homeName.family);
     for (const tab of await phone.locator("#tabs .tab").all()) {
-      assert.equal((await typeOf(tab)).family, add.family, "Every category button must use the UI font");
+      assert.equal((await typeOf(tab)).family, homeName.family, "Every category button must use the handwriting font");
+    }
+    for (const selector of [".item-flavor", ".item-audience", ".item-desc"]) {
+      const node = phone.locator(`#list ${selector}`).first();
+      if (await node.count()) assert.equal((await typeOf(node)).family, homeName.family, `${selector} must use the handwriting font`);
     }
     const card = phone.locator(`#list .item[data-item-id="${item.id}"]`);
     assert.deepEqual(await typeOf(card.locator(".item-name")), homeName);
