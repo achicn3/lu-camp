@@ -24,7 +24,13 @@ from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.sales.service import SalesService
 from app.modules.storecredit.service import StoreCreditService
-from app.shared.enums import SaleLineType, SaleStatus, ServiceMode, TenderType
+from app.shared.enums import (
+    InvoiceAllowanceSource,
+    SaleLineType,
+    SaleStatus,
+    ServiceMode,
+    TenderType,
+)
 from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
 from tests.integration.test_returns_invoice_tenders import (
     _consent,
@@ -227,7 +233,10 @@ async def test_issued_invoice_food_refund_opens_allowance(
     )
     ret = await _return(db_session, m, [ReturnLineInput(m.latte_line, 1)], "inv", consent=consent)
     allowance = await db_session.scalar(
-        select(InvoiceAllowance).where(InvoiceAllowance.invoice_id == invoice.id)
+        select(InvoiceAllowance).where(
+            InvoiceAllowance.invoice_id == invoice.id,
+            InvoiceAllowance.source == InvoiceAllowanceSource.RETURN,
+        )
     )
     assert allowance is not None
     assert allowance.total == Decimal("150")

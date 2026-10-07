@@ -370,11 +370,26 @@ class UploadStatus(StrEnum):
 
 
 class EInvoiceAction(StrEnum):
-    """電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。"""
+    """電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。
+
+    ALLOWANCE_VOID＝作廢折讓（G0501）：混合付款的購物金折讓在整筆作廢時要先作廢（ADR-029）。
+    """
 
     ISSUE = "ISSUE"
     VOID = "VOID"
     ALLOWANCE = "ALLOWANCE"
+    ALLOWANCE_VOID = "ALLOWANCE_VOID"
+
+
+class InvoiceAllowanceSource(StrEnum):
+    """折讓的來源（invoice_allowances.source）。
+
+    RETURN＝退貨（ADR-014）；STORE_CREDIT＝混合付款的購物金部分，平台確認開立後自動開立、
+    一張發票至多一張（ADR-029）。
+    """
+
+    RETURN = "RETURN"
+    STORE_CREDIT = "STORE_CREDIT"
 
 
 class LinePayStatus(StrEnum):

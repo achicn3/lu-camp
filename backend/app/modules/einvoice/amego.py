@@ -155,6 +155,7 @@ def build_g0401_data(
     invoice: Invoice,
     net: Decimal,
     tax: Decimal,
+    description: str = "銷貨退回折讓",
 ) -> list[dict[str, object]]:
     """g0401（開立折讓）payload：陣列（每元素一張折讓）。
 
@@ -175,7 +176,7 @@ def build_g0401_data(
                 {
                     "OriginalInvoiceNumber": invoice.invoice_no,
                     "OriginalInvoiceDate": int(invoice.invoice_date.strftime("%Y%m%d")),
-                    "OriginalDescription": "銷貨退回折讓",
+                    "OriginalDescription": description,
                     "Quantity": 1,
                     "UnitPrice": _decimal_str(net),
                     "Amount": _decimal_str(net),
@@ -198,6 +199,14 @@ AMEGO_PRINT_TYPE_REPRINT = 2
 # 熱感應機編碼：1＝BIG5、2＝GBK、3＝UTF-8。**一定要明示**——不帶此參數時平台
 # 會套自己的預設（實測為 GBK），而台灣機以 BIG5 解碼，整張紙就是亂碼。
 AMEGO_PRINTER_LANG_BIG5 = 1
+
+
+def build_g0501_data(allowance_number: str) -> list[dict[str, str]]:
+    """g0501（作廢折讓）payload：陣列（docs/24 §1：`[{"CancelAllowanceNumber": ...}]`）。
+
+    單號是送 g0401 時用的自編折讓單號（`InvoiceAllowance.platform_number`）。
+    """
+    return [{"CancelAllowanceNumber": allowance_number}]
 
 
 def build_invoice_print_data(
@@ -677,6 +686,59 @@ def parse_query_allowance_exists(
     raise AmegoTransportError(
         f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
     )
+
+
+def parse_query_allowance_voided(
+    resp: dict[str, object],
+    *,
+    expect_original_invoice_no: str,
+    expect_net: Decimal,
+    expect_tax: Decimal,
+    count_waiting: bool = True,
+) -> bool:
+    """allowance_query → 平台上的這張折讓是否**已作廢**（G0501 對帳，ADR-029）。
+
+    True＝已作廢（D0501/B0501），或作廢已受理、尚在處理（wait 掛著 D0501/B0501）→ 補記成功、
+    不重送；False＝仍是有效折讓（D0401/B0401、沒有待作廢）→ 可送 G0501。
+    `count_waiting=False`：只認**平台已處理完**的作廢（送 F0501 前用——光貿測試環境實測
+    2026-10-08：作廢還掛在 wait 時送 F0501 會被拒「3050141 已存在折讓單」）。
+    查無（code=71）或任何曖昧回應 → AmegoTransportError：要作廢的折讓在平台上找不到，
+    不能憑空當成功或硬送，轉人工對帳。
+    """
+    code = resp.get("code")
+    if type(code) is not int:
+        raise AmegoTransportError("allowance_query 回應 code 型別不明（結果不可信，待對帳）")
+    if code != 0:
+        raise AmegoTransportError(
+            f"allowance_query 回錯誤碼 {code}（要作廢的折讓查不到或查詢失敗；待對帳）"
+        )
+    data = resp.get("data")
+    if not isinstance(data, dict):
+        raise AmegoTransportError("allowance_query 缺 data（結果不可信，待對帳）")
+    invoice_type = str(data.get("invoice_type") or "")
+    if invoice_type not in _ALLOWANCE_TYPE_ISSUED | _ALLOWANCE_TYPE_VOIDED:
+        raise AmegoTransportError(
+            f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
+        )
+    _assert_same_record(
+        _platform_amount(data, "total_amount", ctx="allowance_query"),
+        expect_net,
+        ctx="allowance_query",
+        label="未稅金額",
+    )
+    _assert_same_record(
+        _platform_amount(data, "tax_amount", ctx="allowance_query"),
+        expect_tax,
+        ctx="allowance_query",
+        label="稅額",
+    )
+    _assert_allowance_original_invoice(data, expect_original_invoice_no)
+    if invoice_type in _ALLOWANCE_TYPE_VOIDED:
+        return True
+    if not count_waiting:
+        return False
+    pending = {str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx="allowance_query")}
+    return bool(pending & _ALLOWANCE_TYPE_VOIDED)
 
 
 class AmegoTransport(Protocol):

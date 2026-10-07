@@ -948,6 +948,19 @@ class ReturnsService:
         # 平台 ProcessResult 成功後才由 einvoice 回呼轉正式 ALLOWANCE**（避免 G0401 上傳失敗卻已顯示
         # 已折讓）。折讓金額＝本次退款額；同退貨 return_id 唯一、累計不超過原發票（einvoice 守衛）。
         invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
+        allowance_total = (
+            await self._allowance_total(
+                store_id,
+                invoice.id,
+                refund_amount,
+                credit_refund=sum(
+                    (a for kind, a in refund_allocations if kind == TenderType.STORE_CREDIT),
+                    Decimal(0),
+                ),
+            )
+            if invoice is not None
+            else refund_amount
+        )
         if (
             invoice is not None
             and invoice.status == InvoiceStatus.ISSUED
@@ -974,13 +987,14 @@ class ReturnsService:
             and invoice_decision.action is ReturnInvoiceAction.ALLOWANCE
             # 退款 0（僅退回贈品）沒有金額可折讓：折讓單的 total 必須 > 0，
             # 硬走下去會在同意流程都跑完後才 flush 失敗並整筆回滾。
-            and refund_amount > 0
+            # 只退購物金、而結帳時購物金已折讓過（ADR-029）也一樣沒有金額可折讓。
+            and allowance_total > 0
         ):
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
                 invoice_id=invoice.id,
-                total=refund_amount,
+                total=allowance_total,
                 return_id=customer_return.id,
             )
             sale.invoice_status = SaleInvoiceStatus.PENDING_ALLOWANCE
@@ -1074,13 +1088,26 @@ class ReturnsService:
             existing = await self._einvoice.get_allowance_for_return(store_id, customer_return.id)
             if existing is not None:
                 continue
-            if customer_return.refund_amount == 0:
-                continue  # 零元退貨（僅退贈品）沒有折讓可開；折讓單的 total 必須 > 0
+            total = await self._allowance_total(
+                store_id,
+                invoice.id,
+                customer_return.refund_amount,
+                credit_refund=sum(
+                    (
+                        t.amount
+                        for t in customer_return.refund_tenders
+                        if t.tender_type == TenderType.STORE_CREDIT
+                    ),
+                    Decimal(0),
+                ),
+            )
+            if total <= 0:
+                continue  # 零元退貨（僅退贈品／只退已折讓的購物金）沒有折讓可開；total 必須 > 0
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
                 invoice_id=invoice.id,
-                total=customer_return.refund_amount,
+                total=total,
                 return_id=customer_return.id,
             )
             created = True
@@ -1089,6 +1116,15 @@ class ReturnsService:
             if sale is not None and sale.invoice_status == SaleInvoiceStatus.ISSUED:
                 sale.invoice_status = SaleInvoiceStatus.PENDING_ALLOWANCE
                 await self._session.flush()
+
+    async def _allowance_total(
+        self, store_id: int, invoice_id: int, refund_amount: Decimal, *, credit_refund: Decimal
+    ) -> Decimal:
+        """退貨折讓金額。發票已有購物金折讓（ADR-029）→ 購物金那部分結帳時已折讓過，
+        只折讓本次退款中非購物金的部分；否則照舊＝退款總額。"""
+        if await self._einvoice.active_store_credit_allowance(store_id, invoice_id) is None:
+            return refund_amount
+        return refund_amount - credit_refund
 
     @staticmethod
     def _normalize_lines(lines: Sequence[ReturnLineInput]) -> dict[int, int]:

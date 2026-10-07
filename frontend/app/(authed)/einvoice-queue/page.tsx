@@ -19,6 +19,7 @@ const ACTION_LABELS: Record<QueueItem["action"], string> = {
   ISSUE: "開立",
   VOID: "作廢",
   ALLOWANCE: "折讓",
+  ALLOWANCE_VOID: "作廢折讓",
 };
 
 const STATUS_LABELS: Record<UploadStatus, string> = {

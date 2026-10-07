@@ -26,6 +26,7 @@ from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
     EInvoiceMessageType,
+    InvoiceAllowanceSource,
     InvoiceStatus,
     UploadStatus,
 )
@@ -250,6 +251,7 @@ class EInvoiceRepository:
         stmt = select(func.coalesce(func.sum(InvoiceAllowance.total), 0)).where(
             InvoiceAllowance.store_id == store_id,
             InvoiceAllowance.invoice_id == invoice_id,
+            InvoiceAllowance.voided.is_(False),
         )
         value = await self._session.scalar(stmt)
         return Decimal(value if value is not None else 0)
@@ -259,7 +261,7 @@ class EInvoiceRepository:
         store_id: int,
         invoice_id: int,
     ) -> tuple[Decimal, Decimal, Decimal]:
-        """Return cumulative net, tax and total for one invoice's allowances."""
+        """某發票**有效**折讓的累計未稅、稅額、總額（已作廢的不算）。"""
         row = (
             await self._session.execute(
                 select(
@@ -269,10 +271,51 @@ class EInvoiceRepository:
                 ).where(
                     InvoiceAllowance.store_id == store_id,
                     InvoiceAllowance.invoice_id == invoice_id,
+                    InvoiceAllowance.voided.is_(False),
                 )
             )
         ).one()
         return Decimal(row[0]), Decimal(row[1]), Decimal(row[2])
+
+    async def find_store_credit_allowance(
+        self, store_id: int, invoice_id: int, *, for_update: bool = False
+    ) -> InvoiceAllowance | None:
+        """某發票的購物金折讓（一張發票至多一張，ADR-029）；無則 None。"""
+        stmt = select(InvoiceAllowance).where(
+            InvoiceAllowance.store_id == store_id,
+            InvoiceAllowance.invoice_id == invoice_id,
+            InvoiceAllowance.source == InvoiceAllowanceSource.STORE_CREDIT,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: InvoiceAllowance | None = await self._session.scalar(stmt)
+        return result
+
+    async def lock_queue_items_for_allowance(
+        self, store_id: int, allowance_id: int
+    ) -> list[EInvoiceUploadQueue]:
+        """某張折讓的所有佇列列（FOR UPDATE、刷新到已提交狀態；照建立先後）。"""
+        stmt = (
+            select(EInvoiceUploadQueue)
+            .where(
+                EInvoiceUploadQueue.store_id == store_id,
+                EInvoiceUploadQueue.allowance_id == allowance_id,
+            )
+            .order_by(EInvoiceUploadQueue.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def has_uploaded_allowance_void(self, store_id: int, allowance_id: int) -> bool:
+        """這張折讓是否有平台已受理的作廢（G0501 UPLOADED）——即它曾在平台成立、又被作廢。"""
+        stmt = select(EInvoiceUploadQueue.id).where(
+            EInvoiceUploadQueue.store_id == store_id,
+            EInvoiceUploadQueue.allowance_id == allowance_id,
+            EInvoiceUploadQueue.action == EInvoiceAction.ALLOWANCE_VOID,
+            EInvoiceUploadQueue.status == UploadStatus.UPLOADED,
+        )
+        return (await self._session.scalar(stmt.limit(1))) is not None
 
     async def find_allowance_by_return(
         self, store_id: int, return_id: int
@@ -288,17 +331,22 @@ class EInvoiceRepository:
     async def list_allowance_queue_items_for_invoice(
         self, store_id: int, invoice_id: int
     ) -> list[EInvoiceUploadQueue]:
-        """某發票**所有折讓**的佇列列。
+        """某發票**有效退貨折讓**的開立（G0401）佇列列（退貨決定折讓或作廢用）。
 
         折讓佇列列以 `allowance_id` 關聯（`invoice_id` 為空），故不能用
         `list_queue_items_for_invoice` 取得——必須經 invoice_allowances 轉一手。
+        已作廢的折讓與作廢折讓（G0501）列不算：它們不代表「這張發票還有折讓」（ADR-029）。
+        購物金折讓也不算：同月整筆退照樣作廢（ADR-014），作廢時先作廢它（ADR-029）。
         """
         stmt = (
             select(EInvoiceUploadQueue)
             .join(InvoiceAllowance, InvoiceAllowance.id == EInvoiceUploadQueue.allowance_id)
             .where(
                 EInvoiceUploadQueue.store_id == store_id,
+                EInvoiceUploadQueue.action == EInvoiceAction.ALLOWANCE,
                 InvoiceAllowance.invoice_id == invoice_id,
+                InvoiceAllowance.source == InvoiceAllowanceSource.RETURN,
+                InvoiceAllowance.voided.is_(False),
             )
         )
         return list((await self._session.scalars(stmt)).all())
@@ -358,7 +406,11 @@ class EInvoiceRepository:
                 EInvoiceUploadQueue.store_id == store_id,
                 EInvoiceUploadQueue.status.notin_([UploadStatus.UPLOADED, UploadStatus.CANCELLED]),
                 EInvoiceUploadQueue.id != exclude_queue_id,
+                EInvoiceUploadQueue.action == EInvoiceAction.ALLOWANCE,
                 InvoiceAllowance.invoice_id == invoice_id,
+                # 銷售的「已折讓」狀態只看退貨折讓；購物金折讓是結帳的稅務處理（ADR-029）。
+                InvoiceAllowance.source == InvoiceAllowanceSource.RETURN,
+                InvoiceAllowance.voided.is_(False),
             )
         )
         value = await self._session.scalar(stmt)

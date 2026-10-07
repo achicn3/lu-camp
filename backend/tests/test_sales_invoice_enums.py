@@ -75,4 +75,4 @@ def test_upload_status_values() -> None:
 
 
 def test_einvoice_action_values() -> None:
-    assert {s.value for s in EInvoiceAction} == {"ISSUE", "VOID", "ALLOWANCE"}
+    assert {s.value for s in EInvoiceAction} == {"ISSUE", "VOID", "ALLOWANCE", "ALLOWANCE_VOID"}

@@ -35,12 +35,14 @@ from app.modules.einvoice.amego import (
     build_f0401_data,
     build_f0501_data,
     build_g0401_data,
+    build_g0501_data,
     build_invoice_print_data,
     build_invoice_query_by_number_data,
     build_invoice_query_data,
     parse_f0401_success,
     parse_invoice_print,
     parse_query_allowance_exists,
+    parse_query_allowance_voided,
     parse_query_invoice_voided,
     parse_query_issued,
 )
@@ -62,6 +64,7 @@ from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
     EInvoiceMessageType,
+    InvoiceAllowanceSource,
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
@@ -93,6 +96,12 @@ RESULT_KIND_SUMMARY = "SUMMARY"
 
 # 發票開立日以台灣時區呈現（Amego invoice_time 為 Unix 秒；折讓日亦同）。
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+# 折讓單上的品名（OriginalDescription）：退貨與購物金折讓分開寫，申報時看得出是哪一種。
+_ALLOWANCE_DESCRIPTION = {
+    InvoiceAllowanceSource.RETURN: "銷貨退回折讓",
+    InvoiceAllowanceSource.STORE_CREDIT: "購物金折抵折讓",
+}
 
 
 def _may_have_reached_platform(item: EInvoiceUploadQueue) -> bool:
@@ -399,6 +408,137 @@ class EInvoiceService:
         )
         return invoice
 
+    async def _enqueue_g0501(self, store_id: int, allowance: InvoiceAllowance) -> None:
+        """排入 G0501（作廢折讓）上傳佇列；同一張折讓已有待送的就不重排（ADR-029）。"""
+        for item in await self._repo.lock_queue_items_for_allowance(store_id, allowance.id):
+            if item.action is EInvoiceAction.ALLOWANCE_VOID and item.status in (
+                UploadStatus.PENDING,
+                UploadStatus.UPLOADED,
+            ):
+                return
+        await self._repo.add_queue_item(
+            EInvoiceUploadQueue(
+                store_id=store_id,
+                action=EInvoiceAction.ALLOWANCE_VOID,
+                message_type=EInvoiceMessageType.G0501,
+                allowance_id=allowance.id,
+                status=UploadStatus.PENDING,
+            )
+        )
+
+    async def _continue_invoice_void(self, store_id: int, invoice_id: int) -> None:
+        """購物金折讓已作廢（或從未成立）→ 正在等它的發票作廢續送 F0501（ADR-029）。"""
+        invoice = await self._repo.get_invoice(store_id, invoice_id)
+        if invoice is None or invoice.status is not InvoiceStatus.VOID_PENDING:
+            return
+        if any(
+            item.action is EInvoiceAction.VOID
+            and item.status in (UploadStatus.PENDING, UploadStatus.UPLOADED)
+            for item in await self._repo.list_queue_items_for_invoice(store_id, invoice.id)
+        ):
+            return
+        await self._enqueue_f0501(store_id, invoice.id)
+
+    async def ensure_store_credit_allowance(
+        self, store_id: int, invoice_id: int
+    ) -> InvoiceAllowance | None:
+        """混合付款：發票平台確認開立後，對購物金付款金額開一張折讓（ADR-029）。
+
+        一張發票至多一張（已有就回那張）。全額購物金本來就不開發票；沒用購物金、手開紙本、
+        發票非已開立 → 不開（None）。交易的發票狀態不動——這是結帳的稅務處理，不是退貨。
+        """
+        existing = await self._repo.find_store_credit_allowance(store_id, invoice_id)
+        if existing is not None:
+            return existing
+        invoice = await self._repo.get_invoice(store_id, invoice_id)
+        if (
+            invoice is None
+            or invoice.status is not InvoiceStatus.ISSUED
+            or invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+        ):
+            return None
+        from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+        credit = await SalesService(self._session).store_credit_paid(store_id, invoice.sale_id)
+        if credit <= 0:
+            return None
+        return await self.record_allowance(
+            store_id,
+            invoice_id=invoice.id,
+            total=credit,
+            source=InvoiceAllowanceSource.STORE_CREDIT,
+        )
+
+    async def _await_store_credit_allowance_void(
+        self, store_id: int, client: AmegoClient, invoice: Invoice
+    ) -> None:
+        """F0501 送出前：這張發票的購物金折讓若曾在平台成立、已送作廢（G0501），要等平台
+        **處理完**才能作廢發票（ADR-029）。
+
+        光貿測試環境實測（2026-10-08）：G0501 受理後作廢先掛在 `wait[]`，此時送 F0501 會被拒
+        「3050141 已存在折讓單」。還沒處理完 → AmegoTransportError：佇列列維持待送出、寫明原因，
+        背景自動送出隔一段時間再試，不會被標成平台退回。
+        """
+        allowance = await self._repo.find_store_credit_allowance(store_id, invoice.id)
+        if allowance is None or not allowance.voided:
+            return
+        if not await self._repo.has_uploaded_allowance_void(store_id, allowance.id):
+            return  # 平台上從沒成立過（送出前就取消／被退回），沒有東西要等
+        if not invoice.invoice_no:
+            raise EInvoiceDropError("原發票缺字軌，無法確認購物金折讓的作廢（需人工對帳）")
+        resp = await client.call(
+            "/json/allowance_query",
+            build_allowance_query_data(number=allowance.platform_number),
+        )
+        if not parse_query_allowance_voided(
+            resp,
+            expect_original_invoice_no=invoice.invoice_no,
+            expect_net=Decimal(allowance.net),
+            expect_tax=Decimal(allowance.tax),
+            count_waiting=False,
+        ):
+            raise AmegoTransportError(
+                "購物金折讓的作廢平台還在處理，發票作廢稍後會自動重送（不用處理）"
+            )
+
+    async def active_store_credit_allowance(
+        self, store_id: int, invoice_id: int
+    ) -> InvoiceAllowance | None:
+        """某發票**有效**的購物金折讓（未作廢）；退貨據此只折讓非購物金的部分（ADR-029）。"""
+        allowance = await self._repo.find_store_credit_allowance(store_id, invoice_id)
+        return allowance if allowance is not None and not allowance.voided else None
+
+    async def _void_store_credit_allowance_first(self, store_id: int, invoice: Invoice) -> bool:
+        """整筆作廢：先處理這張發票的購物金折讓（ADR-029）。回傳 True＝要等折讓作廢，先別送 F0501。
+
+        - 沒有、或已作廢 → False。
+        - G0401 還沒送（未認領）或被平台退回 → 視為從未成立：取消那筆、標已作廢 → False。
+        - 平台已受理 → 排 G0501，等它成功再送 F0501 → True。
+        - 送出中、結果未回 → 記下要作廢，等 G0401 結果（成功續送 G0501、失敗視為從未成立）→ True。
+        """
+        allowance = await self._repo.find_store_credit_allowance(
+            store_id, invoice.id, for_update=True
+        )
+        if allowance is None or allowance.voided:
+            return False
+        items = [
+            item
+            for item in await self._repo.lock_queue_items_for_allowance(store_id, allowance.id)
+            if item.action is EInvoiceAction.ALLOWANCE
+        ]
+        if any(item.status is UploadStatus.UPLOADED for item in items):
+            await self._enqueue_g0501(store_id, allowance)
+            return True
+        if any(item.status is UploadStatus.PENDING and item.xml_path is not None for item in items):
+            allowance.void_requested_at = datetime.now(UTC)
+            return True
+        for item in items:
+            if item.status in (UploadStatus.PENDING, UploadStatus.FAILED):
+                item.status = UploadStatus.CANCELLED
+                item.last_error = "交易整筆作廢：購物金折讓尚未在平台成立，取消送出"
+        allowance.voided = True
+        return False
+
     async def _enqueue_f0501(self, store_id: int, invoice_id: int) -> None:
         """排入 F0501（作廢）上傳佇列（作廢已核可發票；裁示：作廢走 F0501）。"""
         await self._repo.add_queue_item(
@@ -539,9 +679,12 @@ class EInvoiceService:
         # **與狀態同時設定**：ck_invoices_void_reason_matches_status 要求兩者一致，中途若被
         # autoflush 寫出（下方查詢會觸發）就會違反約束。
         if invoice.status is InvoiceStatus.ISSUED:
+            # 購物金折讓要先作廢（ADR-029）：平台上還有它的話，F0501 等 G0501 成功才送。
+            wait_for_allowance = await self._void_store_credit_allowance_first(store_id, invoice)
             invoice.status = InvoiceStatus.VOID_PENDING
             invoice.void_reason = reason
-            await self._enqueue_f0501(store_id, invoice.id)
+            if not wait_for_allowance:
+                await self._enqueue_f0501(store_id, invoice.id)
         else:  # PENDING（尚未平台核可）
             # FOR UPDATE：與交付協議同鎖（Codex 第五輪）——避免讀到過期未認領列、
             # 在另一 worker 曝光檔案後才取消（交付持列鎖期間，本查詢會等待其 commit）。
@@ -617,8 +760,12 @@ class EInvoiceService:
         invoice_id: int,
         total: Decimal,
         return_id: int | None = None,
+        source: InvoiceAllowanceSource = InvoiceAllowanceSource.RETURN,
     ) -> InvoiceAllowance:
         """開立折讓單並排入 G0401 上傳佇列（退貨且原發票已開立，§7 不變量 5）。
+
+        `source=STORE_CREDIT`：混合付款的購物金部分（ADR-029；
+        由 ensure_store_credit_allowance 呼叫）。
 
         守衛（F6）：原發票必須已開立（ISSUED，否則 InvoiceNotIssued）；同一退貨至多一張折讓
         （return_id 唯一，否則 DuplicateAllowanceForReturn）；累計折讓不得超過原發票總額
@@ -678,6 +825,7 @@ class EInvoiceService:
             store_id=store_id,
             invoice_id=invoice_id,
             return_id=return_id,
+            source=source,
             net=Decimal(net),
             tax=Decimal(tax),
             total=Decimal(net + tax),
@@ -821,6 +969,7 @@ class EInvoiceService:
         EInvoiceMessageType.F0401: "/json/f0401",
         EInvoiceMessageType.F0501: "/json/f0501",
         EInvoiceMessageType.G0401: "/json/g0401",
+        EInvoiceMessageType.G0501: "/json/g0501",
     }
 
     async def send_via_amego(
@@ -1035,6 +1184,7 @@ class EInvoiceService:
                             delivery_attempt=claim_attempts,
                             issue_result=None,
                         )
+                    await self._await_store_credit_allowance_void(store_id, client, void_target)
             elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
                 sending = await self._session.get(InvoiceAllowance, locked.allowance_id)
                 if sending is None or sending.store_id != store_id:
@@ -1060,6 +1210,36 @@ class EInvoiceService:
                         success=True,
                         status_code="0",
                         message="以 allowance_query 對帳確認平台已有折讓（前次結果未知）",
+                        delivery_attempt=claim_attempts,
+                        issue_result=None,
+                    )
+
+            elif locked.action is EInvoiceAction.ALLOWANCE_VOID and locked.allowance_id is not None:
+                cancelling = await self._session.get(InvoiceAllowance, locked.allowance_id)
+                if cancelling is None or cancelling.store_id != store_id:
+                    raise EInvoiceDropError(f"佇列 {queue_id} 的作廢折讓目標不存在（需人工對帳）")
+                original = await self._repo.get_invoice(store_id, cancelling.invoice_id)
+                if original is None or not original.invoice_no:
+                    raise EInvoiceDropError(f"佇列 {queue_id} 的原發票缺字軌（需人工對帳）")
+                _assert_payload_targets(
+                    payload, "CancelAllowanceNumber", cancelling.platform_number, ctx="g0501"
+                )
+                query_resp = await client.call(
+                    "/json/allowance_query",
+                    build_allowance_query_data(number=cancelling.platform_number),
+                )
+                if parse_query_allowance_voided(
+                    query_resp,
+                    expect_original_invoice_no=original.invoice_no,
+                    expect_net=Decimal(cancelling.net),
+                    expect_tax=Decimal(cancelling.tax),
+                ):
+                    return await self._record_amego_outcome(
+                        store_id,
+                        queue_id,
+                        success=True,
+                        status_code="0",
+                        message="以 allowance_query 對帳確認平台已作廢折讓（前次結果未知）",
                         delivery_attempt=claim_attempts,
                         issue_result=None,
                     )
@@ -1434,7 +1614,17 @@ class EInvoiceService:
                 invoice=invoice,
                 net=Decimal(allowance.net),
                 tax=Decimal(allowance.tax),
+                description=_ALLOWANCE_DESCRIPTION[allowance.source],
             )
+        if item.message_type is EInvoiceMessageType.G0501:
+            if item.allowance_id is None:
+                raise EInvoiceQueueNotDroppable("G0501 佇列列缺折讓目標")
+            target = await self._session.get(InvoiceAllowance, item.allowance_id)
+            if target is None or target.store_id != store_id:
+                raise EInvoiceQueueItemNotFound(f"折讓不存在或不屬於本店：id={item.allowance_id}")
+            if target.voided:
+                raise EInvoiceQueueNotDroppable(f"折讓 {target.id} 已作廢，不用再送作廢")
+            return build_g0501_data(target.platform_number)
         invoice = await self._repo.get_invoice(store_id, item.invoice_id or 0)
         if invoice is None:
             raise InvoiceNotFound(f"發票不存在或不屬於本店：id={item.invoice_id}")
@@ -1649,7 +1839,21 @@ class EInvoiceService:
 
     async def _apply_success_transition(self, store_id: int, item: EInvoiceUploadQueue) -> None:
         """ProcessResult 成功時依佇列動作轉對應狀態（ISSUE / VOID / ALLOWANCE）。"""
+        if item.action is EInvoiceAction.ALLOWANCE_VOID:
+            # G0501（作廢折讓）核可 → 折讓作廢；等它的發票作廢續送 F0501（ADR-029）。
+            voided = await self._session.get(InvoiceAllowance, item.allowance_id or 0)
+            if voided is not None and voided.store_id == store_id:
+                voided.voided = True
+                await self._continue_invoice_void(store_id, voided.invoice_id)
+            return
         if item.action is EInvoiceAction.ALLOWANCE:
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id or 0)
+            if allowance is not None and allowance.void_requested_at is not None:
+                # 送出中被要求作廢（整筆作廢時結果未回）：平台確實成立了 → 續送 G0501。
+                await self._enqueue_g0501(store_id, allowance)
+                return
+            if allowance is not None and allowance.source is InvoiceAllowanceSource.STORE_CREDIT:
+                return  # 購物金折讓是結帳的稅務處理，交易的發票狀態不動（ADR-029）
             # G0401（折讓）核可 → 銷售 PENDING_ALLOWANCE→ALLOWANCE（比照 ISSUE/VOID 等平台成功）。
             await self._mark_sale_allowance(store_id, item)
             return
@@ -1666,6 +1870,9 @@ class EInvoiceService:
                 invoice.status = InvoiceStatus.ISSUED
                 # H2：同步對應銷售 PENDING_ISSUE→ISSUED。
                 await SalesService(self._session).mark_invoice_issued(store_id, invoice.sale_id)
+                # 混合付款的購物金部分開折讓（ADR-029）。**先於**補開退貨折讓：退貨折讓要
+                # 扣掉購物金退款，必須看得到這張購物金折讓。
+                await self.ensure_store_credit_allowance(store_id, invoice.id)
                 # 核可前已有（部分）退貨的補開折讓：發票此刻才成立，先前退貨因「非 ISSUED」
                 # 未能開折讓 → 於此回補 G0401（returns↔einvoice 互呼，函式內 import 破循環）。
                 from app.modules.returns.service import ReturnsService
@@ -1690,7 +1897,16 @@ class EInvoiceService:
                 await sales.mark_invoice_not_issued(store_id, invoice.sale_id)
 
     async def _apply_failure_transition(self, store_id: int, item: EInvoiceUploadQueue) -> None:
-        """ProcessResult 失敗時的狀態收斂：作廢請求中的 F0401 失敗 → 平台未開立 → 正式 VOID。"""
+        """ProcessResult 失敗時的狀態收斂：作廢請求中的 F0401 失敗 → 平台未開立 → 正式 VOID。
+
+        整筆作廢等著的購物金折讓 G0401 被退回 → 平台從未成立：視為已作廢、續送 F0501（ADR-029）。
+        """
+        if item.action is EInvoiceAction.ALLOWANCE:
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id or 0)
+            if allowance is not None and allowance.void_requested_at is not None:
+                allowance.voided = True
+                await self._continue_invoice_void(store_id, allowance.invoice_id)
+            return
         if item.action is not EInvoiceAction.ISSUE or item.invoice_id is None:
             return
         invoice = await self._repo.get_invoice(store_id, item.invoice_id)

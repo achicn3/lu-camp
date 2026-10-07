@@ -502,10 +502,11 @@ def _mixed_linepay_client(transport: LinePayTransport) -> LinePayClient:
     )
 
 
-async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
+async def test_mixed_refund_allowance_excludes_store_credit_already_allowanced(
     db_session: AsyncSession,
 ) -> None:
-    """SC 300＋LINE 700 分兩次退 200：第二次 LINE 只退 100，但光貿 G0401 仍折讓商品 200。"""
+    """SC 300＋LINE 700 分兩次退 200（ADR-029）：開票時購物金 300 已折讓過，
+    第一次全退購物金 → 不再折讓；第二次購物金 100＋LINE 100 → 只折讓 LINE 那 100。"""
     store_id, clerk_id, _code = await _seed(db_session)
     await db_session.execute(
         update(StoreSettings).where(StoreSettings.store_id == store_id).values(linepay_enabled=True)
@@ -613,7 +614,7 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         for item in await einvoice.list_queue(store_id)
         if item.action is EInvoiceAction.ALLOWANCE and item.status is UploadStatus.PENDING
     ]
-    assert len(allowance_items) == 2
+    assert len(allowance_items) == 2  # 購物金折讓（開票時）＋第二次退貨的折讓
     payloads: list[dict[str, object]] = []
     for item in allowance_items:
         transport = _ScriptedTransport(dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 0, "msg": ""})
@@ -623,7 +624,7 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         payloads.append(json.loads(transport.calls[1][1]["data"])[0])
 
     assert payloads[0]["AllowanceNumber"] != payloads[1]["AllowanceNumber"]
-    observed_splits: list[tuple[str, int]] = []
+    observed: list[tuple[str, str, int]] = []
     for payload in payloads:
         allowance_no = cast("str", payload["AllowanceNumber"])
         assert 0 < len(allowance_no) <= 16
@@ -635,7 +636,6 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         product_item = cast("list[dict[str, object]]", payload["ProductItem"])[0]
         assert product_item["OriginalInvoiceNumber"] == "AB00001111"
         assert product_item["OriginalInvoiceDate"] == 20260711
-        assert product_item["OriginalDescription"] == "銷貨退回折讓"
         assert product_item["Quantity"] == 1
         unit_price = cast("str", product_item["UnitPrice"])
         amount = cast("str", product_item["Amount"])
@@ -644,9 +644,8 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         assert product_item["TaxType"] == 1
         assert payload["TotalAmount"] == int(unit_price)
         assert payload["TaxAmount"] == item_tax
-        assert int(payload["TotalAmount"]) + int(payload["TaxAmount"]) == 200
-        observed_splits.append((unit_price, item_tax))
-    assert sorted(observed_splits) == [("190", 10), ("191", 9)]
+        observed.append((cast("str", product_item["OriginalDescription"]), unit_price, item_tax))
+    assert sorted(observed) == [("購物金折抵折讓", "286", 14), ("銷貨退回折讓", "95", 5)]
 
 
 async def test_ambiguous_response_treated_as_unknown_not_failed(

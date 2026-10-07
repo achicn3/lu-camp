@@ -44,6 +44,7 @@ from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
     EInvoiceMessageType,
+    InvoiceAllowanceSource,
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
@@ -195,6 +196,10 @@ class InvoiceAllowance(Base, TimestampMixin):
 
     走 G0401（開立折讓）/G0501（作廢折讓）。`return_id` 連結退貨單（Phase 4B backend
     已存在）；為避免與 returns 模組緊耦合，此處不設 DB FK，僅存參照。
+
+    `source=STORE_CREDIT`：混合付款的購物金部分，平台確認開立後自動開立，一張發票至多一張
+    （ADR-029）。`void_requested_at`：整筆作廢時要求作廢這張折讓、G0401 結果還沒回來——
+    等 G0401 收斂再決定送 G0501 或視為從未成立。`voided`＝已作廢（或從未在平台成立）。
     """
 
     __tablename__ = "invoice_allowances"
@@ -228,11 +233,29 @@ class InvoiceAllowance(Base, TimestampMixin):
         UniqueConstraint(
             "store_id", "platform_number", name="uq_invoice_allowances_store_platform_number"
         ),
+        # 一張發票至多一張購物金折讓（ADR-029）：重送、重複回執都不會開第二張。
+        Index(
+            "uq_invoice_allowances_store_credit",
+            "store_id",
+            "invoice_id",
+            unique=True,
+            postgresql_where=text("source = 'STORE_CREDIT'"),
+        ),
+        # 購物金折讓不屬於任何退貨單。
+        CheckConstraint(
+            "source <> 'STORE_CREDIT' OR return_id IS NULL",
+            name="ck_invoice_allowances_store_credit_no_return",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     invoice_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
+    source: Mapped[InvoiceAllowanceSource] = mapped_column(
+        _enum_col(InvoiceAllowanceSource),
+        default=InvoiceAllowanceSource.RETURN,
+        server_default=InvoiceAllowanceSource.RETURN.value,
+    )
     return_id: Mapped[int | None] = mapped_column()  # 退貨單參照（無 FK，避免跨模組耦合）
     allowance_no: Mapped[str | None] = mapped_column(String(16))  # 折讓證明單號；配號 deferred
     # 送 Amego 的折讓單號：建立時隨機產生並持久化（platform_ids）；核可後寫回 allowance_no。
@@ -243,6 +266,7 @@ class InvoiceAllowance(Base, TimestampMixin):
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     voided: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    void_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EInvoiceUploadQueue(Base, TimestampMixin):

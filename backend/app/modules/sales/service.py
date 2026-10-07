@@ -2238,6 +2238,18 @@ class SalesService:
     async def get_tenders(self, sale_id: int) -> list[SaleTender]:
         return await self._repo.list_tenders(sale_id)
 
+    async def store_credit_paid(self, store_id: int, sale_id: int) -> Decimal:
+        """這筆銷售以購物金付了多少（結帳的購物金折讓金額，ADR-029）；沒用購物金為 0。"""
+        tenders = await self._repo.list_tenders(sale_id)
+        return sum(
+            (
+                Decimal(t.amount)
+                for t in tenders
+                if t.store_id == store_id and t.tender_type == TenderType.STORE_CREDIT
+            ),
+            Decimal(0),
+        )
+
     async def list_sales_by_ids(self, store_id: int, sale_ids: list[int]) -> list[Sale]:
         """依 id 取銷售（保持新到舊）。供發票救援清單以發票狀態選單、再取回銷售摘要。"""
         if not sale_ids:

@@ -34,10 +34,18 @@ from app.shared.enums import EInvoiceAction, EInvoiceMessageType, UploadStatus
 
 logger = logging.getLogger(__name__)
 
-AUTO_SEND_ACTIONS = (EInvoiceAction.VOID, EInvoiceAction.ALLOWANCE)
+AUTO_SEND_ACTIONS = (
+    EInvoiceAction.VOID,
+    EInvoiceAction.ALLOWANCE,
+    EInvoiceAction.ALLOWANCE_VOID,
+)
 """可自動送出的動作。**不含 ISSUE**，理由見模組 docstring；改動請連同測試一起看。"""
 
-AUTO_SEND_MESSAGE_TYPES = (EInvoiceMessageType.F0501, EInvoiceMessageType.G0401)
+AUTO_SEND_MESSAGE_TYPES = (
+    EInvoiceMessageType.F0501,
+    EInvoiceMessageType.G0401,
+    EInvoiceMessageType.G0501,
+)
 """可自動送出的訊息型別——**這才是決定打哪支平台端點的欄位**（`send_via_amego` 依它查
 `_AMEGO_ENDPOINTS`）。`action` 只是我們自己的分類，兩欄之間沒有 DB 約束保證配對；
 安全界線必須釘在會生效的那一欄上，否則一列 `action=VOID, message_type=F0401`

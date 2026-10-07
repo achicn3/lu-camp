@@ -6692,9 +6692,11 @@ export interface components {
         /**
          * EInvoiceAction
          * @description 電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。
+         *
+         *     ALLOWANCE_VOID＝作廢折讓（G0501）：混合付款的購物金折讓在整筆作廢時要先作廢（ADR-029）。
          * @enum {string}
          */
-        EInvoiceAction: "ISSUE" | "VOID" | "ALLOWANCE";
+        EInvoiceAction: "ISSUE" | "VOID" | "ALLOWANCE" | "ALLOWANCE_VOID";
         /**
          * EInvoiceAttentionCountRead
          * @description 需要人處理的發票筆數（導覽列紅點用）。
