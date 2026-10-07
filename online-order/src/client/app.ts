@@ -1,9 +1,8 @@
 // 客人掃碼點餐頁（docs/44 §4.2）。菜單文字一律 textContent，不拼 HTML。
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
-import { greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, tableCodeFromPath, visibleItems } from "./logic";
+import { homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, tableCodeFromPath, visibleItems } from "./logic";
 import type { MenuItemView, MenuSnapshot, TableView } from "./types";
 
-const SPLASH_MS = 1200;
 const POLL_MS = 5000;
 const MENU_REFRESH_MS = 15000;
 const ALL = -1;
@@ -34,6 +33,11 @@ let cart: CartLine[] = [];
 let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
 let activeCategory = ALL;
+let menuHome = true;
+let detailTrigger: HTMLElement | null = null;
+let feedbackTimer: number | null = null;
+let restoringHistory = false;
+let renderedMenuKey = "";
 let activeDetail: number | null = null;
 let pollTimer: number | null = null;
 let widgetId: string | null = null;
@@ -97,12 +101,11 @@ function showMessage(text: string): void {
   const box = $("message"); box.textContent = text; box.hidden = false;
 }
 function clearMessage(): void { $("message").hidden = true; }
-function startSplash(): void {
-  $("splash").addEventListener("click", () => document.body.classList.add("entered"));
-  window.setTimeout(() => document.body.classList.add("entered"),
-    matchMedia("(prefers-reduced-motion: reduce)").matches ? 300 : SPLASH_MS);
-}
 function showScreen(screen: "menu" | "cart" | "order"): void {
+  if (screen === "cart" && $("cart-view").hidden && !restoringHistory && !history.state?.cart) {
+    history.pushState({ menuCategory: activeCategory, menuHome, cart: true }, "");
+  }
+  $("cart-feedback").textContent = "";
   $("menu-view").hidden = screen !== "menu";
   $("cart-view").hidden = screen !== "cart";
   $("order-view").hidden = screen !== "order";
@@ -116,12 +119,18 @@ function priceNode(item: MenuItemView): HTMLElement {
   return node;
 }
 function closeDetail(): void {
+  const itemId = activeDetail;
   activeDetail = null;
   $("sheet").hidden = true;
   document.body.classList.remove("sheet-open");
+  if (itemId === null) return;
+  const fallback = document.querySelector<HTMLElement>(`${menuHome ? "#recommended-list" : "#list"} .item[data-item-id="${itemId}"] .item-detail`)
+    ?? document.querySelector<HTMLElement>(menuHome ? "#shortcuts button" : "#back-home");
+  (detailTrigger?.isConnected ? detailTrigger : fallback)?.focus({ preventScroll: true });
 }
 function openDetail(item: MenuItemView): void {
   if (menu === null) return;
+  detailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   activeDetail = item.id;
   const body = $("sheet-body"); body.replaceChildren();
   if (item.photo) {
@@ -150,15 +159,13 @@ function openDetail(item: MenuItemView): void {
       input.disabled = !option.available || option.remaining === 0;
       label.append(input, el("span", "", option.name));
       if (option.price_delta > 0) label.append(el("span", "opt-extra", `+${money(option.price_delta)}`));
-      if (input.disabled) label.append(el("span", "opt-off", "售完"));
+      const off = el("span", "opt-off", "售完"); off.hidden = !input.disabled; label.append(off);
       field.append(label);
     }
     groups.append(field);
   }
   body.append(groups);
-  if (itemSoldOut(item)) {
-    body.append(el("p", "sheet-note", "今日售完，請選其他品項。"));
-  } else {
+  {
     const controls = el("div", "detail-controls");
     const qty = el("input", "qty-input"); qty.type = "number"; qty.min = "1"; qty.max = "10";
     qty.inputMode = "numeric"; qty.value = "1"; qty.setAttribute("aria-label", "數量");
@@ -171,9 +178,11 @@ function openDetail(item: MenuItemView): void {
         saveCart(); renderFooter(); closeDetail(); clearMessage();
       } catch (reason) { error.textContent = cartError(reason); }
     });
+    add.id = "detail-add"; add.disabled = itemSoldOut(item);
     controls.append(qty, add);
     body.append(controls, error);
   }
+  const availability = el("p", "field-error"); availability.id = "detail-availability"; availability.setAttribute("role", "status"); availability.textContent = itemSoldOut(item) ? "今日售完，請選其他品項。" : ""; body.append(availability);
   $("sheet").hidden = false; document.body.classList.add("sheet-open"); $("sheet-close").focus();
 }
 function cartError(reason: unknown): string {
@@ -183,13 +192,17 @@ function cartError(reason: unknown): string {
   if (code === "invalid_qty" || code === "too_many") return "每項最多 10 份、整張單最多 50 份及 20 項。";
   return "購物車已變動，請重新確認菜單。";
 }
-function itemRow(item: MenuItemView): HTMLElement {
+function itemRow(item: MenuItemView, featured = false): HTMLElement {
   const soldOut = itemSoldOut(item);
-  const row = button("", () => openDetail(item), soldOut ? "item item-soldout" : "item");
-  const photo = el("span", "item-photo");
+  const row = el("article", soldOut ? "item item-soldout" : "item");
+  row.dataset.itemId = String(item.id);
+  const detail = button("", () => openDetail(menu?.items.find((entry) => entry.id === item.id) ?? item), "item-detail");
+  detail.setAttribute("aria-label", `查看${item.name}`);
   if (item.photo) {
+    const photo = el("span", "item-photo");
     const img = el("img"); img.src = `/photos/${item.photo}.webp`; img.alt = "";
-    img.loading = "lazy"; img.decoding = "async"; photo.append(img);
+    img.width = 168; img.height = 168;
+    img.loading = featured ? "eager" : "lazy"; img.decoding = "async"; photo.append(img); detail.append(photo);
   }
   const copy = el("span", "item-text"); copy.append(el("span", "item-name", item.name));
   if (item.presentation?.flavor_description) copy.append(el("span", "item-flavor", item.presentation.flavor_description));
@@ -197,23 +210,65 @@ function itemRow(item: MenuItemView): HTMLElement {
   if (item.description && !item.presentation?.flavor_description) copy.append(el("span", "item-desc", item.description));
   const labels = presentationBadges(item, new Date());
   if (labels.length) copy.append(el("span", "item-labels", labels.join(" · ")));
-  copy.append(priceNode(item)); row.append(photo, copy);
+  detail.append(copy); row.append(detail);
+  const actions = el("div", "item-actions");
+  const price = el("div"); price.append(priceNode(item));
   const badge = soldOut ? "今日售完" : itemBadge(item);
-  if (badge) row.append(el("span", soldOut ? "item-badge item-badge-off" : "item-badge", badge));
+  if (badge) price.append(el("span", soldOut ? "item-badge item-badge-off" : "item-badge", badge));
+  const add = button(soldOut ? "今日售完" : item.option_groups.length ? "選擇選項" : "加入", () => {
+    const current = menu?.items.find((entry) => entry.id === item.id);
+    if (!menu || !current) { showMessage("菜單已更新，請重新選擇。"); return; }
+    if (current.option_groups.length) { openDetail(current); return; }
+    try {
+      cart = addLine(menu, cart, { item_id: current.id, option_ids: [], qty: 1 });
+      saveCart(); renderFooter(); clearMessage();
+      $("cart-feedback").textContent = `已加入${current.name}`;
+      if (feedbackTimer !== null) clearTimeout(feedbackTimer);
+      feedbackTimer = window.setTimeout(() => { $("cart-feedback").textContent = ""; }, 2500);
+    } catch (reason) { showMessage(cartError(reason)); }
+  }, "item-add");
+  add.disabled = soldOut; add.setAttribute("aria-label", `${soldOut ? "今日售完" : item.option_groups.length ? "選擇選項" : "加入"}：${item.name}`);
+  actions.append(price, add); row.append(actions);
   return row;
 }
+function selectCategory(category: number, home = false, push = true): void {
+  activeCategory = category; menuHome = home;
+  if (push) history.pushState({ menuCategory: category, menuHome: home }, "");
+  if (menu) renderMenu(menu);
+  window.scrollTo(0, 0);
+}
 function renderMenu(snapshot: MenuSnapshot): void {
+  const key = JSON.stringify([snapshot, menuHome, activeCategory, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date())]);
+  if (key === renderedMenuKey) return;
+  renderedMenuKey = key;
   const tabs = $("tabs"); const list = $("list");
-  if (!snapshot.categories.some((category) => category.id === activeCategory)) activeCategory = ALL;
-  const categories = [{ id: ALL, name: "全部" }, ...snapshot.categories];
-  const draw = () => {
-    tabs.replaceChildren(...categories.map((category) => {
-      const tab = button(category.name, () => { activeCategory = category.id; draw(); }, category.id === activeCategory ? "tab tab-on" : "tab");
-      tab.setAttribute("role", "tab"); tab.setAttribute("aria-selected", String(category.id === activeCategory)); return tab;
-    }));
-    list.replaceChildren(...visibleItems(snapshot.items).filter((item) => activeCategory === ALL || item.category_id === activeCategory).map(itemRow));
-  };
-  tabs.hidden = snapshot.categories.length < 2; draw();
+  const selection = homeSelection(snapshot);
+  if (!selection.categories.some((category) => category.id === activeCategory)) activeCategory = ALL;
+  $("menu-home").hidden = !menuHome; $("back-home").hidden = menuHome;
+  $("catalog-title").textContent = menuHome ? "完整菜單" : selection.categories.find((category) => category.id === activeCategory)?.name ?? "全部品項";
+  const categories = [{ id: ALL, name: "全部" }, ...selection.categories];
+  tabs.replaceChildren(...categories.map((category) => {
+    const tab = button(category.name, () => selectCategory(category.id), !menuHome && category.id === activeCategory ? "tab tab-on" : "tab");
+    tab.setAttribute("aria-pressed", String(!menuHome && category.id === activeCategory)); return tab;
+  }));
+  tabs.hidden = false;
+  list.replaceChildren(...(menuHome ? [] : visibleItems(snapshot.items).filter((item) => activeCategory === ALL || item.category_id === activeCategory).map((item) => itemRow(item))));
+  if (!menuHome && !list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
+  $("recommendations").hidden = selection.recommended.length === 0;
+  $("recommended-list").replaceChildren(...(menuHome ? selection.recommended.map((item) => itemRow(item, true)) : []));
+  const shortcuts: HTMLElement[] = [];
+  if (selection.recommended.length) shortcuts.push(button("露坑推薦", () => $("recommendations").scrollIntoView({ block: "start" }), "shortcut"));
+  const preferred = [selection.categories.find((category) => category.name === "咖啡"),
+    selection.categories.find((category) => category.name === "甜點") ?? selection.categories.find((category) => category.name === "今日甜點"),
+    ...selection.categories];
+  const chosen = new Set<number>();
+  for (const category of preferred) {
+    if (!category || chosen.has(category.id)) continue;
+    chosen.add(category.id); shortcuts.push(button(category.name, () => selectCategory(category.id), "shortcut"));
+    if (chosen.size === 2) break;
+  }
+  if (!shortcuts.length) shortcuts.push(button("看看菜單", () => selectCategory(ALL), "shortcut"));
+  $("shortcuts").replaceChildren(...shortcuts);
 }
 function renderFooter(): void {
   const footer = $("footer"); footer.replaceChildren();
@@ -238,7 +293,21 @@ function renderCart(): void {
   const priced = checkCart(menu, cart);
   if (!priced.ok) {
     body.append(el("p", "field-error", cartError(new Error(priced.reason))));
-    body.append(button("清空購物車", () => { cart = []; saveCart(); renderFooter(); renderCart(); }, "quiet-action"));
+    cart.forEach((line, index) => {
+      const item = menu?.items.find((entry) => entry.id === line.item_id);
+      const row = el("div", "cart-line");
+      const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
+      const name = [item?.name ?? "已下架品項", ...selected].join(" · ");
+      const info = el("div"); info.append(el("b", "", name), el("span", "", `${line.qty} 份`));
+      const checked = menu ? checkCart(menu, [line]) : null;
+      if (checked && !checked.ok) info.append(el("span", "field-error", cartError(new Error(checked.reason))));
+      const controls = el("div", "cart-controls");
+      controls.append(button("−", () => {
+        cart = line.qty <= 1 ? removeLine(cart, index) : cart.map((entry, i) => i === index ? { ...entry, qty: entry.qty - 1 } : entry);
+        saveCart(); renderFooter(); renderCart();
+      }, "qty-button"), button("移除", () => { cart = removeLine(cart, index); saveCart(); renderFooter(); renderCart(); }, "quiet-action"));
+      row.append(info, controls); body.append(row);
+    });
     showScreen("cart"); return;
   }
   priced.lines.forEach((line, index) => {
@@ -404,6 +473,18 @@ async function refreshAvailability(): Promise<void> {
   renderMenu(menu); // 限定標籤跨台北午夜失效，無須重發快照。
   if (activeDetail !== null) {
     const item = menu.items.find((entry) => entry.id === activeDetail);
+    const unavailable = !item || itemSoldOut(item);
+    const add = document.getElementById("detail-add") as HTMLButtonElement | null;
+    if (add) add.disabled = unavailable;
+    let invalidSelection = false;
+    for (const input of $("sheet-body").querySelectorAll<HTMLInputElement>(".opt-choice input")) {
+      const option = item?.option_groups.flatMap((group) => group.options).find((entry) => entry.id === Number(input.value));
+      input.disabled = !option || !option.available || option.remaining === 0;
+      const off = input.parentElement?.querySelector<HTMLElement>(".opt-off");
+      if (off) off.hidden = !input.disabled;
+      if (input.disabled && input.checked) { input.checked = false; invalidSelection = true; }
+    }
+    $("detail-availability").textContent = unavailable ? "這個品項剛剛售完了，請選其他品項。" : invalidSelection ? "選項供應已更新，請重新選擇。" : "";
     const node = $("sheet-body").querySelector<HTMLElement>(".item-labels");
     if (node) {
       const labels = item ? presentationBadges(item, new Date()) : [];
@@ -419,12 +500,35 @@ async function openOrder(token: string): Promise<void> {
   await refreshOrder();
 }
 async function main(): Promise<void> {
-  startSplash(); $("greeting").textContent = greeting(new Date());
+  $("greeting").textContent = greeting(new Date());
   $("sheet-close").addEventListener("click", closeDetail);
   $("sheet").addEventListener("click", (event) => { if (event.target === event.currentTarget) closeDetail(); });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDetail(); });
-  $("back-menu").addEventListener("click", () => showScreen("menu"));
-  window.addEventListener("popstate", () => location.reload());
+  document.addEventListener("keydown", (event) => {
+    if ($("sheet").hidden) return;
+    if (event.key === "Escape") { closeDetail(); return; }
+    if (event.key !== "Tab") return;
+    const controls = Array.from($("sheet").querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  });
+  $("back-menu").addEventListener("click", () => {
+    if (history.state?.cart) history.back();
+    else showScreen("menu");
+  });
+  $("back-home").addEventListener("click", () => selectCategory(ALL, true));
+  window.addEventListener("popstate", (event: PopStateEvent) => {
+    if (ORDER_PATH.test(location.pathname) || activeOrder) { location.reload(); return; }
+    restoringHistory = true;
+    closeDetail();
+    selectCategory(event.state?.menuCategory ?? ALL, event.state?.menuHome ?? true, false);
+    if (event.state?.cart) renderCart(); else showScreen("menu");
+    restoringHistory = false;
+  });
+  if (!ORDER_PATH.test(location.pathname)) {
+    menuHome = history.state?.menuHome ?? true; activeCategory = history.state?.menuCategory ?? ALL;
+    history.replaceState({ menuCategory: activeCategory, menuHome, cart: history.state?.cart === true }, "");
+  }
   tableCode = tableCodeFromPath(location.pathname);
   const orderToken = ORDER_PATH.exec(location.pathname)?.[1];
   const [menuResult, tableResult, storeResult] = await Promise.all([
@@ -446,7 +550,7 @@ async function main(): Promise<void> {
   menu = menuResult.body; void loadHandFont(menu.font);
   cart = readCart(); renderMenu(menu); renderFooter();
   if (orderToken) await openOrder(orderToken);
-  else if (readDraft()) renderCart();
+  else if (readDraft() || history.state?.cart) renderCart();
   else showScreen("menu");
   window.setInterval(() => void refreshAvailability(), MENU_REFRESH_MS);
 }

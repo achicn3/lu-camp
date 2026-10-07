@@ -1,5 +1,5 @@
 // 客人點餐頁的純邏輯（不碰 DOM，好測）。
-import type { MenuItemView, MenuPresentation } from "./types";
+import type { MenuItemView, MenuPresentation, MenuSnapshot } from "./types";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Taipei",
@@ -75,4 +75,13 @@ const TABLE_PATH = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/;
 
 export function tableCodeFromPath(pathname: string): string | null {
   return TABLE_PATH.exec(pathname)?.[1] ?? null;
+}
+
+/** 首頁只使用已發布的人工推薦；保留後台順序，不推測人氣或品項角色。 */
+export function homeSelection(menu: Pick<MenuSnapshot, "categories" | "items">) {
+  const items = visibleItems(menu.items);
+  return {
+    recommended: menu.items.filter((item) => item.presentation?.is_recommended && !itemSoldOut(item)).slice(0, 3),
+    categories: menu.categories.filter((category) => items.some((item) => item.category_id === category.id)),
+  };
 }

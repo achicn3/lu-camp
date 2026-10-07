@@ -52,7 +52,8 @@ const errors = [];
 page.on("pageerror", (error) => errors.push(String(error)));
 try {
   await page.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
-  await page.locator(".item", { hasText: name }).click();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.locator(".item", { hasText: name }).locator(".item-detail").click();
   await page.getByRole("button", { name: "加入購物車" }).click();
   await page.getByRole("button", { name: /購物車 1 份/ }).click();
   await page.locator("#order-note").fill(note);
@@ -75,7 +76,7 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-cancelled.png"), fullPage: true });
   await api("POST", `/menu-daily-stock/item/${item.id}/adjust`, { delta: -2, reason: "WASTE" });
   await page.getByRole("button", { name: "返回菜單", exact: true }).click();
-  await page.locator(".item", { hasText: name }).getByText("今日售完").waitFor({ timeout: 30000 });
+  await page.locator(".item", { hasText: name }).locator(".item-badge-off").waitFor({ timeout: 30000 });
   await page.screenshot({ path: join(SHOTS, "04-sold-out.png"), fullPage: true });
   assert.deepEqual(errors, []);
   console.log(`PASS guest checkout → real POS hold → cancel → guest polling → live sold out. Screenshots: ${SHOTS}`);

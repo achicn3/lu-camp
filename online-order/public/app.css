@@ -44,29 +44,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   mask: var(--logo) center / contain no-repeat;
 }
 
-/* 開場：滿版 logo 約 1.2 秒後淡出；點一下可跳過 */
-.splash {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  background: var(--bg);
-  transition: opacity 600ms ease, visibility 0s linear 600ms;
-}
-.splash-logo { width: min(56vw, 300px); aspect-ratio: 486 / 640; animation: settle 1200ms ease-out both; }
-.splash-rule {
-  position: absolute;
-  bottom: 18%;
-  width: 28vw;
-  max-width: 140px;
-  height: 1px;
-  background: var(--gold);
-  opacity: 0.7;
-}
-.entered .splash { opacity: 0; visibility: hidden; }
-@keyframes settle { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
-
 .bar {
   position: sticky;
   top: 0;
@@ -227,11 +204,47 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .splash { transition: none; }
-  .splash-logo { animation: none; }
+  html { scroll-behavior: auto; }
 }
 
 .item-flavor, .item-audience, .item-labels { display: block; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6; margin-top: 5px; }
 .item-flavor { color: var(--ink); }
 .item-audience { color: var(--soft); }
 .item-labels { color: var(--gold); font-size: 12px; letter-spacing: .04em; }
+
+/* M1b：先選一個方向，再看完整品項。沿用夜墨、霧金與手寫標題。 */
+.welcome { padding: 32px 0 28px; }
+.welcome .greeting { margin: 0 0 12px; font-family: system-ui, sans-serif; font-size: 14px; color: var(--soft); letter-spacing: .02em; }
+.welcome-title { font-size: clamp(36px, 9vw, 48px); font-weight: 400; line-height: 1.35; margin: 0 0 28px; letter-spacing: .06em; }
+.welcome-dot { color: var(--gold); }
+.shortcuts { display: flex; gap: 8px; flex-wrap: wrap; }
+.shortcut { flex: 1 1 85px; min-height: 52px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--photo); font-size: 18px; cursor: pointer; overflow-wrap: anywhere; }
+.shortcut:first-child { border-color: var(--gold); }
+.section-heading { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
+.section-heading h2, .catalog-title { font-size: 24px; font-weight: 400; margin: 16px 0 8px; }
+.section-heading > span { font-family: system-ui, sans-serif; font-size: 12px; color: var(--soft); }
+#recommendations { scroll-margin-top: 90px; }
+.recommended-list { gap: 12px; }
+.recommended-list .item { padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #151719; }
+.catalog-title { margin-top: 30px; }
+.tabs { flex-wrap: wrap; gap: 8px 18px; overflow: visible; }
+.tab { font-size: 18px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.item { display: block; cursor: default; padding: 22px 0; }
+.item-detail { display: flex; flex-direction: row-reverse; align-items: flex-start; gap: 16px; padding: 0; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; min-height: 44px; }
+.item-text { flex: 1; overflow-wrap: anywhere; }
+.item-photo { flex: none; width: 76px; height: 76px; }
+.item-name { font-size: 25px; line-height: 1.4; }
+.item-desc { font-family: system-ui, sans-serif; font-size: 14px; }
+.item-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.item-actions > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.item-badge { font-family: system-ui, sans-serif; font-size: 12px; }
+.item-add { flex: none; min-height: 44px; min-width: 72px; padding: 8px 14px; font-family: system-ui, sans-serif; font-size: 14px; border: 1px solid var(--gold); border-radius: 4px; color: var(--gold); background: none; cursor: pointer; }
+.item-add:disabled { color: var(--soft); border-color: var(--line); cursor: default; }
+.footer-action, .qty-button, .quiet-action, .back-link { min-height: 44px; }
+.qty-button { min-width: 44px; }
+.cart-feedback { position: fixed; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); left: 18px; right: 18px; z-index: 6; margin: 0 auto; width: fit-content; max-width: calc(100% - 36px); background: var(--photo); color: var(--ink); font: 13px/1.5 system-ui, sans-serif; border-radius: 4px; }
+.cart-feedback:not(:empty) { padding: 8px 14px; }
+.sheet-title { padding-right: 34px; overflow-wrap: anywhere; }
+.sheet { overscroll-behavior: contain; }
+
+.shortcut, .tab, .footer-action, .back-link { font-family: system-ui, sans-serif; }

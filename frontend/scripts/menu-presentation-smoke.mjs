@@ -81,7 +81,7 @@ try {
     phone.on("pageerror", (error) => errors.push(String(error)));
     if (width === 390) await phone.clock.install({ time: new Date() });
     await phone.goto(ORDER, { waitUntil: "networkidle" });
-    await phone.getByRole("tab", { name: category, exact: true }).click();
+    await phone.getByRole("button", { name: category, exact: true }).click();
     const lowCard = phone.locator(".item", { hasText: low.name });
     await lowCard.getByText("今天剩 3 份", { exact: true }).waitFor();
     await lowCard.getByText("蜜桃・花香・甜感", { exact: true }).waitFor();
@@ -93,7 +93,7 @@ try {
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await phone.screenshot({ path: join(shots, `guest-${width}.png`), fullPage: true });
     if (width === 390) {
-      await lowCard.click();
+      await lowCard.locator(".item-detail").click();
       await phone.locator(".qty-input").fill("2");
       const tomorrow = new Date(`${day}T12:00:00+08:00`);
       tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
@@ -103,8 +103,8 @@ try {
       assert.equal(await phone.locator(".qty-input").inputValue(), "2", "Cross-day labels must not reset the selection");
       await phone.getByRole("button", { name: "關閉", exact: true }).click();
     }
-    await phone.locator(".item", { hasText: sold.name }).click();
-    assert.equal(await phone.getByRole("button", { name: "加入購物車", exact: true }).count(), 0);
+    await phone.locator(".item", { hasText: sold.name }).locator(".item-detail").click();
+    assert.equal(await phone.getByRole("button", { name: "加入購物車", exact: true }).isDisabled(), true);
     await phone.close();
   }
   const unchanged = (await api("GET", "/menu-items")).find((item) => item.id === low.id);
