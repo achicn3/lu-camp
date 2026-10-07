@@ -57,11 +57,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   border-bottom: 1px solid var(--line);
 }
 .bar-logo { width: 30px; height: 40px; flex: none; }
-.bar-name { display: grid; line-height: 1.2; }
+.bar-name { flex: none; display: grid; line-height: 1.2; }
 .bar-name b { font-weight: 400; font-size: 25px; letter-spacing: 0.08em; }
 .bar-name small { font-family: var(--brand-latin); font-style: italic; font-size: 16px; color: var(--gold); letter-spacing: 0.04em; }
 .bar-table {
   margin-left: auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow-wrap: anywhere;
   padding: 3px 10px;
   border: 1px solid var(--gold);
   border-radius: 2px;
@@ -70,7 +73,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   font-size: 18px;
 }
 
-.page { max-width: 640px; margin: 0 auto; padding: 0 18px 120px; }
+.page { overflow-wrap: anywhere; max-width: 640px; margin: 0 auto; padding: 0 18px 120px; }
 .greeting { margin: 22px 0 8px; font-size: 28px; letter-spacing: 0.04em; text-wrap: balance; }
 .message { margin: 18px 0; padding: 12px 14px; border: 1px solid var(--gold); color: var(--ink); }
 
@@ -157,8 +160,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .order-state { margin: 20px 0; padding: 20px; border-left: 2px solid var(--gold); background: var(--photo); font-size: 23px; }
 .order-line { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
-.sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.6); display: grid; align-items: end; }
+.sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.6); display: grid; grid-template-columns: minmax(0, 1fr); align-items: end; }
 .sheet {
+  min-width: 0;
+  overflow-wrap: anywhere;
   position: relative;
   max-height: 88dvh;
   overflow-y: auto;
@@ -187,15 +192,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sheet-price { margin: 0 0 12px; font-size: 20px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
-.opt-group { margin: 0; padding: 10px 0; border: 0; border-top: 1px solid var(--line); line-height: 1.8; }
-.opt-group-name { font-size: 21px; }
+.opt-group { min-inline-size: 0; margin: 0; padding: 10px 0; border: 0; border-top: 1px solid var(--line); line-height: 1.8; }
+.opt-group-name { max-width: 100%; font-size: 21px; }
 .opt-group-rule { font-size: 16px; color: var(--soft); }
 .opt-off { color: var(--soft); }
 .opt-extra { font-family: var(--ui); font-variant-numeric: tabular-nums; color: var(--gold); }
 .opt-choice { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 3px 0; cursor: pointer; }
 .opt-choice:has(input:disabled) { cursor: default; opacity: .55; }
-.opt-choice input { width: 20px; height: 20px; accent-color: var(--gold); }
+.opt-choice input { flex: none; width: 20px; height: 20px; accent-color: var(--gold); }
 .opt-choice .opt-extra { margin-left: auto; }
+.opt-choice > span { min-width: 0; }
+.opt-choice .opt-extra, .opt-choice .opt-off { flex: none; }
 .detail-controls { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
 .detail-controls .action { margin: 0; }
 .qty-input { width: 68px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); text-align: center; }

@@ -41,7 +41,12 @@ try {
     const priceBounds = await homeCard.locator(".item-price").boundingBox();
     assert.ok(Math.abs(nameBounds.x - priceBounds.x) < 1, "Name and price must share the card left edge");
     await phone.screenshot({ path: join(shots, `home-${label}.png`), fullPage: true });
-    await phone.locator("#tabs").getByRole("button", { name: "全部", exact: true }).click();
+    const category = snapshot.categories.find((entry) => entry.id === item.category_id);
+    await phone.locator("#tabs").getByRole("button", { name: category?.name ?? "全部", exact: true }).click();
+    assert.equal((await typeOf(phone.locator("#catalog-title"))).family, homeName.family);
+    for (const tab of await phone.locator("#tabs .tab").all()) {
+      assert.equal((await typeOf(tab)).family, add.family, "Every category button must use the UI font");
+    }
     const card = phone.locator(`#list .item[data-item-id="${item.id}"]`);
     assert.deepEqual(await typeOf(card.locator(".item-name")), homeName);
     assert.deepEqual(await typeOf(card.locator(".item-price")), price);
