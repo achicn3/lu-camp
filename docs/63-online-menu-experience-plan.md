@@ -1,4 +1,4 @@
-# 58 — 露坑 LUKENG：線上菜單體驗與 POS 整合計畫
+# 63 — 露坑 LUKENG：線上菜單體驗與 POS 整合計畫
 
 > 2026-10-06 店主需求與現有程式盤點；2026-10-07 更新 M1a 交付狀態。
 > M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`；M1b 與餐飲管理分組接續於 `feat/online-menu-home`，均尚未合併／部署。M1c 起仍待實作。

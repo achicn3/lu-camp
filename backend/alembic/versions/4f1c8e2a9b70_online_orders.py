@@ -6,7 +6,7 @@
 - online_order_links：和雲端的連線狀態（最後拉單、接單／暫停）。
 
 Revision ID: 4f1c8e2a9b70
-Revises: 7b2e4f19c0a5
+Revises: c4e8a2f6b1d3
 """
 
 import sqlalchemy as sa
@@ -14,7 +14,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "4f1c8e2a9b70"
-down_revision = "7b2e4f19c0a5"
+down_revision = "c4e8a2f6b1d3"
 branch_labels = None
 depends_on = None
 

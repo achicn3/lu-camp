@@ -48,13 +48,14 @@
 - [MacBook 正式機：升級到 2026-10-01 版（餐飲交易紀錄、餐點退款、點選同意）](./48-macbook-upgrade-2026-10-01-fnb-refund.md)
 - [餐飲損耗與成本（報廢、客訴退款、選項成本、關帳提醒）](./49-fnb-waste-and-cost.md)
 - [線上點餐／彈性菜單：交接文件（現況、上線注意、下一步）](./50-online-ordering-handoff.md)
-- [露坑線上菜單體驗與 POS 整合計畫（2026-10-06 店主需求、分期與驗收）](./58-online-menu-experience-plan.md)
+- [露坑線上菜單體驗與 POS 整合計畫（2026-10-06 店主需求、分期與驗收）](./63-online-menu-experience-plan.md)
 - [MacBook 正式機：升級到 2026-10-01 版（餐飲損耗與成本）](./51-macbook-upgrade-2026-10-01-fnb-waste.md)
 - [MacBook 正式機：升級到 2026-10-01 版（POS 選項點餐＋菜單選項管理）](./52-macbook-upgrade-menu-options.md)
 - [MacBook 正式機：升級到 2026-10-02 版（發票撞號修正）](./53-macbook-upgrade-2026-10-02-einvoice-order-id.md)
 - [MacBook 正式機：升級到 2026-10-04 版（POS 結帳：備註末三碼、總件數、完成頁找零）](./59-macbook-upgrade-pos-checkout-notes.md)
 - [MacBook 正式機：升級到 2026-10-04 版（排隊收購「詳細」按折數帶出收購價）](./60-macbook-upgrade-intake-detail-cost.md)
 - [MacBook 正式機：升級到 2026-10-04 版（組合包袋裝條碼）](./61-macbook-upgrade-bundle-packs.md)
+- [MacBook 正式機：升級到 2026-10-08 版（線上點餐：店內收單＋菜單管理改版）](./64-macbook-upgrade-online-orders-store.md)
 
 ## 評估與後續實作
 

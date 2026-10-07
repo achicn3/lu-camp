@@ -50,7 +50,7 @@ O4 現金線上點餐：雲端送單（O4a）、雲端拉單／回報（O4b 雲�
 | O1f | 選項成本、報廢／盤點短少凍結成本、客訴退款成本算損耗、毛利報表「餐飲損耗」、關帳提醒剩餘份數 | migrations `31f4b20c0acc`、`edaa5e5ce783` |
 | O1d | 菜單照片：上傳轉 WebP、縮 1200、去 EXIF／XMP（含 GPS）、內容雜湊去重**存資料庫**（店主 2026-10-02 裁示，備份自動涵蓋）；公開讀取 `GET /menu-photos/{sha256}.webp`（不需登入）；新套件 pillow、pillow-heif | migration `2e52d783ec0e`，煙霧 `menu-photo-smoke.mjs` |
 | O3 | 雲端 `online-order/`（Worker＋D1＋R2）：店內 HMAC 簽章（防重放／竄改／過期、一組雲端只服務一家店）、菜單快照（不含成本）、照片與字型子集只推一次、桌位碼（依設定桌號、可單桌重發、版本號防晚到）、客人電子菜單頁（B1 夜墨金＋辰宇落雁體、開場 logo、時段問候、只能看） | migration `da91ffee580d`；D1 `0001`、`0002`；煙霧 `online-menu-smoke.mjs` |
-| O4 | 雲端送單（伺服器驗價、冪等、Turnstile、未付款上限、POS 離線即暫停）；POS 每 5 秒拉單（兼心跳）、限量品項拉到時直接扣份數＝保留（不夠就 REJECTED）、現金單 30 分鐘沒來付加回份數（單子不取消）；回報走持久化佇列（退避重試、明確拒收不重試）；POS「線上訂單」（徽章＋提示音、帶入結帳以 POS 現價重算並提示差額、取消、暫停／恢復接單）；結帳帶 `online_order_id`：交易內先加回保留再照常扣，`online_orders.sale_id` 唯一＝一張線上單只成立一筆銷售 | migration `4f1c8e2a9b70`；D1 `0003`；升級 docs/57；煙霧 `online-orders-pos-smoke.mjs` |
+| O4 | 雲端送單（伺服器驗價、冪等、Turnstile、未付款上限、POS 離線即暫停）；POS 每 5 秒拉單（兼心跳）、限量品項拉到時直接扣份數＝保留（不夠就 REJECTED）、現金單 30 分鐘沒來付加回份數（單子不取消）；回報走持久化佇列（退避重試、明確拒收不重試）；POS「線上訂單」（徽章＋提示音、帶入結帳以 POS 現價重算並提示差額、取消、暫停／恢復接單）；結帳帶 `online_order_id`：交易內先加回保留再照常扣，`online_orders.sale_id` 唯一＝一張線上單只成立一筆銷售 | migration `4f1c8e2a9b70`；D1 `0003`；升級 docs/64；煙霧 `online-orders-pos-smoke.mjs` |
 | O2 | POS 分類分頁＋選項視窗（必選／最多選、加價、停售／售完選項不能點）；菜單頁選項群組管理、品項掛群組與介紹 | 純前端，煙霧 `menu-options-smoke.mjs` |
 
 ## 4. 正式環境上線注意（main 先上線時）
@@ -64,7 +64,7 @@ O4 現金線上點餐：雲端送單（O4a）、雲端拉單／回報（O4b 雲�
 
 ## 5. 接下來的順序
 
-2026-10-06 新增菜單體驗需求見 [docs/58](./58-online-menu-experience-plan.md)。順序調整為：
+2026-10-06 新增菜單體驗需求見 [docs/63](./63-online-menu-experience-plan.md)。順序調整為：
 **O4 穩定化與審查 → M1a 後台呈現設定 → M1b 手機首頁與菜單 → M1c 手沖體驗／餐飲加購 → M1d 零售商品整合 → O5 → M2 推薦與分析**。
 M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`（未合併／部署），migration `d8f2a4c6e901`；M1b–M1d 待實作。資料層／POS／結帳／報表必須與 UI 同波驗收。人氣榜與分析不擋第一階段上線。
 
@@ -134,4 +134,4 @@ M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`（未合併／�
 
 ### 2026-10-07：M1b 與餐飲管理分組（功能分支，未部署）
 
-`feat/online-menu-home` 接續 M1a：客人首頁三個方向入口、最多三項人工推薦、卡片加入與行動版返回流程；`/menu` 改為品項、選項群組、分類與排序、線上發布四個分頁，增加搜尋與篩選且保留草稿。詳見 [docs/58 §10](58-online-menu-experience-plan.md#10-m1b-與餐飲管理-ux2026-10-07)。未改庫存／金額／發票流程，M1c 手沖體驗與加購仍待實作。
+`feat/online-menu-home` 接續 M1a：客人首頁三個方向入口、最多三項人工推薦、卡片加入與行動版返回流程；`/menu` 改為品項、選項群組、分類與排序、線上發布四個分頁，增加搜尋與篩選且保留草稿。詳見 [docs/63 §10](63-online-menu-experience-plan.md#10-m1b-與餐飲管理-ux2026-10-07)。未改庫存／金額／發票流程，M1c 手沖體驗與加購仍待實作。
