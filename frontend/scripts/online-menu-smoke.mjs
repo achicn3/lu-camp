@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium, devices } from "playwright";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const API = process.env.SMOKE_API ?? "http://localhost:8000";
@@ -43,6 +44,7 @@ const desk = await (await browser.newContext({ viewport: { width: 1280, height: 
 desk.on("pageerror", (err) => ok("POS 頁面 JS 錯誤", false, String(err)));
 
 try {
+  await skipOpeningCheckRedirect(desk);
   await desk.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await desk.waitForTimeout(400);
   await desk.fill('input[name="username"]', "dev-manager");

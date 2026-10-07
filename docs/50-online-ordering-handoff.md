@@ -130,3 +130,8 @@ M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`（未合併／�
   改文案後紅了就補字。
 - **辰宇落雁體有保留字型名稱**：子集一律改名 `LukengHand`，不可改回原名（OFL）。
 - `test_passwords_are_hashed_not_stored` 約 4% 隨機紅（雜湊剛好含 "pw"），已裁示不修，單獨重跑確認即可。
+
+
+### 2026-10-07：M1b 與餐飲管理分組（功能分支，未部署）
+
+`feat/online-menu-home` 接續 M1a：客人首頁三個方向入口、最多三項人工推薦、卡片加入與行動版返回流程；`/menu` 改為品項、選項群組、分類與排序、線上發布四個分頁，增加搜尋與篩選且保留草稿。詳見 [docs/58 §10](58-online-menu-experience-plan.md#10-m1b-與餐飲管理-ux2026-10-07)。未改庫存／金額／發票流程，M1c 手沖體驗與加購仍待實作。

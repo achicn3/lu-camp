@@ -513,9 +513,10 @@ export default function MenuPage() {
   });
 
   const items = listQuery.data ?? [];
-  const categories = [...new Set(
-    items.flatMap((item) => item.category === null ? [] : [item.category]),
-  )];
+  const categories = [...new Set([
+    ...items.flatMap((item) => item.category === null ? [] : [item.category]),
+    ...(category.startsWith("category:") ? [category.slice("category:".length)] : []),
+  ])];
   const query = search.trim().toLowerCase();
   const shown = items.filter((item) => {
     const matchesCategory = category === "all" || (
@@ -630,7 +631,7 @@ export default function MenuPage() {
           </label>
           <label className="field">
             <span className="field-label">品項分類</span>
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <select aria-label="品項分類" value={category} onChange={(event) => setCategory(event.target.value)}>
               <option value="all">全部分類</option>
               {categories.map((name) => (
                 <option key={name} value={`category:${name}`}>{name}</option>
@@ -640,7 +641,7 @@ export default function MenuPage() {
           </label>
           <label className="field">
             <span className="field-label">販售狀態</span>
-            <select value={availability} onChange={(event) => setAvailability(event.target.value)}>
+            <select aria-label="販售狀態" value={availability} onChange={(event) => setAvailability(event.target.value)}>
               <option value="all">全部狀態</option>
               <option value="available">可售</option>
               <option value="unavailable">停售</option>

@@ -64,9 +64,11 @@ try {
   assert.equal(await dialog.getByLabel("風味描述", { exact: true }).inputValue(), "蜜桃・花香・甜感");
   assert.equal(await dialog.getByLabel("低庫存顯示門檻", { exact: true }).inputValue(), "3");
   await dialog.getByRole("button", { name: "關閉", exact: true }).click();
+  await desk.getByRole("tab", { name: "分類與排序", exact: true }).click();
   await desk.getByText("菜單排序", { exact: true }).click();
   await desk.getByLabel(`${high.name} 商品排序`, { exact: true }).fill("-2");
   await desk.getByRole("button", { name: `儲存${high.name}商品排序`, exact: true }).click();
+  await desk.getByRole("tab", { name: "線上發布", exact: true }).click();
   const panel = desk.getByRole("region", { name: "線上點餐" });
   await panel.getByRole("button", { name: "發佈到線上點餐" }).click();
   await panel.getByText(/已發佈 \d+ 道菜/).waitFor({ timeout: 60000 });

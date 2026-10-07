@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const API = process.env.SMOKE_API ?? "http://localhost:8000";
@@ -36,6 +37,7 @@ const costName = `成本品項-${Date.now().toString().slice(-6)}`;
 const sentBodies = [];
 
 try {
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
@@ -52,7 +54,7 @@ try {
 
   // 新增品項按需展開，提交後表單仍可繼續新增。
   await page.getByRole("button", { name: "新增品項", exact: true }).click();
-  await page.getByLabel("品名").fill(uniqueName);
+  await page.getByLabel("品名", { exact: true }).fill(uniqueName);
   await page.getByLabel("售價（整數元）").fill("250");
   await page.getByLabel("分類（選填）").fill("點心");
   await page.getByRole("button", { name: "新增品項", exact: true }).click();
@@ -89,7 +91,7 @@ try {
   const wholePrice = Math.round((cost / (1 - margin / 100)) * (1 + tax) / (1 - fee * (1 + tax)));
   const expectedPrice = String(Math.ceil(wholePrice / 10) * 10);
 
-  await page.getByLabel("品名").fill(costName);
+  await page.getByLabel("品名", { exact: true }).fill(costName);
   await page.getByLabel("成本（整數元，選填）").fill(String(cost));
   await page.waitForFunction(
     (expected) => document.querySelector("input[placeholder='180']")?.value === expected,

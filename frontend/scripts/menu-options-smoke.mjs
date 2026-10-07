@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const API = process.env.SMOKE_API ?? "http://localhost:8000";
@@ -67,6 +68,7 @@ async function createGroup(name, min, max, lines) {
 }
 
 try {
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");

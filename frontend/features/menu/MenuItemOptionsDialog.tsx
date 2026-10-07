@@ -101,7 +101,7 @@ export function MenuItemOptionsDialog({
           })}
         </ul>
         {groups.isSuccess && groups.data.length === 0 && (
-          <p className="hint">還沒有選項群組，先到下方「選項群組」新增。</p>
+          <p className="hint">還沒有選項群組，先到「選項群組」分頁新增。</p>
         )}
         <label className="field">
           <span className="field-label">介紹</span>
