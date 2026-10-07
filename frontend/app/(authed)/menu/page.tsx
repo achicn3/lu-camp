@@ -1,9 +1,10 @@
 "use client";
 // /menu 餐飲菜單管理頁（MANAGER 專用）：品項清單（含停售）＋ 建立 ＋ 改名改價/上下架/封存。
 // 純呈現：金額為整數元字串，走 OpenAPI 生成 client（禁手刻型別）。
-// 下方「選項群組」管理溫度／加購等選項；品項列「選項」欄設定要掛哪些群組與介紹（O2）。
+// 「選項群組」分頁管理溫度／加購等選項；品項列「選項」欄設定掛哪些群組與介紹（O2）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import Link from "next/link";
+import { type FormEvent, type KeyboardEvent, useState } from "react";
 
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
@@ -215,10 +216,12 @@ function MenuItemRow({
   item,
   onChanged,
   rates,
+  hidden,
 }: {
   item: MenuItemRead;
   onChanged: () => void;
   rates: PricingRates;
+  hidden: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(item.unit_price);
@@ -297,7 +300,7 @@ function MenuItemRow({
       : null;
 
   return (
-    <tr>
+    <tr hidden={hidden}>
       <td>
         <MenuPhotoCell item={item} onChanged={onChanged} />
       </td>
@@ -481,7 +484,20 @@ function MenuItemRow({
   );
 }
 
+const MENU_SECTIONS = [
+  { key: "items", label: "品項" },
+  { key: "options", label: "選項群組" },
+  { key: "ordering", label: "分類與排序" },
+  { key: "online", label: "線上發布" },
+] as const;
+type MenuSection = (typeof MENU_SECTIONS)[number]["key"];
+
 export default function MenuPage() {
+  const [section, setSection] = useState<MenuSection>("items");
+  const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [availability, setAvailability] = useState("all");
   const queryClient = useQueryClient();
   // DB 現值角色（升權未重登也生效；與導覽同源，Codex 波次三第二輪）
   const { isManager } = useCurrentRole();
@@ -495,6 +511,53 @@ export default function MenuPage() {
       return data;
     },
   });
+
+  const items = listQuery.data ?? [];
+  const categories = [...new Set(
+    items.flatMap((item) => item.category === null ? [] : [item.category]),
+  )];
+  const query = search.trim().toLowerCase();
+  const shown = items.filter((item) => {
+    const matchesCategory = category === "all" || (
+      category === "uncategorized"
+        ? item.category === null
+        : `category:${item.category}` === category
+    );
+    const matchesAvailability = availability === "all"
+      || item.is_available === (availability === "available");
+    return item.name.toLowerCase().includes(query) && matchesCategory && matchesAvailability;
+  });
+  const shownIds = new Set(shown.map((item) => item.id));
+  const filtered = query !== "" || category !== "all" || availability !== "all";
+
+  function moveSection(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+        next = (index + 1) % MENU_SECTIONS.length;
+        break;
+      case "ArrowLeft":
+        next = (index + MENU_SECTIONS.length - 1) % MENU_SECTIONS.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = MENU_SECTIONS.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setSection(MENU_SECTIONS[next].key);
+    document.getElementById(`menu-tab-${MENU_SECTIONS[next].key}`)?.focus();
+  }
+
+  function clearFilters() {
+    setSearch("");
+    setCategory("all");
+    setAvailability("all");
+  }
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["menu-items"] });
@@ -510,51 +573,160 @@ export default function MenuPage() {
   }
 
   return (
-    <section>
-      <h1 className="page-title">餐飲菜單</h1>
-      <OnlinePublishPanel />
-      <CreateMenuItemForm onCreated={refresh} rates={rates} />
-
-      <div className="menu-list-section">
-        {listQuery.isError && (
-          <p role="alert" className="form-error">
-            {listQuery.error.message}
-          </p>
-        )}
-        <div className="inv-table-wrap">
-          <table className="inv-table">
-            <thead>
-              <tr>
-                <th>照片</th>
-                <th>品名</th>
-                <th>分類</th>
-                <th>售價</th>
-                <th>成本</th>
-                <th>預估毛利率</th>
-                <th>選項</th>
-                <th>狀態</th>
-                <th>每日限量</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(listQuery.data ?? []).map((item) => (
-                <MenuItemRow key={item.id} item={item} onChanged={refresh} rates={rates} />
+    <section className="menu-management">
+      <div className="menu-management-heading">
+        <h1 className="page-title">餐飲菜單</h1>
+        <Link className="btn-secondary" href="/opening-check#daily-stock">
+          填今日份數
+        </Link>
+      </div>
+      <div className="menu-management-nav" role="tablist" aria-label="菜單管理功能">
+        {MENU_SECTIONS.map(({ key, label }, index) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            id={`menu-tab-${key}`}
+            aria-controls={`menu-panel-${key}`}
+            aria-selected={section === key}
+            tabIndex={section === key ? 0 : -1}
+            onKeyDown={(event) => moveSection(event, index)}
+            onClick={() => setSection(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div
+        role="tabpanel"
+        id="menu-panel-items"
+        aria-labelledby="menu-tab-items"
+        hidden={section !== "items"}
+      >
+        <div className="menu-items-heading">
+          <h2>品項清單</h2>
+          <button
+            type="button"
+            className="btn-primary"
+            aria-expanded={creating}
+            aria-controls="menu-create-item"
+            onClick={() => setCreating(!creating)}
+          >
+            {creating ? "收起新增品項" : "新增品項"}
+          </button>
+        </div>
+        <div id="menu-create-item" hidden={!creating}>
+          <CreateMenuItemForm onCreated={refresh} rates={rates} />
+        </div>
+        <div className="card menu-items-filters" role="search" aria-label="篩選品項">
+          <label className="field">
+            <span className="field-label">搜尋品名</span>
+            <input
+              type="search"
+              value={search}
+              placeholder="輸入品名"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">品項分類</span>
+            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="all">全部分類</option>
+              {categories.map((name) => (
+                <option key={name} value={`category:${name}`}>{name}</option>
               ))}
-            </tbody>
-          </table>
-          {(rates.taxRate === null || rates.feeRate === null) && (
-            <p role="status" className="hint">
-              讀不到稅率或行動支付費率設定，預估毛利率暫不顯示。
+              <option value="uncategorized">未分類</option>
+            </select>
+          </label>
+          <label className="field">
+            <span className="field-label">販售狀態</span>
+            <select value={availability} onChange={(event) => setAvailability(event.target.value)}>
+              <option value="all">全部狀態</option>
+              <option value="available">可售</option>
+              <option value="unavailable">停售</option>
+            </select>
+          </label>
+          <button type="button" className="btn-ghost" disabled={!filtered} onClick={clearFilters}>
+            清除篩選
+          </button>
+          {listQuery.isSuccess && (
+            <p className="hint menu-items-count" role="status">
+              顯示 {shown.length} / {items.length} 個品項
             </p>
           )}
-          {listQuery.isSuccess && listQuery.data.length === 0 && (
-            <p className="hint">尚無餐飲品項</p>
+        </div>
+        <div className="menu-list-section">
+          {listQuery.isError && (
+            <p role="alert" className="form-error">
+              {listQuery.error.message}
+            </p>
           )}
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>照片</th>
+                  <th>品名</th>
+                  <th>分類</th>
+                  <th>售價</th>
+                  <th>成本</th>
+                  <th>預估毛利率</th>
+                  <th>選項</th>
+                  <th>狀態</th>
+                  <th>每日限量</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(listQuery.data ?? []).map((item) => (
+                  <MenuItemRow
+                    key={item.id}
+                    item={item}
+                    onChanged={refresh}
+                    rates={rates}
+                    hidden={!shownIds.has(item.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {(rates.taxRate === null || rates.feeRate === null) && (
+              <p role="status" className="hint">
+                讀不到稅率或行動支付費率設定，預估毛利率暫不顯示。
+              </p>
+            )}
+            {listQuery.isSuccess && items.length === 0 && (
+              <p className="hint">尚無餐飲品項</p>
+            )}
+            {listQuery.isSuccess && items.length > 0 && shown.length === 0 && (
+              <p className="hint">沒有符合條件的品項，請調整或清除篩選。</p>
+            )}
+          </div>
         </div>
       </div>
-      <MenuOrderingSection items={listQuery.data ?? []} onChanged={refresh} />
-      <OptionGroupsSection />
+      <div
+        role="tabpanel"
+        id="menu-panel-options"
+        aria-labelledby="menu-tab-options"
+        hidden={section !== "options"}
+      >
+        <OptionGroupsSection />
+      </div>
+      <div
+        role="tabpanel"
+        id="menu-panel-ordering"
+        aria-labelledby="menu-tab-ordering"
+        hidden={section !== "ordering"}
+      >
+        <MenuOrderingSection items={listQuery.data ?? []} onChanged={refresh} />
+      </div>
+      <div
+        role="tabpanel"
+        id="menu-panel-online"
+        aria-labelledby="menu-tab-online"
+        hidden={section !== "online"}
+      >
+        <OnlinePublishPanel />
+      </div>
     </section>
   );
 }

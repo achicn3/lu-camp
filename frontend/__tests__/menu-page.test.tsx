@@ -88,6 +88,104 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(screen.getByText("停售", { selector: ".inv-badge" })).toBeTruthy();
   });
 
+  it("預設只顯示品項；四個功能分開且切換保留新增草稿", async () => {
+    stubFetch((url) => {
+      if (url.includes("/menu-items")) return json(ITEMS);
+      if (url.includes("/menu-option-groups")) return json([]);
+      if (url.includes("/online-order/status")) return json({ configured: false, tables: [] });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("手沖-耶加");
+    const itemsTab = screen.getByRole("tab", { name: "品項" });
+    expect(itemsTab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "品項", "選項群組", "分類與排序", "線上發布",
+    ]);
+    expect(screen.queryByRole("region", { name: "線上點餐" })).toBeNull();
+    expect(screen.queryByRole("form", { name: "新增選項群組" })).toBeNull();
+    expect(screen.getByLabelText("品名").closest("[hidden]")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
+    await user.type(screen.getByLabelText("品名"), "還沒完成的拿鐵");
+    await user.click(screen.getByRole("tab", { name: "選項群組" }));
+    expect(screen.getByRole("form", { name: "新增選項群組" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "手沖-耶加 選項與介紹" })).toBeNull();
+    await user.type(screen.getByLabelText("群組名稱"), "還沒完成的溫度");
+    await user.click(screen.getByRole("tab", { name: "線上發布" }));
+    expect(screen.getByRole("region", { name: "線上點餐" })).toBeTruthy();
+    await user.click(itemsTab);
+    expect((screen.getByLabelText("品名") as HTMLInputElement).value).toBe("還沒完成的拿鐵");
+    await user.click(screen.getByRole("button", { name: "收起新增品項" }));
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
+    expect((screen.getByLabelText("品名") as HTMLInputElement).value).toBe("還沒完成的拿鐵");
+    await user.click(screen.getByRole("tab", { name: "選項群組" }));
+    expect((screen.getByLabelText("群組名稱") as HTMLInputElement).value).toBe("還沒完成的溫度");
+  });
+
+  it("搜尋、分類、販售狀態交集篩選；清除後恢復全部，不寫入資料", async () => {
+    const writes: string[] = [];
+    const items = [
+      ...ITEMS,
+      { ...ITEMS[0], id: 3, name: "Coffee 冰拿鐵", category: "咖啡" },
+      { ...ITEMS[0], id: 4, name: "Coffee 蛋糕", category: "甜點", is_available: false },
+    ];
+    stubFetch((url, method) => {
+      if (method !== "GET") writes.push(url);
+      if (url.includes("/menu-items")) return json(items);
+      if (url.includes("/menu-option-groups")) return json([]);
+      if (url.includes("/online-order/status")) return json({ configured: false, tables: [] });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const panel = screen.getByRole("tabpanel", { name: "品項" });
+    const table = within(panel).getByRole("table");
+    await within(table).findByText("Coffee 冰拿鐵");
+    await user.type(screen.getByRole("searchbox", { name: "搜尋品名" }), "  coffee  ");
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    await user.selectOptions(screen.getByLabelText("品項分類"), "category:咖啡");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText("販售狀態"), "unavailable");
+    expect(within(table).getAllByRole("row")).toHaveLength(1);
+    expect(screen.getByText("沒有符合條件的品項，請調整或清除篩選。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "清除篩選" }));
+    expect(within(table).getAllByRole("row")).toHaveLength(5);
+    await user.selectOptions(screen.getByLabelText("品項分類"), "uncategorized");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(within(table).getByRole("button", { name: "季節限定 選項與介紹" })).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "線上發布" }));
+    await user.click(screen.getByRole("tab", { name: "品項" }));
+    expect((screen.getByLabelText("品項分類") as HTMLSelectElement).value).toBe("uncategorized");
+    expect(writes).toEqual([]);
+  });
+
+  it("鍵盤可用方向鍵與 Home/End 切換功能；只讓選中分頁進入 Tab 順序", async () => {
+    stubFetch((url) => {
+      if (url.includes("/menu-items")) return json(ITEMS);
+      if (url.includes("/menu-option-groups")) return json([]);
+      if (url.includes("/online-order/status")) return json({ configured: false, tables: [] });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("手沖-耶加");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1]);
+    tabs[0].focus();
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(tabs[1]);
+    expect(screen.getByRole("tabpanel", { name: "選項群組" })).toBeTruthy();
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(tabs[3]);
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(tabs[0]);
+    await user.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(tabs[3]);
+    await user.keyboard("{Home}");
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1]);
+  });
+
   it("選項欄列出掛的群組；下方有選項群組管理；點設定開選項與介紹", async () => {
     const group = { id: 3, name: "溫度", min_select: 1, max_select: 1, sort_order: 0, options: [] };
     stubFetch((url) => {
@@ -98,7 +196,9 @@ describe("/menu 餐飲菜單管理頁", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
     expect(await screen.findByText("沒有選項")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "選項群組" }));
     expect(await screen.findByRole("region", { name: "溫度" })).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "品項" }));
     await user.click(screen.getByRole("button", { name: "手沖-耶加 選項與介紹" }));
     const dialog = await screen.findByRole("dialog", { name: /手沖-耶加/ });
     expect(
@@ -119,6 +219,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
     await user.type(screen.getByLabelText("品名"), "拿鐵");
     await user.type(screen.getByLabelText("售價（整數元）"), "150");
     await user.click(screen.getByRole("button", { name: "新增品項" }));
@@ -195,6 +296,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
     await user.type(screen.getByLabelText("品名"), "拿鐵");
     await user.type(screen.getByLabelText("成本（整數元，選填）"), "60");
     // 預設毛利率 30%：未稅 60÷0.7=85.71 → 含稅 ÷(1−0.022×1.05) → 92 → 進位 → 100
@@ -215,6 +317,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
     await user.type(screen.getByLabelText("成本（整數元，選填）"), "60");
     // 費率 0：60÷0.7=85.71 → ×1.05 = 90（少補手續費，不把客人的價格墊高）
     await waitFor(() =>
@@ -238,6 +341,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
     await user.type(screen.getByLabelText("品名"), "白開水");
     await user.type(screen.getByLabelText("售價（整數元）"), "10");
     await user.click(screen.getByRole("button", { name: "新增品項" }));

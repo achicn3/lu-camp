@@ -6396,3 +6396,73 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .menu-order-row label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex: 1; min-width: 180px; }
 .menu-order-row input { width: 90px; min-height: 44px; }
 .menu-order-row .form-error { flex-basis: 100%; }
+
+/* 餐飲管理按工作分頁：品項先顯示，其他設定保留草稿但不佔畫面。 */
+.menu-management [hidden] {
+  display: none !important;
+}
+.menu-management-heading,
+.menu-items-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.menu-management-heading .page-title,
+.menu-items-heading h2 {
+  margin: 0;
+}
+.menu-management-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-5) 0 var(--sp-6);
+}
+.menu-management-nav button {
+  min-height: var(--tap-min);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.menu-management-nav button[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.menu-management-nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.menu-items-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(130px, 1fr)) auto;
+  align-items: end;
+  gap: var(--sp-3);
+}
+.menu-items-filters input,
+.menu-items-filters select {
+  width: 100%;
+  min-height: var(--tap-min);
+}
+.menu-items-count {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .menu-management-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .menu-items-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .menu-items-filters .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
