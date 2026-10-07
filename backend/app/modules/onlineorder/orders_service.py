@@ -404,6 +404,26 @@ class OnlineOrdersService:
         await self._repo.flush()
         return order
 
+    async def held_portions(self, store_id: int, order_id: int) -> dict[tuple[str, int], int]:
+        """這張線上單**今天**還保留著的份數，依（每日限量對象, id）加總。
+
+        POS／顧客螢幕試算帶入這張單時，它自己保留的份數算可用（否則保留了最後一份就試算售完、
+        結帳鈕永遠按不下去；Codex O4 第二輪）。唯讀——不釋放保留，真正結帳仍在交易內嚴格檢查。
+        昨天的保留今天已經歸零，不算。
+        """
+        reservation = await self._repo.reservation(store_id, order_id)
+        if reservation is None or reservation.status != StockReservationStatus.ACTIVE:
+            return {}
+        day = store_date(utc_now()).isoformat()
+        held: dict[tuple[str, int], int] = {}
+        for row in reservation.consumed:
+            for entry in row["consumed"]:
+                if str(entry["day"]) != day:
+                    continue
+                key = (str(entry["kind"]), int(entry["id"]))
+                held[key] = held.get(key, 0) + int(row["qty"])
+        return held
+
     async def begin_checkout(
         self, store_id: int, order_id: int, *, cart_session_id: int | None = None
     ) -> None:

@@ -5,7 +5,7 @@
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -494,11 +494,13 @@ class MenuService:
         qty: int = 1,
         *,
         check_stock: bool = True,
+        held: Mapping[tuple[str, int], int] | None = None,
     ) -> MenuSelection:
         """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
 
         `check_stock=False`：只算價、不看今天剩幾份——線上單帶入結帳前的預覽用，那張單保留的
         份數已經先扣掉了，用剩餘份數判斷會誤報售完（真正結帳仍會檢查）。
+        `held`：試算時帶入的線上單自己保留的份數（（對象, id）→份數），算可用（Codex O4 第二輪）。
 
         - 選項必須屬於品項目前所掛、未封存的群組，且未封存；停售 → MenuItemUnavailable。
         - 每個群組所選數量須在 [min_select, max_select]；同一選項不可重複。
@@ -512,7 +514,10 @@ class MenuService:
         if not chosen <= known:
             raise SaleLineInvalid(f"「{item.name}」沒有這個選項，請重新選擇")
         day = today()
-        if check_stock and _short(item, day, qty):
+        spare = held or {}
+        if check_stock and _short(
+            item, day, qty - spare.get((MenuStockTarget.ITEM.value, item.id), 0)
+        ):
             raise InsufficientStock(_shortage_message(item.name, item, day))
         unit_price = item.unit_price
         chosen_options: list[MenuOption] = []
@@ -530,7 +535,9 @@ class MenuService:
             for option in picked:
                 if not option.is_available:
                     raise MenuItemUnavailable(f"「{option.name}」目前停售")
-                if check_stock and _short(option, day, qty):
+                if check_stock and _short(
+                    option, day, qty - spare.get((MenuStockTarget.OPTION.value, option.id), 0)
+                ):
                     raise InsufficientStock(_shortage_message(option.name, option, day))
                 chosen_options.append(option)
                 unit_price += option.price_delta

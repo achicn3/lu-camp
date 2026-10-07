@@ -734,6 +734,7 @@ class CustomerDisplayService:
             buyer_contact_id=data.buyer_contact_id,
             adjustments=data.to_adjustments(),
             disabled_campaigns=data.to_disabled_campaigns(),
+            online_order_id=data.online_order_id,
         )
         items: list[dict[str, object]] = []
         discount_total = Decimal(0)

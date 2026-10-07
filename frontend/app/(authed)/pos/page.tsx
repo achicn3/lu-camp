@@ -1818,6 +1818,7 @@ export default function PosPage() {
       JSON.stringify(adjustments),
       JSON.stringify(disabledCampaigns),
       member?.id ?? null,
+      onlineOrder?.id ?? null,
     ],
     enabled: lines.length > 0,
     queryFn: async () => {
@@ -1827,6 +1828,8 @@ export default function PosPage() {
           buyer_contact_id: member?.id ?? null,
           adjustments: adjustments.length > 0 ? adjustments : null,
           ...(disabledCampaigns.length > 0 ? { disabled_campaigns: disabledCampaigns } : {}),
+          // 帶入的線上單自己保留的份數算可用；不帶的話保留了最後一份就會試算售完（Codex O4 第二輪）。
+          ...(onlineOrder ? { online_order_id: onlineOrder.id } : {}),
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "試算失敗");

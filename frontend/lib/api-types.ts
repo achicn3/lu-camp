@@ -9916,6 +9916,8 @@ export interface components {
             disabled_campaigns?: components["schemas"]["SaleCampaignOverrideRequest"][] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
+            /** Online Order Id */
+            online_order_id?: number | null;
         };
         /**
          * SaleQuoteResponse

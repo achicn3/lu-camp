@@ -471,6 +471,7 @@ async def quote_sale(
             buyer_contact_id=payload.buyer_contact_id,
             adjustments=payload.to_adjustments(),
             disabled_campaigns=payload.to_disabled_campaigns(),
+            online_order_id=payload.online_order_id,
         )
     except DomainError as exc:
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc

@@ -449,6 +449,52 @@ async def test_checkout_converts_reservation_and_reports_settled(
     assert ctx.worker.reports == [(_rid(8), {"sync_status": "SETTLED", "payment_status": "PAID"})]
 
 
+async def test_quote_counts_the_bound_orders_own_reservation_as_available(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """線上單保留了最後幾份：帶入 POS 試算時，那張單自己保留的份數算可用（Codex O4 第二輪 high）。
+
+    不帶線上單編號照樣以剩餘份數判斷（別張單、現場客人不能用掉這份保留）；試算不釋放保留。
+    """
+    row = await _pulled(
+        db_session,
+        ctx,
+        _rid(31),
+        [_line(1, ctx.cake, "戚風", 90, qty=3, limited=True)],
+        "HOLD_REQUESTED",
+    )
+    assert await _cake_left(db_session, ctx) == 0  # 三份全被這張線上單保留
+    cart = {"lines": [{"line_type": "MENU", "menu_item_id": ctx.cake, "qty": 3}]}
+
+    plain = await client.post("/api/v1/sales/quote", json=cart, headers=_h(ctx.clerk))
+    assert plain.status_code == 409, plain.text
+
+    bound = await client.post(
+        "/api/v1/sales/quote", json={**cart, "online_order_id": row.id}, headers=_h(ctx.clerk)
+    )
+    assert bound.status_code == 200, bound.text
+    assert bound.json()["total"] == "270"
+    assert await _cake_left(db_session, ctx) == 0  # 試算不動保留
+
+    over = await client.post(
+        "/api/v1/sales/quote",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.cake, "qty": 4}],
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk),
+    )
+    assert over.status_code == 409, over.text  # 超過保留＋剩餘仍擋
+
+    sale = await client.post(
+        "/api/v1/sales",
+        json={**cart, "service_mode": "TAKEOUT", "online_order_id": row.id},
+        headers=_h(ctx.clerk, "online-31"),
+    )
+    assert sale.status_code == 201, sale.text
+    assert await _cake_left(db_session, ctx) == 0
+
+
 async def test_online_order_settles_only_once(
     client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
 ) -> None:
@@ -696,6 +742,37 @@ async def test_cart_resend_check_compares_online_order(
         await display.upsert_cart(
             ctx.store_id, terminal.id, body(1, 5), actor_user_id=ctx.clerk_id
         )
+
+
+async def test_customer_display_cart_counts_the_bound_orders_reservation(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """顧客螢幕購物車用同一支試算：帶入保留了最後幾份的線上單也要建得起來（Codex O4 第二輪）。"""
+    row = await _pulled(
+        db_session,
+        ctx,
+        _rid(32),
+        [_line(1, ctx.cake, "戚風", 90, qty=3, limited=True)],
+        "HOLD_REQUESTED",
+    )
+    assert await _cake_left(db_session, ctx) == 0
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=ctx.store_id, actor_user_id=ctx.clerk_id
+    )
+    cart = await CustomerDisplayService(db_session).upsert_cart(
+        ctx.store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "lines": [{"line_type": "MENU", "menu_item_id": ctx.cake, "qty": 3}],
+                "service_mode": "TAKEOUT",
+                "online_order_id": row.id,
+            }
+        ),
+        actor_user_id=ctx.clerk_id,
+    )
+    assert cart.revision == 1
+    assert await _cake_left(db_session, ctx) == 0
 
 
 @pytest.mark.parametrize("first_online", [False, True])

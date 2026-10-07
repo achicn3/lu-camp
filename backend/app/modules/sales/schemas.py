@@ -374,6 +374,8 @@ class SaleQuoteRequest(BaseModel):
         Annotated[list[SaleCampaignOverrideRequest], Field(max_length=DISABLED_CAMPAIGNS_MAX)]
         | None
     ) = None
+    # 帶入結帳的線上單：它自己保留的每日限量份數算可用（Codex O4 第二輪）。
+    online_order_id: int | None = Field(default=None, ge=1)
 
     def to_disabled_campaigns(self) -> list[CampaignOverrideInput] | None:
         return disabled_campaign_inputs(self.disabled_campaigns)

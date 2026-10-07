@@ -1,8 +1,8 @@
 // POS 線上訂單瀏覽器煙霧（docs/44 §4.3；O4b＋O4c）：真雲端（本機 wrangler dev）＋真 backend＋真 Postgres。
 // 配好顧客螢幕（購物車才會存到伺服器、重新整理還原得回來）→ 發佈菜單（拿鐵不限量、戚風每日限量 2 份）→ 客人用桌位碼向雲端送現金單 → POS 背景拉單（5 秒內）、
-// 徽章出現 → 戚風保留（剩 1 份）→ 「帶入結帳」品項／桌號帶進購物車 → **重新整理 POS 仍是那張線上單** →
+// 徽章出現 → 戚風**最後 2 份全被保留**（剩 0 份；Codex O4 第二輪：保留最後一份曾讓 POS 試算售完、結不了帳）→ 「帶入結帳」品項／桌號帶進購物車 → **重新整理 POS 仍是那張線上單** →
 // 收現結帳 → 雲端那張單變已付款、
-// 份數只扣一次 → 第二張要 5 份戚風被拒（庫存不足）→ 第三張取消、雲端變已取消 → 暫停接單、恢復。
+// 份數只扣一次 → 第二張要 5 份戚風被拒、再要 1 份也被拒（售完）→ 另一張取消、雲端變已取消 → 暫停接單、恢復。
 //
 // 需三個服務已起且指向隔離測試庫（SMOKE_ALLOW_WRITE=1）：backend（ONLINE_ORDER_BASE_URL 指向 SMOKE_ORDER、
 // 密鑰與 wrangler 的 .dev.vars 相同）、frontend、wrangler dev（.dev.vars 的 TURNSTILE_SECRET 用 Cloudflare 測試用
@@ -128,12 +128,12 @@ try {
   // 確保接單中（前一次煙霧可能留下暫停）
   await api("PUT", "/api/v1/online-orders/accepting", { accepting: true });
 
-  // ① 客人在 A1 點拿鐵×1＋戚風×1（戚風限量 → 等 POS 確認庫存）
+  // ① 客人在 A1 點拿鐵×1＋戚風×2（戚風限量、點走最後 2 份 → 等 POS 確認庫存）
   const first = await placeOrder(
     tableCode,
     [
       { item_id: latte.id, option_ids: [], qty: 1 },
-      { item_id: cake.id, option_ids: [], qty: 1 },
+      { item_id: cake.id, option_ids: [], qty: 2 },
     ],
     "拿鐵少冰",
   );
@@ -145,7 +145,7 @@ try {
   }, "POS 確認庫存（HELD）");
   ok("POS 拉到單並保留份數：客人那邊變待付款", held.status === "UNPAID");
   const stock = (await api("GET", "/api/v1/menu-daily-stock")).body.find((s) => s.id === cake.id);
-  ok("戚風剩 1 份（已保留 1 份）", stock?.remaining === 1, JSON.stringify(stock));
+  ok("戚風剩 0 份（最後 2 份都被這張單保留）", stock?.remaining === 0, JSON.stringify(stock));
 
   // ② POS：徽章、清單、帶入結帳
   await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
@@ -155,7 +155,7 @@ try {
   ok("POS 有線上訂單徽章", (await page.locator(".online-orders-badge").innerText()).trim().length > 0);
   await toggle.click();
   const sheet = page.getByRole("dialog", { name: "線上訂單" });
-  const row = sheet.getByRole("listitem", { name: /桌號 A1 \$240/ }).first();
+  const row = sheet.getByRole("listitem", { name: /桌號 A1 \$330/ }).first();
   await row.waitFor();
   const rowText = await row.innerText();
   ok("清單：桌號、品項、合計、已保留、備註", rowText.includes(`拿鐵-${run} ×1`) && rowText.includes("已保留份數") && rowText.includes("拿鐵少冰"), rowText.replace(/\n/g, " "));
@@ -182,20 +182,15 @@ try {
   }, "雲端那張單變已付款");
   ok("雲端：客人那邊變已付款", paid.status === "PAID");
   const after = (await api("GET", "/api/v1/menu-daily-stock")).body.find((s) => s.id === cake.id);
-  ok("戚風仍剩 1 份（保留轉成正式扣減，只扣一次）", after?.remaining === 1, JSON.stringify(after));
+  ok("戚風仍剩 0 份（保留轉成正式扣減，只扣一次）", after?.remaining === 0, JSON.stringify(after));
 
   // ③ 不重發菜單，也會同步保留／結帳與店內報廢後的份數。
   await waitFor(async () => {
     const menu = await (await fetch(`${ORDER}/api/menu`)).json();
-    return menu.items.find((item) => item.id === cake.id)?.remaining === 1;
-  }, "雲端可售份數更新為 1");
+    return menu.items.find((item) => item.id === cake.id)?.remaining === 0;
+  }, "雲端可售份數更新為 0");
   const tooMany = await placeOrder(tableCode, [{ item_id: cake.id, option_ids: [], qty: 5 }]);
   ok("超過現有份數：雲端直接擋下", tooMany.status === 422 && tooMany.body?.error === "sold_out", JSON.stringify(tooMany.body));
-  await api("POST", `/api/v1/menu-daily-stock/item/${cake.id}/adjust`, { delta: -1, reason: "WASTE" });
-  await waitFor(async () => {
-    const menu = await (await fetch(`${ORDER}/api/menu`)).json();
-    return menu.items.find((item) => item.id === cake.id)?.remaining === 0;
-  }, "最後一份報廢後雲端更新為售完");
   const second = await placeOrder(tableCode, [{ item_id: cake.id, option_ids: [], qty: 1 }]);
   ok("店內售完自動同步，客人不能再送出", second.status === 422 && second.body?.error === "sold_out", JSON.stringify(second.body));
 

@@ -13,7 +13,7 @@ commit/rollback 由呼叫端控制），不留「庫存扣了但現金沒進」�
 """
 
 import hashlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -3143,15 +3143,24 @@ class SalesService:
         buyer_contact_id: int | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
         disabled_campaigns: Sequence[CampaignOverrideInput] | None = None,
+        online_order_id: int | None = None,
     ) -> SaleQuote:
         """結帳前試算（docs/21 C2b）：套生效活動後的折後總額與各行折讓。唯讀——不扣庫存、不收款、
         不建單。供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額、收款不對齊 → 422）。
 
         不執行 STORE_ABSORBS 的「折讓>抽成」虧損守衛（那是收款側守衛，由 create_sale 把關）；
         quote 只回客人實付的折後金額（兩種 bearing 客人實付相同）。
+
+        `online_order_id`：帶入結帳的線上單；它自己保留的每日限量份數算可用（不釋放保留），
+        否則保留了最後一份就試算售完、結帳鈕按不下去（Codex O4 第二輪）。
         """
         if not lines:
             raise EmptySale("結帳試算必須至少有一筆明細")
+        held = (
+            await OnlineOrdersService(self._session, None).held_portions(store_id, online_order_id)
+            if online_order_id is not None
+            else {}
+        )
         # 試算永遠不放行停售品：同一個 service 實例若先做過補單，旗標不能殘留到這裡。
         self._allow_inactive_items = False
         promos, disabled = await self._effective_promos(store_id, disabled_campaigns)
@@ -3161,7 +3170,7 @@ class SalesService:
         discountable: list[bool] = []
         priced_lines = await self._price_cart(store_id, lines, promos)
         for line, priced in zip(lines, priced_lines, strict=True):
-            ql = await self._quote_line(store_id, line, promos, priced, discountable)
+            ql = await self._quote_line(store_id, line, promos, priced, discountable, held=held)
             self._ensure_numeric_12_amounts(
                 ql.unit_price,
                 ql.line_total,
@@ -3251,6 +3260,8 @@ class SalesService:
         promos: Sequence[PromoCampaign],
         priced: LinePrice,
         discountable_out: list[bool] | None = None,
+        *,
+        held: Mapping[tuple[str, int], int] | None = None,
     ) -> QuoteLine:
         """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。
 
@@ -3300,7 +3311,7 @@ class SalesService:
             if gift is not None:
                 raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
             selection = await self._menu.price_selection(
-                store_id, menu_item, line.menu_option_ids, line.qty
+                store_id, menu_item, line.menu_option_ids, line.qty, held=held
             )
             if discountable_out is not None:
                 discountable_out.append(False)
