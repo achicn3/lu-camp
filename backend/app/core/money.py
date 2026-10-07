@@ -179,6 +179,30 @@ def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
     return net, tax
 
 
+def allocate_deduction(amounts: list[Decimal], deduction: Decimal) -> list[Decimal]:
+    """把一筆扣抵（整數元）依各項金額比例攤到各項，回傳每項扣多少（與 amounts 同序）。
+
+    最大餘數法：先各取比例的整數部分，剩下的零頭一元一元給小數部分最大的項目
+    （同分給排前面的）。保證 Σ = deduction，且每項扣的不超過它自己的金額。
+    用途：混合付款的發票不含購物金，購物金依品項金額比例攤（店主 2026-10-08）。
+    """
+    whole = Decimal(round_ntd(deduction))
+    if whole != deduction or deduction < 0:
+        raise ValueError(f"扣抵金額須為非負整數元，收到 {deduction}")
+    base = sum(amounts, Decimal(0))
+    if any(a < 0 for a in amounts) or deduction > base:
+        raise ValueError(f"扣抵 {deduction} 超過可扣的品項合計 {base}")
+    if deduction == 0:
+        return [Decimal(0) for _ in amounts]
+    exact = [a * deduction / base for a in amounts]
+    shares = [Decimal(int(e)) for e in exact]
+    leftover = int(deduction - sum(shares, Decimal(0)))
+    by_fraction = sorted(range(len(amounts)), key=lambda i: (-(exact[i] - shares[i]), i))
+    for i in by_fraction[:leftover]:
+        shares[i] += 1
+    return shares
+
+
 def commission(gross: Decimal, pct: int) -> int:
     """抽成金額 = round_ntd(金額 × pct / 100)。
 

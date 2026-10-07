@@ -555,12 +555,14 @@ async def list_sales(
     sale_ids = [sale.id for sale in sales]
     invoices = await einvoice.invoice_info_for_sales(user.store_id, sale_ids)
     lines = await svc.line_summaries(user.store_id, sale_ids)
+    no_invoice = (None, None, None, None)
     return [
         SaleSummaryRead.model_validate(sale).model_copy(
             update={
-                "invoice_issue_channel": (invoices.get(sale.id) or (None, None, None))[0],
-                "invoice_print_mark": (invoices.get(sale.id) or (None, None, None))[1],
-                "invoice_no": (invoices.get(sale.id) or (None, None, None))[2],
+                "invoice_issue_channel": (invoices.get(sale.id) or no_invoice)[0],
+                "invoice_print_mark": (invoices.get(sale.id) or no_invoice)[1],
+                "invoice_no": (invoices.get(sale.id) or no_invoice)[2],
+                "invoice_total": (invoices.get(sale.id) or no_invoice)[3],
                 "first_item_name": (lines.get(sale.id) or (None, 0))[0],
                 "item_count": (lines.get(sale.id) or (None, 0))[1],
             }
@@ -632,6 +634,7 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
             "clerk_name": None if clerk is None else clerk.username,
             "buyer_name": None if buyer is None else buyer.name,
             "invoice_no": None if invoice is None else invoice[2],
+            "invoice_total": None if invoice is None else invoice[3],
         }
     )
 

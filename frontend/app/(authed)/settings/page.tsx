@@ -1,22 +1,28 @@
 "use client";
-// /settings 管理者設定頁（docs/10 §5 /settings + docs/16 §6）：
-// 一般設定（PATCH 僅送變更欄位）、溢價率區（金錢級，二次確認）、溢價率變更歷史。
+// /settings 管理者設定頁（docs/10 §5 /settings + docs/16 §6）：依用途分區、左側分區目錄；
+// 每區一個儲存鈕（PATCH 僅送變更欄位）、改過未存有提示、離開頁面前提醒（2026-10-08 改版）。
+// 溢價率為金錢級設定，二次確認。
 import "./settings.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import {
   addTable,
   removeTable,
   sameTables,
 } from "@/features/settings/dineInTables";
-import { clampRate, formatPct, parsePctInput, parseRateInput, ratePercentValue } from "@/features/settings/helpers";
+import { clampRate, formatPct, parseRateInput, ratePercentValue } from "@/features/settings/helpers";
+import {
+  AdvancedForm,
+  InvoiceTaxForm,
+  PricingForm,
+  StoreCreditBasicsForm,
+} from "@/features/settings/SettingsForms";
 import { useDialogFocus } from "@/features/common/useDialogFocus";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
-import { formatNtd, parseNtd } from "@/lib/money";
 
 type SettingsRead = components["schemas"]["SettingsRead"];
 type PremiumSuggestionResponse = components["schemas"]["PremiumSuggestionResponse"];
@@ -34,253 +40,6 @@ function extractDetail(error: unknown): string | null {
     if (typeof detail === "string") return detail;
   }
   return null;
-}
-
-function GeneralSettingsCard({
-  settings,
-  onSaved,
-}: {
-  settings: SettingsRead;
-  onSaved: () => void;
-}) {
-  // Rolling deployments and older fixtures may not include this newly added
-  // setting yet. Keep the UI usable and aligned with the server-side default.
-  const retentionDaysCurrent = settings.signature_png_retention_days ?? 183;
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-
-  const mutation = useMutation({
-    mutationFn: async (body: components["schemas"]["SettingsUpdateRequest"]) => {
-      const { data, error: apiError } = await api.PATCH("/api/v1/settings", { body });
-      if (!data) throw new Error(extractDetail(apiError) ?? "儲存失敗");
-      return data;
-    },
-    onSuccess: () => {
-      setSuccess(true);
-      setError(null);
-      onSaved();
-    },
-    onError: (err: Error) => {
-      setError(err.message);
-      setSuccess(false);
-    },
-  });
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSuccess(false);
-    const form = new FormData(event.currentTarget);
-
-    const einvoiceEnabled = form.get("einvoice_enabled") === "on";
-    const allowClerkManageCategories = form.get("allow_clerk_manage_categories") === "on";
-    const autoPrintAcquisitionLabels = form.get("auto_print_acquisition_labels") === "on";
-    const requireAcquisitionAffidavit = form.get("require_acquisition_affidavit") === "on";
-    const taxRateRaw = String(form.get("tax_rate") ?? "");
-    const commissionRaw = String(form.get("default_commission_pct") ?? "");
-    const marginRaw = String(form.get("default_margin_pct") ?? "");
-    const purchaseMarginRaw = String(form.get("purchase_default_margin_pct") ?? "");
-    const outflowRaw = String(form.get("monthly_fixed_cash_outflow") ?? "");
-    const minSpendRaw = String(form.get("store_credit_min_spend") ?? "");
-    const retentionRaw = String(form.get("signature_png_retention_days") ?? "");
-
-    const taxRate = parseRateInput(taxRateRaw);
-    if (taxRate === null) {
-      setError("稅率請輸入有效百分比數字");
-      return;
-    }
-    // 嚴格整數解析（"50.5"/"50abc" → null，不可前綴解析成 50 存錯值）。
-    // 寄售抽成允許 0-100（後端契約 le=100）；定價毛利 0-99（避免除以零）。
-    const commission = parsePctInput(commissionRaw, 100);
-    if (commission === null) {
-      setError("寄售抽成請輸入 0-100 的整數");
-      return;
-    }
-    const margin = parsePctInput(marginRaw);
-    if (margin === null) {
-      setError("收購定價目標毛利請輸入 0-99 的整數");
-      return;
-    }
-    // 同樣 0-99：≥100 會讓「成本 ÷ (1−毛利)」除以零或變負（CLAUDE.md §7.9 邊界）。
-    const purchaseMargin = parsePctInput(purchaseMarginRaw);
-    if (purchaseMargin === null) {
-      setError("採購定價目標毛利請輸入 0-99 的整數");
-      return;
-    }
-    const outflow = parseNtd(outflowRaw);
-    if (outflow === null || outflow < 0) {
-      setError("月固定現金支出請輸入非負整數");
-      return;
-    }
-    const minSpend = parseNtd(minSpendRaw);
-    if (minSpend === null || minSpend < 0) {
-      setError("購物金低消門檻請輸入非負整數（0＝不限制）");
-      return;
-    }
-    const retentionDays = Number(retentionRaw);
-    if (
-      !Number.isInteger(retentionDays) ||
-      retentionDays < 1 ||
-      retentionDays > 3650
-    ) {
-      setError("簽名圖檔保留天數請輸入 1 到 3650 之間的整數");
-      return;
-    }
-
-    // Only send changed fields
-    const body: components["schemas"]["SettingsUpdateRequest"] = {};
-    if (einvoiceEnabled !== settings.einvoice_enabled) body.einvoice_enabled = einvoiceEnabled;
-    if (allowClerkManageCategories !== settings.allow_clerk_manage_categories)
-      body.allow_clerk_manage_categories = allowClerkManageCategories;
-    if (autoPrintAcquisitionLabels !== settings.auto_print_acquisition_labels)
-      body.auto_print_acquisition_labels = autoPrintAcquisitionLabels;
-    if (requireAcquisitionAffidavit !== settings.require_acquisition_affidavit)
-      body.require_acquisition_affidavit = requireAcquisitionAffidavit;
-    // 以數值比較（非字串）：後端預設可能回 "0.05"，前端顯示 5% 會重組成 "0.0500"，
-    // 字串不等但數值相同 → 否則會誤判為變更、送出空操作 PATCH 並產生假稽核紀錄。
-    if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
-    if (commission !== settings.default_commission_pct) body.default_commission_pct = commission;
-    if (margin !== settings.default_margin_pct) body.default_margin_pct = margin;
-    if (purchaseMargin !== settings.purchase_default_margin_pct)
-      body.purchase_default_margin_pct = purchaseMargin;
-    if (outflow !== parseNtd(settings.monthly_fixed_cash_outflow))
-      body.monthly_fixed_cash_outflow = outflow;
-    if (minSpend !== parseNtd(settings.store_credit_min_spend))
-      body.store_credit_min_spend = minSpend;
-    if (retentionDays !== retentionDaysCurrent)
-      body.signature_png_retention_days = retentionDays;
-
-    if (Object.keys(body).length === 0) {
-      setSuccess(true);
-      return;
-    }
-    mutation.mutate(body);
-  }
-
-  const taxPct = ratePercentValue(settings.tax_rate);
-  const outflowNum = parseNtd(settings.monthly_fixed_cash_outflow);
-  const minSpendNum = parseNtd(settings.store_credit_min_spend);
-
-  return (
-    <form className="card" onSubmit={onSubmit}>
-      <h2>一般設定</h2>
-      <label className="field field-toggle">
-        <input
-          type="checkbox"
-          name="einvoice_enabled"
-          defaultChecked={settings.einvoice_enabled}
-        />
-        <span className="field-label">電子發票開關</span>
-      </label>
-      <label className="field">
-        <span className="field-label">稅率 (%)</span>
-        <input name="tax_rate" inputMode="decimal" defaultValue={taxPct} required />
-      </label>
-      <label className="field">
-        <span className="field-label">簽名圖檔保留天數</span>
-        <input
-          name="signature_png_retention_days"
-          inputMode="numeric"
-          defaultValue={String(retentionDaysCurrent)}
-          min={1}
-          max={3650}
-          required
-        />
-        <span className="hint">
-          預設 183 天（半年）。目前只會列出可清除的圖檔，不會自動刪除；
-          交易內容與簽署紀錄一律保存五年，不受這個天數影響。
-        </span>
-      </label>
-      <label className="field">
-        <span className="field-label">寄售抽成預設 (%)</span>
-        <input
-          name="default_commission_pct"
-          inputMode="numeric"
-          defaultValue={String(settings.default_commission_pct)}
-          required
-        />
-      </label>
-      <label className="field">
-        <span className="field-label">收購定價目標毛利 (%)</span>
-        <input
-          name="default_margin_pct"
-          aria-label="收購定價目標毛利 (%)"
-          inputMode="numeric"
-          defaultValue={String(settings.default_margin_pct)}
-          required
-        />
-        <span className="hint">折數鑑價會先扣除稅與支付手續費，再依這個毛利率自動計算收購價。</span>
-      </label>
-      <label className="field">
-        {/* 與收購分開：二手議價空間大、目標毛利本來就比新品高（裁示 2026-09-16）。
-            這只是建立商品時「先帶的數字」，每件仍可各自調整。 */}
-        <span className="field-label">採購定價目標毛利 (%)</span>
-        <input
-          name="purchase_default_margin_pct"
-          // 標籤內另有說明文字，會被併進可及名稱；明確指定才對得上（其他欄位沒有說明文字）。
-          aria-label="採購定價目標毛利 (%)"
-          inputMode="numeric"
-          defaultValue={String(settings.purchase_default_margin_pct)}
-          required
-        />
-        <span className="hint">採購建立商品時先帶的毛利率，每件仍可各自調整。</span>
-      </label>
-      <label className="field">
-        <span className="field-label">月固定現金支出</span>
-        <input
-          name="monthly_fixed_cash_outflow"
-          inputMode="numeric"
-          defaultValue={outflowNum !== null ? formatNtd(outflowNum) : "0"}
-          required
-        />
-      </label>
-      <label className="field">
-        <span className="field-label">購物金低消門檻（0＝不限）</span>
-        <input
-          name="store_credit_min_spend"
-          inputMode="numeric"
-          defaultValue={minSpendNum !== null ? formatNtd(minSpendNum) : "0"}
-          required
-        />
-        <span className="hint">非餐飲消費未達此金額則不可折抵購物金（內用餐飲一律不計入）。</span>
-      </label>
-      <label className="field field-toggle">
-        <input
-          type="checkbox"
-          name="auto_print_acquisition_labels"
-          defaultChecked={settings.auto_print_acquisition_labels}
-        />
-        <span>收購送出後自動印標籤（櫃台沒接標籤機時可關掉）</span>
-      </label>
-      <label className="field field-toggle">
-        <input
-          type="checkbox"
-          name="require_acquisition_affidavit"
-          defaultChecked={settings.require_acquisition_affidavit}
-        />
-        <span>
-          收購付錢前一定要客人在顧客螢幕簽名（收購頁與排隊收購都適用；關掉時可以不簽直接付款）
-        </span>
-      </label>
-      <label className="field field-toggle">
-        <input
-          type="checkbox"
-          name="allow_clerk_manage_categories"
-          defaultChecked={settings.allow_clerk_manage_categories}
-        />
-        <span className="field-label">允許店員管理分類</span>
-      </label>
-      {error !== null && (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      )}
-      {success && <p className="form-success">設定已儲存</p>}
-      <button type="submit" className="btn-primary" disabled={mutation.isPending}>
-        儲存一般設定
-      </button>
-    </form>
-  );
 }
 
 function MobilePaymentCard({
@@ -349,14 +108,14 @@ function MobilePaymentCard({
 
   return (
     <form className="card" onSubmit={onSubmit}>
-      <h2>行動支付設定</h2>
+      <h3>行動支付</h3>
       <label className="field field-toggle">
         <input
           type="checkbox"
           name="linepay_enabled"
           defaultChecked={settings.linepay_enabled}
         />
-        <span className="field-label">啟用 LINE Pay（店家掃客人條碼收款）</span>
+        <span className="field-label">收 LINE Pay（店家掃客人手機上的付款條碼）</span>
       </label>
       <label className="field">
         <span className="field-label">LINE Pay 手續費率 (%)</span>
@@ -439,7 +198,7 @@ function DineInCard({
 
   return (
     <div className="card dinein-card">
-      <h2>餐飲內用設定</h2>
+      <h3>內用桌號與出餐單</h3>
       <div className="field">
         <span className="field-label">桌號清單</span>
         {tables.length === 0 ? (
@@ -592,7 +351,10 @@ function PremiumRateCard({
 
   return (
     <div className="card">
-      <h2>溢價率設定</h2>
+      <h3>購物金溢價率</h3>
+      <p className="hint">
+        客人收購選購物金時，比現金多給的比例。例：溢價率 6%，收購價 $1,000 選購物金拿 $1,060。
+      </p>
       <div className="settings-premium-info">
         <div className="stat">
           <span className="field-label">目前溢價率</span>
@@ -623,29 +385,34 @@ function PremiumRateCard({
                 <span className="money">{formatPct(suggestion.suggested_rate)}</span>
               </div>
               {cv && (
-                <div className="settings-constraints">
-                  <p className="hint">各約束中間值摘要：</p>
+                <details className="settings-constraints">
+                  <summary>為什麼建議這個數字</summary>
                   <ul>
                     <li>
-                      毛利約束上限 (p_max1)：{cv.p_max1 != null ? formatPct(String(cv.p_max1)) : "N/A"}
+                      毛利撐得住的上限：
+                      {cv.p_max1 != null ? formatPct(String(cv.p_max1)) : "資料不足，先不算"}
                     </li>
                     <li>
-                      負債約束上限 (p_max2)：{cv.p_max2 != null ? formatPct(String(cv.p_max2)) : "N/A"}
-                      {cv.p_max2_note ? ` (${String(cv.p_max2_note)})` : ""}
+                      手上現金撐得住的上限：
+                      {cv.p_max2 != null
+                        ? formatPct(String(cv.p_max2))
+                        : String(cv.p_max2_note ?? "").includes("monthly_fixed_cash_outflow")
+                          ? "還沒填「每月固定現金支出」，這項先不算"
+                          : "資料不足，先不算"}
                     </li>
                     <li>
-                      選用率導向值：
+                      依客人選購物金的比例調整：
                       {cv.take_rate_directional != null
                         ? formatPct(String(cv.take_rate_directional))
-                        : "N/A"}
+                        : "資料不足，先不算"}
                     </li>
                   </ul>
                   {wm && typeof wm.liability_ratio === "number" && (
                     <p className="hint">
-                      負債比：{wm.liability_ratio.toFixed(2)}
+                      目前流通中的購物金約是每月固定支出的 {wm.liability_ratio.toFixed(2)} 倍。
                     </p>
                   )}
-                </div>
+                </details>
               )}
               <button type="button" className="btn-ghost" onClick={handleAdopt}>
                 採納建議值
@@ -798,7 +565,7 @@ function ReasonCard({
 
   return (
     <div className="card">
-      <h2>{title}</h2>
+      <h3>{title}</h3>
       <p className="hint">
         停用的原因不再出現在 POS 的選單裡，但先前的單據仍會保留當初選的名稱。
       </p>
@@ -883,7 +650,7 @@ function ReasonCard({
 function ErrorCard({ title, message }: { title: string; message: string }) {
   return (
     <div className="card">
-      <h2>{title}</h2>
+      <h3>{title}</h3>
       <p role="alert" className="form-error">
         {message}
       </p>
@@ -893,8 +660,10 @@ function ErrorCard({ title, message }: { title: string; message: string }) {
 
 function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) {
   return (
-    <div className="card">
-      <h2>溢價率變更紀錄</h2>
+    <details className="card settings-history">
+      <summary>
+        <h3>溢價率變更紀錄（{history.length} 筆）</h3>
+      </summary>
       {history.length === 0 ? (
         <p className="hint">尚無變更紀錄</p>
       ) : (
@@ -921,7 +690,7 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
           </tbody>
         </table>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -932,7 +701,7 @@ function SignatureRetentionReportCard({
 }) {
   return (
     <div className="card">
-      <h2>可清除的簽名圖檔</h2>
+      <h3>可清除的簽名圖檔</h3>
       <p className="hint">
         這裡只列出可以清除的簽名圖檔，系統不會自動刪除，要不要刪由店長決定。
         清除的只有圖檔本身；簽署紀錄、簽署內容與時間都會完整保留，不受保留天數影響。
@@ -995,7 +764,7 @@ function AgreementCard() {
   const current = agreementQuery.data ?? null;
   return (
     <div className="card">
-      <h2>收購切結書</h2>
+      <h3>收購切結書</h3>
       <p className="hint">
         客人在手持裝置上簽的就是這份全文。改了內容會存成新版本，先前簽過的簽名仍對應
         他當初看到的那一份，不會被改掉。
@@ -1253,7 +1022,7 @@ function OpeningCheckItemsCard() {
   const items = todayQuery.data?.items ?? [];
   return (
     <div className="card">
-      <h2>開店前檢查項目</h2>
+      <h3>開店前檢查項目</h3>
       <p className="hint">
         這些會出現在每天的「開店前檢查」頁，由店員逐項確認。開帳與各機器的連線狀態由系統
         自動判斷，不需要也不能在這裡加。
@@ -1331,8 +1100,117 @@ function OpeningCheckItemsCard() {
   );
 }
 
+/** 分區目錄：key 是區塊 id（也是表單回報「未儲存」用的 key）。 */
+const SECTIONS: { id: string; title: string }[] = [
+  { id: "invoice", title: "發票與稅" },
+  { id: "pricing", title: "收購與定價" },
+  { id: "store-credit", title: "購物金" },
+  { id: "payments", title: "付款方式" },
+  { id: "dine-in", title: "餐飲" },
+  { id: "pos", title: "POS 選項" },
+  { id: "opening", title: "開店前檢查" },
+  { id: "advanced", title: "其他" },
+];
+
+const LEAVE_WARNING = "有設定還沒儲存，確定要離開這一頁嗎？";
+
+function SettingsSection({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={`settings-${id}`} className="settings-section" aria-labelledby={`settings-${id}-title`}>
+      <h2 id={`settings-${id}-title`} className="settings-section-title">
+        {title}
+      </h2>
+      <div className="card-stack">{children}</div>
+    </section>
+  );
+}
+
+function SettingsLayout({
+  dirtySections,
+  children,
+}: {
+  dirtySections: ReadonlySet<string>;
+  children: ReactNode;
+}) {
+  const anyDirty = dirtySections.size > 0;
+
+  // 有沒存的變更就提醒：重新整理／關分頁（beforeunload），以及點選單切到別頁
+  // （Next 的站內連結不會觸發 beforeunload，要在點擊時攔）。
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const onClick = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest?.("a[href]");
+      if (!(link instanceof HTMLAnchorElement)) return;
+      const href = link.getAttribute("href") ?? "";
+      if (href.startsWith("#") || link.target === "_blank") return;
+      if (!window.confirm(LEAVE_WARNING)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [anyDirty]);
+
+  return (
+    <section className="settings-page">
+      <header className="settings-header">
+        <h1 className="page-title">設定</h1>
+        {anyDirty && (
+          <p className="settings-dirty" role="status">
+            有設定還沒儲存
+          </p>
+        )}
+      </header>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="設定分區">
+          <ul>
+            {SECTIONS.map((section) => (
+              <li key={section.id}>
+                <a href={`#settings-${section.id}`}>
+                  {section.title}
+                  {dirtySections.has(section.id) && (
+                    <span className="settings-nav-dot" aria-label="有未儲存的變更" />
+                  )}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="settings-sections">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
+  const [dirtySections, setDirtySections] = useState<ReadonlySet<string>>(() => new Set());
+  const reportDirty = useCallback((key: string, dirty: boolean) => {
+    setDirtySections((prev) => {
+      if (prev.has(key) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
 
   // 注意：GET /settings 與 premium-suggestion 皆為 clerk 可讀（POS/收購需讀稅率/溢價率），
   // 不能拿來把關。權限以「唯一的 MANAGER-only 端點」溢價率歷史為準（見下 historyQuery）。
@@ -1407,36 +1285,59 @@ export default function SettingsPage() {
   }
 
   const settings = settingsQuery.data;
+  const premium = (
+    <PremiumRateCard
+      settings={settings}
+      suggestion={suggestionQuery.data ?? null}
+      suggestionError={suggestionQuery.isError}
+      onSaved={refreshPremiumSettings}
+    />
+  );
 
   return (
-    <section>
-      <h1 className="page-title">設定</h1>
-      <div className="card-stack">
-        <GeneralSettingsCard settings={settings} onSaved={refreshSettings} />
-        <MobilePaymentCard settings={settings} onSaved={refreshSettings} />
-        <DineInCard settings={settings} onSaved={refreshSettings} />
-        <PremiumRateCard
+    <SettingsLayout dirtySections={dirtySections}>
+      <SettingsSection id="invoice" title="發票與稅">
+        <InvoiceTaxForm settings={settings} onSaved={refreshSettings} onDirtyChange={reportDirty} />
+      </SettingsSection>
+      <SettingsSection id="pricing" title="收購與定價">
+        <PricingForm settings={settings} onSaved={refreshSettings} onDirtyChange={reportDirty} />
+        <AgreementCard />
+      </SettingsSection>
+      <SettingsSection id="store-credit" title="購物金">
+        <StoreCreditBasicsForm
           settings={settings}
-          suggestion={suggestionQuery.data ?? null}
-          suggestionError={suggestionQuery.isError}
           onSaved={refreshPremiumSettings}
+          onDirtyChange={reportDirty}
         />
+        {premium}
         {/* 歷史載入失敗（非權限，權限已於上方 gate 處理）時明確顯示錯誤，不可呈現為空白稽核紀錄 */}
         {historyQuery.isError ? (
           <ErrorCard title="溢價率變更紀錄" message="讀取變更紀錄失敗，請稍後再試" />
         ) : (
           <PremiumHistoryCard history={historyQuery.data ?? []} />
         )}
-        <AgreementCard />
-        <OpeningCheckItemsCard />
+      </SettingsSection>
+      <SettingsSection id="payments" title="付款方式">
+        <MobilePaymentCard settings={settings} onSaved={refreshSettings} />
+      </SettingsSection>
+      <SettingsSection id="dine-in" title="餐飲">
+        <DineInCard settings={settings} onSaved={refreshSettings} />
+      </SettingsSection>
+      <SettingsSection id="pos" title="POS 選項">
         <ReasonCard title="贈品原因" kind="gift-reasons" />
         <ReasonCard title="折扣原因" kind="discount-reasons" />
+      </SettingsSection>
+      <SettingsSection id="opening" title="開店前檢查">
+        <OpeningCheckItemsCard />
+      </SettingsSection>
+      <SettingsSection id="advanced" title="其他">
+        <AdvancedForm settings={settings} onSaved={refreshSettings} onDirtyChange={reportDirty} />
         {retentionReportQuery.isError ? (
-          <ErrorCard title="簽名 PNG 待清理報表" message="讀取待清理報表失敗，請稍後再試" />
+          <ErrorCard title="可清除的簽名圖檔" message="讀取待清理報表失敗，請稍後再試" />
         ) : (
           <SignatureRetentionReportCard rows={retentionReportQuery.data ?? []} />
         )}
-      </div>
-    </section>
+      </SettingsSection>
+    </SettingsLayout>
   );
 }

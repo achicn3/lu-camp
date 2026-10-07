@@ -1,4 +1,4 @@
-"""混合付款的購物金部分以折讓處理（ADR-029；店主 2026-10-07）。
+"""混合付款的購物金部分以折讓處理（設定「整筆開＋購物金折讓」；ADR-029，店主 2026-10-07）。
 
 情境：帳篷 5 件 × $200 = $1,000，購物金 $300＋現金 $700。
 - 結帳照整筆 $1,000 開發票；平台確認開立後自動開一張 $300 的「購物金折讓」（G0401），
@@ -15,7 +15,7 @@ from itertools import count
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.contacts.models import Contact
@@ -30,6 +30,7 @@ from app.modules.inventory.models import CatalogProduct
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
+from app.modules.settings.models import StoreSettings
 from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     EInvoiceAction,
@@ -38,6 +39,7 @@ from app.shared.enums import (
     InvoiceStatus,
     SaleInvoiceStatus,
     SaleLineType,
+    StoreCreditInvoiceMode,
     TenderType,
     UploadStatus,
 )
@@ -94,6 +96,11 @@ async def _mixed_sale(
 ) -> tuple[int, int, int]:
     """開一筆購物金＋現金的 $1,000 交易；回傳 (store_id, clerk_id, sale_id)。"""
     store_id, clerk_id, _code = await _seed(session)
+    await session.execute(
+        update(StoreSettings)
+        .where(StoreSettings.store_id == store_id)
+        .values(store_credit_invoice_mode=StoreCreditInvoiceMode.ALLOWANCE)
+    )
     n = next(_seq)
     member = Contact(store_id=store_id, name=f"混合會員{n}", roles=["MEMBER"])
     product = CatalogProduct(

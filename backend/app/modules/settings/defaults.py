@@ -6,6 +6,8 @@
 
 from decimal import Decimal
 
+from app.shared.enums import StoreCreditInvoiceMode
+
 DEFAULT_EINVOICE_ENABLED = False
 DEFAULT_TAX_RATE = Decimal("0.05")  # 營業稅率 5%
 DEFAULT_COMMISSION_PCT = 50  # 寄售抽成預設（整數百分數，§7.2）
@@ -49,6 +51,8 @@ DEFAULT_BACKUP_OFFPEAK_HOUR = 21  # 晚上 9 點（打烊後離峰）；過此�
 DEFAULT_DINE_IN_TABLES: list[str] = []
 DEFAULT_PRINT_KITCHEN_TICKET = True
 DEFAULT_AUTO_PRINT_ACQUISITION_LABELS = True
+# 混合付款的發票預設扣掉購物金後開（店主 2026-10-08）。
+DEFAULT_STORE_CREDIT_INVOICE_MODE = StoreCreditInvoiceMode.DEDUCT
 # 桌號清單邊界：單一桌號最長 20 字（與 sales.table_no 欄寬一致）、最多 50 桌。
 MAX_DINE_IN_TABLE_LENGTH = 20
 MAX_DINE_IN_TABLES = 50

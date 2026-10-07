@@ -274,10 +274,13 @@ async def test_list_sales_shows_what_was_sold_and_the_invoice_number(
     assert one["first_item_name"] == "飲料"
     assert one["item_count"] == 1  # 一種品項（數量 2 不算兩項）
     assert one["invoice_no"] == "AB12345678"
+    # 發票金額可能不等於成交總額（混合付款的發票不含購物金）：登記手開發票要對這個數字。
+    assert one["invoice_total"] == "200"
 
     two = rows[multi["id"]]
     assert two["first_item_name"] == "飲料"
     assert two["item_count"] == 2
+    assert two["invoice_total"] is None
     assert two["invoice_no"] is None  # 沒開發票就是沒有號碼，不要瞎編
 
 

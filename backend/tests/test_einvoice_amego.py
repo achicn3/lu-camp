@@ -950,3 +950,88 @@ def test_parse_invoice_print_rejects_an_error_code() -> None:
 
 def test_parse_invoice_print_returns_the_escpos_payload() -> None:
     assert parse_invoice_print({"code": 0, "data": {"base64_data": "G0A="}}) == "G0A="
+
+
+# ── 混合付款：發票金額不含購物金，購物金依金額比例攤到非餐點品項（店主 2026-10-08）──
+
+
+def _menu_line(description: str, qty: int, amount: str) -> SaleLine:
+    return SaleLine(
+        store_id=1,
+        sale_id=7,
+        line_type=SaleLineType.MENU,
+        description=description,
+        qty=qty,
+        unit_price=Decimal(amount) / qty,
+        line_total=Decimal(amount),
+        net_amount=Decimal(amount),
+    )
+
+
+def test_f0401_deducts_store_credit_proportionally_from_items() -> None:
+    """$800 帳篷＋$200 營燈，購物金 $300 → 發票 $700：品項 $560／$140，不列負數行。"""
+    inv = _invoice(net=Decimal(667), tax=Decimal(33), total=Decimal(700))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 1, "800", "800"), _line("營燈", 2, "100", "200")],
+        order_id="S1-7",
+        store_credit=Decimal(300),
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [(i["Description"], i["Amount"], i["UnitPrice"]) for i in items] == [
+        ("帳篷", "560", "560"),
+        ("營燈", "140", "70"),
+    ]
+    assert data["SalesAmount"] == 700
+    assert data["TotalAmount"] == 700
+
+
+def test_f0401_store_credit_never_lands_on_menu_lines() -> None:
+    """餐點不能用購物金付：購物金只攤到二手／一般商品，餐點照原價。"""
+    inv = _invoice(net=Decimal(352), tax=Decimal(18), total=Decimal(370))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 1, "400", "400"), _menu_line("拿鐵", 1, "120")],
+        order_id="S1-7",
+        store_credit=Decimal(150),
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [(i["Description"], i["Amount"]) for i in items] == [("帳篷", "250"), ("拿鐵", "120")]
+
+
+def test_f0401_drops_items_fully_paid_by_store_credit() -> None:
+    """購物金剛好付清商品、餐點付現：商品變 0 元就不列（不假設平台收 0 元品項）。"""
+    inv = _invoice(net=Decimal(114), tax=Decimal(6), total=Decimal(120))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 1, "400", "400"), _menu_line("拿鐵", 1, "120")],
+        order_id="S1-7",
+        store_credit=Decimal(400),
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [i["Description"] for i in items] == ["拿鐵"]
+    assert data["SalesAmount"] == 120
+
+
+def test_f0401_legacy_full_amount_invoice_still_sends_without_deduction() -> None:
+    """升級前就建立、照整筆金額的待開發票：品項合計等於發票總額 → 不扣、照原樣送。"""
+    inv = _invoice(total=Decimal(1000), net=Decimal(952), tax=Decimal(48))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 1, "1000", "1000")],
+        order_id="S1-7",
+        store_credit=Decimal(300),
+    )
+    assert data["SalesAmount"] == 1000
+
+
+def test_f0401_rejects_a_gap_that_is_not_the_store_credit() -> None:
+    """品項合計與發票總額的差額既不是 0 也不是購物金 → 對不上，拒送。"""
+    inv = _invoice(net=Decimal(667), tax=Decimal(33), total=Decimal(700))
+    with pytest.raises(ValueError):
+        build_f0401_data(
+            inv,
+            [_line("帳篷", 1, "1000", "1000")],
+            order_id="S1-7",
+            store_credit=Decimal(200),
+        )

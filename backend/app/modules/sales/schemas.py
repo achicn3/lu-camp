@@ -526,6 +526,8 @@ class SaleRead(BaseModel):
     # 發票號碼跟著**這次**的明細查詢回來：清單那份可能是幾分鐘前的快照，
     # 期間別台開立了發票，只看快照會顯示「已開立」卻沒有號碼（Codex 審查）。
     invoice_no: str | None = None
+    # 發票金額（同 SaleSummaryRead.invoice_total）；沒有發票為 None。
+    invoice_total: NTDAmount | None = None
     subtotal: NTDAmount
     tax: NTDAmount
     total: NTDAmount
@@ -641,6 +643,8 @@ class SaleSummaryRead(BaseModel):
     # 這張發票印不印證明聯（存載具或捐贈 → False）。交易紀錄據此不顯示列印按鈕；
     # 沒有發票的銷售為 None。
     invoice_print_mark: bool | None = None
+    # 發票金額：混合付款扣掉購物金後開的發票會小於成交總額（店主 2026-10-08）。沒有發票為 None。
+    invoice_total: NTDAmount | None = None
 
 
 class LinePayRefundAttemptRead(BaseModel):

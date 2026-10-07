@@ -135,6 +135,33 @@ describe("/sales 交易紀錄頁", () => {
     expect(screen.queryByText(/已作廢。/)).toBeNull();
   });
 
+  it("登記手開發票：對發票金額（混合付款扣掉購物金後開，小於成交總額）", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const req = input instanceof Request ? input : new Request(String(input), init);
+        if (req.url.includes("/linepay-refunds/pending")) return json([]);
+        if (req.url.includes("/manual-invoice") && req.method === "POST") {
+          bodies.push(JSON.parse(await req.clone().text()));
+          return json({ invoice_no: "ZA10029999", issue_channel: "MANUAL_PAPER" });
+        }
+        if (req.url.includes("/api/v1/sales") && req.method === "GET") {
+          return json([sale(5, { invoice_status: "PENDING_ISSUE", invoice_total: "700" })]);
+        }
+        throw new Error(`unmatched fetch: ${req.method} ${req.url}`);
+      }),
+    );
+    renderPage("MANAGER");
+    await userEvent.click(await screen.findByLabelText("登記銷售 5 的手開發票"));
+    const dialog = screen.getByRole("dialog", { name: "登記手開發票" });
+    expect(within(dialog).getByText(/發票金額/).textContent).toContain("$700");
+    await userEvent.type(within(dialog).getByLabelText("發票號碼"), "ZA10029999");
+    await userEvent.click(within(dialog).getByRole("button", { name: "確認登記" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect((bodies[0] as { total: string }).total).toBe("700");
+  });
+
   it("店員：看得到列表、沒有作廢鈕", async () => {
     stubFetch((url, method) => {
       if (url.includes("/linepay-refunds/pending")) return json([]);

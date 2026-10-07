@@ -21,10 +21,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.core.money import round_ntd
+from app.core.money import allocate_deduction, round_ntd
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
-from app.shared.enums import InvoiceType, SaleLineKind
+from app.shared.enums import InvoiceType, SaleLineKind, SaleLineType
 from app.shared.exceptions import (
     AmegoIdentifierCollision,
     AmegoNotConfigured,
@@ -67,6 +67,7 @@ def build_f0401_data(
     lines: list[SaleLine],
     *,
     order_id: str,
+    store_credit: Decimal = Decimal(0),
 ) -> dict[str, object]:
     """組 f0401（開立發票）payload——含稅品項（DetailVat 預設 1）。
 
@@ -81,29 +82,27 @@ def build_f0401_data(
     billable = [line for line in lines if line.line_kind is not SaleLineKind.GIFT]
     if not billable:
         raise ValueError("發票沒有品項行，不可送開立")
-    line_sum = Decimal(0)
-    items: list[dict[str, object]] = []
     for line in billable:
-        # 品項金額認**實付**（net_amount）：Σ net_amount == sale.total == invoice.total。
-        # line_total 只是活動折後的牌價小計，臨時折扣不在其中。
         if line.qty <= 0 or line.net_amount < 0:
             raise ValueError(f"品項行不合法（qty={line.qty}, net_amount={line.net_amount}）")
-        line_sum += Decimal(line.net_amount)
+    total = Decimal(invoice.total)
+    amounts = _invoice_line_amounts(billable, total, store_credit)
+    items: list[dict[str, object]] = []
+    for line, amount in zip(billable, amounts, strict=True):
+        if amount == 0:
+            continue  # 整行被購物金付清：不列（不假設平台接受 0 元品項行）
         # Amount（實收整數元小計）為權威；UnitPrice 最多 7 位小數，平台依
         # DetailAmountRound=1 將 Quantity×UnitPrice 四捨五入至整數元後驗算。
-        effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
+        effective_unit = amount / Decimal(line.qty)
         items.append(
             {
                 "Description": line.description[:_DESCRIPTION_MAX],
                 "Quantity": line.qty,
                 "UnitPrice": _amego_unit_price_str(effective_unit),
-                "Amount": _decimal_str(Decimal(line.net_amount)),
+                "Amount": _decimal_str(amount),
                 "TaxType": _TAX_TYPE_TAXABLE,
             }
         )
-    total = Decimal(invoice.total)
-    if line_sum != total:
-        raise ValueError(f"品項小計合計 {line_sum} 不等於發票總額 {total}，拒送開立")
 
     if invoice.invoice_type is InvoiceType.B2B:
         if not invoice.buyer_tax_id:
@@ -137,6 +136,31 @@ def build_f0401_data(
     if invoice.donate_mark and invoice.npoban:
         data["NPOBAN"] = invoice.npoban
     return data
+
+
+def _invoice_line_amounts(
+    billable: list[SaleLine], total: Decimal, store_credit: Decimal
+) -> list[Decimal]:
+    """各品項開在發票上的金額（與 billable 同序），合計必等於發票總額。
+
+    品項金額認**實付**（net_amount）；line_total 只是活動折後的牌價小計，臨時折扣不在其中。
+    混合付款的發票不含購物金（店主 2026-10-08）：差額＝這筆的購物金，依金額比例攤到
+    **非餐點**品項（餐點不能用購物金付，docs/47 §2）。差額為 0＝沒用購物金，或升級前就
+    建立、照整筆金額開的待開發票——照原樣送。差額是其他數字＝對不上，拒送。
+    """
+    amounts = [Decimal(line.net_amount) for line in billable]
+    gap = sum(amounts, Decimal(0)) - total
+    if gap == 0:
+        return amounts
+    if gap != store_credit or store_credit <= 0:
+        raise ValueError(
+            f"品項小計合計與發票總額 {total} 差 {gap}，不等於本筆購物金 {store_credit}，拒送開立"
+        )
+    eligible = [i for i, line in enumerate(billable) if line.line_type is not SaleLineType.MENU]
+    shares = allocate_deduction([amounts[i] for i in eligible], store_credit)
+    for i, share in zip(eligible, shares, strict=True):
+        amounts[i] -= share
+    return amounts
 
 
 def build_f0501_data(invoice_number: str) -> list[dict[str, str]]:

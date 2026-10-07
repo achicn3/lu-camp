@@ -737,7 +737,8 @@ async def test_full_credit_skips_invoice_but_keeps_sale(
     )
     assert len(invoices) == len(queues) == (0 if cash is None else 1)
     if invoices:
-        assert invoices[0].total == Decimal("300")
+        # 混合付款預設扣掉購物金後開（店主 2026-10-08）：$300 用購物金 200 → 發票 $100。
+        assert invoices[0].total == Decimal("100")
     assert await StoreCreditService(db_session).get_balance(store_id, member_id) == Decimal(
         "2000"
     ) - Decimal(credit)

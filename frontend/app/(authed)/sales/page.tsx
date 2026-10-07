@@ -257,7 +257,8 @@ function ManualInvoiceDialog({
             invoice_date: invoiceDate,
             invoice_time: invoiceTime === "" ? null : `${invoiceTime}:00`,
             random_number: randomNumber === "" ? null : randomNumber,
-            total: sale.total,
+            // 發票金額可能小於成交總額（混合付款扣掉購物金後開）；舊後端沒回就用成交總額。
+            total: sale.invoice_total ?? sale.total,
             note: note.trim() === "" ? null : note.trim(),
           },
         },
@@ -290,8 +291,10 @@ function ManualInvoiceDialog({
           電子發票（避免同一筆交易開出兩張），日後的作廢與折讓也須依國稅局程序以紙本辦理。
         </p>
         <p>
-          本筆金額{" "}
-          <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
+          本筆發票金額{" "}
+          <span className="money">
+            ${formatNtd(parseNtd(sale.invoice_total ?? sale.total) ?? 0)}
+          </span>
           ，登記不會更動金額。
         </p>
         <label className="field">

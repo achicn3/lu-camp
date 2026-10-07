@@ -392,6 +392,18 @@ class InvoiceAllowanceSource(StrEnum):
     STORE_CREDIT = "STORE_CREDIT"
 
 
+class StoreCreditInvoiceMode(StrEnum):
+    """混合付款（購物金＋其他）的發票怎麼開（settings.store_credit_invoice_mode；店主 2026-10-08）。
+
+    DEDUCT＝扣掉購物金後開發票，品項金額依比例扣（預設）；ALLOWANCE＝照整筆開發票，平台
+    確認開立後自動對購物金開折讓（ADR-029）。結帳當下的模式記在 invoices.store_credit_mode，
+    之後改設定不影響既有發票。
+    """
+
+    DEDUCT = "DEDUCT"
+    ALLOWANCE = "ALLOWANCE"
+
+
 class LinePayStatus(StrEnum):
     """LINE Pay 交易狀態（linepay_transactions.status，docs/30）。
 

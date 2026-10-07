@@ -48,6 +48,7 @@ from app.shared.enums import (
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
+    StoreCreditInvoiceMode,
     UploadStatus,
 )
 
@@ -188,6 +189,11 @@ class Invoice(Base, TimestampMixin):
         _enum_col(EInvoiceIssueChannel),
         default=EInvoiceIssueChannel.AMEGO,
         server_default=EInvoiceIssueChannel.AMEGO.value,
+    )
+    # 混合付款結帳當下的購物金開票方式（店主 2026-10-08）；沒用購物金為 NULL。
+    # 記在發票上：之後改設定不影響這張發票的開立、折讓與退貨口徑。
+    store_credit_mode: Mapped[StoreCreditInvoiceMode | None] = mapped_column(
+        _enum_col(StoreCreditInvoiceMode), nullable=True
     )
 
 

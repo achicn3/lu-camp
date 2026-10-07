@@ -522,8 +522,10 @@ async def test_credit_plus_linepay_partial_then_full_keeps_allowance_and_caps_re
     )
     assert txn is not None and txn.refunded_amount == Decimal("700")
 
-    # 發票：全程折讓，原發票未被作廢；折讓總額＝商品含稅總額 1000（非外部退款 700）。
+    # 發票：全程折讓，原發票未被作廢。預設「扣掉購物金後開」：發票只開 700（購物金 300
+    # 不在裡面），折讓只算 LINE Pay 退款 100＋600＝700＝發票金額（店主 2026-10-08）。
     await db_session.refresh(invoice)
+    assert invoice.total == Decimal("700")
     assert invoice.status is InvoiceStatus.ISSUED
     assert invoice.void_reason is None
     allowances = (
@@ -531,7 +533,7 @@ async def test_credit_plus_linepay_partial_then_full_keeps_allowance_and_caps_re
             select(InvoiceAllowance).where(InvoiceAllowance.invoice_id == invoice.id)
         )
     ).all()
-    assert sum((a.total for a in allowances), Decimal(0)) == Decimal("1000")
+    assert sorted(a.total for a in allowances) == [Decimal("100"), Decimal("600")]
     refreshed = await SalesService(db_session).get_sale(store_id, sale.id)
     assert refreshed is not None and refreshed.status is SaleStatus.RETURNED
 

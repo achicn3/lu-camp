@@ -51,6 +51,7 @@ from app.shared.enums import (
     SaleLineType,
     SaleStatus,
     StockReason,
+    StoreCreditInvoiceMode,
     TenderType,
 )
 from app.shared.exceptions import (
@@ -144,6 +145,29 @@ def _refund_identity(
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 _GIFT_SNAPSHOT_BATCH_SIZE = 500
+
+
+def _credit_part(refund_tenders: Sequence[tuple[TenderType, Decimal]]) -> Decimal:
+    """退款明細裡退回購物金的金額。"""
+    return sum(
+        (amount for kind, amount in refund_tenders if kind == TenderType.STORE_CREDIT), Decimal(0)
+    )
+
+
+def _skip_allowance_when_nothing_to_allow(
+    decision: ReturnInvoiceDecision, allowance_total: Decimal
+) -> ReturnInvoiceDecision:
+    """要折讓、但可折讓金額是 0（退款全數退回購物金，而購物金本來就不在發票的應稅金額裡）
+    → 發票不用動，也不用客人簽名同意（店主 2026-10-08）。"""
+    if decision.action is not ReturnInvoiceAction.ALLOWANCE or allowance_total > 0:
+        return decision
+    return replace(
+        decision,
+        action=ReturnInvoiceAction.NONE,
+        requires_paper_recall=False,
+        requires_customer_consent=False,
+        reason="本次退款全數退回購物金，購物金不在發票金額裡，發票不需折讓。",
+    )
 
 
 def _invoice_lines_fully_returned(
@@ -342,6 +366,17 @@ class ReturnsService:
             refund_supported = True
         except ReturnConflict:
             refund_tenders, refund_supported = [], False
+        if preview_invoice is not None and refund_supported:
+            decision = _skip_allowance_when_nothing_to_allow(
+                decision,
+                await self._allowance_total(
+                    store_id,
+                    preview_invoice.id,
+                    preview_invoice.store_credit_mode,
+                    refund_total,
+                    credit_refund=_credit_part(refund_tenders),
+                ),
+            )
         return {
             "refund_tenders": refund_tenders,
             "refund_supported": refund_supported,
@@ -691,6 +726,21 @@ class ReturnsService:
         invoice_decision = await self._decide_invoice_action(
             store_id, sale.id, is_full_return=will_be_full_return
         )
+        sale_tenders = await self._sales.list_tenders(sale.id)
+        refund_allocations = self._refund_plan(sale, sale_tenders, sale_lines, previous, selected)
+        decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
+        allowance_total = (
+            await self._allowance_total(
+                store_id,
+                decided_invoice.id,
+                decided_invoice.store_credit_mode,
+                refund_amount,
+                credit_refund=_credit_part(refund_allocations),
+            )
+            if decided_invoice is not None
+            else refund_amount
+        )
+        invoice_decision = _skip_allowance_when_nothing_to_allow(invoice_decision, allowance_total)
         if refund_amount == 0:
             # 純贈品退貨沒有金額可折讓，也沒有發票需要作廢（贈品本來就不在發票品項裡）。
             # 折讓單的 DB CHECK 要求 total > 0——硬走下去會在同意流程都跑完之後才 flush 失敗
@@ -702,7 +752,6 @@ class ReturnsService:
                 requires_customer_consent=False,
                 reason="本次退貨金額為 0（僅退回贈品），發票不需處置。",
             )
-        decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
         if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
             # 手開紙本（docs/36）：平台上沒有這張發票，系統不能也不該代開 G0401/F0501。
             # 但**光是擋下退貨並不是「轉人工」**——那會讓庫存、退款、點數、寄售結算全部
@@ -767,8 +816,6 @@ class ReturnsService:
                 f"本單有贈品未一併退回（{names}）：請一併勾選退回，或說明不收回的原因後再送出。"
             )
 
-        sale_tenders = await self._sales.list_tenders(sale.id)
-        refund_allocations = self._refund_plan(sale, sale_tenders, sale_lines, previous, selected)
         if any(kind == TenderType.TAIWAN_PAY for kind, _ in refund_allocations):
             if not taiwan_pay_refund_confirmed:
                 raise ReturnConflict("請先在台灣Pay完成退款，並確認本次退款金額")
@@ -948,19 +995,6 @@ class ReturnsService:
         # 平台 ProcessResult 成功後才由 einvoice 回呼轉正式 ALLOWANCE**（避免 G0401 上傳失敗卻已顯示
         # 已折讓）。折讓金額＝本次退款額；同退貨 return_id 唯一、累計不超過原發票（einvoice 守衛）。
         invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
-        allowance_total = (
-            await self._allowance_total(
-                store_id,
-                invoice.id,
-                refund_amount,
-                credit_refund=sum(
-                    (a for kind, a in refund_allocations if kind == TenderType.STORE_CREDIT),
-                    Decimal(0),
-                ),
-            )
-            if invoice is not None
-            else refund_amount
-        )
         if (
             invoice is not None
             and invoice.status == InvoiceStatus.ISSUED
@@ -1091,14 +1125,10 @@ class ReturnsService:
             total = await self._allowance_total(
                 store_id,
                 invoice.id,
+                invoice.store_credit_mode,
                 customer_return.refund_amount,
-                credit_refund=sum(
-                    (
-                        t.amount
-                        for t in customer_return.refund_tenders
-                        if t.tender_type == TenderType.STORE_CREDIT
-                    ),
-                    Decimal(0),
+                credit_refund=_credit_part(
+                    [(t.tender_type, t.amount) for t in customer_return.refund_tenders]
                 ),
             )
             if total <= 0:
@@ -1118,13 +1148,25 @@ class ReturnsService:
                 await self._session.flush()
 
     async def _allowance_total(
-        self, store_id: int, invoice_id: int, refund_amount: Decimal, *, credit_refund: Decimal
+        self,
+        store_id: int,
+        invoice_id: int,
+        store_credit_mode: StoreCreditInvoiceMode | None,
+        refund_amount: Decimal,
+        *,
+        credit_refund: Decimal,
     ) -> Decimal:
-        """退貨折讓金額。發票已有購物金折讓（ADR-029）→ 購物金那部分結帳時已折讓過，
-        只折讓本次退款中非購物金的部分；否則照舊＝退款總額。"""
-        if await self._einvoice.active_store_credit_allowance(store_id, invoice_id) is None:
-            return refund_amount
-        return refund_amount - credit_refund
+        """退貨折讓金額：購物金那部分若不在發票的應稅金額裡，就只折讓非購物金的退款。
+
+        不在裡面的兩種情況（店主 2026-10-08 起兩種可切換）：發票是扣掉購物金後開的
+        （`store_credit_mode=DEDUCT`），或結帳時已開過購物金折讓（ADR-029）。
+        其餘（沒用購物金、升級前照整筆開的舊發票）照舊＝退款總額。
+        """
+        if store_credit_mode is StoreCreditInvoiceMode.DEDUCT or (
+            await self._einvoice.active_store_credit_allowance(store_id, invoice_id) is not None
+        ):
+            return refund_amount - credit_refund
+        return refund_amount
 
     @staticmethod
     def _normalize_lines(lines: Sequence[ReturnLineInput]) -> dict[int, int]:

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     Numeric,
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
 from app.modules.settings.defaults import DEFAULT_STORE_CREDIT_ENGINE_PARAMS
+from app.shared.enums import StoreCreditInvoiceMode
 
 
 class StoreSettings(Base, TimestampMixin):
@@ -144,6 +146,13 @@ class StoreSettings(Base, TimestampMixin):
     # 收購送出後自動印標籤（2026-09-23 收購 UX）：幾乎每筆都要印，預設開；櫃台沒接標籤機可關。
     auto_print_acquisition_labels: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    # 混合付款的發票：扣掉購物金後開（預設）或整筆開＋購物金折讓（店主 2026-10-08）。
+    store_credit_invoice_mode: Mapped[StoreCreditInvoiceMode] = mapped_column(
+        Enum(StoreCreditInvoiceMode, native_enum=False, length=30, create_constraint=True),
+        default=StoreCreditInvoiceMode.DEDUCT,
+        server_default=StoreCreditInvoiceMode.DEDUCT.value,
+        nullable=False,
     )
 
 

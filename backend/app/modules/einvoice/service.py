@@ -68,6 +68,7 @@ from app.shared.enums import (
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
+    StoreCreditInvoiceMode,
     UploadStatus,
 )
 from app.shared.exceptions import (
@@ -234,8 +235,12 @@ class EInvoiceService:
         donate_mark: bool = False,
         npoban: str | None = None,
         print_mark: bool = True,
+        store_credit_mode: StoreCreditInvoiceMode | None = None,
     ) -> Invoice:
         """建立**待開立（PENDING）**發票並排入 F0401 上傳佇列（冪等：同一 sale 重入回原發票）。
+
+        `store_credit_mode`：混合付款結帳當下的購物金開票方式（沒用購物金為 None）；
+        `total` 由呼叫端依此決定（DEDUCT＝已扣掉購物金）。
 
         非「已開立」：字軌號碼/開立日/隨機碼於 T13 收尾（配號 + XSD 序列化）與平台核可後才有，
         屆時經 record_result(PROCESS, success) 轉 ISSUED。稅於總額層級推算一次（§6）：
@@ -262,6 +267,7 @@ class EInvoiceService:
             donate_mark=donate_mark,
             npoban=npoban,
             print_mark=print_mark,
+            store_credit_mode=store_credit_mode,
             net=Decimal(net),
             tax=Decimal(tax),
             total=Decimal(net + tax),
@@ -444,8 +450,10 @@ class EInvoiceService:
     ) -> InvoiceAllowance | None:
         """混合付款：發票平台確認開立後，對購物金付款金額開一張折讓（ADR-029）。
 
-        一張發票至多一張（已有就回那張）。全額購物金本來就不開發票；沒用購物金、手開紙本、
-        發票非已開立 → 不開（None）。交易的發票狀態不動——這是結帳的稅務處理，不是退貨。
+        一張發票至多一張（已有就回那張）。只有結帳當下設定為「整筆開＋購物金折讓」的發票
+        才開（`store_credit_mode=ALLOWANCE`）；扣掉購物金後開的發票本來就不含購物金。
+        全額購物金本來就不開發票；手開紙本、發票非已開立 → 不開（None）。
+        交易的發票狀態不動——這是結帳的稅務處理，不是退貨。
         """
         existing = await self._repo.find_store_credit_allowance(store_id, invoice_id)
         if existing is not None:
@@ -455,6 +463,7 @@ class EInvoiceService:
             invoice is None
             or invoice.status is not InvoiceStatus.ISSUED
             or invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+            or invoice.store_credit_mode is not StoreCreditInvoiceMode.ALLOWANCE
         ):
             return None
         from app.modules.sales.service import SalesService  # 函式內 import 破循環
@@ -581,8 +590,8 @@ class EInvoiceService:
 
     async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]
-    ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None]]:
-        """一批銷售各自的發票開立來源、列印註記與號碼（docs/36；供 sales 列表，§2 經 service）。
+    ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None, Decimal]]:
+        """一批銷售各自的發票開立來源、列印註記、號碼與發票金額（docs/36；供 sales 列表）。
 
         沒有發票的銷售不會出現在結果裡。交易紀錄要據此**在顯示任何退款指示之前**就知道
         「這筆是手開紙本」——否則店員會先被叫去退款，之後才被後端擋下（錢已經出去了）。
@@ -1645,10 +1654,17 @@ class EInvoiceService:
                 )
         from app.modules.sales.service import SalesService  # 函式內 import 破循環
 
-        lines = await SalesService(self._session).get_lines(invoice.sale_id)
+        sales = SalesService(self._session)
+        lines = await sales.get_lines(invoice.sale_id)
         # 金額/稅率一律用發票**落地快照**（invoice.net/tax/tax_rate），不讀活 settings
-        # （結帳後改稅率不得改變申報內容，Codex 第九輪）。
-        return build_f0401_data(invoice, lines, order_id=invoice.platform_order_id)
+        # （結帳後改稅率不得改變申報內容，Codex 第九輪）。購物金給 payload 判斷差額：
+        # 扣掉購物金後開的發票，品項要依比例扣（店主 2026-10-08）。
+        return build_f0401_data(
+            invoice,
+            lines,
+            order_id=invoice.platform_order_id,
+            store_credit=await sales.store_credit_paid(store_id, invoice.sale_id),
+        )
 
     async def retry(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue:
         """把 FAILED 佇列列轉回 PENDING（attempts+1），供重新拋檔/上傳。

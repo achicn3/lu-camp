@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from app.core.money import (
+    allocate_deduction,
     commission,
     consignment_breakdown,
     consignment_split,
@@ -392,3 +393,40 @@ def test_round_up_to_listed_step_rejects_negative() -> None:
 def test_round_up_to_listed_step_zero_stays_zero() -> None:
     """0 元（例如成本 0 的贈品）不該被抬成 10 元。"""
     assert round_up_to_listed_step(0) == 0
+
+
+# ── 購物金分攤（混合付款的發票不含購物金；店主 2026-10-08）──
+
+
+def test_allocate_deduction_is_proportional_to_line_amounts() -> None:
+    """$800＋$200 用購物金 $300：照金額比例扣 → $240／$60。"""
+    assert allocate_deduction([Decimal(800), Decimal(200)], Decimal(300)) == [
+        Decimal(240),
+        Decimal(60),
+    ]
+
+
+def test_allocate_deduction_sums_exactly_and_never_exceeds_a_line() -> None:
+    """除不盡時零頭給小數最大的那幾項；每項扣的都不超過它自己的金額，合計剛好等於購物金。"""
+    amounts = [Decimal(1), Decimal(1), Decimal(1)]
+    shares = allocate_deduction(amounts, Decimal(2))
+    assert sum(shares) == Decimal(2)
+    assert all(Decimal(0) <= s <= a for s, a in zip(shares, amounts, strict=True))
+
+    amounts = [Decimal(333), Decimal(333), Decimal(334)]
+    shares = allocate_deduction(amounts, Decimal(999))
+    assert sum(shares) == Decimal(999)
+    assert all(Decimal(0) <= s <= a for s, a in zip(shares, amounts, strict=True))
+
+
+def test_allocate_deduction_full_and_zero() -> None:
+    amounts = [Decimal(150), Decimal(50)]
+    assert allocate_deduction(amounts, Decimal(200)) == amounts
+    assert allocate_deduction(amounts, Decimal(0)) == [Decimal(0), Decimal(0)]
+
+
+def test_allocate_deduction_rejects_more_than_the_lines_total() -> None:
+    with pytest.raises(ValueError):
+        allocate_deduction([Decimal(100)], Decimal(101))
+    with pytest.raises(ValueError):
+        allocate_deduction([Decimal(100)], Decimal(-1))
