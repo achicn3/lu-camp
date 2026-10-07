@@ -149,15 +149,15 @@ describe("/settings", () => {
     renderPage();
     expect(await screen.findByText("需管理者權限")).toBeDefined();
     // clerk 雖能讀 /settings，但無 manager 權限 → 不得出現設定表單
-    expect(screen.queryByText("一般設定")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "發票與稅" })).toBeNull();
   });
 
   it("過時 CLERK token 但後端授權（升權）→ 渲染設定，不被擋", async () => {
     loginAs("CLERK");
     defaultStub();
     renderPage();
-    // gate 以後端授權為準：token=CLERK 但 manager-only 歷史端點回 200 → 應看得到一般設定。
-    expect(await screen.findByText("一般設定")).toBeDefined();
+    // gate 以後端授權為準：token=CLERK 但 manager-only 歷史端點回 200 → 應看得到設定分區。
+    expect(await screen.findByRole("heading", { name: "發票與稅" })).toBeDefined();
     expect(screen.queryByText("需管理者權限")).toBeNull();
   });
 
@@ -202,10 +202,10 @@ describe("/settings", () => {
     });
     renderPage();
     // 只改抽成觸發 PATCH；稅率未動，body 不應含 tax_rate（0.0500 vs 0.05 數值相同）。
-    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    const commissionInput = await screen.findByLabelText("寄售抽成");
     await userEvent.clear(commissionInput);
     await userEvent.type(commissionInput, "60");
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存收購與定價" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     const parsed = JSON.parse(bodies[0]) as Record<string, unknown>;
     expect(parsed.default_commission_pct).toBe(60);
@@ -226,27 +226,29 @@ describe("/settings", () => {
       return null;
     });
     renderPage();
-    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    const commissionInput = await screen.findByLabelText("寄售抽成");
     await userEvent.clear(commissionInput);
     await userEvent.type(commissionInput, "50.5");
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存收購與定價" }));
     expect(await screen.findByText("寄售抽成請輸入 0-100 的整數")).toBeDefined();
     expect(bodies).toHaveLength(0); // 未送出（不會把 50.5 截成 50）
   });
 
-  it("MANAGER 渲染一般設定區、顯示目前值", async () => {
+  it("MANAGER 渲染各設定分區（含左側目錄）、顯示目前值", async () => {
     loginAs("MANAGER");
     defaultStub();
     renderPage();
-    expect(await screen.findByText("一般設定")).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "收購與定價" })).toBeDefined();
+    const nav = screen.getByRole("navigation", { name: "設定分區" });
+    expect(nav.querySelectorAll("a")).toHaveLength(8);
     // 寄售抽成顯示 50
-    const commissionInput = screen.getByLabelText("寄售抽成預設 (%)");
+    const commissionInput = screen.getByLabelText("寄售抽成");
     expect((commissionInput as HTMLInputElement).value).toBe("50");
     // 定價目標毛利顯示 45
-    const marginInput = screen.getByLabelText("收購定價目標毛利 (%)");
+    const marginInput = screen.getByLabelText("收購目標毛利");
     expect((marginInput as HTMLInputElement).value).toBe("45");
     // 採購（新品進貨）另有一個，預設 30——兩者刻意分開，二手與新品的目標毛利本來就不同。
-    const purchaseMargin = screen.getByLabelText("採購定價目標毛利 (%)");
+    const purchaseMargin = screen.getByLabelText("採購目標毛利");
     expect((purchaseMargin as HTMLInputElement).value).toBe("30");
   });
 
@@ -254,21 +256,22 @@ describe("/settings", () => {
     loginAs("MANAGER");
     defaultStub();
     renderPage();
-    expect(await screen.findByText("溢價率設定")).toBeDefined();
+    expect(await screen.findByText("購物金溢價率")).toBeDefined();
     // 目前溢價率 10% (may appear in history too)
     expect(screen.getAllByText("10%").length).toBeGreaterThanOrEqual(1);
     // 建議值 12.5%
     expect(screen.getAllByText("12.5%").length).toBeGreaterThanOrEqual(1);
-    // 約束摘要
-    expect(screen.getByText(/毛利約束/)).toBeDefined();
-    expect(screen.getByText(/負債約束/)).toBeDefined();
+    // 建議值的依據（白話，收在「為什麼建議這個數字」裡）
+    expect(screen.getByText(/毛利撐得住的上限/)).toBeDefined();
+    expect(screen.getByText(/手上現金撐得住的上限/)).toBeDefined();
+    expect(screen.queryByText(/p_max/)).toBeNull();
   });
 
   it("一鍵採納建議值：將建議值填入輸入欄", async () => {
     loginAs("MANAGER");
     defaultStub();
     renderPage();
-    await screen.findByText("溢價率設定");
+    await screen.findByText("購物金溢價率");
     const adoptBtn = screen.getByRole("button", { name: "採納建議值" });
     await userEvent.click(adoptBtn);
     const rateInput = screen.getByLabelText("溢價率 (%)") as HTMLInputElement;
@@ -298,10 +301,10 @@ describe("/settings", () => {
       return null;
     });
     renderPage();
-    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    const commissionInput = await screen.findByLabelText("寄售抽成");
     await userEvent.clear(commissionInput);
     await userEvent.type(commissionInput, "40");
-    const saveBtn = screen.getByRole("button", { name: "儲存一般設定" });
+    const saveBtn = screen.getByRole("button", { name: "儲存收購與定價" });
     await userEvent.click(saveBtn);
     await waitFor(() => expect(bodies).toHaveLength(1));
     const parsed = JSON.parse(bodies[0]) as Record<string, unknown>;
@@ -327,7 +330,7 @@ describe("/settings", () => {
     const toggle = (await screen.findByLabelText(/收購送出後自動印標籤/)) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     await userEvent.click(toggle);
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存收購與定價" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(JSON.parse(bodies[0])).toEqual({ auto_print_acquisition_labels: false });
   });
@@ -349,7 +352,7 @@ describe("/settings", () => {
     const deduct = (await screen.findByLabelText(/扣掉購物金後開發票/)) as HTMLInputElement;
     expect(deduct.checked).toBe(true);
     await userEvent.click(screen.getByLabelText(/整筆開發票，再自動開購物金折讓/));
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存發票設定" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(JSON.parse(bodies[0])).toEqual({ store_credit_invoice_mode: "ALLOWANCE" });
   });
@@ -368,10 +371,10 @@ describe("/settings", () => {
       return null;
     });
     renderPage();
-    const toggle = (await screen.findByLabelText(/一定要客人在顧客螢幕簽名/)) as HTMLInputElement;
+    const toggle = (await screen.findByLabelText(/一定要客人簽名/)) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     await userEvent.click(toggle);
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存收購與定價" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(JSON.parse(bodies[0])).toEqual({ require_acquisition_affidavit: true });
   });
@@ -399,15 +402,15 @@ describe("/settings", () => {
     });
     renderPage();
 
-    const outflow = await screen.findByLabelText("月固定現金支出");
+    const outflow = await screen.findByLabelText("每月固定現金支出");
     await userEvent.clear(outflow);
     await userEvent.type(outflow, "60000");
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存購物金設定" }));
 
     await waitFor(() => expect(currentSettings.monthly_fixed_cash_outflow).toBe("60000"));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(historyCalls).toBe(1);
-    expect(screen.getByText("設定已儲存")).toBeDefined();
+    expect(screen.getByText("已儲存")).toBeDefined();
   });
 
   it("寄售抽成允許 100（後端契約 le=100，不被前端誤擋）", async () => {
@@ -424,13 +427,42 @@ describe("/settings", () => {
       return null;
     });
     renderPage();
-    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    const commissionInput = await screen.findByLabelText("寄售抽成");
     await userEvent.clear(commissionInput);
     await userEvent.type(commissionInput, "100");
-    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存收購與定價" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect((JSON.parse(bodies[0]) as Record<string, unknown>).default_commission_pct).toBe(100);
     expect(screen.queryByText(/寄售抽成請輸入/)).toBeNull();
+  });
+
+  it("改過還沒存：卡片與左側目錄都提示；存好後提示消失", async () => {
+    loginAs("MANAGER");
+    let current = SETTINGS;
+    stubFetch((url, init) => {
+      if (url.includes("/agreements")) return json(AGREEMENT);
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        current = { ...SETTINGS, default_commission_pct: 60 };
+        return json(current);
+      }
+      if (url.includes("/settings")) return json(current);
+      return null;
+    });
+    renderPage();
+    const commission = await screen.findByLabelText("寄售抽成");
+    expect(screen.queryByText("有未儲存的變更")).toBeNull();
+    await userEvent.clear(commission);
+    await userEvent.type(commission, "60");
+    const card = screen.getByRole("form", { name: "收購預設值" });
+    expect(within(card).getByText("有未儲存的變更")).toBeDefined();
+    const nav = screen.getByRole("navigation", { name: "設定分區" });
+    expect(within(nav).getByLabelText("有未儲存的變更")).toBeDefined();
+    await userEvent.click(within(card).getByRole("button", { name: "儲存收購與定價" }));
+    await waitFor(() => expect(within(card).queryByText("有未儲存的變更")).toBeNull());
+    expect(within(nav).queryByLabelText("有未儲存的變更")).toBeNull();
+    expect(within(card).getByText("已儲存")).toBeDefined();
   });
 
   it("溢價率變更需二次確認後送 PATCH", async () => {
@@ -447,7 +479,7 @@ describe("/settings", () => {
       return null;
     });
     renderPage();
-    await screen.findByText("溢價率設定");
+    await screen.findByText("購物金溢價率");
     // Adopt suggestion
     await userEvent.click(screen.getByRole("button", { name: "採納建議值" }));
     // Click save premium
@@ -469,7 +501,7 @@ describe("/settings", () => {
     loginAs("MANAGER");
     defaultStub();
     renderPage();
-    expect(await screen.findByText("溢價率變更紀錄")).toBeDefined();
+    expect(await screen.findByText(/溢價率變更紀錄（\d+ 筆）/)).toBeDefined();
     expect(screen.getByText("8%")).toBeDefined(); // old
     expect(screen.getByText(/調高溢價率/)).toBeDefined(); // reason
   });

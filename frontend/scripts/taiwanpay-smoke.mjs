@@ -160,7 +160,7 @@ try {
 
   // 1) 設定頁：行動支付設定卡渲染＋值正確
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
-  await page.waitForSelector('h2:has-text("行動支付設定")');
+  await page.waitForSelector('h3:has-text("行動支付")');
   const linepayToggle = page.locator('input[name="linepay_enabled"]');
   const linepayFee = page.locator('input[name="linepay_fee_pct"]');
   const taiwanpayFee = page.locator('input[name="taiwanpay_fee_pct"]');

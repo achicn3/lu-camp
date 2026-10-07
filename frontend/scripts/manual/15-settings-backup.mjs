@@ -12,24 +12,24 @@ await page.waitForTimeout(2000);
 // 這張是「設定頁有哪些卡片」的總覽，圖說會逐一點名——被高度上限裁掉就會
 // 承諾讀者看不到的東西（實際發生過：六張卡片只看得到四張）。刻意放寬。
 await shot(page, "page", { content: true, contentMaxHeight: 4600 });
-await shot(page, "general-card", { locator: '.card:has(h2:text("一般設定"))' });
+await shot(page, "general-card", { locator: '#settings-invoice' });
 
 // 修改「購物金低消門檻」並儲存（改完必還原成原值）
 await withSettings(["store_credit_min_spend"], async () => {
   await page.fill('input[name="store_credit_min_spend"]', "100");
-  await page.click('button:has-text("儲存一般設定")');
+  await page.click('button:has-text("儲存購物金設定")');
   await page.waitForTimeout(2000);
-  const okMsg = await page.textContent('.card:has(h2:text("一般設定")) .form-success').catch(() => null);
-  note(`一般設定儲存訊息：${okMsg}`);
-  await shot(page, "general-saved", { locator: '.card:has(h2:text("一般設定"))' });
+  const okMsg = await page.textContent('form[aria-label="購物金使用"] .form-success').catch(() => null);
+  note(`購物金設定儲存訊息：${okMsg}`);
+  await shot(page, "general-saved", { locator: 'form[aria-label="購物金使用"]' });
 });
 
 // 行動支付設定
-await shot(page, "mobile-pay-card", { locator: '.card:has(h2:text("行動支付設定"))' });
+await shot(page, "mobile-pay-card", { locator: '.card:has(h3:text("行動支付"))' });
 
 // 溢價率設定的變更需要二次確認對話框，改由 15b-settings-premium.mjs 專責擷取（見該檔），
 // 本腳本只截圖卡片外觀，不改值，避免留下未確認的對話框或未還原的費率。
-await shot(page, "premium-card", { locator: '.card:has(h2:text("溢價率設定"))' });
+await shot(page, "premium-card", { locator: '.card:has(h3:text("購物金溢價率"))' });
 
 // ══ 備份 ══
 const dir2 = shotsDir("16-backup");

@@ -56,9 +56,9 @@ export function SettingsForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // 「已儲存」只在沒有新的未存變更時顯示（見下方 success && !dirty），不必在 effect 裡清掉。
   useEffect(() => {
     onDirtyChange(formKey, dirty);
-    if (dirty) setSuccess(false);
   }, [formKey, dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(formKey, false), [formKey, onDirtyChange]);
 
@@ -120,11 +120,13 @@ export function SettingsForm({
 
 /** 開關：標題＋一句「打開會怎樣」。仍是原生 checkbox（鍵盤、讀屏、測試都照舊）。 */
 export function SettingsSwitch({
+  name,
   label,
   description,
   checked,
   onChange,
 }: {
+  name: string;
   label: string;
   description?: string;
   checked: boolean;
@@ -135,6 +137,7 @@ export function SettingsSwitch({
       <input
         type="checkbox"
         role="switch"
+        name={name}
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
@@ -148,6 +151,7 @@ export function SettingsSwitch({
 }
 
 function NumberField({
+  name,
   label,
   value,
   onChange,
@@ -155,6 +159,7 @@ function NumberField({
   hint,
   inputMode = "numeric",
 }: {
+  name: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -167,6 +172,7 @@ function NumberField({
       <span className="field-label">{label}</span>
       <span className="settings-input-row">
         <input
+          name={name}
           aria-label={label}
           inputMode={inputMode}
           value={value}
@@ -222,6 +228,7 @@ export function InvoiceTaxForm({
       onDirtyChange={onDirtyChange}
     >
       <SettingsSwitch
+        name="einvoice_enabled"
         label="開電子發票"
         description="打開後，每筆交易結帳時會自動開電子發票；關掉時交易照常記錄、之後可以補開。"
         checked={einvoice}
@@ -260,6 +267,7 @@ export function InvoiceTaxForm({
         <span className="hint">只影響之後的交易，已開的發票照原本的方式處理。</span>
       </fieldset>
       <NumberField
+        name="tax_rate"
         label="營業稅率"
         value={tax}
         onChange={setTax}
@@ -317,7 +325,7 @@ export function PricingForm({
   return (
     <SettingsForm
       formKey="pricing"
-      title="收購與定價"
+      title="收購預設值"
       saveLabel="儲存收購與定價"
       dirty={dirty}
       build={build}
@@ -326,21 +334,24 @@ export function PricingForm({
     >
       <div className="settings-grid">
         <NumberField
-          label="收購目標毛利"
+          name="default_margin_pct"
+        label="收購目標毛利"
           value={margin}
           onChange={setMargin}
           suffix="%"
           hint="折數鑑價先扣掉稅與支付手續費，再照這個毛利算收購價。"
         />
         <NumberField
-          label="採購目標毛利"
+          name="purchase_default_margin_pct"
+        label="採購目標毛利"
           value={purchaseMargin}
           onChange={setPurchaseMargin}
           suffix="%"
           hint="採購建立商品時先帶的毛利，每件還能各自調。"
         />
         <NumberField
-          label="寄售抽成"
+          name="default_commission_pct"
+        label="寄售抽成"
           value={commission}
           onChange={setCommission}
           suffix="%"
@@ -348,12 +359,14 @@ export function PricingForm({
         />
       </div>
       <SettingsSwitch
+        name="require_acquisition_affidavit"
         label="收購付錢前一定要客人簽名"
         description="客人要先在顧客螢幕簽切結書才能付款（收購頁與排隊收購都適用）。關掉時可以不簽直接付。"
         checked={affidavit}
         onChange={setAffidavit}
       />
       <SettingsSwitch
+        name="auto_print_acquisition_labels"
         label="收購送出後自動印標籤"
         description="櫃台沒接標籤機時可以關掉，之後再從收購紀錄補印。"
         checked={autoPrint}
@@ -378,7 +391,10 @@ export function StoreCreditBasicsForm({
   const initialOutflow = ntdText(settings.monthly_fixed_cash_outflow);
   const [minSpend, setMinSpend] = useState(initialMinSpend);
   const [outflow, setOutflow] = useState(initialOutflow);
-  const dirty = minSpend.trim() !== initialMinSpend || outflow.trim() !== initialOutflow;
+  // 以金額比較：畫面顯示 "60,000"，店主打 "60000" 是同一個數字，不算沒存。
+  const dirty =
+    parseNtd(minSpend) !== parseNtd(settings.store_credit_min_spend) ||
+    parseNtd(outflow) !== parseNtd(settings.monthly_fixed_cash_outflow);
 
   function build(): BuildResult {
     const ms = parseNtd(minSpend);
@@ -404,14 +420,16 @@ export function StoreCreditBasicsForm({
     >
       <div className="settings-grid">
         <NumberField
-          label="購物金低消門檻"
+          name="store_credit_min_spend"
+        label="購物金低消門檻"
           value={minSpend}
           onChange={setMinSpend}
           suffix="元"
           hint="非餐飲消費沒到這個金額就不能用購物金折抵；0＝不限制。"
         />
         <NumberField
-          label="每月固定現金支出"
+          name="monthly_fixed_cash_outflow"
+        label="每月固定現金支出"
           value={outflow}
           onChange={setOutflow}
           suffix="元"
@@ -456,7 +474,7 @@ export function AdvancedForm({
   return (
     <SettingsForm
       formKey="advanced"
-      title="其他"
+      title="權限與資料保存"
       saveLabel="儲存其他設定"
       dirty={dirty}
       build={build}
@@ -464,12 +482,14 @@ export function AdvancedForm({
       onDirtyChange={onDirtyChange}
     >
       <SettingsSwitch
+        name="allow_clerk_manage_categories"
         label="店員可以管理商品分類"
         description="打開後店員也能新增、改名分類；關掉時只有店長可以。"
         checked={clerkCategories}
         onChange={setClerkCategories}
       />
       <NumberField
+        name="signature_png_retention_days"
         label="簽名圖檔保留天數"
         value={retention}
         onChange={setRetention}

@@ -11,7 +11,7 @@ await page.waitForTimeout(2000);
 // 溢價率是金錢級設定：快照原值、finally 還原並讀回驗證（不假設原本就是 10%）
 await withSettings(["premium_rate"], async (original) => {
 note(`溢價率原值：${original.premium_rate}`);
-const card = page.locator('.card:has(h2:text("溢價率設定"))');
+const card = page.locator('.card:has(h3:text("購物金溢價率"))');
 const premiumInput = card.locator("input").last();
 await premiumInput.fill("12");
 await card.locator('button:has-text("儲存溢價率")').click();
@@ -21,9 +21,9 @@ await page.fill('.settings-confirm-dialog input', "操作手冊示範：調高�
 await shot(page, "premium-confirm", { locator: ".settings-confirm-dialog" });
 await page.click('.settings-confirm-dialog button:has-text("確認")');
 await page.waitForTimeout(2500);
-await shot(page, "premium-saved", { locator: '.card:has(h2:text("溢價率設定"))' });
+await shot(page, "premium-saved", { locator: '.card:has(h3:text("購物金溢價率"))' });
 await shot(page, "premium-history", { locator: '.card:has(h2:text("溢價率變更紀錄"))' });
-await shot(page, "signature-retention", { locator: '.card:has(h2:text("可清除的簽名圖檔"))' });
+await shot(page, "signature-retention", { locator: '.card:has(h3:text("可清除的簽名圖檔"))' });
 note(`變更紀錄：${(await page.textContent('.card:has(h2:text("溢價率變更紀錄"))'))?.replace(/\s+/g, " ").slice(0, 200)}`);
 
 });

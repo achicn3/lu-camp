@@ -1186,7 +1186,7 @@ function SettingsLayout({
                 <a href={`#settings-${section.id}`}>
                   {section.title}
                   {dirtySections.has(section.id) && (
-                    <span className="settings-nav-dot" aria-label="有未儲存的變更" />
+                    <span className="settings-nav-dot" role="img" aria-label="有未儲存的變更" />
                   )}
                 </a>
               </li>
@@ -1306,7 +1306,7 @@ export default function SettingsPage() {
       <SettingsSection id="store-credit" title="購物金">
         <StoreCreditBasicsForm
           settings={settings}
-          onSaved={refreshPremiumSettings}
+          onSaved={refreshSettings}
           onDirtyChange={reportDirty}
         />
         {premium}

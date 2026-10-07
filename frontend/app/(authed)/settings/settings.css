@@ -406,3 +406,7 @@
   color: var(--accent);
   font-weight: 600;
 }
+/* 單獨一欄的數字（稅率、保留天數）不必拉滿整張卡 */
+.settings-fields > .settings-number {
+  max-width: 280px;
+}

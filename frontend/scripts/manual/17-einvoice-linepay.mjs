@@ -48,14 +48,14 @@ await withSettings(["einvoice_enabled", "linepay_enabled"], async () => {
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2000);
 await page.locator('input[name="einvoice_enabled"]').check();
-await page.click('button:has-text("儲存一般設定")');
+await page.click('button:has-text("儲存發票設定")');
 await page.waitForTimeout(2000);
-await shot(page, "settings-einvoice-on", { locator: '.card:has(h2:text("一般設定"))' });
+await shot(page, "settings-einvoice-on", { locator: 'form[aria-label="電子發票"]' });
 
-await page.locator('.card:has(h2:text("行動支付設定")) input[type="checkbox"]').first().check();
+await page.locator('.card:has(h3:text("行動支付")) input[type="checkbox"]').first().check();
 await page.click('button:has-text("儲存行動支付設定")');
 await page.waitForTimeout(2000);
-await shot(page, "settings-linepay-on", { locator: '.card:has(h2:text("行動支付設定"))' });
+await shot(page, "settings-linepay-on", { locator: '.card:has(h3:text("行動支付"))' });
 
 // 2) POS：發票欄位與 LINE Pay 選項
 await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });

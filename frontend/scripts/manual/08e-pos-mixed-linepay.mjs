@@ -56,7 +56,7 @@ await withSettings(["linepay_enabled"], async () => {
 // 1) 啟用 LINE Pay
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
-await page.locator('.card:has(h2:text("行動支付設定")) input[type="checkbox"]').first().check();
+await page.locator('.card:has(h3:text("行動支付")) input[type="checkbox"]').first().check();
 await page.click('button:has-text("儲存行動支付設定")');
 await page.waitForTimeout(2500);
 note("已啟用 LINE Pay");

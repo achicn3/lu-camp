@@ -98,7 +98,7 @@ async function setMinSpend(value) {
   const inp = page.locator('input[name="store_credit_min_spend"]');
   await inp.waitFor();
   await inp.fill(String(value));
-  await page.click('button:has-text("儲存一般設定")');
+  await page.click('button:has-text("儲存購物金設定")');
   await page.waitForTimeout(1200); // 等 PATCH 完成（成功訊息會隨重抓重繪而閃逝，不可靠）
   // 重新載入設定頁，確認伺服器已持久化（輸入框顯示千分位格式化的已存值）。
   await nav("設定", "/settings");

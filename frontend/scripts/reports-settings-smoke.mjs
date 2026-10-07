@@ -117,7 +117,7 @@ try {
       await cp.waitForTimeout(1000);
       const t = await cp.innerText("body");
       assert(/需管理者權限/.test(t), `CLERK blocked from ${path} (需管理者權限)`);
-      assert(!/一般設定|放了多久/.test(t), `CLERK sees no manager content on ${path}`);
+      assert(!/發票與稅|收購與定價|放了多久/.test(t), `CLERK sees no manager content on ${path}`);
     }
     await cp.screenshot({ path: `${SHOTS}/settings-clerk-blocked.png`, fullPage: true });
     console.log("  shot: settings-clerk-blocked.png");
