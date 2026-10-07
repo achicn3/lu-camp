@@ -90,6 +90,7 @@ try {
 
   // 1. 菜單頁：用表單建兩個群組
   await page.goto(`${BASE}/menu`, { waitUntil: "networkidle" });
+  await page.getByRole("tab", { name: "選項群組", exact: true }).click();
   await createGroup(tempGroup, 1, 1, ["熱", "冰"]);
   await createGroup(extraGroup, 0, 2, ["燕麥奶 +20", "濃縮 +30", "香草 +15"]);
   const groupPosts = writes.filter((w) => w.method === "POST" && w.url.endsWith("/menu-option-groups"));
@@ -121,6 +122,7 @@ try {
   await extra.screenshot({ path: `${SHOTS}/opt-01-group-card.png` });
 
   // 2. 品項掛群組＋介紹
+  await page.getByRole("tab", { name: "品項", exact: true }).click();
   await page.getByRole("button", { name: `${latteName} 選項與介紹` }).click();
   const dialog = page.getByRole("dialog", { name: `${latteName} 的選項與介紹` });
   await dialog.getByRole("checkbox", { name: new RegExp(tempGroup) }).check();

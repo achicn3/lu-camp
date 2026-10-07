@@ -1,6 +1,6 @@
 // 線上點餐電子菜單瀏覽器煙霧（docs/44 §3.5、§4.2；O3）：
 // POS 菜單頁按「發佈到線上點餐」→ 菜單、照片、手寫字型子集、桌位碼推到雲端（本機 wrangler dev）
-// → 手機尺寸打開 /t/<桌位碼>：先看到滿版 logo、淡出後是點餐頁（桌號、問候、分類、照片、售完、選項）
+// → 手機尺寸打開 /t/<桌位碼>：先是首頁，點「全部」查看完整菜單（桌號、問候、分類、售完、選項）
 // → 失效的桌位碼顯示說明 → 公開菜單裡沒有成本。
 //
 // 需三個服務已起且指向隔離測試庫（SMOKE_ALLOW_WRITE=1）：
@@ -81,6 +81,7 @@ try {
 
   // 1. POS 菜單頁按發佈
   await desk.goto(`${BASE}/menu`, { waitUntil: "networkidle" });
+  await desk.getByRole("tab", { name: "線上發布", exact: true }).click();
   const panel = desk.getByRole("region", { name: "線上點餐" });
   await panel.getByRole("button", { name: "發佈到線上點餐" }).click();
   const notice = panel.getByText(/已發佈 \d+ 道菜/);
@@ -106,12 +107,9 @@ try {
     if (/Content Security Policy/i.test(msg.text())) csp.push(msg.text());
   });
   await phone.goto(a1.url.replace(/^https?:\/\/[^/]+/, ORDER));
-  await phone.waitForTimeout(250);
-  ok("一打開先是滿版 logo", await phone.locator("#splash").isVisible());
-  await phone.screenshot({ path: `${SHOTS}/online-02-splash.png` });
-  await phone.waitForFunction(() => document.body.classList.contains("entered"), null, { timeout: 5000 });
-  await phone.waitForTimeout(800);
-  ok("約 1.2 秒後進入點餐頁", !(await phone.locator("#splash").isVisible()));
+  await phone.locator("#menu-home").waitFor();
+  ok("一打開即顯示露坑首頁", await phone.locator("#menu-home").isVisible());
+  await phone.screenshot({ path: `${SHOTS}/online-02-home.png` });
   ok("顯示桌號", (await phone.locator("#table").textContent()) === "桌 A1");
   const greet = await phone.locator("#greeting").textContent();
   ok("顯示時段問候", /^(早安|午安|晚安)，/.test(greet ?? ""), greet);
@@ -119,11 +117,16 @@ try {
     timeout: 10000,
   });
   ok("手寫字型子集載入", true);
-  const cakeRow = phone.locator(".item", { hasText: `戚風-${run}` });
-  ok("每日限量沒填份數＝今日售完", (await cakeRow.textContent()).includes("今日售完"));
+  const all = phone.locator("#tabs").getByRole("button", { name: "全部", exact: true });
+  await all.click();
+  ok("點全部顯示完整菜單", (await all.getAttribute("aria-pressed")) === "true");
+  const cakeRow = phone.locator("#list .item", { hasText: `戚風-${run}` });
+  await cakeRow.locator(".item-badge-off").waitFor();
+  ok("每日限量沒填份數＝今日售完", (await cakeRow.locator(".item-badge-off").textContent()) === "今日售完");
+  ok("售完不能加入", await cakeRow.locator(".item-add").isDisabled());
   await phone.screenshot({ path: `${SHOTS}/online-03-menu.png` });
 
-  await phone.locator(".item", { hasText: `拿鐵-${run}` }).click();
+  await phone.locator("#list .item", { hasText: `拿鐵-${run}` }).locator(".item-detail").click();
   const sheet = phone.getByRole("dialog");
   await sheet.waitFor();
   ok("點品項看到選項", (await sheet.textContent()).includes(`溫度-${run}`));

@@ -50,11 +50,12 @@ try {
   ok("菜單管理清單載入", true);
   await page.screenshot({ path: `${SHOTS}/m4-01-list.png` });
 
-  // 新增品項
+  // 新增品項按需展開，提交後表單仍可繼續新增。
+  await page.getByRole("button", { name: "新增品項", exact: true }).click();
   await page.getByLabel("品名").fill(uniqueName);
   await page.getByLabel("售價（整數元）").fill("250");
   await page.getByLabel("分類（選填）").fill("點心");
-  await page.click('button:has-text("新增品項")');
+  await page.getByRole("button", { name: "新增品項", exact: true }).click();
   await page.waitForSelector(`tr:has-text("${uniqueName}")`);
   ok("新增品項出現於清單", true, uniqueName);
   await page.screenshot({ path: `${SHOTS}/m4-02-created.png` });
@@ -85,7 +86,8 @@ try {
   const margin = Number(settings.purchase_default_margin_pct);
   const cost = 60;
   // 與 CLAUDE.md §7.9 同式，在腳本內獨立算一次（不引用產品程式碼，否則錯一起錯）
-  const expectedPrice = String(Math.round((cost / (1 - margin / 100)) * (1 + tax) / (1 - fee * (1 + tax))));
+  const wholePrice = Math.round((cost / (1 - margin / 100)) * (1 + tax) / (1 - fee * (1 + tax)));
+  const expectedPrice = String(Math.ceil(wholePrice / 10) * 10);
 
   await page.getByLabel("品名").fill(costName);
   await page.getByLabel("成本（整數元，選填）").fill(String(cost));
@@ -97,7 +99,7 @@ try {
   ok("填成本後自動帶出建議售價", true, `NT$${expectedPrice}（成本 ${cost}／毛利 ${margin}%）`);
   await page.screenshot({ path: `${SHOTS}/m4-04-suggested-price.png` });
 
-  await page.click('button:has-text("新增品項")');
+  await page.getByRole("button", { name: "新增品項", exact: true }).click();
   await page.waitForSelector(`tr:has-text("${costName}")`);
   const created = sentBodies.find((r) => r.method === "POST" && r.body?.name === costName);
   if (!created) throw new Error("沒攔到新增品項的 POST");
@@ -106,7 +108,7 @@ try {
   ok("新增送出的 body 帶成本與建議售價", true, JSON.stringify({ unit_cost: created.body.unit_cost, unit_price: created.body.unit_price }));
 
   const costRow = page.locator(`tr:has-text("${costName}")`);
-  const marginCell = (await costRow.locator("td").nth(4).textContent()) ?? "";
+  const marginCell = (await costRow.locator("td").nth(5).textContent()) ?? "";
   const price = Number(expectedPrice);
   const expectedMarginPct = (() => {
     const net = Math.round(price / (1 + tax)) - Math.round(price * fee);
