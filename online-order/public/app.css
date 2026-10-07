@@ -16,12 +16,13 @@
   --line: #24262a;
   --gold: #c8a96a;
   --photo: #1d1f22;
-  --hand: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
-  --num: "Cormorant Italic", "Times New Roman", serif;
+  --ui: system-ui, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --hand: var(--ui);
+  --brand-latin: "Cormorant Italic", "Times New Roman", serif;
   --logo: url("/brand/logo-ink.png");
 }
 .hand-font-ready {
-  --hand: "LukengHand", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --hand: "LukengHand", var(--ui);
 }
 
 * { box-sizing: border-box; }
@@ -29,13 +30,13 @@
 [hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body {
-  font-family: var(--hand);
-  font-size: 19px;
+  font-family: var(--ui);
+  font-size: 16px;
   line-height: 1.6;
   min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
 }
-button, input, textarea { font: inherit; color: inherit; }
+button, input, textarea { font: inherit; line-height: 1.5; color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 .logo {
@@ -58,7 +59,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .bar-logo { width: 30px; height: 40px; flex: none; }
 .bar-name { display: grid; line-height: 1.2; }
 .bar-name b { font-weight: 400; font-size: 25px; letter-spacing: 0.08em; }
-.bar-name small { font-family: var(--num); font-style: italic; font-size: 16px; color: var(--gold); letter-spacing: 0.04em; }
+.bar-name small { font-family: var(--brand-latin); font-style: italic; font-size: 16px; color: var(--gold); letter-spacing: 0.04em; }
 .bar-table {
   margin-left: auto;
   padding: 3px 10px;
@@ -109,14 +110,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .item-name { font-size: 23px; letter-spacing: 0.03em; }
 .item-desc { font-size: 17px; color: var(--soft); }
 .item-price, .sheet-price {
-  font-family: var(--num);
-  font-style: italic;
-  font-weight: 600;
+  font-family: var(--ui);
+  font-style: normal;
+  font-weight: 500;
   font-variant-numeric: lining-nums tabular-nums;
   color: var(--gold);
-  font-size: 22px;
+  font-size: 18px;
+  line-height: 1.5;
 }
-.price-from { font-family: var(--hand); font-style: normal; font-weight: 400; font-size: 0.8em; }
+.price-from { font-family: var(--ui); font-style: normal; font-weight: 400; font-size: 0.8em; }
 .item-badge { font-size: 17px; color: var(--gold); white-space: nowrap; }
 .item-badge-off { color: var(--soft); }
 
@@ -135,18 +137,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .footer-action { width: min(100%, 604px); border: 0; background: none; color: var(--gold); cursor: pointer; }
 
 .view-title { margin: 4px 0 18px; font-weight: 400; font-size: 38px; letter-spacing: .06em; }
-.eyebrow { margin: 28px 0 0; color: var(--gold); font-family: var(--num); font-style: italic; }
+.eyebrow { margin: 28px 0 0; color: var(--gold); font-family: var(--ui); }
 .back-link { margin: 18px 0 0; padding: 8px 0; border: 0; background: none; color: var(--gold); cursor: pointer; }
 .action { display: block; width: 100%; margin: 20px 0; padding: 13px 18px; border: 1px solid var(--gold); border-radius: 3px; background: var(--gold); color: var(--bg); cursor: pointer; text-align: center; }
 .action:hover { background: #dfc084; }
 .quiet-action { padding: 8px; border: 0; background: none; color: var(--gold); cursor: pointer; }
 .empty-state, .order-hint { color: var(--soft); }
 .cart-line { display: flex; justify-content: space-between; gap: 15px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.cart-line > div:first-child { display: grid; align-content: start; gap: 5px; }
-.cart-line b { font-weight: 400; }
+.cart-line > div:first-child { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.cart-line b { font-weight: 400; overflow-wrap: anywhere; }
 .cart-controls { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .qty-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 2px; background: var(--photo); cursor: pointer; }
-.cart-total { margin: 22px 0; padding-top: 14px; border-top: 1px solid var(--gold); color: var(--gold); font-size: 27px; text-align: right; }
+.cart-total { margin: 22px 0; padding-top: 14px; border-top: 1px solid var(--gold); color: var(--gold); font-size: 22px; line-height: 1.5; font-variant-numeric: tabular-nums; text-align: right; }
 .note-label { display: grid; gap: 8px; margin: 26px 0 8px; }
 .note-label textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); resize: vertical; }
 .payment-note { color: var(--soft); }
@@ -182,14 +184,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sheet-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block; }
 .sheet-title { margin: 16px 0 4px; font-weight: 400; font-size: 31px; letter-spacing: 0.04em; }
 .sheet-desc { margin: 0 0 6px; color: var(--soft); }
-.sheet-price { margin: 0 0 12px; font-size: 25px; }
+.sheet-price { margin: 0 0 12px; font-size: 20px; }
 .sheet-note { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--soft); }
 .sheet-open { overflow: hidden; }
 .opt-group { margin: 0; padding: 10px 0; border: 0; border-top: 1px solid var(--line); line-height: 1.8; }
 .opt-group-name { font-size: 21px; }
 .opt-group-rule { font-size: 16px; color: var(--soft); }
 .opt-off { color: var(--soft); }
-.opt-extra { font-family: var(--num); font-style: italic; color: var(--gold); }
+.opt-extra { font-family: var(--ui); font-variant-numeric: tabular-nums; color: var(--gold); }
 .opt-choice { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 3px 0; cursor: pointer; }
 .opt-choice:has(input:disabled) { cursor: default; opacity: .55; }
 .opt-choice input { width: 20px; height: 20px; accent-color: var(--gold); }
@@ -198,7 +200,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .detail-controls .action { margin: 0; }
 .qty-input { width: 68px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); text-align: center; }
 
-@media (max-width: 390px) {
+@media (max-width: 480px) {
   .cart-line { flex-wrap: wrap; }
   .cart-controls { width: 100%; justify-content: flex-end; }
 }
@@ -207,14 +209,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   html { scroll-behavior: auto; }
 }
 
-.item-flavor, .item-audience, .item-labels { display: block; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6; margin-top: 5px; }
+.item-flavor, .item-audience, .item-labels { display: block; font-family: var(--ui); font-size: 14px; line-height: 1.6; margin-top: 5px; }
 .item-flavor { color: var(--ink); }
 .item-audience { color: var(--soft); }
 .item-labels { color: var(--gold); font-size: 12px; letter-spacing: .04em; }
 
 /* M1b：先選一個方向，再看完整品項。沿用夜墨、霧金與手寫標題。 */
 .welcome { padding: 32px 0 28px; }
-.welcome .greeting { margin: 0 0 12px; font-family: system-ui, sans-serif; font-size: 14px; color: var(--soft); letter-spacing: .02em; }
+.welcome .greeting { margin: 0 0 12px; font-family: var(--ui); font-size: 14px; color: var(--soft); letter-spacing: .02em; }
 .welcome-title { font-size: clamp(36px, 9vw, 48px); font-weight: 400; line-height: 1.35; margin: 0 0 28px; letter-spacing: .06em; }
 .welcome-dot { color: var(--gold); }
 .shortcuts { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -222,7 +224,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .shortcut:first-child { border-color: var(--gold); }
 .section-heading { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
 .section-heading h2, .catalog-title { font-size: 24px; font-weight: 400; margin: 16px 0 8px; }
-.section-heading > span { font-family: system-ui, sans-serif; font-size: 12px; color: var(--soft); }
+.section-heading > span { font-family: var(--ui); font-size: 12px; color: var(--soft); }
 #recommendations { scroll-margin-top: 90px; }
 .recommended-list { gap: 12px; }
 .recommended-list .item { padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #151719; }
@@ -233,18 +235,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .item-detail { display: flex; flex-direction: row-reverse; align-items: flex-start; gap: 16px; padding: 0; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; min-height: 44px; }
 .item-text { flex: 1; overflow-wrap: anywhere; }
 .item-photo { flex: none; width: 76px; height: 76px; }
-.item-name { font-size: 25px; line-height: 1.4; }
-.item-desc { font-family: system-ui, sans-serif; font-size: 14px; }
+.item-name, .cart-line b { font-family: var(--hand); font-size: 25px; line-height: 1.4; letter-spacing: .03em; }
+.item-desc { font-family: var(--ui); font-size: 14px; }
 .item-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
 .item-actions > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
-.item-badge { font-family: system-ui, sans-serif; font-size: 12px; }
-.item-add { flex: none; min-height: 44px; min-width: 72px; padding: 8px 14px; font-family: system-ui, sans-serif; font-size: 14px; border: 1px solid var(--gold); border-radius: 4px; color: var(--gold); background: none; cursor: pointer; }
+.item-badge { font-family: var(--ui); font-size: 12px; }
+.item-add { flex: none; min-height: 44px; min-width: 72px; padding: 8px 14px; font-family: var(--ui); font-size: 14px; border: 1px solid var(--gold); border-radius: 4px; color: var(--gold); background: none; cursor: pointer; }
 .item-add:disabled { color: var(--soft); border-color: var(--line); cursor: default; }
 .footer-action, .qty-button, .quiet-action, .back-link { min-height: 44px; }
 .qty-button { min-width: 44px; }
-.cart-feedback { position: fixed; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); left: 18px; right: 18px; z-index: 6; margin: 0 auto; width: fit-content; max-width: calc(100% - 36px); background: var(--photo); color: var(--ink); font: 13px/1.5 system-ui, sans-serif; border-radius: 4px; }
+.cart-feedback { position: fixed; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); left: 18px; right: 18px; z-index: 6; margin: 0 auto; width: fit-content; max-width: calc(100% - 36px); background: var(--photo); color: var(--ink); font: 13px/1.5 var(--ui); border-radius: 4px; }
 .cart-feedback:not(:empty) { padding: 8px 14px; }
 .sheet-title { padding-right: 34px; overflow-wrap: anywhere; }
 .sheet { overscroll-behavior: contain; }
 
-.shortcut, .tab, .footer-action, .back-link { font-family: system-ui, sans-serif; }
+.shortcut, .tab, .footer-action, .back-link { font-family: var(--ui); }
+
+/* 手寫體只承擔品牌與商品名稱；操作、數量與金額共用同一套字體基線。 */
+.bar-name b, .welcome-title, .view-title, .section-heading h2, .catalog-title, .sheet-title { font-family: var(--hand); line-height: 1.4; }
+.cart-controls { font-variant-numeric: tabular-nums; line-height: 1.5; }
+.cart-controls > span { min-width: 2ch; text-align: center; }
+.qty-button { display: inline-grid; place-items: center; padding: 0; font-size: 16px; }
+.qty-input { font-variant-numeric: tabular-nums; }
