@@ -23,7 +23,7 @@
 
 ## 2. 升級步驟
 
-照 docs/43 §3 的指令依序做。`alembic current` 應顯示 **`d8f2a4c6e901 (head)`**。
+照 docs/43 §3 的指令依序做。`alembic current` 應顯示 **`d8f2a4c6e901 (head)`**；若同時拉到 docs/65（購物金不課稅）的版本，會顯示 **`e3a9c5d1f7b2 (head)`**，兩者都正確。
 
 ## 3. 驗證（每一項都回報結果）
 

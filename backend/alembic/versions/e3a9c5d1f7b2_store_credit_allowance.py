@@ -8,7 +8,7 @@
 - einvoice_upload_queue.action 加 `ALLOWANCE_VOID`（G0501 作廢折讓）。
 
 Revision ID: e3a9c5d1f7b2
-Revises: c4e8a2f6b1d3
+Revises: d8f2a4c6e901
 """
 
 import sqlalchemy as sa
@@ -16,7 +16,7 @@ from alembic import op
 from sqlalchemy.engine import Connection
 
 revision = "e3a9c5d1f7b2"
-down_revision = "c4e8a2f6b1d3"
+down_revision = "d8f2a4c6e901"
 branch_labels = None
 depends_on = None
 
