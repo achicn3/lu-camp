@@ -293,9 +293,7 @@ async def update_retail_listing(
 )
 async def delete_retail_listing(listing_id: int, session: SessionDep, user: ManagerDep) -> None:
     try:
-        await RetailListingService(session).delete(
-            user.store_id, listing_id, actor_user_id=user.id
-        )
+        await RetailListingService(session).delete(user.store_id, listing_id, actor_user_id=user.id)
     except _RETAIL_ERRORS as exc:
         await session.rollback()
         raise _retail_error(exc) from exc
