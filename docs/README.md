@@ -61,6 +61,8 @@
 - [MacBook 正式機：升級到 2026-10-08 版（購物金一律扣掉後開發票）](./67-macbook-upgrade-store-credit-deduct-only.md)
 - [MacBook 正式機：升級到 2026-10-08 版（線上點餐「帶回家」零售商品＋交貨）](./68-macbook-upgrade-online-retail.md)
 - [MacBook 正式機：升級到 2026-10-08 版（線上點餐 LINE Pay 付款）](./69-macbook-upgrade-online-linepay.md)
+- [採購單事後修改＋進項發票獨立登錄（設計）](./70-purchasing-edit-and-input-invoices.md)
+- [MacBook 正式機：升級到 2026-10-08 版（採購單可修改＋進項發票）](./71-macbook-upgrade-purchasing-edit.md)
 
 ## 評估與後續實作
 
