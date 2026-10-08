@@ -6200,6 +6200,7 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+}
 /* POS 線上訂單（docs/44 §4.3；O4c） */
 .pos-title-row {
   display: flex;
