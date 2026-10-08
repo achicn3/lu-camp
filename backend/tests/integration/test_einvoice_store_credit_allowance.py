@@ -37,13 +37,14 @@ from app.shared.enums import (
     EInvoiceMessageType,
     InvoiceAllowanceSource,
     InvoiceStatus,
+    InvoiceVoidReason,
     SaleInvoiceStatus,
     SaleLineType,
     StoreCreditInvoiceMode,
     TenderType,
     UploadStatus,
 )
-from app.shared.exceptions import AmegoTransportError
+from app.shared.exceptions import AmegoTransportError, EInvoiceQueueNotRetryable
 from tests.integration.customer_display_helpers import (
     prepare_signed_store_credit_cart,
     signed_return_consent,
@@ -565,3 +566,49 @@ async def test_invoice_void_waits_until_platform_finishes_allowance_void(
         {"code": 0, "msg": ""},
     )
     assert (await _invoice(db_session, sale_id)).status is InvoiceStatus.VOID
+
+
+async def test_rejected_allowance_void_can_be_retried_and_then_voids_the_invoice(
+    db_session: AsyncSession,
+) -> None:
+    """G0501 被平台退回：發票停在作廢中，店員要能重送 G0501（Codex 第一輪 high）。
+
+    「作廢中不可再送折讓」只擋開立折讓（G0401）；作廢折讓正是作廢流程的一步，擋了就卡死。
+    """
+    store_id, clerk_id, sale_id = await _mixed_sale(db_session)
+    await _issue(db_session, store_id)
+    [g0401] = _pending(await _queue(db_session, store_id), EInvoiceAction.ALLOWANCE)
+    await _send(
+        db_session, store_id, g0401, dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 0, "msg": ""}
+    )
+    await _void_sale(db_session, store_id, clerk_id, sale_id)
+    [g0501] = _pending(await _queue(db_session, store_id), EInvoiceAction.ALLOWANCE_VOID)
+    await _send(db_session, store_id, g0501, _allowance_exists(286, 14), {"code": 1, "msg": "拒"})
+    await db_session.refresh(g0501)
+    assert g0501.status is UploadStatus.FAILED
+    assert (await _invoice(db_session, sale_id)).status is InvoiceStatus.VOID_PENDING
+
+    retried = await EInvoiceService(db_session).retry(store_id, g0501.id)
+    assert retried.status is UploadStatus.PENDING
+    await _send(db_session, store_id, retried, _allowance_exists(286, 14), {"code": 0, "msg": ""})
+    [allowance] = await _allowances(db_session, sale_id)
+    assert allowance.voided is True
+    assert len(_pending(await _queue(db_session, store_id), EInvoiceAction.VOID)) == 1
+
+
+async def test_allowance_issue_still_cannot_be_retried_while_invoice_is_voiding(
+    db_session: AsyncSession,
+) -> None:
+    """既有規則不變：發票作廢中，失敗的開立折讓（G0401）仍不可重送（不可既作廢又折讓）。"""
+    store_id, _clerk_id, sale_id = await _mixed_sale(db_session)
+    await _issue(db_session, store_id)
+    [g0401] = _pending(await _queue(db_session, store_id), EInvoiceAction.ALLOWANCE)
+    await _send(
+        db_session, store_id, g0401, dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 1, "msg": "拒"}
+    )
+    invoice = await _invoice(db_session, sale_id)
+    invoice.status = InvoiceStatus.VOID_PENDING
+    invoice.void_reason = InvoiceVoidReason.SALE_VOID
+    await db_session.flush()
+    with pytest.raises(EInvoiceQueueNotRetryable):
+        await EInvoiceService(db_session).retry(store_id, g0401.id)

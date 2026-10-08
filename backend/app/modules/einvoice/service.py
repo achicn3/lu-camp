@@ -1695,14 +1695,18 @@ class EInvoiceService:
                 raise EInvoiceQueueNotRetryable(
                     f"折讓 {allowance.id} 已作廢，折讓訊息不可重送（此列維持 FAILED 供稽核）"
                 )
-            # 母發票已進入作廢流程 → 折讓不可再送（Codex 對抗審查 #1）：否則會同時對同一張
+            # 母發票已進入作廢流程 → 開立折讓不可再送（Codex 對抗審查 #1）：否則會同時對同一張
             # 發票送出 G0401 與 F0501，帳目自相矛盾且無法事後判斷孰先孰後。
+            # **作廢折讓（G0501）例外**：它本身就是整筆作廢的第一步（ADR-029），發票作廢中
+            # 被平台退回時要能重送，否則作廢永遠卡住（Codex 第一輪 high）。發票已作廢則不必再送。
+            blocked = (
+                (InvoiceStatus.VOID,)
+                if item.action is EInvoiceAction.ALLOWANCE_VOID
+                else (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING)
+            )
             if allowance is not None:
                 parent = await self._repo.get_invoice(store_id, allowance.invoice_id)
-                if parent is not None and parent.status in (
-                    InvoiceStatus.VOID,
-                    InvoiceStatus.VOID_PENDING,
-                ):
+                if parent is not None and parent.status in blocked:
                     raise EInvoiceQueueNotRetryable(
                         "這張發票已經作廢（或正在作廢），不能再送折讓單——"
                         "同一張發票不可以既作廢又折讓。這筆折讓保留紀錄不再重送。"
