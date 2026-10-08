@@ -2,12 +2,13 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.presentation_schemas import (
@@ -17,6 +18,8 @@ from app.modules.onlineorder.presentation_schemas import (
     MenuPresentationUpdateRequest,
 )
 from app.modules.onlineorder.presentation_service import MenuPresentationService
+from app.modules.onlineorder.retail_schemas import RetailListingRead, RetailListingWriteRequest
+from app.modules.onlineorder.retail_service import RetailListingService
 from app.modules.onlineorder.schemas import (
     OnlineMenuPublishRead,
     OnlineOrderStatusRead,
@@ -25,10 +28,13 @@ from app.modules.onlineorder.schemas import (
 from app.modules.onlineorder.service import OnlineOrderService
 from app.shared.exceptions import (
     MenuItemNotFound,
+    MenuPhotoInvalid,
     OnlineExperienceInvalid,
     OnlineExperienceNotFound,
     OnlineOrderNotConfigured,
     OnlineOrderPushFailed,
+    OnlineRetailListingDuplicate,
+    OnlineRetailListingNotFound,
     OnlineTableNotFound,
 )
 
@@ -222,3 +228,123 @@ async def delete_menu_experience(experience_id: int, session: SessionDep, user: 
         await session.rollback()
         raise _experience_error(exc) from exc
     await session.commit()
+
+
+# ── 帶回家零售商品（docs/63 §13、M1d）──
+
+
+def _retail_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, OnlineRetailListingDuplicate):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, MenuPhotoInvalid):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+_RETAIL_ERRORS = (OnlineRetailListingDuplicate, OnlineRetailListingNotFound, MenuPhotoInvalid)
+
+
+@router.get("/retail", response_model=list[RetailListingRead], operation_id="listRetailListings")
+async def list_retail_listings(session: SessionDep, user: AuthDep) -> list[RetailListingRead]:
+    return await RetailListingService(session).list_for_store(user.store_id)
+
+
+@router.post(
+    "/retail",
+    response_model=RetailListingRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createRetailListing",
+)
+async def create_retail_listing(
+    body: RetailListingWriteRequest, session: SessionDep, user: ManagerDep
+) -> RetailListingRead:
+    try:
+        result = await RetailListingService(session).create(
+            user.store_id, body, actor_user_id=user.id
+        )
+    except _RETAIL_ERRORS as exc:
+        await session.rollback()
+        raise _retail_error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.put(
+    "/retail/{listing_id}", response_model=RetailListingRead, operation_id="updateRetailListing"
+)
+async def update_retail_listing(
+    listing_id: int, body: RetailListingWriteRequest, session: SessionDep, user: ManagerDep
+) -> RetailListingRead:
+    try:
+        result = await RetailListingService(session).update(
+            user.store_id, listing_id, body, actor_user_id=user.id
+        )
+    except _RETAIL_ERRORS as exc:
+        await session.rollback()
+        raise _retail_error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.delete(
+    "/retail/{listing_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteRetailListing",
+)
+async def delete_retail_listing(listing_id: int, session: SessionDep, user: ManagerDep) -> None:
+    try:
+        await RetailListingService(session).delete(
+            user.store_id, listing_id, actor_user_id=user.id
+        )
+    except _RETAIL_ERRORS as exc:
+        await session.rollback()
+        raise _retail_error(exc) from exc
+    await session.commit()
+
+
+@router.post(
+    "/retail/{listing_id}/photo",
+    response_model=RetailListingRead,
+    operation_id="uploadRetailListingPhoto",
+)
+async def upload_retail_listing_photo(
+    listing_id: int,
+    session: SessionDep,
+    user: ManagerDep,
+    file: Annotated[UploadFile, File(description="JPEG／PNG／WebP／HEIC，10 MB 以內")],
+) -> RetailListingRead:
+    """上傳／更換照片：轉成 WebP、長邊 1200、去掉 EXIF（含 GPS），同菜單品項照片。"""
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="照片超過 10 MB，請先縮小再上傳",
+        )
+    try:
+        result = await RetailListingService(session).set_photo(
+            user.store_id, listing_id, data, actor_user_id=user.id
+        )
+    except _RETAIL_ERRORS as exc:
+        await session.rollback()
+        raise _retail_error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.delete(
+    "/retail/{listing_id}/photo",
+    response_model=RetailListingRead,
+    operation_id="removeRetailListingPhoto",
+)
+async def remove_retail_listing_photo(
+    listing_id: int, session: SessionDep, user: ManagerDep
+) -> RetailListingRead:
+    try:
+        result = await RetailListingService(session).clear_photo(
+            user.store_id, listing_id, actor_user_id=user.id
+        )
+    except _RETAIL_ERRORS as exc:
+        await session.rollback()
+        raise _retail_error(exc) from exc
+    await session.commit()
+    return result

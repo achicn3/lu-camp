@@ -247,6 +247,21 @@ class MenuService:
         await self._change_photo(store_id, item, photo.sha256, actor_user_id)
         return item
 
+    async def store_photo(self, store_id: int, data: bytes) -> str:
+        """轉檔並存一張照片（不掛到任何品項），回傳內容雜湊；給線上帶回家商品共用（docs/63 §13）。
+
+        不合格的檔案丟 `MenuPhotoInvalid`。
+        """
+        photo = await process_photo_async(data)
+        await self._repo.save_photo(
+            store_id,
+            sha256=photo.sha256,
+            content=photo.content,
+            width=photo.width,
+            height=photo.height,
+        )
+        return photo.sha256
+
     async def clear_item_photo(
         self, store_id: int, item_id: int, *, actor_user_id: int
     ) -> MenuItem:

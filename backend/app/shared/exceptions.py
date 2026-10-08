@@ -599,6 +599,14 @@ class OnlineExperienceInvalid(DomainError):
     """手沖體驗卡的預選選項不合法（沒掛在該品項上、重複或超過群組上限）。"""
 
 
+class OnlineRetailListingNotFound(DomainError):
+    """線上帶回家商品不存在（或商品不屬於本店）。"""
+
+
+class OnlineRetailListingDuplicate(DomainError):
+    """同一個商品已經上線（一個商品只能有一筆帶回家設定）。"""
+
+
 class OnlineOrderNotConfigured(DomainError):
     """線上點餐尚未設定（沒有雲端網址或整合密鑰）。"""
 
