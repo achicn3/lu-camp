@@ -2831,6 +2831,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/experiences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Experiences */
+        get: operations["listMenuExperiences"];
+        put?: never;
+        /** Create Menu Experience */
+        post: operations["createMenuExperience"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/experiences/{experience_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Menu Experience */
+        put: operations["updateMenuExperience"];
+        post?: never;
+        /** Delete Menu Experience */
+        delete: operations["deleteMenuExperience"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/menu-items/{item_id}/presentation": {
         parameters: {
             query?: never;
@@ -4889,6 +4925,24 @@ export interface components {
             name: string;
         };
         /**
+         * BrewCardArt
+         * @description 手沖體驗卡的插畫（輕量 SVG，畫在客人頁）。NONE＝不放插畫。
+         * @enum {string}
+         */
+        BrewCardArt: "peach" | "vanilla" | "citrus" | "rum" | "none";
+        /**
+         * BrewCardTheme
+         * @description 手沖體驗卡的卡面配色（docs/63 §4；店主 2026-10-08 選定的展示稿）。
+         * @enum {string}
+         */
+        BrewCardTheme: "peach" | "honey" | "citrus" | "wine" | "forest" | "ink";
+        /**
+         * BrewDrawEffect
+         * @description 點手沖體驗卡時的抽卡動畫；RANDOM＝每次隨機挑一種。
+         * @enum {string}
+         */
+        BrewDrawEffect: "random" | "soar" | "truck" | "smash" | "seal" | "shuffle" | "bloom";
+        /**
          * BulkAcquisitionBasis
          * @description 散裝批收購計價基礎。
          * @enum {string}
@@ -6862,6 +6916,16 @@ export interface components {
             /** Take Rate */
             take_rate: string | null;
         };
+        /**
+         * ExperienceInclude
+         * @description 體驗包含的一項（例：咖啡豆／這支豆子現磨、單杯份量）。
+         */
+        ExperienceInclude: {
+            /** Detail */
+            detail?: string | null;
+            /** Title */
+            title: string;
+        };
         /** FlowRow */
         FlowRow: {
             /** Adjustment Net */
@@ -8499,6 +8563,81 @@ export interface components {
             /** Sort Order */
             sort_order?: number | null;
         };
+        /** MenuExperienceRead */
+        MenuExperienceRead: {
+            /** @default none */
+            art: components["schemas"]["BrewCardArt"];
+            /** Description */
+            description?: string | null;
+            /** @default random */
+            effect: components["schemas"]["BrewDrawEffect"];
+            /** Id */
+            id: number;
+            /** Includes */
+            includes?: components["schemas"]["ExperienceInclude"][];
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /** Notes */
+            notes?: string | null;
+            /** Option Ids */
+            option_ids?: number[];
+            /** Origin */
+            origin?: string | null;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /** Tag */
+            tag?: string | null;
+            /** @default peach */
+            theme: components["schemas"]["BrewCardTheme"];
+            /** Title */
+            title: string;
+        };
+        /**
+         * MenuExperienceWriteRequest
+         * @description 手沖體驗卡：引用既有品項＋預選選項；價格、成本、庫存一律來自原品項。
+         */
+        MenuExperienceWriteRequest: {
+            /** @default none */
+            art: components["schemas"]["BrewCardArt"];
+            /** Description */
+            description?: string | null;
+            /** @default random */
+            effect: components["schemas"]["BrewDrawEffect"];
+            /** Includes */
+            includes?: components["schemas"]["ExperienceInclude"][];
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /** Notes */
+            notes?: string | null;
+            /** Option Ids */
+            option_ids?: number[];
+            /** Origin */
+            origin?: string | null;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /** Tag */
+            tag?: string | null;
+            /** @default peach */
+            theme: components["schemas"]["BrewCardTheme"];
+            /** Title */
+            title: string;
+        };
         /** MenuItemCreateRequest */
         MenuItemCreateRequest: {
             /** Category */
@@ -8698,6 +8837,7 @@ export interface components {
             low_stock_threshold: number;
             /** Menu Item Id */
             menu_item_id: number;
+            role?: components["schemas"]["MenuUpsellRole"] | null;
             /**
              * Show Remaining
              * @default true
@@ -8735,6 +8875,7 @@ export interface components {
              * @default 5
              */
             low_stock_threshold: number;
+            role?: components["schemas"]["MenuUpsellRole"] | null;
             /**
              * Show Remaining
              * @default true
@@ -8755,6 +8896,14 @@ export interface components {
          * @enum {string}
          */
         MenuStockTarget: "item" | "option";
+        /**
+         * MenuUpsellRole
+         * @description 線上菜單的加購角色（docs/63 §6）：決定「配個甜的？」要推什麼，不猜品名關鍵字。
+         *
+         *     咖啡→甜點、甜點→咖啡、手沖體驗→咖啡豆／濾掛、咖啡豆→濾掛／其他豆款。
+         * @enum {string}
+         */
+        MenuUpsellRole: "coffee" | "dessert" | "experience" | "bean" | "drip" | "other";
         /**
          * NoteUpdateRequest
          * @description 改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。
@@ -16714,6 +16863,123 @@ export interface operations {
                 content: {
                     "image/webp": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMenuExperiences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuExperienceRead"][];
+                };
+            };
+        };
+    };
+    createMenuExperience: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuExperienceWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuExperienceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuExperience: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experience_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuExperienceWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuExperienceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteMenuExperience: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experience_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

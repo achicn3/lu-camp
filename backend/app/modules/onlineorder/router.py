@@ -9,7 +9,10 @@ from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.presentation_schemas import (
+    MenuExperienceRead,
+    MenuExperienceWriteRequest,
     MenuPresentationRead,
     MenuPresentationUpdateRequest,
 )
@@ -22,6 +25,8 @@ from app.modules.onlineorder.schemas import (
 from app.modules.onlineorder.service import OnlineOrderService
 from app.shared.exceptions import (
     MenuItemNotFound,
+    OnlineExperienceInvalid,
+    OnlineExperienceNotFound,
     OnlineOrderNotConfigured,
     OnlineOrderPushFailed,
     OnlineTableNotFound,
@@ -143,3 +148,77 @@ async def update_menu_presentation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     await session.commit()
     return result
+
+
+# ── 手沖體驗卡（docs/63 §4、M1c）──
+
+
+def _experience_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, OnlineExperienceInvalid):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+_EXPERIENCE_ERRORS = (MenuItemNotFound, OnlineExperienceInvalid, OnlineExperienceNotFound)
+
+
+@router.get(
+    "/experiences", response_model=list[MenuExperienceRead], operation_id="listMenuExperiences"
+)
+async def list_menu_experiences(session: SessionDep, user: AuthDep) -> list[MenuExperienceRead]:
+    return await MenuExperienceService(session).list_for_store(user.store_id)
+
+
+@router.post(
+    "/experiences",
+    response_model=MenuExperienceRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createMenuExperience",
+)
+async def create_menu_experience(
+    body: MenuExperienceWriteRequest, session: SessionDep, user: ManagerDep
+) -> MenuExperienceRead:
+    try:
+        result = await MenuExperienceService(session).create(
+            user.store_id, body, actor_user_id=user.id
+        )
+    except _EXPERIENCE_ERRORS as exc:
+        await session.rollback()
+        raise _experience_error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.put(
+    "/experiences/{experience_id}",
+    response_model=MenuExperienceRead,
+    operation_id="updateMenuExperience",
+)
+async def update_menu_experience(
+    experience_id: int, body: MenuExperienceWriteRequest, session: SessionDep, user: ManagerDep
+) -> MenuExperienceRead:
+    try:
+        result = await MenuExperienceService(session).update(
+            user.store_id, experience_id, body, actor_user_id=user.id
+        )
+    except _EXPERIENCE_ERRORS as exc:
+        await session.rollback()
+        raise _experience_error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.delete(
+    "/experiences/{experience_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteMenuExperience",
+)
+async def delete_menu_experience(experience_id: int, session: SessionDep, user: ManagerDep) -> None:
+    try:
+        await MenuExperienceService(session).delete(
+            user.store_id, experience_id, actor_user_id=user.id
+        )
+    except _EXPERIENCE_ERRORS as exc:
+        await session.rollback()
+        raise _experience_error(exc) from exc
+    await session.commit()

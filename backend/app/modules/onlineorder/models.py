@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Enum,
     ForeignKey,
     Index,
     Numeric,
@@ -22,6 +23,18 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+from app.shared.enums import BrewCardArt, BrewCardTheme, BrewDrawEffect, MenuUpsellRole
+
+
+def _choice(enum_cls: type) -> Enum:
+    """存小寫值（客人頁直接用），CHECK 約束擋掉不認得的值。"""
+    return Enum(
+        enum_cls,
+        native_enum=False,
+        length=20,
+        create_constraint=True,
+        values_callable=lambda e: [m.value for m in e],
+    )
 
 
 class OnlineMenuPresentation(Base, TimestampMixin):
@@ -47,6 +60,39 @@ class OnlineMenuPresentation(Base, TimestampMixin):
     show_remaining: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     low_stock_threshold: Mapped[int] = mapped_column(default=5, server_default=text("5"))
     hide_sold_out: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    # 加購角色（docs/63 §6）；沒設定＝不參與加購推薦。
+    role: Mapped[MenuUpsellRole | None] = mapped_column(_choice(MenuUpsellRole), nullable=True)
+
+
+class OnlineMenuExperience(Base, TimestampMixin):
+    """手沖體驗卡（docs/63 §4「手沖體驗」）：既有品項＋預選選項的另一種呈現。
+
+    **不存價格、成本、庫存**——售價由原品項加預選選項算，成交仍記原品項與選項 ID。
+    原品項真刪時連帶刪除（cascade）；封存或預選選項失效時發佈會略過這張卡。
+    """
+
+    __tablename__ = "online_menu_experiences"
+    __table_args__ = (
+        CheckConstraint("sort_order BETWEEN 0 AND 9999", name="ck_online_menu_experiences_sort"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    menu_item_id: Mapped[int] = mapped_column(
+        ForeignKey("menu_items.id", ondelete="CASCADE"), index=True
+    )
+    option_ids: Mapped[list[int]] = mapped_column(JSONB, default=list)
+    title: Mapped[str] = mapped_column(String(30))
+    tag: Mapped[str | None] = mapped_column(String(12))
+    origin: Mapped[str | None] = mapped_column(String(60))
+    notes: Mapped[str | None] = mapped_column(String(80))
+    description: Mapped[str | None] = mapped_column(String(300))
+    includes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    theme: Mapped[BrewCardTheme] = mapped_column(_choice(BrewCardTheme))
+    art: Mapped[BrewCardArt] = mapped_column(_choice(BrewCardArt))
+    effect: Mapped[BrewDrawEffect] = mapped_column(_choice(BrewDrawEffect))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
 
 class OnlineMenuPublication(Base, TimestampMixin):

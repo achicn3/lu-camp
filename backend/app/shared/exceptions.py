@@ -591,6 +591,14 @@ class InvalidIntakeLine(DomainError):
     """估價列內容不合法（例如用折數估價卻沒填原價、寄售沒填抽成）。"""
 
 
+class OnlineExperienceNotFound(DomainError):
+    """手沖體驗卡不存在（或不屬於本店）。"""
+
+
+class OnlineExperienceInvalid(DomainError):
+    """手沖體驗卡的預選選項不合法（沒掛在該品項上、重複或超過群組上限）。"""
+
+
 class OnlineOrderNotConfigured(DomainError):
     """線上點餐尚未設定（沒有雲端網址或整合密鑰）。"""
 

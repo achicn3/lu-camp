@@ -416,6 +416,7 @@ async def test_publish_includes_only_public_presentation_without_altering_stock(
         "show_remaining": False,
         "low_stock_threshold": 3,
         "hide_sold_out": True,
+        "role": "coffee",
     }
     response = await client.put(
         f"/api/v1/online-order/menu-items/{item_id}/presentation",
@@ -436,4 +437,78 @@ async def test_publish_includes_only_public_presentation_without_altering_stock(
     assert "presentation" not in items[ids["戚風"]]  # conservative legacy defaults
     encoded = json.dumps(worker.menu())
     for forbidden in ("unit_cost", "store_id", "created_at", "actor_user_id", "menu_item_id"):
+        assert forbidden not in encoded
+
+
+async def test_publish_includes_active_valid_experiences_with_public_fields_only(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """手沖體驗卡（M1c）：啟用中、原品項上架、預選仍合法才發佈；不含成本與店內欄位名。"""
+    _, manager = await _seed(db_session)
+    ids = await _menu(client, manager)
+    beans = await client.post(
+        "/api/v1/menu-option-groups",
+        json={
+            "name": "豆子",
+            "min_select": 1,
+            "max_select": 1,
+            "options": [{"name": "蜜桃", "price_delta": "60"}],
+        },
+        headers=_auth(manager),
+    )
+    peach = beans.json()["options"][0]["id"]
+    await client.put(
+        f"/api/v1/menu-items/{ids['拿鐵']}/option-groups",
+        json={"group_ids": [beans.json()["id"]]},
+        headers=_auth(manager),
+    )
+    base = {
+        "menu_item_id": ids["拿鐵"],
+        "option_ids": [peach],
+        "title": "蜜桃手沖體驗",
+        "includes": [{"title": "咖啡豆", "detail": "現磨"}],
+        "theme": "peach",
+        "art": "peach",
+        "effect": "truck",
+    }
+    shown = await client.post("/api/v1/online-order/experiences", json=base, headers=_auth(manager))
+    assert shown.status_code == 201, shown.text
+    hidden = await client.post(
+        "/api/v1/online-order/experiences",
+        json={**base, "title": "停用的", "is_active": False},
+        headers=_auth(manager),
+    )
+    assert hidden.status_code == 201
+    # 預選選項之後被拿掉（群組從品項取下）→ 發佈時略過，不推壞掉的卡
+    on_cake = await client.post(
+        "/api/v1/online-order/experiences",
+        json={**base, "menu_item_id": ids["戚風"], "option_ids": [], "title": "戚風體驗"},
+        headers=_auth(manager),
+    )
+    assert on_cake.status_code == 201
+    await client.patch(
+        f"/api/v1/menu-items/{ids['戚風']}", json={"is_available": False}, headers=_auth(manager)
+    )
+
+    response = await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert response.status_code == 200, response.text
+    menu = worker.menu()
+    assert menu["experiences"] == [
+        {
+            "id": shown.json()["id"],
+            "item_id": ids["拿鐵"],
+            "option_ids": [peach],
+            "title": "蜜桃手沖體驗",
+            "tag": None,
+            "origin": None,
+            "notes": None,
+            "description": None,
+            "includes": [{"title": "咖啡豆", "detail": "現磨"}],
+            "theme": "peach",
+            "art": "peach",
+            "effect": "truck",
+        }
+    ]
+    encoded = json.dumps(menu)
+    for forbidden in ("unit_cost", "store_id", "menu_item_id", "is_active", "sort_order"):
         assert forbidden not in encoded

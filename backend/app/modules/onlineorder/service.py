@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.modules.menu.service import MenuService, today
 from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.font import subset_font
 from app.modules.onlineorder.models import OnlineMenuPublication, OnlineTableCode
 from app.modules.onlineorder.presentation_service import MenuPresentationService
@@ -141,6 +142,14 @@ class OnlineOrderService:
             day=today(),
             presentations=await MenuPresentationService(self._session).snapshot_settings(
                 store_id, [item.id for item in items]
+            ),
+            experiences=await MenuExperienceService(self._session).snapshot_experiences(
+                store_id,
+                {
+                    d.item.id: d
+                    for d in details
+                    if d.item.archived_at is None and d.item.is_available
+                },
             ),
         )
         return snapshot

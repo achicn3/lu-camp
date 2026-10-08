@@ -25,6 +25,7 @@ DEFAULTS = {
     "show_remaining": True,
     "low_stock_threshold": 5,
     "hide_sold_out": False,
+    "role": None,
 }
 SETTINGS = {
     **DEFAULTS,

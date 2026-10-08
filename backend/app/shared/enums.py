@@ -648,6 +648,53 @@ class IntakeDisposition(StrEnum):
     STORE_DECLINED = "STORE_DECLINED"  # 店家不收、退回客人
 
 
+class MenuUpsellRole(StrEnum):
+    """線上菜單的加購角色（docs/63 §6）：決定「配個甜的？」要推什麼，不猜品名關鍵字。
+
+    咖啡→甜點、甜點→咖啡、手沖體驗→咖啡豆／濾掛、咖啡豆→濾掛／其他豆款。
+    """
+
+    COFFEE = "coffee"
+    DESSERT = "dessert"
+    EXPERIENCE = "experience"
+    BEAN = "bean"
+    DRIP = "drip"
+    OTHER = "other"
+
+
+class BrewCardTheme(StrEnum):
+    """手沖體驗卡的卡面配色（docs/63 §4；店主 2026-10-08 選定的展示稿）。"""
+
+    PEACH = "peach"
+    HONEY = "honey"
+    CITRUS = "citrus"
+    WINE = "wine"
+    FOREST = "forest"
+    INK = "ink"
+
+
+class BrewCardArt(StrEnum):
+    """手沖體驗卡的插畫（輕量 SVG，畫在客人頁）。NONE＝不放插畫。"""
+
+    PEACH = "peach"
+    VANILLA = "vanilla"
+    CITRUS = "citrus"
+    RUM = "rum"
+    NONE = "none"
+
+
+class BrewDrawEffect(StrEnum):
+    """點手沖體驗卡時的抽卡動畫；RANDOM＝每次隨機挑一種。"""
+
+    RANDOM = "random"
+    SOAR = "soar"
+    TRUCK = "truck"
+    SMASH = "smash"
+    SEAL = "seal"
+    SHUFFLE = "shuffle"
+    BLOOM = "bloom"
+
+
 class MenuStockTarget(StrEnum):
     """每日限量的對象（docs/44 §3.7）：品項本身，或某個選項（例：某支豆子）。
 

@@ -1490,6 +1490,45 @@
         "title": "BrandRead",
         "type": "object"
       },
+      "BrewCardArt": {
+        "description": "手沖體驗卡的插畫（輕量 SVG，畫在客人頁）。NONE＝不放插畫。",
+        "enum": [
+          "peach",
+          "vanilla",
+          "citrus",
+          "rum",
+          "none"
+        ],
+        "title": "BrewCardArt",
+        "type": "string"
+      },
+      "BrewCardTheme": {
+        "description": "手沖體驗卡的卡面配色（docs/63 §4；店主 2026-10-08 選定的展示稿）。",
+        "enum": [
+          "peach",
+          "honey",
+          "citrus",
+          "wine",
+          "forest",
+          "ink"
+        ],
+        "title": "BrewCardTheme",
+        "type": "string"
+      },
+      "BrewDrawEffect": {
+        "description": "點手沖體驗卡時的抽卡動畫；RANDOM＝每次隨機挑一種。",
+        "enum": [
+          "random",
+          "soar",
+          "truck",
+          "smash",
+          "seal",
+          "shuffle",
+          "bloom"
+        ],
+        "title": "BrewDrawEffect",
+        "type": "string"
+      },
       "BulkAcquisitionBasis": {
         "description": "散裝批收購計價基礎。",
         "enum": [
@@ -6831,6 +6870,35 @@
         "title": "EffectivenessReport",
         "type": "object"
       },
+      "ExperienceInclude": {
+        "additionalProperties": false,
+        "description": "體驗包含的一項（例：咖啡豆／這支豆子現磨、單杯份量）。",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "title": {
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ExperienceInclude",
+        "type": "object"
+      },
       "FlowRow": {
         "properties": {
           "adjustment_net": {
@@ -11341,6 +11409,232 @@
         "title": "MenuCategoryUpdateRequest",
         "type": "object"
       },
+      "MenuExperienceRead": {
+        "additionalProperties": false,
+        "properties": {
+          "art": {
+            "$ref": "#/components/schemas/BrewCardArt",
+            "default": "none"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/BrewDrawEffect",
+            "default": "random"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "includes": {
+            "items": {
+              "$ref": "#/components/schemas/ExperienceInclude"
+            },
+            "maxItems": 5,
+            "title": "Includes",
+            "type": "array"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "menu_item_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "option_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 10,
+            "title": "Option Ids",
+            "type": "array"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "sort_order": {
+            "default": 0,
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "maxLength": 12,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/BrewCardTheme",
+            "default": "peach"
+          },
+          "title": {
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "menu_item_id",
+          "title",
+          "id"
+        ],
+        "title": "MenuExperienceRead",
+        "type": "object"
+      },
+      "MenuExperienceWriteRequest": {
+        "additionalProperties": false,
+        "description": "手沖體驗卡：引用既有品項＋預選選項；價格、成本、庫存一律來自原品項。",
+        "properties": {
+          "art": {
+            "$ref": "#/components/schemas/BrewCardArt",
+            "default": "none"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/BrewDrawEffect",
+            "default": "random"
+          },
+          "includes": {
+            "items": {
+              "$ref": "#/components/schemas/ExperienceInclude"
+            },
+            "maxItems": 5,
+            "title": "Includes",
+            "type": "array"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "menu_item_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "option_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 10,
+            "title": "Option Ids",
+            "type": "array"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "sort_order": {
+            "default": 0,
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "maxLength": 12,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/BrewCardTheme",
+            "default": "peach"
+          },
+          "title": {
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "menu_item_id",
+          "title"
+        ],
+        "title": "MenuExperienceWriteRequest",
+        "type": "object"
+      },
       "MenuItemCreateRequest": {
         "properties": {
           "category": {
@@ -12043,6 +12337,16 @@
             "title": "Menu Item Id",
             "type": "integer"
           },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MenuUpsellRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "show_remaining": {
             "default": true,
             "title": "Show Remaining",
@@ -12117,6 +12421,16 @@
             "title": "Low Stock Threshold",
             "type": "integer"
           },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MenuUpsellRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "show_remaining": {
             "default": true,
             "title": "Show Remaining",
@@ -12143,6 +12457,19 @@
           "option"
         ],
         "title": "MenuStockTarget",
+        "type": "string"
+      },
+      "MenuUpsellRole": {
+        "description": "線上菜單的加購角色（docs/63 §6）：決定「配個甜的？」要推什麼，不猜品名關鍵字。\n\n咖啡→甜點、甜點→咖啡、手沖體驗→咖啡豆／濾掛、咖啡豆→濾掛／其他豆款。",
+        "enum": [
+          "coffee",
+          "dessert",
+          "experience",
+          "bean",
+          "drip",
+          "other"
+        ],
+        "title": "MenuUpsellRole",
         "type": "string"
       },
       "NoteUpdateRequest": {
@@ -28388,6 +28715,175 @@
         "summary": "Get Menu Photo",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/online-order/experiences": {
+      "get": {
+        "operationId": "listMenuExperiences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MenuExperienceRead"
+                  },
+                  "title": "Response Listmenuexperiences",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Menu Experiences",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "post": {
+        "operationId": "createMenuExperience",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuExperienceWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuExperienceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Menu Experience",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/experiences/{experience_id}": {
+      "delete": {
+        "operationId": "deleteMenuExperience",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experience_id",
+            "required": true,
+            "schema": {
+              "title": "Experience Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Menu Experience",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "put": {
+        "operationId": "updateMenuExperience",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experience_id",
+            "required": true,
+            "schema": {
+              "title": "Experience Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuExperienceWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuExperienceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Menu Experience",
+        "tags": [
+          "online-order"
         ]
       }
     },
