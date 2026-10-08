@@ -54,10 +54,14 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {
     if (typeof l !== "object" || l === null) return null;
-    const { item_id, option_ids, qty } = l as Record<string, unknown>;
+    const { item_id, option_ids, qty, experience_id } = l as Record<string, unknown>;
     if (typeof item_id !== "number" || typeof qty !== "number" || !Array.isArray(option_ids)) return null;
     if (!option_ids.every((id) => typeof id === "number")) return null;
-    lines.push({ item_id, option_ids: option_ids as number[], qty });
+    if (experience_id !== undefined && experience_id !== null && typeof experience_id !== "number") return null;
+    lines.push({
+      item_id, option_ids: option_ids as number[], qty,
+      ...(typeof experience_id === "number" ? { experience_id } : {}),
+    });
   }
   return {
     idempotency_key: o.idempotency_key,

@@ -1,7 +1,7 @@
 // 送單驗價（docs/44 §3.2、§8.1 T4、§8.2）：價格只在伺服器端依目前菜單算；不合法的品項／選項／數量一律拒收。
 import { describe, expect, it } from "vitest";
 
-import type { MenuSnapshot } from "../src/client/types";
+import type { MenuExperienceView, MenuSnapshot } from "../src/client/types";
 import { priceOrder } from "../src/pricing";
 
 const MENU: MenuSnapshot = {
@@ -130,5 +130,38 @@ describe("送單驗價", () => {
       { item_id: 6, option_ids: [], qty: 2 },
     ]);
     expect(r).toMatchObject({ ok: false, reason: "sold_out" });
+  });
+});
+
+// ── 手沖體驗卡（docs/63 §4、M1c）：原品項＋預選選項，價格照原品項算，品名標示體驗 ──
+const EXPERIENCE: MenuExperienceView = {
+  id: 9, item_id: 5, option_ids: [11], title: "熱拿鐵體驗", tag: null, origin: null, notes: null,
+  description: null, includes: [], theme: "honey", art: "none", effect: "random",
+};
+const WITH_EXPERIENCE: MenuSnapshot = { ...MENU, experiences: [EXPERIENCE] };
+
+describe("手沖體驗卡送單", () => {
+  it("照原品項＋選項計價；品名帶體驗名稱，並記下是哪張體驗卡", () => {
+    const r = priceOrder(WITH_EXPERIENCE, [{ item_id: 5, option_ids: [11, 21], qty: 1, experience_id: 9 }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.total).toBe(170);
+    expect(r.lines[0]).toMatchObject({
+      item_id: 5, option_ids: [11, 21], unit_price: 170, experience_id: 9,
+      name: "熱拿鐵體驗・拿鐵（熱、燕麥奶）",
+    });
+  });
+
+  it.each([
+    ["少了預選的選項", { item_id: 5, option_ids: [12], qty: 1, experience_id: 9 }],
+    ["體驗卡和品項對不上", { item_id: 6, option_ids: [], qty: 1, experience_id: 9 }],
+    ["沒有這張體驗卡", { item_id: 5, option_ids: [11], qty: 1, experience_id: 99 }],
+  ])("拒收：%s", (_, line) => {
+    expect(priceOrder(WITH_EXPERIENCE, [line])).toMatchObject({ ok: false, reason: "invalid_experience" });
+  });
+
+  it("一般品項的明細不多出體驗欄位", () => {
+    const r = priceOrder(WITH_EXPERIENCE, [{ item_id: 6, option_ids: [], qty: 1 }]);
+    expect(r.ok && Object.hasOwn(r.lines[0]!, "experience_id")).toBe(false);
   });
 });

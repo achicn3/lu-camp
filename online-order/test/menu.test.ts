@@ -108,6 +108,38 @@ describe("菜單", () => {
     expect((await publish({ ...SNAPSHOT, items: [item] })).status).toBe(422);
   });
 
+  const EXPERIENCE = {
+    id: 3, item_id: 5, option_ids: [], title: "蜜桃蹦蹦手沖體驗", tag: "清甜果香", origin: "柯契爾｜水洗",
+    notes: "水蜜桃・白桃", description: "以飽滿的水蜜桃甜香為主。",
+    includes: [{ title: "咖啡豆", detail: "現磨" }, { title: "器材", detail: null }],
+    theme: "peach", art: "peach", effect: "truck",
+  };
+
+  it("手沖體驗卡與加購角色原樣保留", async () => {
+    const snapshot = { ...SNAPSHOT, experiences: [EXPERIENCE],
+      items: [{ ...SNAPSHOT.items[0], presentation: { ...PRESENTATION, role: "coffee" } }] };
+    expect((await publish(snapshot)).status).toBe(200);
+    expect(await (await get("/api/menu")).json()).toEqual(snapshot);
+  });
+
+  it.each([
+    ["混入成本", { ...EXPERIENCE, cost: 30 }],
+    ["不認得的配色", { ...EXPERIENCE, theme: "neon" }],
+    ["不認得的動畫", { ...EXPERIENCE, effect: "explode" }],
+    ["標題過長", { ...EXPERIENCE, title: "茶".repeat(31) }],
+    ["包含項目超過 5 項", { ...EXPERIENCE, includes: Array.from({ length: 6 }, () => ({ title: "a", detail: null })) }],
+    ["包含項目多欄位", { ...EXPERIENCE, includes: [{ title: "a", detail: null, price: 1 }] }],
+    ["引用不在快照裡的品項", { ...EXPERIENCE, item_id: 999 }],
+    ["預選選項不是整數陣列", { ...EXPERIENCE, option_ids: ["1"] }],
+  ])("手沖體驗卡格式錯誤拒收：%s", async (_, experience) => {
+    expect((await publish({ ...SNAPSHOT, experiences: [experience] })).status).toBe(422);
+  });
+
+  it("加購角色不認得的值拒收", async () => {
+    expect((await publish({ ...SNAPSHOT,
+      items: [{ ...SNAPSHOT.items[0], presentation: { ...PRESENTATION, role: "snack" } }] })).status).toBe(422);
+  });
+
   it("只保留最近 5 版", async () => {
     for (let v = 1; v <= 7; v++) await publish({ ...SNAPSHOT, version: v });
     const resp = await get("/api/menu");

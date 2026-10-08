@@ -37,6 +37,30 @@ export interface MenuPresentation {
   show_remaining: boolean;
   low_stock_threshold: number;
   hide_sold_out: boolean;
+  /** 加購角色（docs/63 §6）；舊快照沒有這欄。 */
+  role?: UpsellRole | null;
+}
+
+export type UpsellRole = "coffee" | "dessert" | "experience" | "bean" | "drip" | "other";
+export const UPSELL_ROLES: readonly UpsellRole[] = ["coffee", "dessert", "experience", "bean", "drip", "other"];
+export const BREW_THEMES = ["peach", "honey", "citrus", "wine", "forest", "ink"] as const;
+export const BREW_ARTS = ["peach", "vanilla", "citrus", "rum", "none"] as const;
+export const BREW_EFFECTS = ["random", "soar", "truck", "smash", "seal", "shuffle", "bloom"] as const;
+
+/** 手沖體驗卡（docs/63 §4）：原品項＋預選選項的另一種呈現；價格照原品項算。 */
+export interface MenuExperienceView {
+  id: number;
+  item_id: number;
+  option_ids: number[];
+  title: string;
+  tag: string | null;
+  origin: string | null;
+  notes: string | null;
+  description: string | null;
+  includes: { title: string; detail: string | null }[];
+  theme: (typeof BREW_THEMES)[number];
+  art: (typeof BREW_ARTS)[number];
+  effect: (typeof BREW_EFFECTS)[number];
 }
 
 export interface MenuSnapshot {
@@ -46,6 +70,8 @@ export interface MenuSnapshot {
   font: string | null;
   categories: { id: number; name: string }[];
   items: MenuItemView[];
+  /** 舊快照沒有這欄（當成空的）。 */
+  experiences?: MenuExperienceView[];
 }
 
 export interface TableView {

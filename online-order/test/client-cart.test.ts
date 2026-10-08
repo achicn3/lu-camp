@@ -32,3 +32,17 @@ describe("guest cart", () => {
     expect(removeLine(twice, 0)).toEqual([]);
   });
 });
+
+describe("guest cart with experiences", () => {
+  const withExp: MenuSnapshot = { ...menu, experiences: [{
+    id: 7, item_id: 1, option_ids: [5], title: "熱咖啡體驗", tag: null, origin: null, notes: null,
+    description: null, includes: [], theme: "ink", art: "none", effect: "random",
+  }] };
+  const hotPlain: CartLine = { item_id: 1, option_ids: [5], qty: 1 };
+  const hotExp: CartLine = { item_id: 1, option_ids: [5], qty: 1, experience_id: 7 };
+
+  it("keeps an experience line apart from the same plain item and merges repeats", () => {
+    const cart = addLine(withExp, addLine(withExp, [hotPlain], hotExp), hotExp);
+    expect(cart).toEqual([hotPlain, { ...hotExp, qty: 2 }]);
+  });
+});

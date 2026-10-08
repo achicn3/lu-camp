@@ -1,5 +1,8 @@
 // 客人點餐頁的純邏輯（不碰 DOM，好測）。
-import type { MenuItemView, MenuPresentation, MenuSnapshot } from "./types";
+import type {
+  MenuExperienceView, MenuItemView, MenuPresentation, MenuSnapshot, OptionGroupView, UpsellRole,
+} from "./types";
+import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Taipei",
@@ -84,4 +87,72 @@ export function homeSelection(menu: Pick<MenuSnapshot, "categories" | "items">) 
     recommended: menu.items.filter((item) => item.presentation?.is_recommended && !itemSoldOut(item)).slice(0, 3),
     categories: menu.categories.filter((category) => items.some((item) => item.category_id === category.id)),
   };
+}
+
+export interface ExperienceView {
+  experience: MenuExperienceView;
+  item: MenuItemView;
+  /** 原品項＋預選選項的價格（還沒補選的必選項另計）。 */
+  price: number;
+  /** 還有必選項要客人補選、而且其中有加價的：價格標「起」。 */
+  priceFrom: boolean;
+  /** 預選沒涵蓋的必選群組：客人要自己選。 */
+  pending: OptionGroupView[];
+  soldOut: boolean;
+}
+
+/** 手沖體驗卡要怎麼呈現；原品項不在菜單上就不顯示（回 null）。 */
+export function experienceView(menu: MenuSnapshot, experience: MenuExperienceView): ExperienceView | null {
+  const item = menu.items.find((entry) => entry.id === experience.item_id);
+  if (item === undefined) return null;
+  const preset = new Set(experience.option_ids);
+  let price = item.unit_price;
+  let presetSoldOut = false;
+  const pending: OptionGroupView[] = [];
+  for (const group of item.option_groups) {
+    const picked = group.options.filter((option) => preset.has(option.id));
+    for (const option of picked) {
+      price += option.price_delta;
+      if (!option.available || option.remaining === 0) presetSoldOut = true;
+    }
+    if (picked.length < group.min_select) pending.push(group);
+  }
+  return {
+    experience, item, price, pending,
+    priceFrom: pending.some((group) => group.options.some((option) => option.price_delta > 0)),
+    soldOut: presetSoldOut || itemSoldOut(item),
+  };
+}
+
+/** 加購方向（docs/63 §6）：咖啡→甜點、甜點→咖啡、體驗→豆／濾掛、豆→濾掛／其他豆款。 */
+const UPSELL_TARGETS: Partial<Record<UpsellRole, UpsellRole[]>> = {
+  coffee: ["dessert"],
+  dessert: ["coffee"],
+  experience: ["bean", "drip"],
+  bean: ["drip", "bean"],
+};
+const UPSELL_LIMIT = 2;
+
+/** 購物車下方的「配個…？」：依角色挑可售、沒在車裡的，最多 2 項；略過過的方向不再推。 */
+export function upsellSuggestions(
+  menu: MenuSnapshot,
+  cart: readonly CartLine[],
+  dismissed: ReadonlySet<UpsellRole>,
+): MenuItemView[] {
+  const byId = new Map(menu.items.map((entry) => [entry.id, entry]));
+  const inCart = new Set(cart.map((line) => line.item_id));
+  const wanted: UpsellRole[] = [];
+  for (const line of cart) {
+    const role = line.experience_id !== undefined ? "experience" : byId.get(line.item_id)?.presentation?.role;
+    for (const target of (role ? UPSELL_TARGETS[role] : undefined) ?? []) {
+      if (!dismissed.has(target) && !wanted.includes(target)) wanted.push(target);
+    }
+  }
+  if (wanted.length === 0) return [];
+  return visibleItems(menu.items)
+    .filter((entry) => {
+      const role = entry.presentation?.role;
+      return role != null && wanted.includes(role) && !inCart.has(entry.id) && !itemSoldOut(entry);
+    })
+    .slice(0, UPSELL_LIMIT);
 }

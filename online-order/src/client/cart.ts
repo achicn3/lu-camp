@@ -15,7 +15,7 @@ function valid(menu: MenuSnapshot, cart: CartLine[]): CartLine[] {
 
 export function addLine(menu: MenuSnapshot, cart: CartLine[], line: CartLine): CartLine[] {
   const index = cart.findIndex((current) =>
-    current.item_id === line.item_id &&
+    current.item_id === line.item_id && current.experience_id === line.experience_id &&
     current.option_ids.length === line.option_ids.length &&
     current.option_ids.every((id) => line.option_ids.includes(id)));
   const next = cart.map((current) => ({ ...current, option_ids: [...current.option_ids] }));

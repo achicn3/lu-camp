@@ -1,7 +1,7 @@
 // 菜單快照（docs/44 §3.5）：店內 POS 發佈、客人讀目前生效的版本。
 // 快照內容由店內 backend 組好（已驗證過的菜單），這裡只檢查形狀，擋住格式錯誤的發佈。
 import { error, json, sha256Hex } from "./http";
-import type { MenuSnapshot } from "./client/types";
+import { BREW_ARTS, BREW_EFFECTS, BREW_THEMES, UPSELL_ROLES, type MenuSnapshot } from "./client/types";
 import type { AvailabilityUpdate } from "./availability";
 
 export const MENU_MAX_BYTES = 512 * 1024;
@@ -35,7 +35,9 @@ function validPresentation(value: unknown): boolean {
   if (!isRecord(value) || !keysAre(value, [
     "flavor_description", "audience_description", "is_recommended", "is_new",
     "limited_on", "show_remaining", "low_stock_threshold", "hide_sold_out",
-  ])) return false;
+  ], ["role"])) return false;
+  if (Object.hasOwn(value, "role") && value.role !== null &&
+    !(UPSELL_ROLES as readonly unknown[]).includes(value.role)) return false;
   const shortText = (text: unknown) => text === null ||
     (typeof text === "string" && [...text].length <= 120);
   return shortText(value.flavor_description) && shortText(value.audience_description) &&
@@ -53,11 +55,36 @@ function validGroups(value: unknown): boolean {
   );
 }
 
+function textUpTo(value: unknown, max: number, nullable = true): boolean {
+  if (value === null) return nullable;
+  return typeof value === "string" && [...value].length <= max && (nullable || value.length > 0);
+}
+
+/** 手沖體驗卡（docs/63 §4）：只收公開欄位；引用的品項必須在同一份快照裡。 */
+function validExperiences(value: unknown, itemIds: Set<unknown>): boolean {
+  if (value === undefined) return true;
+  return Array.isArray(value) && value.every((e: unknown) =>
+    isRecord(e) && keysAre(e, ["id", "item_id", "option_ids", "title", "tag", "origin", "notes",
+      "description", "includes", "theme", "art", "effect"]) &&
+    isPositiveInt(e.id) && itemIds.has(e.item_id) &&
+    Array.isArray(e.option_ids) && e.option_ids.length <= 10 && e.option_ids.every(isPositiveInt) &&
+    textUpTo(e.title, 30, false) && textUpTo(e.tag, 12) && textUpTo(e.origin, 60) &&
+    textUpTo(e.notes, 80) && textUpTo(e.description, 300) &&
+    Array.isArray(e.includes) && e.includes.length <= 5 && e.includes.every((inc: unknown) =>
+      isRecord(inc) && keysAre(inc, ["title", "detail"]) && textUpTo(inc.title, 20, false) &&
+      textUpTo(inc.detail, 60)) &&
+    (BREW_THEMES as readonly unknown[]).includes(e.theme) &&
+    (BREW_ARTS as readonly unknown[]).includes(e.art) &&
+    (BREW_EFFECTS as readonly unknown[]).includes(e.effect));
+}
+
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
   if (!isPositiveInt(o.version) || typeof o.published_at !== "string") return false;
   if (!Array.isArray(o.categories) || !Array.isArray(o.items)) return false;
+  const itemIds = new Set(o.items.map((item: unknown) => (isRecord(item) ? item.id : undefined)));
+  if (!validExperiences(o.experiences, itemIds)) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;

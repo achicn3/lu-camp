@@ -10,6 +10,8 @@ export interface OrderLineInput {
   item_id: number;
   option_ids: number[];
   qty: number;
+  /** 從手沖體驗卡點的（docs/63 §4）：價格仍照原品項＋選項算。 */
+  experience_id?: number;
 }
 
 export interface PricedLine {
@@ -21,6 +23,7 @@ export interface PricedLine {
   line_total: number;
   /** 品項或所選選項有每日限量：要 POS 先保留（HOLD）才成立。 */
   limited: boolean;
+  experience_id?: number;
 }
 
 export type PriceResult =
@@ -80,6 +83,7 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
   if (totalQty > MAX_TOTAL_QTY) return { ok: false, reason: "too_many" };
 
   const items = new Map(menu.items.map((i) => [i.id, i]));
+  const experiences = new Map((menu.experiences ?? []).map((e) => [e.id, e]));
   const lines: PricedLine[] = [];
   const itemQty = new Map<number, number>();
   const optionQty = new Map<number, number>();
@@ -89,6 +93,15 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
     if (item.remaining === 0) return { ok: false, reason: "sold_out", item_id: item.id };
     const line = priceLine(item, input);
     if ("reason" in line) return { ok: false, reason: line.reason, item_id: item.id };
+    if (input.experience_id !== undefined) {
+      // 體驗卡必須是這個品項的，而且預選的選項都要在（客人只能補選其他必選項）
+      const exp = experiences.get(input.experience_id);
+      if (exp === undefined || exp.item_id !== item.id || !exp.option_ids.every((id) => line.option_ids.includes(id))) {
+        return { ok: false, reason: "invalid_experience", item_id: item.id };
+      }
+      line.name = `${exp.title}・${line.name}`;
+      line.experience_id = exp.id;
+    }
     lines.push(line);
     itemQty.set(item.id, (itemQty.get(item.id) ?? 0) + input.qty);
     for (const id of line.option_ids) optionQty.set(id, (optionQty.get(id) ?? 0) + input.qty);
