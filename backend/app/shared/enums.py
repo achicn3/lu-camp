@@ -156,6 +156,9 @@ class StockReason(StrEnum):
     GIFT_RETURN = "GIFT_RETURN"  # 贈品退回入庫（退款 0 元）
     WRITE_OFF = "WRITE_OFF"
     STOCKTAKE = "STOCKTAKE"
+    # 線上單保留帶回家商品（docs/63 §13）：拉單時先扣、取消／到期／結帳前加回，淨額為零。
+    ONLINE_HOLD = "ONLINE_HOLD"
+    ONLINE_RELEASE = "ONLINE_RELEASE"
 
 
 class PurchaseOrderStatus(StrEnum):
@@ -730,6 +733,17 @@ class OnlineOrderHold(StrEnum):
     NONE = "NONE"
     HELD = "HELD"
     REJECTED = "REJECTED"
+
+
+class OnlineOrderFulfillment(StrEnum):
+    """帶回家商品的交貨（docs/63 §13）。
+
+    沒有帶回家商品＝NONE；付款後待交貨＝AWAITING；店員交給客人＝HANDED_OVER。
+    """
+
+    NONE = "NONE"
+    AWAITING = "AWAITING"
+    HANDED_OVER = "HANDED_OVER"
 
 
 class OnlineOrderPayment(StrEnum):

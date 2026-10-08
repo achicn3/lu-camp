@@ -62,7 +62,12 @@ _MOVEMENT_LABELS: dict[tuple[StockDirection, StockReason], str] = {
     (StockDirection.IN, StockReason.RETURN): "退貨入庫",
     (StockDirection.OUT, StockReason.CONSIGN_RETURN): "寄售退回",
     (StockDirection.OUT, StockReason.WRITE_OFF): "作廢出庫",
+    (StockDirection.OUT, StockReason.ONLINE_HOLD): "線上訂單保留",
+    (StockDirection.IN, StockReason.ONLINE_RELEASE): "線上訂單保留加回",
 }
+
+
+_ONLINE_ORDER_REF = "online_order"
 
 
 def _movement_label(direction: StockDirection, reason: StockReason) -> str:
@@ -2113,6 +2118,47 @@ class InventoryService:
         ok = await self._repo.decrement_catalog(catalog_id, qty)
         if not ok:
             raise InsufficientStock("一般商品庫存不足，無法售出")
+
+    async def hold_catalog_for_online_order(
+        self, store_id: int, catalog_id: int, qty: int, *, online_order_id: int
+    ) -> None:
+        """線上單保留帶回家商品（docs/63 §13）：直接扣現量並記 ONLINE_HOLD，櫃檯就賣不掉這幾件。
+
+        停售或不夠丟 `InsufficientStock`（訊息帶品名，回報給客人看）；
+        不是這家店的丟 `CrossStoreReference`。
+        """
+        product = await self._repo.get_catalog(store_id, catalog_id)
+        if product is None:
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
+        if not product.is_active:
+            raise InsufficientStock(f"「{product.name}」已停售")
+        if qty <= 0 or not await self._repo.decrement_catalog(catalog_id, qty):
+            raise InsufficientStock(f"「{product.name}」庫存不足")
+        await self.record_stock_out(
+            store_id,
+            ItemKind.CATALOG,
+            qty=qty,
+            reason=StockReason.ONLINE_HOLD,
+            ref_type=_ONLINE_ORDER_REF,
+            ref_id=online_order_id,
+            catalog_product_id=catalog_id,
+        )
+
+    async def release_online_hold(
+        self, store_id: int, catalog_id: int, qty: int, *, online_order_id: int
+    ) -> None:
+        """把線上單保留的帶回家商品加回（取消、到期、帶入結帳前），記 ONLINE_RELEASE。"""
+        if not await self._repo.increment_catalog(store_id, catalog_id, qty):
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
+        await self.record_stock_in(
+            store_id,
+            ItemKind.CATALOG,
+            qty=qty,
+            reason=StockReason.ONLINE_RELEASE,
+            ref_type=_ONLINE_ORDER_REF,
+            ref_id=online_order_id,
+            catalog_product_id=catalog_id,
+        )
 
     async def restock_catalog_items(
         self,

@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -91,6 +92,39 @@ class OnlineMenuExperience(Base, TimestampMixin):
     theme: Mapped[BrewCardTheme] = mapped_column(_choice(BrewCardTheme))
     art: Mapped[BrewCardArt] = mapped_column(_choice(BrewCardArt))
     effect: Mapped[BrewDrawEffect] = mapped_column(_choice(BrewDrawEffect))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class OnlineRetailListing(Base, TimestampMixin):
+    """線上「帶回家」的零售商品（docs/63 §13、M1d）：引用既有一般商品的呈現設定。
+
+    **不存價格、成本、庫存**——售價是商品含稅 `unit_price`、庫存是 `quantity_on_hand`。
+    商品真刪時連帶刪除；停售時發佈會標售完。照片沿用菜單照片表（同一家店）。
+    """
+
+    __tablename__ = "online_retail_listings"
+    __table_args__ = (
+        UniqueConstraint(
+            "store_id", "catalog_product_id", name="uq_online_retail_listings_product"
+        ),
+        CheckConstraint("sort_order BETWEEN 0 AND 9999", name="ck_online_retail_listings_sort"),
+        ForeignKeyConstraint(
+            ["store_id", "photo_sha256"],
+            ["menu_photos.store_id", "menu_photos.sha256"],
+            name="fk_online_retail_listings_photo",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    catalog_product_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_products.id", ondelete="CASCADE"), index=True
+    )
+    description: Mapped[str | None] = mapped_column(String(300))
+    # 加購角色（只用咖啡豆／濾掛）；沒設定＝不參與加購推薦。
+    role: Mapped[MenuUpsellRole | None] = mapped_column(_choice(MenuUpsellRole), nullable=True)
+    photo_sha256: Mapped[str | None] = mapped_column(String(64))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
@@ -200,6 +234,17 @@ class OnlineOrder(Base, TimestampMixin):
             name="ck_online_orders_settled_sale",
         ),
         CheckConstraint("total >= 0", name="ck_online_orders_total_nonneg"),
+        CheckConstraint(
+            "fulfillment_status IN ('NONE', 'AWAITING', 'HANDED_OVER')",
+            name="ck_online_orders_fulfillment",
+        ),
+        # 交貨只在成立銷售之後；交了貨一定有時間與經手人。
+        CheckConstraint(
+            "fulfillment_status <> 'HANDED_OVER' OR "
+            "(sync_status = 'SETTLED' AND handed_over_at IS NOT NULL "
+            "AND handed_over_by IS NOT NULL)",
+            name="ck_online_orders_handed_over",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -221,6 +266,12 @@ class OnlineOrder(Base, TimestampMixin):
     sale_id: Mapped[int | None] = mapped_column(ForeignKey("sales.id"))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # 帶回家商品的交貨（docs/63 §13）：付款與交貨分開，店員交給客人時按「已交貨」才結單。
+    fulfillment_status: Mapped[str] = mapped_column(
+        String(12), default="NONE", server_default=text("'NONE'")
+    )
+    handed_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    handed_over_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 
 class StockReservation(Base, TimestampMixin):
