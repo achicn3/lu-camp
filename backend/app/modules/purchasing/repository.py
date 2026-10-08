@@ -285,22 +285,25 @@ class PurchasingRepository:
         )
         return {int(r[0]): int(r[1]) for r in (await self._session.execute(stmt)).all()}
 
-    async def unit_costs_of_orders(
-        self, store_id: int, po_ids: list[int]
-    ) -> dict[tuple[int, int], Decimal]:
-        """{(採購單, 商品): 進價}。"""
+    async def lines_of_orders(self, store_id: int, po_ids: list[int]) -> list[PurchaseOrderLine]:
         if not po_ids:
-            return {}
-        stmt = select(
-            PurchaseOrderLine.purchase_order_id,
-            PurchaseOrderLine.catalog_product_id,
-            PurchaseOrderLine.unit_cost,
-        ).where(
+            return []
+        stmt = select(PurchaseOrderLine).where(
             PurchaseOrderLine.store_id == store_id,
             PurchaseOrderLine.purchase_order_id.in_(po_ids),
         )
-        rows = (await self._session.execute(stmt)).all()
-        return {(int(r[0]), int(r[1])): r[2] for r in rows}
+        return list((await self._session.scalars(stmt)).all())
+
+    async def receipt_counts(self, store_id: int, po_ids: list[int]) -> dict[int, int]:
+        """{採購單: 收貨批數}。"""
+        if not po_ids:
+            return {}
+        stmt = (
+            select(GoodsReceipt.purchase_order_id, func.count())
+            .where(GoodsReceipt.store_id == store_id, GoodsReceipt.purchase_order_id.in_(po_ids))
+            .group_by(GoodsReceipt.purchase_order_id)
+        )
+        return {int(r[0]): int(r[1]) for r in (await self._session.execute(stmt)).all()}
 
     async def count_purchase_orders(
         self,

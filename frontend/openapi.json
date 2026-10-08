@@ -7371,7 +7371,7 @@
         "type": "object"
       },
       "GoodsReceiptRead": {
-        "description": "單一收貨批次（分批收貨事件）＋其選填進項發票。",
+        "description": "單一收貨批次（分批收貨事件）＋所掛的進項發票（沒有＝還沒開發票）。",
         "properties": {
           "id": {
             "title": "Id",
@@ -7519,6 +7519,74 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InputInvoiceDetailRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "invoice_net": {
+            "title": "Invoice Net",
+            "type": "string"
+          },
+          "invoice_number": {
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "invoice_tax": {
+            "title": "Invoice Tax",
+            "type": "string"
+          },
+          "invoice_total": {
+            "title": "Invoice Total",
+            "type": "string"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAmountRead"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "receipts_total": {
+            "title": "Receipts Total",
+            "type": "string"
+          },
+          "supplier_id": {
+            "title": "Supplier Id",
+            "type": "integer"
+          },
+          "supplier_name": {
+            "title": "Supplier Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "invoice_number",
+          "invoice_date",
+          "invoice_total",
+          "invoice_net",
+          "invoice_tax",
+          "supplier_id",
+          "supplier_name",
+          "created_at",
+          "receipts",
+          "receipts_total"
+        ],
+        "title": "InputInvoiceDetailRead",
+        "type": "object"
+      },
       "InputInvoiceIn": {
         "description": "進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。\n\n號碼＝2 英文大寫＋8 數字；三個金額照錄供應商原始發票，後端只驗證皆為整數元且\ninvoice_net + invoice_tax = invoice_total，不以補登當下設定重算歷史憑證。",
         "properties": {
@@ -7580,7 +7648,12 @@
         "type": "object"
       },
       "InputInvoiceRead": {
+        "description": "收貨批次上顯示的進項發票摘要（點進去看整張：`getInputInvoice`）。",
         "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
           "invoice_date": {
             "format": "date",
             "title": "Invoice Date",
@@ -7604,6 +7677,7 @@
           }
         },
         "required": [
+          "id",
           "invoice_number",
           "invoice_date",
           "invoice_total",
@@ -7611,6 +7685,80 @@
           "invoice_tax"
         ],
         "title": "InputInvoiceRead",
+        "type": "object"
+      },
+      "InputInvoiceWrite": {
+        "description": "登錄／修改一張進項發票（docs/70 §5.2）：涵蓋哪幾批收貨（至少一批、同一供應商）。",
+        "properties": {
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "invoice_net": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Invoice Net"
+          },
+          "invoice_number": {
+            "pattern": "^[A-Z]{2}[0-9]{8}$",
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "invoice_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Invoice Tax"
+          },
+          "invoice_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Invoice Total"
+          },
+          "receipt_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Receipt Ids",
+            "type": "array"
+          },
+          "supplier_id": {
+            "title": "Supplier Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "invoice_number",
+          "invoice_date",
+          "invoice_net",
+          "invoice_tax",
+          "invoice_total",
+          "supplier_id",
+          "receipt_ids"
+        ],
+        "title": "InputInvoiceWrite",
         "type": "object"
       },
       "InsightsBreakdownRow": {
@@ -13908,6 +14056,56 @@
         "title": "PurchaseOrderLineRead",
         "type": "object"
       },
+      "PurchaseOrderLineUpdate": {
+        "description": "修改採購單的一列（docs/70 §4.2）：有 id＝改既有明細、沒有＝新增。\n\nreceived_qty：部分到貨／已收貨的單才可大於 0，差額由 service 自動加減庫存。",
+        "properties": {
+          "catalog_product_id": {
+            "title": "Catalog Product Id",
+            "type": "integer"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "qty": {
+            "exclusiveMinimum": 0.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "received_qty": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Received Qty",
+            "type": "integer"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Cost"
+          }
+        },
+        "required": [
+          "catalog_product_id",
+          "qty",
+          "unit_cost"
+        ],
+        "title": "PurchaseOrderLineUpdate",
+        "type": "object"
+      },
       "PurchaseOrderRead": {
         "properties": {
           "created_at": {
@@ -14020,6 +14218,29 @@
         ],
         "title": "PurchaseOrderStatus",
         "type": "string"
+      },
+      "PurchaseOrderUpdate": {
+        "description": "整張覆寫：原有明細沒帶到的就刪除。",
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderLineUpdate"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "supplier_id": {
+            "title": "Supplier Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "supplier_id",
+          "lines"
+        ],
+        "title": "PurchaseOrderUpdate",
+        "type": "object"
       },
       "ReasonCreateRequest": {
         "description": "新增原因代碼。`code` 在同店內唯一，且**不可事後修改**——歷史單據存的是名稱快照，\n但報表以 code 對照分類，改 code 會讓同一件事在報表上斷成兩段。",
@@ -14149,6 +14370,36 @@
           }
         },
         "title": "ReasonUpdateRequest",
+        "type": "object"
+      },
+      "ReceiptAmountRead": {
+        "description": "一批收貨與它的金額（這批各商品收到的數量 × 採購單進價）。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "purchase_order_id": {
+            "title": "Purchase Order Id",
+            "type": "integer"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "integer"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "purchase_order_id",
+          "received_at",
+          "amount"
+        ],
+        "title": "ReceiptAmountRead",
         "type": "object"
       },
       "ReceiptHeaderRead": {
@@ -30256,6 +30507,329 @@
         ]
       }
     },
+    "/api/v1/purchase-input-invoices": {
+      "get": {
+        "description": "進項發票清單（發票日期新到舊），可依供應商篩選。",
+        "operationId": "listInputInvoices",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Supplier Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InputInvoiceDetailRead"
+                  },
+                  "title": "Response Listinputinvoices",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Input Invoices",
+        "tags": [
+          "purchasing"
+        ]
+      },
+      "post": {
+        "description": "登錄進項發票並掛上它涵蓋的收貨（可多批、跨採購單，須同一供應商）。",
+        "operationId": "createInputInvoice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputInvoiceWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputInvoiceDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Input Invoice",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/purchase-input-invoices/count": {
+      "get": {
+        "operationId": "countInputInvoices",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Supplier Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Input Invoices",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/purchase-input-invoices/{invoice_id}": {
+      "delete": {
+        "description": "刪掉登錯的發票（涵蓋的收貨回到還沒開發票）；限管理者。",
+        "operationId": "deleteInputInvoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Input Invoice",
+        "tags": [
+          "purchasing"
+        ]
+      },
+      "get": {
+        "operationId": "getInputInvoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputInvoiceDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Input Invoice",
+        "tags": [
+          "purchasing"
+        ]
+      },
+      "put": {
+        "description": "更正進項發票（號碼、日期、金額、涵蓋的收貨）；限管理者。",
+        "operationId": "updateInputInvoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputInvoiceWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputInvoiceDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Input Invoice",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
     "/api/v1/purchase-orders": {
       "get": {
         "description": "狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。\nq 以單號（純數字）或供應商名搜尋。",
@@ -30522,6 +31096,62 @@
         "tags": [
           "purchasing"
         ]
+      },
+      "put": {
+        "description": "修改採購單（整張覆寫）：草稿全員可改，已下單／已收貨限管理者；已收差額自動調庫存。",
+        "operationId": "updatePurchaseOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_order_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseOrderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Purchase Order",
+        "tags": [
+          "purchasing"
+        ]
       }
     },
     "/api/v1/purchase-orders/{purchase_order_id}/cancel": {
@@ -30567,73 +31197,6 @@
           }
         ],
         "summary": "Cancel Purchase Order",
-        "tags": [
-          "purchasing"
-        ]
-      }
-    },
-    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
-      "post": {
-        "description": "補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。",
-        "operationId": "registerInputInvoice",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "purchase_order_id",
-            "required": true,
-            "schema": {
-              "title": "Purchase Order Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "receipt_id",
-            "required": true,
-            "schema": {
-              "title": "Receipt Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InputInvoiceIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InputInvoiceRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Register Input Invoice",
         "tags": [
           "purchasing"
         ]
@@ -34813,6 +35376,58 @@
           }
         ],
         "summary": "Deactivate Supplier",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}/uninvoiced-receipts": {
+      "get": {
+        "description": "某供應商還沒開發票的收貨批次與金額（登錄發票時勾選）。",
+        "operationId": "listUninvoicedReceipts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "title": "Supplier Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReceiptAmountRead"
+                  },
+                  "title": "Response Listuninvoicedreceipts",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Uninvoiced Receipts",
         "tags": [
           "purchasing"
         ]

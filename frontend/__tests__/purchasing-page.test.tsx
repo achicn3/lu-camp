@@ -1090,7 +1090,7 @@ describe("/purchasing/[id] 採購單明細", () => {
     expect(screen.queryByRole("button", { name: "印標籤 瓦斯罐" })).toBeNull();
   });
 
-  it("收貨與補登發票的欄位用一般人懂的字，不出現「原票」", async () => {
+  it("收貨的發票欄位用一般人懂的字，不出現「原票」", async () => {
     loginAs("CLERK");
     const received = {
       ...ORDERED_PO,
@@ -1101,7 +1101,7 @@ describe("/purchasing/[id] 採購單明細", () => {
     stubFetch(detailRoutes(received));
     const user = userEvent.setup();
     renderDetail();
-    await screen.findByText("補登進項發票");
+    await screen.findByText(/尚未開發票/);
     await user.click(screen.getByRole("button", { name: "收貨入庫" }));
     await screen.findByRole("dialog", { name: "確認收貨" });
     expect(document.body.innerHTML).not.toContain("原票");

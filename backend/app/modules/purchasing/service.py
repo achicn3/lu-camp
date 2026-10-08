@@ -881,23 +881,40 @@ class PurchasingService:
     async def receipt_amounts(
         self, store_id: int, receipts: list[GoodsReceipt]
     ) -> dict[int, Decimal]:
-        """{收貨批次: 金額}＝這批各商品入庫數量 × 該採購單的進價（進項發票對帳提示用）。"""
+        """{收貨批次: 金額}（進項發票對帳提示用，docs/70 §5.3）。
+
+        只收過一批的採購單＝整張單現在的「已收 × 進價」，事後改過數量、進價或換商品都跟著對；
+        分好幾批的，照每批當時入庫的數量 × 現在的進價估。
+        """
+        po_ids = sorted({receipt.purchase_order_id for receipt in receipts})
+        lines = await self._repo.lines_of_orders(store_id, po_ids)
+        batches = await self._repo.receipt_counts(store_id, po_ids)
         quantities = await self._inventory.purchase_in_by_receipt(
             store_id, [receipt.id for receipt in receipts]
         )
-        costs = await self._repo.unit_costs_of_orders(
-            store_id, sorted({receipt.purchase_order_id for receipt in receipts})
-        )
-        return {
-            receipt.id: sum(
+        costs = {
+            (line.purchase_order_id, line.catalog_product_id): line.unit_cost for line in lines
+        }
+        received_value: dict[int, Decimal] = {}
+        for line in lines:
+            received_value[line.purchase_order_id] = (
+                received_value.get(line.purchase_order_id, Decimal(0))
+                + Decimal(line.received_qty) * line.unit_cost
+            )
+        amounts: dict[int, Decimal] = {}
+        for receipt in receipts:
+            po_id = receipt.purchase_order_id
+            if batches.get(po_id, 0) == 1:
+                amounts[receipt.id] = received_value.get(po_id, Decimal(0))
+                continue
+            amounts[receipt.id] = sum(
                 (
-                    Decimal(qty) * costs.get((receipt.purchase_order_id, product), Decimal(0))
+                    Decimal(qty) * costs.get((po_id, product), Decimal(0))
                     for product, qty in quantities.get(receipt.id, {}).items()
                 ),
                 Decimal(0),
             )
-            for receipt in receipts
-        }
+        return amounts
 
     @staticmethod
     def _receive_fingerprint(

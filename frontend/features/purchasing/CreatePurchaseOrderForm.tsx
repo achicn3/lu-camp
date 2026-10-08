@@ -4,6 +4,9 @@
 // 不出現 SKU（2026-09-23 採購改版）：商品條碼由系統自動產生，收貨後在明細頁印標籤。
 // 新增商品比照收購頁：品牌 → 型號（品名自動帶型號）→ 分類 → 成本；售價依設定的毛利率、
 // 營業稅與行動支付手續費自動算出（進位到 10 元，ADR-023），店員可以直接改。
+//
+// 同一個表單也用來**修改**既有採購單（docs/70 §4）：帶入原供應商與明細；收過貨的單多一欄「已收」，
+// 改了由後端自動加減庫存。管理者可在明細列直接改商品名稱（錯字）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
@@ -14,9 +17,12 @@ import {
   canSubmitPo,
   type DraftLine,
   draftTotal,
+  hasReceipts,
   lineTotal,
   qtyError,
+  receivedQtyError,
   toLinePayload,
+  toUpdatePayload,
   unitCostError,
 } from "@/features/purchasing/purchasing";
 import { extractDetail, nextDraftKey, type PurchaseOrder } from "@/features/purchasing/shared";
@@ -38,21 +44,32 @@ import { newIdempotencyKey } from "@/lib/uuid";
 function DraftLineRow({
   line,
   brand,
+  showReceived,
+  canRename,
   onChange,
   onRemove,
 }: {
   line: DraftLine;
   brand: string | null | undefined;
+  /** 修改收過貨的採購單：多一欄「已收」。 */
+  showReceived: boolean;
+  /** 管理者可直接改商品名稱（錯字）。 */
+  canRename: boolean;
   onChange: (next: DraftLine) => void;
   onRemove: () => void;
 }) {
   const qtyErr = qtyError(line.qty);
   const costErr = unitCostError(line.unitCost);
+  const receivedErr = receivedQtyError(line);
   const total = lineTotal(line);
   return (
     <tr>
       <td>
-        {line.product.name}
+        {canRename ? (
+          <RenameProduct product={line.product} onRenamed={(product) => onChange({ ...line, product })} />
+        ) : (
+          line.product.name
+        )}
         {brand && <span className="row-sub">{brand}</span>}
       </td>
       <td>
@@ -67,6 +84,23 @@ function DraftLineRow({
           onChange={(e) => onChange({ ...line, qty: Number.parseInt(e.target.value, 10) })}
         />
       </td>
+      {showReceived && (
+        <td>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            className={`pur-qty ${receivedErr ? "input-error" : ""}`}
+            aria-label={`已收 ${line.product.name}`}
+            aria-invalid={receivedErr !== null}
+            title={receivedErr ?? undefined}
+            value={line.receivedQty === undefined || Number.isNaN(line.receivedQty) ? "" : line.receivedQty}
+            onChange={(e) =>
+              onChange({ ...line, receivedQty: Number.parseInt(e.target.value, 10) })
+            }
+          />
+        </td>
+      )}
       <td>
         <input
           inputMode="numeric"
@@ -93,6 +127,78 @@ function DraftLineRow({
   );
 }
 
+// 商品名稱打錯字：直接改商品本身的名稱（已成交的明細存的是當時品名，不受影響）。
+function RenameProduct({
+  product,
+  onRenamed,
+}: {
+  product: CatalogProduct;
+  onRenamed: (product: CatalogProduct) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const rename = useMutation({
+    mutationFn: async (name: string) => {
+      const { data, error } = await api.PATCH("/api/v1/catalog-products/{product_id}", {
+        params: { path: { product_id: product.id } },
+        body: { name },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "改名失敗");
+      return data;
+    },
+    onSuccess: (renamed) => {
+      setDraft(null);
+      onRenamed({ ...product, name: renamed.name });
+      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+    },
+  });
+  if (draft === null) {
+    return (
+      <span className="pur-rename">
+        {product.name}
+        <button
+          type="button"
+          className="btn-ghost pur-inline-btn"
+          aria-label={`改名 ${product.name}`}
+          onClick={() => {
+            rename.reset();
+            setDraft(product.name);
+          }}
+        >
+          改名
+        </button>
+      </span>
+    );
+  }
+  const name = draft.trim();
+  return (
+    <span className="pur-rename">
+      <input
+        aria-label={`新品名 ${product.name}`}
+        value={draft}
+        maxLength={200}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button
+        type="button"
+        className="btn-secondary pur-inline-btn"
+        disabled={name === "" || rename.isPending}
+        onClick={() => rename.mutate(name)}
+      >
+        {rename.isPending ? "儲存中…" : "儲存品名"}
+      </button>
+      <button type="button" className="btn-ghost pur-inline-btn" onClick={() => setDraft(null)}>
+        取消
+      </button>
+      {rename.isError && (
+        <span role="alert" className="form-error">
+          {rename.error.message}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export interface ReorderItem {
   id: number;
   /** 低庫存提示算好的建議數量（補貨點−現量−在途）；沒帶就補到補貨點。 */
@@ -101,22 +207,29 @@ export interface ReorderItem {
 
 export function CreatePurchaseOrderForm({
   initialItems = [],
-  onCreated,
+  editing,
+  onSaved,
 }: {
   /** 從低庫存「補貨」帶進來的商品，進頁面就先放進明細。 */
   initialItems?: ReorderItem[];
-  onCreated: (po: PurchaseOrder) => void;
+  /** 修改既有採購單（docs/70 §4）；沒給就是建立新單。 */
+  editing?: PurchaseOrder;
+  /** 建立或修改成功（帶回後端最新的採購單）。 */
+  onSaved: (po: PurchaseOrder) => void;
 }) {
   const queryClient = useQueryClient();
   const brandName = useCatalogBrandNames();
-  const catalogCreateStoreId = decodeSession()?.storeId ?? 0;
+  const session = decodeSession();
+  const catalogCreateStoreId = session?.storeId ?? 0;
+  const isManager = session?.role === "MANAGER";
+  const showReceived = editing !== undefined && hasReceipts(editing.status);
   const pendingCatalogCreate = useSyncExternalStore(
     subscribePendingCatalogCreate,
     () => pendingCatalogCreateSnapshot(catalogCreateStoreId),
     pendingCatalogCreateServerSnapshot,
   );
   const [lines, setLines] = useState<DraftLine[]>([]);
-  const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [supplierId, setSupplierId] = useState<number | null>(editing?.supplier_id ?? null);
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [newProductOpen, setNewProductOpen] = useState(false);
@@ -138,9 +251,50 @@ export function CreatePurchaseOrderForm({
     setLines((prev) =>
       prev.some((l) => l.product.id === product.id)
         ? prev
-        : [...prev, { key: nextDraftKey(), product, qty, unitCost }],
+        : [
+            ...prev,
+            {
+              key: nextDraftKey(),
+              product,
+              qty,
+              unitCost,
+              // 收過貨的單補加的品項預設還沒收；實際收到了就把「已收」填上。
+              ...(showReceived ? { receivedQty: 0 } : {}),
+            },
+          ],
     );
   }
+
+  // 修改既有採購單：取回各列商品後一次帶入（之後店員的增刪不會被覆蓋）。
+  const editSeeded = useRef(false);
+  const editProducts = useQuery({
+    queryKey: ["catalog-products", "po-edit", editing?.id ?? 0],
+    enabled: editing !== undefined,
+    queryFn: async () =>
+      Promise.all(
+        (editing?.lines ?? []).map(async (line) => {
+          const { data, error } = await api.GET("/api/v1/catalog-products/{product_id}", {
+            params: { path: { product_id: line.catalog_product_id } },
+          });
+          if (!data) throw new Error(extractDetail(error) ?? "讀取商品失敗");
+          return { line, product: data };
+        }),
+      ),
+  });
+  useEffect(() => {
+    if (editSeeded.current || !editProducts.data) return;
+    editSeeded.current = true;
+    setLines(
+      editProducts.data.map(({ line, product }) => ({
+        key: nextDraftKey(),
+        product,
+        qty: line.qty,
+        unitCost: String(parseNtd(line.unit_cost) ?? ""),
+        lineId: line.id,
+        ...(showReceived ? { receivedQty: line.received_qty } : {}),
+      })),
+    );
+  }, [editProducts.data, showReceived]);
 
   // 低庫存帶入：只在第一次拿到商品時放進明細（之後店員移除的不會被加回來）。
   const seeded = useRef(false);
@@ -224,6 +378,14 @@ export function CreatePurchaseOrderForm({
   const create = useMutation({
     mutationFn: async (submit: boolean) => {
       if (supplierId === null) throw new Error("請選擇供應商");
+      if (editing !== undefined) {
+        const { data, error } = await api.PUT("/api/v1/purchase-orders/{purchase_order_id}", {
+          params: { path: { purchase_order_id: editing.id } },
+          body: { supplier_id: supplierId, lines: toUpdatePayload(lines) },
+        });
+        if (!data) throw new Error(extractDetail(error) ?? "儲存修改失敗");
+        return data;
+      }
       const { data, error } = await api.POST("/api/v1/purchase-orders", {
         body: { supplier_id: supplierId, lines: toLinePayload(lines), submit },
       });
@@ -233,9 +395,9 @@ export function CreatePurchaseOrderForm({
     onSuccess: (po) => {
       setFormError(null);
       void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
-      // 建立採購單會改變在途待到貨量：一併刷新低庫存提醒（待到貨欄）。
+      // 建立／修改採購單會改變在途待到貨量與庫存：一併刷新商品相關畫面。
       void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
-      onCreated(po);
+      onSaved(po);
     },
     onError: (err: Error) => setFormError(err.message),
   });
@@ -377,6 +539,8 @@ export function CreatePurchaseOrderForm({
           search={searchSuppliers}
           create={createSupplier}
           placeholder="選擇或新增供應商"
+          selectedId={supplierId}
+          selectedName={supplierId === editing?.supplier_id ? editing.supplier_name : null}
           onChange={(o) => setSupplierId(o?.id ?? null)}
         />
       </section>
@@ -386,6 +550,24 @@ export function CreatePurchaseOrderForm({
           <span className="pur-step-no">2</span>採購明細
         </h2>
 
+        {showReceived && (
+          <p className="hint pur-notice">
+            「已收」改了，庫存會跟著加減（已經賣掉、不夠扣會擋下）；進價改了，如果這是該商品最近一次進貨，
+            商品成本也會一起更新。
+          </p>
+        )}
+        {editProducts.isError && (
+          <div role="alert" className="form-error pur-reorder-error">
+            採購單的商品讀取失敗（{editProducts.error.message}）。
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void editProducts.refetch()}
+            >
+              重新讀取
+            </button>
+          </div>
+        )}
         {reorderProducts.isError && (
           <div role="alert" className="form-error pur-reorder-error">
             低庫存商品讀取失敗（{reorderProducts.error.message}），還沒帶進明細。
@@ -408,6 +590,7 @@ export function CreatePurchaseOrderForm({
                 <tr>
                   <th>商品</th>
                   <th>數量</th>
+                  {showReceived && <th>已收</th>}
                   <th>進貨單價</th>
                   <th>售價</th>
                   <th>小計</th>
@@ -420,6 +603,8 @@ export function CreatePurchaseOrderForm({
                     key={line.key}
                     line={line}
                     brand={brandName(line.product.brand_id)}
+                    showReceived={showReceived}
+                    canRename={isManager}
                     onChange={(next) =>
                       setLines((prev) => prev.map((l) => (l.key === line.key ? next : l)))
                     }
@@ -429,7 +614,7 @@ export function CreatePurchaseOrderForm({
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={4}>合計</td>
+                  <td colSpan={showReceived ? 5 : 4}>合計</td>
                   <td className="money">{formatNtd(total)}</td>
                   <td />
                 </tr>
@@ -702,24 +887,37 @@ export function CreatePurchaseOrderForm({
         <p>
           共 {lines.length} 項・合計 <strong className="money">{formatNtd(total)}</strong>
         </p>
-        <div className="pur-create-actions">
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={submitDisabled}
-            onClick={() => create.mutate(false)}
-          >
-            {create.isPending ? "處理中…" : created ? "已建立" : "存草稿"}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={submitDisabled}
-            onClick={() => create.mutate(true)}
-          >
-            {create.isPending ? "處理中…" : created ? "已建立，前往明細…" : "送出採購"}
-          </button>
-        </div>
+        {editing !== undefined ? (
+          <div className="pur-create-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={submitDisabled}
+              onClick={() => create.mutate(false)}
+            >
+              {create.isPending ? "儲存中…" : created ? "已儲存，回到明細…" : "儲存修改"}
+            </button>
+          </div>
+        ) : (
+          <div className="pur-create-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={submitDisabled}
+              onClick={() => create.mutate(false)}
+            >
+              {create.isPending ? "處理中…" : created ? "已建立" : "存草稿"}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={submitDisabled}
+              onClick={() => create.mutate(true)}
+            >
+              {create.isPending ? "處理中…" : created ? "已建立，前往明細…" : "送出採購"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3221,6 +3221,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-input-invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Input Invoices
+         * @description 進項發票清單（發票日期新到舊），可依供應商篩選。
+         */
+        get: operations["listInputInvoices"];
+        put?: never;
+        /**
+         * Create Input Invoice
+         * @description 登錄進項發票並掛上它涵蓋的收貨（可多批、跨採購單，須同一供應商）。
+         */
+        post: operations["createInputInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-input-invoices/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Count Input Invoices */
+        get: operations["countInputInvoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-input-invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Input Invoice */
+        get: operations["getInputInvoice"];
+        /**
+         * Update Input Invoice
+         * @description 更正進項發票（號碼、日期、金額、涵蓋的收貨）；限管理者。
+         */
+        put: operations["updateInputInvoice"];
+        post?: never;
+        /**
+         * Delete Input Invoice
+         * @description 刪掉登錯的發票（涵蓋的收貨回到還沒開發票）；限管理者。
+         */
+        delete: operations["deleteInputInvoice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-orders": {
         parameters: {
             query?: never;
@@ -3272,7 +3338,11 @@ export interface paths {
         };
         /** Get Purchase Order */
         get: operations["getPurchaseOrder"];
-        put?: never;
+        /**
+         * Update Purchase Order
+         * @description 修改採購單（整張覆寫）：草稿全員可改，已下單／已收貨限管理者；已收差額自動調庫存。
+         */
+        put: operations["updatePurchaseOrder"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3294,26 +3364,6 @@ export interface paths {
          * @description 取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。
          */
         post: operations["cancelPurchaseOrder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Register Input Invoice
-         * @description 補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
-         */
-        post: operations["registerInputInvoice"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4501,6 +4551,26 @@ export interface paths {
          * @description 停用供應商（不進建單選單，保留歷史）。
          */
         post: operations["deactivateSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/{supplier_id}/uninvoiced-receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Uninvoiced Receipts
+         * @description 某供應商還沒開發票的收貨批次與金額（登錄發票時勾選）。
+         */
+        get: operations["listUninvoicedReceipts"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7247,7 +7317,7 @@ export interface components {
         };
         /**
          * GoodsReceiptRead
-         * @description 單一收貨批次（分批收貨事件）＋其選填進項發票。
+         * @description 單一收貨批次（分批收貨事件）＋所掛的進項發票（沒有＝還沒開發票）。
          */
         GoodsReceiptRead: {
             /** Id */
@@ -7312,6 +7382,37 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** InputInvoiceDetailRead */
+        InputInvoiceDetailRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Invoice Net */
+            invoice_net: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Invoice Tax */
+            invoice_tax: string;
+            /** Invoice Total */
+            invoice_total: string;
+            /** Receipts */
+            receipts: components["schemas"]["ReceiptAmountRead"][];
+            /** Receipts Total */
+            receipts_total: string;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Supplier Name */
+            supplier_name: string;
+        };
         /**
          * InputInvoiceIn
          * @description 進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。
@@ -7334,8 +7435,13 @@ export interface components {
             /** Invoice Total */
             invoice_total: number | string;
         };
-        /** InputInvoiceRead */
+        /**
+         * InputInvoiceRead
+         * @description 收貨批次上顯示的進項發票摘要（點進去看整張：`getInputInvoice`）。
+         */
         InputInvoiceRead: {
+            /** Id */
+            id: number;
             /**
              * Invoice Date
              * Format: date
@@ -7349,6 +7455,29 @@ export interface components {
             invoice_tax: string;
             /** Invoice Total */
             invoice_total: string;
+        };
+        /**
+         * InputInvoiceWrite
+         * @description 登錄／修改一張進項發票（docs/70 §5.2）：涵蓋哪幾批收貨（至少一批、同一供應商）。
+         */
+        InputInvoiceWrite: {
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Invoice Net */
+            invoice_net: number | string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Invoice Tax */
+            invoice_tax: number | string;
+            /** Invoice Total */
+            invoice_total: number | string;
+            /** Receipt Ids */
+            receipt_ids: number[];
+            /** Supplier Id */
+            supplier_id: number;
         };
         /**
          * InsightsBreakdownRow
@@ -9536,6 +9665,27 @@ export interface components {
             /** Unit Cost */
             unit_cost: string;
         };
+        /**
+         * PurchaseOrderLineUpdate
+         * @description 修改採購單的一列（docs/70 §4.2）：有 id＝改既有明細、沒有＝新增。
+         *
+         *     received_qty：部分到貨／已收貨的單才可大於 0，差額由 service 自動加減庫存。
+         */
+        PurchaseOrderLineUpdate: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Id */
+            id?: number | null;
+            /** Qty */
+            qty: number;
+            /**
+             * Received Qty
+             * @default 0
+             */
+            received_qty: number;
+            /** Unit Cost */
+            unit_cost: number | string;
+        };
         /** PurchaseOrderRead */
         PurchaseOrderRead: {
             /**
@@ -9587,6 +9737,16 @@ export interface components {
          * @enum {string}
          */
         PurchaseOrderStatus: "DRAFT" | "ORDERED" | "PARTIAL" | "RECEIVED" | "CANCELLED";
+        /**
+         * PurchaseOrderUpdate
+         * @description 整張覆寫：原有明細沒帶到的就刪除。
+         */
+        PurchaseOrderUpdate: {
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineUpdate"][];
+            /** Supplier Id */
+            supplier_id: number;
+        };
         /**
          * ReasonCreateRequest
          * @description 新增原因代碼。`code` 在同店內唯一，且**不可事後修改**——歷史單據存的是名稱快照，
@@ -9641,6 +9801,23 @@ export interface components {
             requires_note?: boolean | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /**
+         * ReceiptAmountRead
+         * @description 一批收貨與它的金額（這批各商品收到的數量 × 採購單進價）。
+         */
+        ReceiptAmountRead: {
+            /** Amount */
+            amount: string;
+            /** Purchase Order Id */
+            purchase_order_id: number;
+            /** Receipt Id */
+            receipt_id: number;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
         };
         /**
          * ReceiptHeaderRead
@@ -17890,6 +18067,198 @@ export interface operations {
             };
         };
     };
+    listInputInvoices: {
+        parameters: {
+            query?: {
+                supplier_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputInvoiceDetailRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createInputInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputInvoiceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputInvoiceDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countInputInvoices: {
+        parameters: {
+            query?: {
+                supplier_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getInputInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputInvoiceDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateInputInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputInvoiceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputInvoiceDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteInputInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listPurchaseOrders: {
         parameters: {
             query?: {
@@ -18020,7 +18389,7 @@ export interface operations {
             };
         };
     };
-    cancelPurchaseOrder: {
+    updatePurchaseOrder: {
         parameters: {
             query?: never;
             header?: never;
@@ -18029,7 +18398,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -18051,21 +18424,16 @@ export interface operations {
             };
         };
     };
-    registerInputInvoice: {
+    cancelPurchaseOrder: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 purchase_order_id: number;
-                receipt_id: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InputInvoiceIn"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -18073,7 +18441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InputInvoiceRead"];
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
                 };
             };
             /** @description Validation Error */
@@ -20203,6 +20571,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SupplierRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listUninvoicedReceipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptAmountRead"][];
                 };
             };
             /** @description Validation Error */

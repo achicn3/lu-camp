@@ -26,7 +26,7 @@ function NewPurchaseOrder() {
   return (
     <CreatePurchaseOrderForm
       initialItems={parseReorder(params.get("reorder"))}
-      onCreated={(po) => router.push(`/purchasing/${po.id}`)}
+      onSaved={(po) => router.push(`/purchasing/${po.id}`)}
     />
   );
 }

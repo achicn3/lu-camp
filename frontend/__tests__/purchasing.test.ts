@@ -3,17 +3,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   canCancel,
+  canEdit,
   canReceive,
   canSubmit,
   canSubmitPo,
   type DraftLine,
   draftTotal,
+  hasReceipts,
   lineRemaining,
   lineTotal,
   poStatusBadge,
   qtyError,
+  receivedQtyError,
   supplierNameError,
   toLinePayload,
+  toUpdatePayload,
   unitCostError,
 } from "@/features/purchasing/purchasing";
 import type { components } from "@/lib/api-types";
@@ -154,5 +158,52 @@ describe("poStatusBadge", () => {
     expect(poStatusBadge("PARTIAL").label).toBe("部分到貨");
     expect(poStatusBadge("CANCELLED").label).toBe("已取消");
     expect(poStatusBadge("RECEIVED").tone).toBe("ok");
+  });
+});
+
+describe("canEdit（docs/70 §2）", () => {
+  it("草稿大家能改；下單後只有管理者；取消的誰都不能改", () => {
+    expect(canEdit("DRAFT", false)).toBe(true);
+    for (const status of ["ORDERED", "PARTIAL", "RECEIVED"] as const) {
+      expect(canEdit(status, false)).toBe(false);
+      expect(canEdit(status, true)).toBe(true);
+    }
+    expect(canEdit("CANCELLED", true)).toBe(false);
+  });
+
+  it("收過貨的單才有「已收」欄", () => {
+    expect(hasReceipts("PARTIAL")).toBe(true);
+    expect(hasReceipts("RECEIVED")).toBe(true);
+    expect(hasReceipts("ORDERED")).toBe(false);
+    expect(hasReceipts("DRAFT")).toBe(false);
+  });
+});
+
+describe("receivedQtyError", () => {
+  it("沒有已收欄就不檢查；有就要 0 到訂購數量之間的整數", () => {
+    expect(receivedQtyError(line())).toBeNull();
+    expect(receivedQtyError(line({ qty: 3, receivedQty: 3 }))).toBeNull();
+    expect(receivedQtyError(line({ qty: 3, receivedQty: 0 }))).toBeNull();
+    expect(receivedQtyError(line({ qty: 3, receivedQty: 4 }))).toBe("已收不可超過訂購數量");
+    expect(receivedQtyError(line({ receivedQty: -1 }))).not.toBeNull();
+    expect(receivedQtyError(line({ receivedQty: Number.NaN }))).not.toBeNull();
+  });
+
+  it("已收不合法就不能送出", () => {
+    expect(canSubmitPo(1, [line({ qty: 2, receivedQty: 5 })])).toBe(false);
+  });
+});
+
+describe("toUpdatePayload", () => {
+  it("帶原列 id 與已收數量；新加的列 id 為 null、已收 0", () => {
+    expect(
+      toUpdatePayload([
+        line({ lineId: 9, receivedQty: 1, unitCost: " 30 " }),
+        line({ key: "k2", product: product(2), qty: 1, unitCost: "5" }),
+      ]),
+    ).toEqual([
+      { id: 9, catalog_product_id: 1, qty: 2, received_qty: 1, unit_cost: "30" },
+      { id: null, catalog_product_id: 2, qty: 1, received_qty: 0, unit_cost: "5" },
+    ]);
   });
 });

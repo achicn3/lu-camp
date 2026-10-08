@@ -1,14 +1,16 @@
 "use client";
 // 採購單明細頁：供應商、狀態、時間、逐項訂購／已收／待收、收貨批次與進項發票；
-// 草稿可送出、已下單可收貨或取消。收過貨的品項可在這裡直接印標籤（條碼由系統自動產生）。
+// 草稿可送出、已下單可收貨或取消；可「修改」（草稿大家、其餘限管理者，docs/70 §4）。
+// 收過貨的品項可在這裡直接印標籤（條碼由系統自動產生）。每批收貨顯示掛的進項發票，
+// 還沒開的可直接去登錄（帶入這批）。
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { BackfillInvoiceForm } from "@/features/purchasing/BackfillInvoiceForm";
 import {
   type CatalogProduct,
   canCancel,
+  canEdit,
   canReceive,
   canSubmit,
   lineRemaining,
@@ -19,6 +21,7 @@ import { dt, extractDetail, money, type PurchaseOrder } from "@/features/purchas
 import { useCatalogBrandNames } from "@/features/purchasing/useCatalogBrandNames";
 import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
+import { decodeSession } from "@/lib/auth";
 import { parseNtd } from "@/lib/money";
 
 export function PurchaseOrderDetail({
@@ -111,6 +114,7 @@ export function PurchaseOrderDetail({
 
   const badge = poStatusBadge(po.status);
   const busy = submit.isPending || cancel.isPending;
+  const editable = canEdit(po.status, decodeSession()?.role === "MANAGER");
 
   return (
     <div className="pur-detail-page">
@@ -207,12 +211,22 @@ export function PurchaseOrderDetail({
                   </span>
                   {r.invoice ? (
                     <span className="row-sub">
-                      發票 {r.invoice.invoice_number}（{r.invoice.invoice_date}）含稅{" "}
-                      {money(r.invoice.invoice_total)}｜未稅 {money(r.invoice.invoice_net)}／稅{" "}
-                      {money(r.invoice.invoice_tax)}
+                      發票{" "}
+                      <Link href={`/purchasing/invoices/${r.invoice.id}`}>
+                        {r.invoice.invoice_number}
+                      </Link>
+                      （{r.invoice.invoice_date}）含稅 {money(r.invoice.invoice_total)}｜未稅{" "}
+                      {money(r.invoice.invoice_net)}／稅 {money(r.invoice.invoice_tax)}
                     </span>
                   ) : (
-                    <BackfillInvoiceForm poId={po.id} receiptId={r.id} />
+                    <span className="row-sub">
+                      尚未開發票・
+                      <Link
+                        href={`/purchasing/invoices/new?supplier=${po.supplier_id}&receipt=${r.id}`}
+                      >
+                        登錄發票
+                      </Link>
+                    </span>
                   )}
                 </li>
               ))}
@@ -220,7 +234,10 @@ export function PurchaseOrderDetail({
           </div>
         )}
 
-        {(canSubmit(po.status) || canReceive(po.status) || canCancel(po.status)) && (
+        {(canSubmit(po.status) ||
+          canReceive(po.status) ||
+          canCancel(po.status) ||
+          editable) && (
           <div className="pur-detail-actions">
             {canSubmit(po.status) && (
               <button
@@ -236,6 +253,11 @@ export function PurchaseOrderDetail({
               <button type="button" className="btn-primary" onClick={() => setReceiving(true)}>
                 收貨入庫
               </button>
+            )}
+            {editable && (
+              <Link href={`/purchasing/${po.id}/edit`} className="btn-secondary">
+                修改
+              </Link>
             )}
             {canCancel(po.status) && (
               <button

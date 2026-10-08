@@ -8,6 +8,8 @@ export type Supplier = components["schemas"]["SupplierRead"];
 export type PurchaseOrder = components["schemas"]["PurchaseOrderRead"];
 export type PoStatus = components["schemas"]["PurchaseOrderStatus"];
 export type PurchaseOrderReceiveBody = components["schemas"]["ReceivePurchaseOrderRequest"];
+export type InputInvoice = components["schemas"]["InputInvoiceDetailRead"];
+export type ReceiptAmount = components["schemas"]["ReceiptAmountRead"];
 
 export const PAGE_SIZE = 20;
 const RECEIVE_ERROR_CODE_HEADER = "X-Lu-Camp-Error-Code";
@@ -40,6 +42,12 @@ export function canDiscardReceivePending(response: Response): boolean {
 export function money(value: string): string {
   const parsed = parseNtd(value);
   return parsed === null ? value : formatNtd(parsed);
+}
+
+/** 一張發票涵蓋的採購單號（去重、照號碼排）：「#3、#5」。 */
+export function invoiceOrders(invoice: InputInvoice): string {
+  const ids = [...new Set(invoice.receipts.map((r) => r.purchase_order_id))].sort((a, b) => a - b);
+  return ids.map((id) => `#${id}`).join("、");
 }
 
 export function dt(value: string | null | undefined): string {

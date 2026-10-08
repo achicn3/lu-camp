@@ -345,3 +345,40 @@ async def test_list_filters_by_supplier_and_counts(
         "/api/v1/purchase-input-invoices/count", params={"supplier_id": mine}, headers=_auth(token)
     )
     assert count.json() == {"count": 1}
+
+
+async def test_batch_amount_follows_a_corrected_order(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購單改過（換商品、改進價）後，只收過一批的單，這批金額照改後的已收×進價。"""
+    token, store_id, _ = await _seed_store(db_session, name="改單後金額店")
+    manager = await _manager_token(db_session, store_id)
+    wrong = await _seed_catalog(db_session, store_id, sku="AM-W", qty=0)
+    right = await _seed_catalog(db_session, store_id, sku="AM-R", qty=0)
+    supplier = await _create_supplier(client, token)
+    po_id, receipt = await _received_batch(
+        client, token, supplier_id=supplier, catalog_id=wrong, qty=4, cost="100"
+    )
+    edit = await client.put(
+        f"/api/v1/purchase-orders/{po_id}",
+        json={
+            "supplier_id": supplier,
+            "lines": [
+                {
+                    "id": None,
+                    "catalog_product_id": right,
+                    "qty": 4,
+                    "received_qty": 4,
+                    "unit_cost": "800",
+                }
+            ],
+        },
+        headers=_auth(manager),
+    )
+    assert edit.status_code == 200, edit.text
+
+    resp = await client.get(
+        f"/api/v1/suppliers/{supplier}/uninvoiced-receipts", headers=_auth(token)
+    )
+    [row] = resp.json()
+    assert row["receipt_id"] == receipt and row["amount"] == "3200"

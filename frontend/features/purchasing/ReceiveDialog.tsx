@@ -193,7 +193,7 @@ export function ReceiveDialog({
               </table>
             </div>
             <fieldset className="pur-invoice-fields">
-              <legend>進項發票（選填；供應商發票隨貨時一併登錄，漏登可事後補登）</legend>
+              <legend>進項發票（選填；發票隨貨就一起填，還沒拿到可之後到「進項發票」登錄）</legend>
               <label className="field">
                 <span className="field-label">發票號碼（2 英文＋8 數字）</span>
                 <input

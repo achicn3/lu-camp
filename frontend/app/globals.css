@@ -2268,6 +2268,7 @@ a.btn-ghost {
 .acq-basket select,
 .inv-edit-dialog select,
 .intake-page .field select,
+.pur-page .field select,
 .intake-disposition select {
   min-height: var(--tap-min);
   width: 100%;
@@ -2281,6 +2282,7 @@ a.btn-ghost {
 .acq-basket select:focus,
 .inv-edit-dialog select:focus,
 .intake-page .field select:focus,
+.pur-page .field select:focus,
 .intake-disposition select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -2937,6 +2939,21 @@ a.btn-ghost {
 }
 .pur-receive-table .pur-qty {
   width: 5rem;
+}
+/* 修改採購單：明細列上直接改商品名稱（docs/70 §4.1）。 */
+.pur-rename {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pur-rename input {
+  width: 12rem;
+  max-width: 100%;
+}
+.pur-invoice-receipts td,
+.pur-invoice-receipts th {
+  white-space: nowrap;
 }
 /* 收貨批次清單（詳情頁）。 */
 .pur-receipts {
