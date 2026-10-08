@@ -28,6 +28,7 @@ UI_TEXT = (
     "製複要規計設註認調謝證識變資足載返退通過避重金除響頁驗"
     "北夜快推標無照發籤薦跨須坐慢喝首完口味擇架剛"
     "卡子手抽換支杯沖豆配面體·"
+    "件商家檯領"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 
