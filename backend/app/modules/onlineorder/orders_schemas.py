@@ -15,7 +15,10 @@ NTDOut = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 class OnlineOrderLineRead(BaseModel):
     line_no: int
-    item_id: int
+    item_id: int | None = None
+    """餐飲品項；帶回家商品行為 None。"""
+    catalog_product_id: int | None = None
+    """帶回家商品（docs/63 §13）；餐飲行為 None。"""
     name: str
     option_ids: list[int]
     unit_price: int
@@ -42,6 +45,8 @@ class OnlineOrderRead(BaseModel):
     payment_status: str
     reject_reason: str | None
     sale_id: int | None
+    fulfillment_status: str
+    """帶回家商品交貨：NONE（沒有）／AWAITING（待交貨）／HANDED_OVER（已交貨）。"""
 
     @classmethod
     def from_row(cls, row: OnlineOrder) -> "OnlineOrderRead":
@@ -60,6 +65,7 @@ class OnlineOrderRead(BaseModel):
             payment_status=row.payment_status,
             reject_reason=row.reject_reason,
             sale_id=row.sale_id,
+            fulfillment_status=row.fulfillment_status,
         )
 
 
@@ -87,7 +93,10 @@ class OnlineOrdersRead(BaseModel):
 
 class OnlineCartLineRead(BaseModel):
     line_no: int
-    menu_item_id: int
+    line_type: str
+    """MENU（餐飲）或 CATALOG（帶回家商品）。"""
+    menu_item_id: int | None
+    catalog_product_id: int | None
     menu_option_ids: list[int]
     experience_id: int | None
     qty: int
@@ -118,7 +127,9 @@ class OnlineCartRead(BaseModel):
             lines=[
                 OnlineCartLineRead(
                     line_no=line.line_no,
+                    line_type=line.line_type,
                     menu_item_id=line.menu_item_id,
+                    catalog_product_id=line.catalog_product_id,
                     menu_option_ids=line.menu_option_ids,
                     experience_id=line.experience_id,
                     qty=line.qty,

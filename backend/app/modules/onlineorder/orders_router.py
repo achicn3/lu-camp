@@ -79,6 +79,23 @@ async def cancel_online_order(
     return OnlineOrderRead.from_row(order)
 
 
+@router.post(
+    "/{order_id}/hand-over", response_model=OnlineOrderRead, operation_id="handOverOnlineOrder"
+)
+async def hand_over_online_order(
+    order_id: int, session: SessionDep, user: UserDep, client: ClientDep
+) -> OnlineOrderRead:
+    """帶回家商品交給客人了：結單（docs/63 §13）。店員可按；重按不出錯。"""
+    try:
+        order = await OnlineOrdersService(session, client).hand_over(
+            user.store_id, order_id, actor_user_id=user.id
+        )
+    except _Errors as exc:
+        raise _http_error(exc) from exc
+    await session.commit()
+    return OnlineOrderRead.from_row(order)
+
+
 @router.put("/accepting", response_model=OnlineOrdersRead, operation_id="setOnlineOrderAccepting")
 async def set_online_order_accepting(
     payload: OnlineAcceptingRequest, session: SessionDep, user: UserDep, client: ClientDep

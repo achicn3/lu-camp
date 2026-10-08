@@ -19,7 +19,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.core.time import store_date, store_day_bounds, utc_now
+from app.modules.inventory.service import InventoryService
 from app.modules.menu.service import MenuService
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
@@ -31,6 +33,7 @@ from app.modules.onlineorder.models import (
 )
 from app.modules.onlineorder.orders_repository import OnlineOrdersRepository
 from app.shared.enums import (
+    OnlineOrderFulfillment,
     OnlineOrderHold,
     OnlineOrderPayment,
     OnlineOrderSync,
@@ -38,6 +41,7 @@ from app.shared.enums import (
     StockReservationStatus,
 )
 from app.shared.exceptions import (
+    CrossStoreReference,
     InsufficientStock,
     MenuItemNotFound,
     MenuItemUnavailable,
@@ -79,7 +83,10 @@ class PullResult:
 class CartLine:
     line_no: int
     """雲端訂單的行號：同品項同選項可能有兩行（體驗卡＋一般點），POS 靠它分開。"""
-    menu_item_id: int
+    line_type: str
+    """MENU（餐飲）或 CATALOG（帶回家商品，docs/63 §13）。"""
+    menu_item_id: int | None
+    catalog_product_id: int | None
     menu_option_ids: list[int]
     experience_id: int | None
     qty: int
@@ -111,6 +118,7 @@ class OnlineOrdersService:
         self._client = client
         self._repo = OnlineOrdersRepository(session)
         self._menu = MenuService(session)
+        self._inventory = InventoryService(session)
         self._experiences = MenuExperienceService(session)
 
     def _require_client(self, store_id: int) -> OnlineOrderClient:
@@ -187,6 +195,14 @@ class OnlineOrdersService:
         try:
             async with self._session.begin_nested():
                 for line in order.lines:
+                    if _is_retail(line):
+                        # 帶回家商品：直接扣現量（櫃檯就賣不掉這幾件）；加回時照數量加。
+                        product_id, qty = int(line["catalog_product_id"]), int(line["qty"])
+                        await self._inventory.hold_catalog_for_online_order(
+                            store_id, product_id, qty, online_order_id=order.id
+                        )
+                        consumed.append({"qty": qty, "catalog_product_id": product_id})
+                        continue
                     item = await self._menu.get(store_id, int(line["item_id"]))
                     if item is None or item.archived_at is not None:
                         raise MenuItemNotFound(f"「{line['name']}」已不在菜單上")
@@ -199,7 +215,13 @@ class OnlineOrdersService:
                     used = await self._menu.consume_daily_stock(store_id, item, selection, qty)
                     if used:
                         consumed.append({"qty": qty, "consumed": used})
-        except (InsufficientStock, MenuItemNotFound, MenuItemUnavailable, SaleLineInvalid) as exc:
+        except (
+            CrossStoreReference,
+            InsufficientStock,
+            MenuItemNotFound,
+            MenuItemUnavailable,
+            SaleLineInvalid,
+        ) as exc:
             order.hold_status = OnlineOrderHold.REJECTED
             order.reject_reason = str(exc)[:300]
             return
@@ -219,6 +241,14 @@ class OnlineOrdersService:
     ) -> None:
         """把保留的份數加回（同一營業日、份數版本沒變才加；規則同作廢加回）。"""
         for row in reservation.consumed:
+            if "catalog_product_id" in row:
+                await self._inventory.release_online_hold(
+                    store_id,
+                    int(row["catalog_product_id"]),
+                    int(row["qty"]),
+                    online_order_id=reservation.online_order_id,
+                )
+                continue
             await self._menu.restore_daily_stock(store_id, row["consumed"], qty=int(row["qty"]))
         reservation.status = status
         reservation.ended_at = utc_now()
@@ -328,6 +358,9 @@ class OnlineOrdersService:
         self._ensure_open(order)
         lines: list[CartLine] = []
         for line in order.lines:
+            if _is_retail(line):
+                lines.append(await self._retail_cart_line(store_id, line))
+                continue
             item = await self._menu.get(store_id, int(line["item_id"]))
             if item is None or item.archived_at is not None:
                 raise OnlineOrderConflict(f"「{line['name']}」已不在菜單上，請和客人確認後手動點")
@@ -343,7 +376,9 @@ class OnlineOrdersService:
             lines.append(
                 CartLine(
                     line_no=int(line["line_no"]),
+                    line_type="MENU",
                     menu_item_id=item.id,
+                    catalog_product_id=None,
                     menu_option_ids=option_ids,
                     experience_id=experience_id,
                     qty=qty,
@@ -359,6 +394,24 @@ class OnlineOrdersService:
             lines=lines,
             online_total=order.total,
             total=sum((line.unit_price * line.qty for line in lines), Decimal(0)),
+        )
+
+    async def _retail_cart_line(self, store_id: int, line: dict[str, Any]) -> CartLine:
+        """帶回家商品照目前售價帶入；商品沒了或停售就請店員和客人確認。"""
+        product = await self._inventory.get_catalog(store_id, int(line["catalog_product_id"]))
+        if product is None or not product.is_active:
+            raise OnlineOrderConflict(f"「{line['name']}」已停售，請和客人確認後手動點")
+        return CartLine(
+            line_no=int(line["line_no"]),
+            line_type="CATALOG",
+            menu_item_id=None,
+            catalog_product_id=product.id,
+            menu_option_ids=[],
+            experience_id=None,
+            qty=int(line["qty"]),
+            description=product.name,
+            online_unit_price=Decimal(line["unit_price"]),
+            unit_price=product.unit_price,
         )
 
     @staticmethod
@@ -427,7 +480,7 @@ class OnlineOrdersService:
         day = store_date(utc_now()).isoformat()
         held: dict[tuple[str, int], int] = {}
         for row in reservation.consumed:
-            for entry in row["consumed"]:
+            for entry in row.get("consumed", []):
                 if str(entry["day"]) != day:
                     continue
                 key = (str(entry["kind"]), int(entry["id"]))
@@ -451,11 +504,40 @@ class OnlineOrdersService:
         order.sync_status = OnlineOrderSync.SETTLED
         order.payment_status = OnlineOrderPayment.PAID
         order.sale_id = sale_id
-        self._enqueue(
-            order,
-            {"sync_status": OnlineOrderSync.SETTLED, "payment_status": OnlineOrderPayment.PAID},
-        )
+        report: dict[str, str] = {
+            "sync_status": OnlineOrderSync.SETTLED,
+            "payment_status": OnlineOrderPayment.PAID,
+        }
+        # 有帶回家商品：付了錢還要等店員交貨才算結單（docs/63 §13）。
+        if any(_is_retail(line) for line in order.lines):
+            order.fulfillment_status = OnlineOrderFulfillment.AWAITING
+            report["fulfillment"] = OnlineOrderFulfillment.AWAITING
+        self._enqueue(order, report)
         await self._repo.flush()
+
+    async def hand_over(self, store_id: int, order_id: int, *, actor_user_id: int) -> OnlineOrder:
+        """店員把帶回家商品交給客人：結單、寫稽核、回報雲端（客人頁顯示已領取）。重按＝不動。"""
+        order = await self._order(store_id, order_id, for_update=True)
+        if order.fulfillment_status == OnlineOrderFulfillment.HANDED_OVER:
+            return order
+        if order.fulfillment_status != OnlineOrderFulfillment.AWAITING:
+            raise OnlineOrderConflict("這張線上單還沒收款，或沒有要交給客人的商品；請先帶入結帳")
+        order.fulfillment_status = OnlineOrderFulfillment.HANDED_OVER
+        order.handed_over_at = utc_now()
+        order.handed_over_by = actor_user_id
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="HAND_OVER_ONLINE_ORDER",
+            entity_type="online_order",
+            entity_id=str(order.id),
+            before={"fulfillment_status": OnlineOrderFulfillment.AWAITING.value},
+            after={"fulfillment_status": OnlineOrderFulfillment.HANDED_OVER.value},
+        )
+        self._enqueue(order, {"fulfillment": OnlineOrderFulfillment.HANDED_OVER})
+        await self._repo.flush()
+        return order
 
     async def _describe(
         self, store_id: int, description: str, experience_id: int | None, ordered_name: str
@@ -483,7 +565,12 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
     lines: list[dict[str, Any]] = [
         {
             "line_no": int(line["line_no"]),
-            "item_id": int(line["item_id"]),
+            # 餐飲行帶 item_id；帶回家商品行帶 catalog_product_id（docs/63 §13），兩者擇一。
+            **(
+                {"catalog_product_id": int(line["catalog_product_id"])}
+                if line.get("catalog_product_id") is not None
+                else {"item_id": int(line["item_id"])}
+            ),
             "name": str(line["name"]),
             "option_ids": [int(o) for o in line["option_ids"]],
             "unit_price": int(line["unit_price"]),
@@ -501,6 +588,9 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
     ]
     if not lines or any(line["qty"] < 1 for line in lines):
         raise ValueError("empty or bad lines")
+    # 帶回家商品沒有選項、不會是體驗卡。
+    if any(_is_retail(line) and (line["option_ids"] or "experience_id" in line) for line in lines):
+        raise ValueError("retail line with options")
     mode = str(raw["service_mode"])
     if mode not in ("DINE_IN", "TAKEOUT"):
         raise ValueError("bad service mode")
@@ -521,3 +611,8 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
         hold_status=OnlineOrderHold.NONE,
         payment_status=OnlineOrderPayment.UNPAID,
     )
+
+
+def _is_retail(line: dict[str, Any]) -> bool:
+    """這一行是帶回家商品（一般商品）而不是餐飲。"""
+    return line.get("catalog_product_id") is not None

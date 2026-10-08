@@ -26,6 +26,7 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.core.time import utc_now
@@ -33,6 +34,7 @@ from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.customerdisplay.schemas import CartUpsertRequest, StaffCartPayloadRead
 from app.modules.customerdisplay.service import CartSessionConflict, CustomerDisplayService
+from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.onlineorder.client import OnlineOrderClient
@@ -51,7 +53,7 @@ from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import SaleLineType, ServiceMode, TenderType, UserRole
+from app.shared.enums import SaleLineType, ServiceMode, StockReason, TenderType, UserRole
 from app.shared.exceptions import OnlineOrderNotConfigured, SignatureContentMismatch
 from tests.integration.customer_display_helpers import (
     CustomerDisplayAwareClient,
@@ -406,7 +408,9 @@ async def test_cart_reprices_with_current_menu(
     assert body["lines"] == [
         {
             "line_no": 1,
+            "line_type": "MENU",
             "menu_item_id": ctx.latte,
+            "catalog_product_id": None,
             "menu_option_ids": [],
             "experience_id": None,
             "qty": 2,
@@ -902,3 +906,158 @@ async def test_idempotent_replay_rejects_changed_online_order(
         headers=_h(ctx.clerk, "online-replay"),
     )
     assert changed.status_code == 409, changed.text
+
+
+# ── 帶回家商品（docs/63 §13、M1d）：拉單保留現量、帶入結帳、付款後待交貨、按「已交貨」結單 ──
+
+
+async def _bean(session: AsyncSession, c: Ctx, qty: int = 3) -> CatalogProduct:
+    product = CatalogProduct(
+        store_id=c.store_id,
+        sku="BEAN-200",
+        name="耶加雪菲 200g",
+        unit_price=Decimal(450),
+        unit_cost=Decimal(220),
+        quantity_on_hand=qty,
+    )
+    session.add(product)
+    await session.flush()
+    return product
+
+
+def _retail_line(no: int, product_id: int, qty: int = 1, price: int = 450) -> dict[str, Any]:
+    return {
+        "line_no": no,
+        "catalog_product_id": product_id,
+        "name": "耶加雪菲 200g",
+        "option_ids": [],
+        "unit_price": price,
+        "qty": qty,
+        "line_total": price * qty,
+        "limited": True,
+    }
+
+
+async def _on_hand(session: AsyncSession, product: CatalogProduct) -> int:
+    await session.refresh(product)
+    return product.quantity_on_hand
+
+
+async def test_pull_holds_retail_stock_and_cancel_puts_it_back(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    bean = await _bean(db_session, ctx)
+    row = await _pulled(
+        db_session, ctx, _rid(51), [_retail_line(1, bean.id, qty=2)], "HOLD_REQUESTED"
+    )
+    assert row.hold_status == "HELD"
+    assert await _on_hand(db_session, bean) == 1  # 櫃檯不會把線上保留的兩包賣掉
+    cancelled = await client.post(f"/api/v1/online-orders/{row.id}/cancel", headers=_h(ctx.clerk))
+    assert cancelled.status_code == 200, cancelled.text
+    assert await _on_hand(db_session, bean) == 3
+    reasons = await db_session.scalars(
+        select(StockMovement.reason).where(StockMovement.catalog_product_id == bean.id)
+    )
+    assert list(reasons) == [StockReason.ONLINE_HOLD, StockReason.ONLINE_RELEASE]
+
+
+async def test_not_enough_retail_stock_rejects_whole_order(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    bean = await _bean(db_session, ctx, qty=1)
+    row = await _pulled(
+        db_session, ctx, _rid(52), [_retail_line(1, bean.id, qty=2)], "HOLD_REQUESTED"
+    )
+    assert row.hold_status == "REJECTED"
+    assert "耶加雪菲" in (row.reject_reason or "")
+    assert await _on_hand(db_session, bean) == 1
+
+
+async def test_cart_loads_retail_line_as_catalog_product(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    bean = await _bean(db_session, ctx)
+    row = await _pulled(
+        db_session, ctx, _rid(53), [_retail_line(1, bean.id, qty=2)], "HOLD_REQUESTED"
+    )
+    resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert resp.status_code == 200, resp.text
+    [line] = resp.json()["lines"]
+    assert line == {
+        "line_no": 1,
+        "line_type": "CATALOG",
+        "menu_item_id": None,
+        "catalog_product_id": bean.id,
+        "menu_option_ids": [],
+        "experience_id": None,
+        "qty": 2,
+        "description": "耶加雪菲 200g",
+        "online_unit_price": "450",
+        "unit_price": "450",
+    }
+
+
+async def test_checkout_deducts_once_then_awaits_handover_until_clerk_hands_it_over(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    bean = await _bean(db_session, ctx)
+    row = await _pulled(
+        db_session, ctx, _rid(54), [_retail_line(1, bean.id, qty=2)], "HOLD_REQUESTED"
+    )
+    early = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
+    assert early.status_code == 409  # 還沒收錢不能交貨
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": bean.id, "qty": 2}],
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "online-retail-54"),
+    )
+    assert sale.status_code == 201, sale.text
+    assert await _on_hand(db_session, bean) == 1  # 保留加回再賣：只扣一次
+    row = await _order_row(db_session, _rid(54))
+    assert (row.sync_status, row.fulfillment_status) == ("SETTLED", "AWAITING")
+
+    # 付了錢、還沒交貨：明天的清單也要看得到
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    mine = next(o for o in listed.json()["orders"] if o["id"] == row.id)
+    assert mine["fulfillment_status"] == "AWAITING"
+
+    handed = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
+    assert handed.status_code == 200, handed.text
+    assert handed.json()["fulfillment_status"] == "HANDED_OVER"
+    again = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
+    assert again.status_code == 200  # 重按不出錯、不重複記
+    audits = await db_session.scalars(
+        select(AuditLog.action).where(AuditLog.entity_id == str(row.id))
+    )
+    assert list(audits).count("HAND_OVER_ONLINE_ORDER") == 1
+
+    # 同一張單一次送一筆（保持先後），送兩輪
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [
+        (_rid(54), {"sync_status": "SETTLED", "payment_status": "PAID", "fulfillment": "AWAITING"}),
+        (_rid(54), {"fulfillment": "HANDED_OVER"}),
+    ]
+
+
+async def test_menu_only_order_needs_no_handover(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pulled(db_session, ctx, _rid(55), [_line(1, ctx.latte, "拿鐵", 150)])
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+            "service_mode": "TAKEOUT",
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "online-menu-55"),
+    )
+    assert sale.status_code == 201, sale.text
+    row = await _order_row(db_session, _rid(55))
+    assert row.fulfillment_status == "NONE"
+    resp = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
+    assert resp.status_code == 409

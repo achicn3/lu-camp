@@ -48,14 +48,16 @@ class OnlineOrdersRepository:
         return row
 
     async def list_since(self, store_id: int, since: datetime) -> Sequence[OnlineOrder]:
-        """今天的單＋還沒處理完的舊單（未付款、沒取消），新的在前。"""
+        """今天的單＋還沒處理完的舊單（未付款、沒取消，或還沒交貨），新的在前。"""
         return (
             await self._session.scalars(
                 select(OnlineOrder)
                 .where(
                     OnlineOrder.store_id == store_id,
                     (OnlineOrder.remote_created_at >= since)
-                    | (OnlineOrder.sync_status == "IMPORTED"),
+                    | (OnlineOrder.sync_status == "IMPORTED")
+                    # 付了錢、帶回家商品還沒交給客人的舊單也要留在清單上（docs/63 §13）。
+                    | (OnlineOrder.fulfillment_status == "AWAITING"),
                 )
                 .order_by(OnlineOrder.remote_created_at.desc(), OnlineOrder.id.desc())
             )
