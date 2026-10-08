@@ -4,6 +4,7 @@
 // - 回報（POST /integration/orders/:id/status）：只接受合法的狀態轉換；重送同一結果冪等。
 // - 暫停／恢復（PUT /integration/store-status）。
 import { error, json } from "./http";
+import { reconcileLinePay } from "./linepay-orders";
 
 const PULL_LIMIT = 50;
 const ORDER_ID = /^[0-9a-f]{32}$/;
@@ -37,12 +38,26 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   )
     .bind(storeId, now)
     .run();
+  // 順便補查卡在付款中的 LINE Pay（docs/44 §4.5 C7）。
+  await reconcileLinePay(env, storeId, now);
+  // 新單，加上「已匯入、後來才用 LINE Pay 付清」的單（POS 要據此自動成立銷售，O5b）。
   const orders = await env.DB.prepare(
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-      "note, created_at FROM orders WHERE store_id = ? AND sync_status = 'NEW' ORDER BY created_at, id LIMIT ?",
+      "note, created_at, linepay_transaction_id, invoice_carrier, invoice_tax_id FROM orders WHERE store_id = ? AND " +
+      "(sync_status = 'NEW' OR (sync_status = 'IMPORTED' AND payment_method = 'LINE_PAY' AND payment_status = 'PAID')) " +
+      "ORDER BY created_at, id LIMIT ?",
   )
     .bind(storeId, PULL_LIMIT)
-    .all<Record<string, unknown> & { id: string; created_at: number }>();
+    .all<Record<string, unknown> & {
+      id: string;
+      created_at: number;
+      payment_method: string;
+      payment_status: string;
+      total: number;
+      linepay_transaction_id: string | null;
+      invoice_carrier: string | null;
+      invoice_tax_id: string | null;
+    }>();
   const ids = orders.results.map((o) => o.id);
   const lines =
     ids.length === 0
@@ -70,9 +85,16 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   return json({
     ...(await storeMeta(env, storeId)),
     server_time: new Date(now).toISOString(),
-    orders: orders.results.map((o) => ({
+    orders: orders.results.map(({ linepay_transaction_id, invoice_carrier, invoice_tax_id, ...o }) => ({
       ...o,
       created_at: new Date(o.created_at).toISOString(),
+      // LINE Pay 已付款：交易號（字串）與金額，POS 據此成立銷售、不再扣款（O5b）。
+      ...(o.payment_method === "LINE_PAY" && o.payment_status === "PAID" && linepay_transaction_id !== null
+        ? { payment: { method: "LINE_PAY", transaction_id: linepay_transaction_id, amount: o.total } }
+        : {}),
+      ...(invoice_carrier !== null || invoice_tax_id !== null || o.payment_method === "LINE_PAY"
+        ? { invoice: { carrier: invoice_carrier, tax_id: invoice_tax_id } }
+        : {}),
       lines: lines
         .filter((l) => l.order_id === o.id)
         .map(({ order_id: _, option_ids, limited, ...l }) => ({
@@ -134,11 +156,16 @@ function transitionError(row: OrderRow, t: Target): string | null {
   }
   if (t.hold_status !== undefined && t.hold_status !== row.hold_status) {
     const reserving = row.hold_status === "HOLD_REQUESTED" && (t.hold_status === "HELD" || t.hold_status === "REJECTED");
-    const expiring = row.hold_status === "HELD" && t.hold_status === "NONE" && row.payment_status === "UNPAID";
+    // 保留到期：現金待付，或 LINE Pay 已發起還沒請款（到期後就不會請款，§4.5 C10）。
+    const expiring = row.hold_status === "HELD" && t.hold_status === "NONE" &&
+      (row.payment_status === "UNPAID" || row.payment_status === "PENDING");
     if (!reserving && !expiring) return "invalid_transition";
   }
   if (t.payment_status !== undefined && t.payment_status !== row.payment_status) {
-    if (row.payment_status !== "UNPAID") return "invalid_transition";
+    // 現金待付、或 LINE Pay 已發起但客人還沒授權（POS 取消後就不會再請款）。
+    if (row.payment_status !== "UNPAID" && !(row.payment_status === "PENDING" && t.payment_status === "CANCELLED")) {
+      return "invalid_transition";
+    }
   }
   // 交貨（docs/63 §13）：成立銷售時標待交貨；店員交貨後才能到已領取，不能倒退。
   if (t.fulfillment !== undefined && t.fulfillment !== row.fulfillment) {

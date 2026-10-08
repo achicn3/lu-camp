@@ -1,6 +1,7 @@
 // 露坑線上點餐 Worker 進入點（docs/44）。路由：
 //   客人（公開）：GET /api/menu、GET /api/status、GET /api/tables/:code、POST /api/orders、
-//                GET /api/orders/:token、GET /photos/:hash.webp、GET /fonts/:hash.woff2
+//                GET /api/orders/:token、POST /api/orders/:token/linepay(/confirm|/cancel)、
+//                GET /photos/:hash.webp、GET /fonts/:hash.woff2
 //   店內 backend（HMAC 簽章）：PUT /integration/menu、/integration/menu/availability、/integration/tables、/integration/photos/:hash、
 //                              /integration/fonts/:hash
 // 其餘交給靜態資產（點餐頁）。每個回應都加安全標頭。
@@ -9,6 +10,7 @@ import { AVAILABILITY_MAX_BYTES, publishAvailability } from "./availability";
 import { pullOrders, reportOrder, setStoreStatus } from "./integration-orders";
 import { BodyTooLarge, error, readBody, withSecurityHeaders } from "./http";
 import { type MediaKind, getMedia, mediaLimit, putMedia } from "./media";
+import { cancelLinePay, confirmLinePay, startLinePay } from "./linepay-orders";
 import { MENU_MAX_BYTES, publishMenu, readMenu } from "./menu";
 import { ORDER_MAX_BYTES, createOrder, readOrder, storeStatus } from "./orders";
 import { publishTables, readTable } from "./tables";
@@ -62,6 +64,13 @@ async function route(req: Request, env: Env): Promise<Response> {
       if (e instanceof BodyTooLarge) return error("payload_too_large", 413);
       throw e;
     }
+  }
+  const pay = /^\/api\/orders\/([^/]+)\/linepay(\/confirm|\/cancel)?$/.exec(path);
+  if (pay && req.method === "POST") {
+    const token = pay[1] ?? "";
+    if (pay[2] === "/confirm") return confirmLinePay(env, storeId, token);
+    if (pay[2] === "/cancel") return cancelLinePay(env, storeId, token);
+    return startLinePay(req, env, storeId, token);
   }
   if (req.method !== "GET" && req.method !== "HEAD") {
     return path.startsWith("/api/") ? error("method_not_allowed", 405) : env.ASSETS.fetch(req);

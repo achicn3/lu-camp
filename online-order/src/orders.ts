@@ -5,6 +5,7 @@
 // 同時湧進來的請求也不會超過上限。
 import { error, hex, json, sha256Hex } from "./http";
 import { type OrderLineInput, priceOrder } from "./pricing";
+import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
 import { TABLE_CODE } from "./tables";
 
@@ -14,23 +15,40 @@ const POS_STALE_MS = 2 * 60 * 1000;
 const RATE_PER_MINUTE = 5;
 const FLOOD_WINDOW_MS = 5 * 60 * 1000;
 const FLOOD_LIMIT = 10;
-const LIMITS = { device: 2, ip: 4, table: 4, storeCash: 15 } as const;
+const LIMITS = { device: 2, ip: 4, table: 4, storeCash: 15, storeLinePay: 15 } as const;
+// 發票載具（docs/44 §4.4.2）：手機條碼 `/` 開頭共 8 碼；統編 8 位數字。
+const MOBILE_CARRIER = /^\/[0-9A-Z.+-]{7}$/;
+const TAX_ID = /^\d{8}$/;
 const DEVICE_COOKIE = "lk_dev";
 const DEVICE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const IDEM_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 const TURNSTILE_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-// 「還沒付、還在等」的單：限量品項被拒的不算（已經不會成立）。
-const OPEN_UNPAID =
-  "payment_status = 'UNPAID' AND sync_status IN ('NEW', 'IMPORTED') AND hold_status != 'REJECTED'";
+// 「還沒付、還在等」的單：限量品項被拒的不算（已經不會成立）。LINE Pay 付款中也還沒付。
+export const OPEN_UNPAID =
+  "payment_status IN ('UNPAID', 'PENDING', 'CONFIRMING') AND sync_status IN ('NEW', 'IMPORTED') " +
+  "AND hold_status != 'REJECTED'";
 
 interface OrderRequest {
   idempotency_key: string;
   table_code: string | null;
-  payment_method: "CASH";
+  payment_method: "CASH" | "LINE_PAY";
+  invoice: { carrier: string | null; tax_id: string | null };
   turnstile_token: string;
   note: string;
   lines: OrderLineInput[];
+}
+
+/** 選填的發票資料：手機條碼或統編擇一；格式不對整張拒收。 */
+function parseInvoice(value: unknown): OrderRequest["invoice"] | null {
+  if (value === undefined || value === null) return { carrier: null, tax_id: null };
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const { carrier = null, tax_id = null, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length > 0) return null;
+  if (carrier !== null && (typeof carrier !== "string" || !MOBILE_CARRIER.test(carrier))) return null;
+  if (tax_id !== null && (typeof tax_id !== "string" || !TAX_ID.test(tax_id))) return null;
+  if (carrier !== null && tax_id !== null) return null;
+  return { carrier: carrier as string | null, tax_id: tax_id as string | null };
 }
 
 function parseRequest(raw: Uint8Array): OrderRequest | null {
@@ -44,7 +62,9 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   const o = v as Record<string, unknown>;
   if (typeof o.idempotency_key !== "string" || !IDEM_PATTERN.test(o.idempotency_key)) return null;
   if (o.table_code !== null && typeof o.table_code !== "string") return null;
-  if (o.payment_method !== "CASH") return null; // LINE Pay 在 O5
+  if (o.payment_method !== "CASH" && o.payment_method !== "LINE_PAY") return null;
+  const invoice = parseInvoice(o.invoice);
+  if (invoice === null) return null;
   if (typeof o.turnstile_token !== "string" || o.turnstile_token === "" || o.turnstile_token.length > 2048) {
     return null;
   }
@@ -74,7 +94,8 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   return {
     idempotency_key: o.idempotency_key,
     table_code: o.table_code as string | null,
-    payment_method: "CASH",
+    payment_method: o.payment_method,
+    invoice,
     turnstile_token: o.turnstile_token,
     note: note.trim(),
     lines,
@@ -157,7 +178,7 @@ async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boo
 }
 
 
-function customerStatus(row: { payment_status: string; hold_status: string }): string {
+export function customerStatus(row: { payment_status: string; hold_status: string }): string {
   if (row.hold_status === "REJECTED") return "REJECTED";
   if (row.hold_status === "HOLD_REQUESTED") return "HOLD_REQUESTED";
   return row.payment_status;
@@ -207,7 +228,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
 
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(
-      JSON.stringify([body.table_code, body.payment_method, body.note, body.lines]),
+      JSON.stringify([body.table_code, body.payment_method, body.note, body.lines, body.invoice]),
     ),
   );
   const token = await orderToken(env, storeId, body.idempotency_key);
@@ -220,6 +241,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
   // 暫停只擋新的單：已經成立的單（回應遺失後重送）要拿得回來，否則客人查不到自己的單（Codex O4 第一輪）。
   if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
+  if (body.payment_method === "LINE_PAY" && linePayConfig(env) === null) return error("linepay_unavailable", 422);
   if (!(await verifyTurnstile(env, body.turnstile_token, ip))) return error("challenge_failed", 403);
 
   let tableLabel: string | null = null;
@@ -248,12 +270,12 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     env.DB.prepare(
       "INSERT INTO orders (id, store_id, token_hash, idem_key, fingerprint, device_id, ip_hash, table_code, " +
         "table_label, service_mode, menu_version, total, payment_method, payment_status, sync_status, " +
-        "hold_status, note, created_at, updated_at) " +
-        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CASH', 'UNPAID', 'NEW', ?, ?, ?, ? WHERE " +
+        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ? WHERE " +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND device_id = ?) < ? AND ` +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND ip_hash = ?) < ? AND ` +
         `(? IS NULL OR (SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND table_code = ?) < ?) AND ` +
-        `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND payment_method = 'CASH') < ? ` +
+        `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND payment_method = ?) < ? ` +
         "ON CONFLICT (store_id, idem_key) DO NOTHING",
     ).bind(
       orderId,
@@ -268,10 +290,13 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       serviceMode,
       menu.version,
       priced.total,
+      body.payment_method,
       holdStatus,
       body.note || null,
       now,
       now,
+      body.invoice.carrier,
+      body.invoice.tax_id,
       storeId,
       deviceId,
       LIMITS.device,
@@ -283,7 +308,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       body.table_code,
       LIMITS.table,
       storeId,
-      LIMITS.storeCash,
+      body.payment_method,
+      body.payment_method === "CASH" ? LIMITS.storeCash : LIMITS.storeLinePay,
     ),
     ...priced.lines.map((l, i) =>
       env.DB.prepare(
@@ -358,8 +384,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return error("not_found", 404);
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
-    "SELECT id, table_label, service_mode, total, payment_status, hold_status, fulfillment, note, created_at " +
-      "FROM orders WHERE store_id = ? AND token_hash = ?",
+    "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
+      "linepay_result, note, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
     .first<{
@@ -370,6 +396,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       payment_status: string;
       hold_status: string;
       fulfillment: string;
+      payment_method: string;
+      linepay_result: string | null;
       note: string | null;
       created_at: number;
     }>();
@@ -390,6 +418,9 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       created_at: new Date(row.created_at).toISOString(),
       // 帶回家商品要到櫃檯領：AWAITING＝付了錢還沒拿、HANDED_OVER＝已領取（docs/63 §13）。
       fulfillment: row.fulfillment,
+      payment_method: row.payment_method,
+      // LINE Pay 上一次沒付成的原因（CANCELLED／FAILED／EXPIRED）；客人可以重付。
+      linepay_result: row.linepay_result,
       lines: lines.results.map(({ take_home, ...line }) => ({ ...line, take_home: take_home === 1 })),
     },
     200,
@@ -398,5 +429,13 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
 }
 
 export async function storeStatus(env: Env, storeId: number): Promise<Response> {
-  return json({ accepting: await accepting(env, storeId), turnstile_site_key: env.TURNSTILE_SITE_KEY ?? null }, 200, { "Cache-Control": "no-store" });
+  return json(
+    {
+      accepting: await accepting(env, storeId),
+      turnstile_site_key: env.TURNSTILE_SITE_KEY ?? null,
+      linepay: linePayConfig(env) !== null,
+    },
+    200,
+    { "Cache-Control": "no-store" },
+  );
 }
