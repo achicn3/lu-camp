@@ -430,9 +430,7 @@ async def test_cart_keeps_experience_lines_apart_and_labelled(
     )
     card = {**_line(1, ctx.latte, "拿鐵體驗・拿鐵", 150), "experience_id": exp.id}
     gone = {**_line(3, ctx.latte, "已下架體驗・拿鐵", 150), "experience_id": 999999}
-    row = await _pulled(
-        db_session, ctx, _rid(40), [card, _line(2, ctx.latte, "拿鐵", 150), gone]
-    )
+    row = await _pulled(db_session, ctx, _rid(40), [card, _line(2, ctx.latte, "拿鐵", 150), gone])
     resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
     assert resp.status_code == 200, resp.text
     lines = resp.json()["lines"]
