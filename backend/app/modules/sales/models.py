@@ -30,6 +30,7 @@ from app.shared.enums import (
     AdjustmentScope,
     AdjustmentType,
     CalculationMethod,
+    LinePayChannel,
     LinePayRefundStatus,
     LinePayStatus,
     PaymentMethod,
@@ -458,6 +459,7 @@ class LinePayTransaction(Base, TimestampMixin):
 
     __tablename__ = "linepay_transactions"
     __table_args__ = (
+        CheckConstraint("channel IN ('OFFLINE', 'ONLINE')", name="ck_linepay_transactions_channel"),
         UniqueConstraint("order_id", name="uq_linepay_transactions_order_id"),
         UniqueConstraint("sale_id", name="uq_linepay_transactions_sale_id"),
         CheckConstraint("amount > 0", name="ck_linepay_transactions_amount_positive"),
@@ -483,6 +485,11 @@ class LinePayTransaction(Base, TimestampMixin):
         Numeric(12, 0), default=Decimal(0), server_default=text("0")
     )
     raw_response: Mapped[dict[str, object]] = mapped_column(JSONB)
+    # OFFLINE＝門市掃客人條碼；ONLINE＝客人在線上點餐用手機付（docs/44 §4.4.2）。
+    # 兩種的退款端點不同：門市用 orderId、線上用交易號。
+    channel: Mapped[str] = mapped_column(
+        String(10), default=LinePayChannel.OFFLINE.value, server_default=text("'OFFLINE'")
+    )
 
 
 class LinePayRefundAttempt(Base, TimestampMixin):

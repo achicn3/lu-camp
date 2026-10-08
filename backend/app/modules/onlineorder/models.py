@@ -273,6 +273,13 @@ class OnlineOrder(Base, TimestampMixin):
     handed_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 要交的商品＝實際結帳的一般商品與數量（[{catalog_product_id, name, qty}]），不是客人原本點的。
     handover_items: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    # 線上 LINE Pay（docs/44 §4.4.2）：雲端回報客人已付款才有；POS 據此成立銷售、不再扣款。
+    linepay_order_id: Mapped[str | None] = mapped_column(String(64))
+    linepay_transaction_id: Mapped[str | None] = mapped_column(String(32))
+    invoice_carrier: Mapped[str | None] = mapped_column(String(8))
+    invoice_tax_id: Mapped[str | None] = mapped_column(String(8))
+    # POS 沒辦法自動成立銷售的原因（例如價格與客人付的不同），給店員看。
+    attention: Mapped[str | None] = mapped_column(String(300))
     handed_over_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 

@@ -50,6 +50,8 @@ from app.modules.onlineorder.router import get_online_order_client
 from app.modules.onlineorder.scheduler import tick_once
 from app.modules.onlineorder.signing import canonical_string
 from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.linepay import LinePayClient, LinePayTransport
+from app.modules.sales.models import LinePayTransaction
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -1119,3 +1121,161 @@ async def test_voided_sale_is_no_longer_awaiting_handover(
     assert row.fulfillment_status == "NONE"
     resp = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
     assert resp.status_code == 409
+
+
+# ── 線上 LINE Pay 已付款的單（docs/44 §4.4.2；O5b）：POS 頁面成立銷售、不再扣款 ──
+
+
+def _paid(
+    remote_id: str, lines: list[dict[str, Any]], *, tx: str = "2026100800000000001"
+) -> dict[str, Any]:
+    order = _order(remote_id, lines)
+    total = order["total"]
+    return {
+        **order,
+        "service_mode": "TAKEOUT",
+        "table_label": None,
+        "payment_method": "LINE_PAY",
+        "payment_status": "PAID",
+        "payment": {
+            "method": "LINE_PAY",
+            "transaction_id": tx,
+            "order_id": f"{remote_id}-1",
+            "amount": total,
+        },
+        "invoice": {"carrier": "/ABC+123", "tax_id": None},
+    }
+
+
+async def _pull_raw(db_session: AsyncSession, ctx: Ctx, raw: dict[str, Any]) -> OnlineOrder:
+    ctx.worker.orders = [raw]
+    svc = _svc(db_session, ctx)
+    await svc.pull_once(ctx.store_id)
+    await svc.flush_outbox(ctx.store_id)
+    ctx.worker.reports.clear()
+    ctx.worker.orders = []
+    return await _order_row(db_session, raw["id"])
+
+
+async def test_paid_linepay_order_settles_without_charging_again(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pull_raw(
+        db_session, ctx, _paid(_rid(70), [_line(1, ctx.latte, "拿鐵", 150, qty=2)])
+    )
+    assert (row.payment_method, row.linepay_transaction_id) == ("LINE_PAY", "2026100800000000001")
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    mine = next(o for o in listed.json()["orders"] if o["id"] == row.id)
+    assert mine["linepay_paid"] is True
+    # 已付款的單不能再「帶入結帳」收一次錢
+    assert (
+        await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    ).status_code == 409
+
+    settled = await client.post(
+        f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk)
+    )
+    assert settled.status_code == 200, settled.text
+    sale_id = settled.json()["sale_id"]
+    again = await client.post(f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk))
+    assert again.json()["sale_id"] == sale_id  # 兩台 POS 同時看到也只成立一筆
+    sale = await client.get(f"/api/v1/sales/{sale_id}", headers=_h(ctx.clerk))
+    body = sale.json()
+    assert body["total"] == "300"
+    assert [(t["tender_type"], t["amount"]) for t in body["tenders"]] == [("LINE_PAY", "300")]
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale_id)
+    )
+    assert txn is not None
+    assert (txn.channel, txn.transaction_id, txn.order_id) == (
+        "ONLINE",
+        "2026100800000000001",
+        f"{_rid(70)}-1",
+    )
+    row = await _order_row(db_session, _rid(70))
+    assert (row.sync_status, row.sale_id) == ("SETTLED", sale_id)
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [(_rid(70), {"sync_status": "SETTLED", "payment_status": "PAID"})]
+
+
+async def test_price_changed_since_customer_paid_is_flagged_not_settled(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pull_raw(db_session, ctx, _paid(_rid(71), [_line(1, ctx.latte, "拿鐵", 140)]))
+    resp = await client.post(f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk))
+    assert resp.status_code == 409
+    assert "140" in resp.json()["detail"] and "150" in resp.json()["detail"]
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    mine = next(o for o in listed.json()["orders"] if o["id"] == row.id)
+    assert "140" in (mine["attention"] or "")
+
+
+async def test_unpaid_linepay_order_cannot_be_rung_up_as_cash(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """客人還在 LINE Pay 付款：POS 不能帶入收現金（否則兩邊都收到錢）；要改付現就取消這張重點。"""
+    raw = {
+        **_order(_rid(72), [_line(1, ctx.latte, "拿鐵", 150)]),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+    }
+    row = await _pull_raw(db_session, ctx, raw)
+    resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert resp.status_code == 409
+    assert "LINE Pay" in resp.json()["detail"]
+    early = await client.post(f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk))
+    assert early.status_code == 409
+
+
+async def test_order_paid_after_import_is_picked_up_on_next_pull(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    unpaid = {
+        **_order(_rid(73), [_line(1, ctx.latte, "拿鐵", 150)]),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+    }
+    await _pull_raw(db_session, ctx, unpaid)
+    row = await _pull_raw(db_session, ctx, _paid(_rid(73), [_line(1, ctx.latte, "拿鐵", 150)]))
+    assert row.linepay_transaction_id == "2026100800000000001"
+
+
+async def test_voiding_an_online_linepay_sale_refunds_by_transaction(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    row = await _pull_raw(
+        db_session,
+        ctx,
+        _paid(_rid(74), [_line(1, ctx.latte, "拿鐵", 150)], tx="2026100800000000074"),
+    )
+    settled = await client.post(
+        f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk)
+    )
+    sale = await SalesService(db_session).get_sale(ctx.store_id, settled.json()["sale_id"])
+    assert sale is not None
+    transport = _RefundTransport()
+    linepay = LinePayClient(
+        channel_id="1",
+        channel_secret="s",
+        base_url="https://sandbox-api-pay.line.me",
+        transport=transport,
+        nonce_factory=lambda: "n",
+    )
+    await SalesService(db_session).void_sale(sale, ctx.clerk_id, linepay_client=linepay)
+    # 線上付款的退款走交易號（Online API），不是門市掃碼用的 orderId 路徑
+    assert transport.paths == ["/v4/payments/2026100800000000074/refund"]
+
+
+class _RefundTransport(LinePayTransport):
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+
+    async def send(
+        self, method: str, url: str, headers: dict[str, str], body: str | None
+    ) -> dict[str, object]:
+        self.paths.append(url.removeprefix("https://sandbox-api-pay.line.me"))
+        return {
+            "returnCode": "0000",
+            "returnMessage": "Success.",
+            "info": {"refundTransactionId": 1},
+        }

@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.money import format_ntd
 from app.core.time import store_date, store_day_bounds, utc_now
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.service import MenuService
@@ -33,16 +34,28 @@ from app.modules.onlineorder.models import (
     StockReservation,
 )
 from app.modules.onlineorder.orders_repository import OnlineOrdersRepository
+from app.modules.sales.inputs import (
+    CARRIER_TYPE_MOBILE,
+    InvoiceInfoInput,
+    OnlineLinePayCapture,
+    SaleLineInput,
+    TenderInput,
+)
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import (
     OnlineOrderFulfillment,
     OnlineOrderHold,
     OnlineOrderPayment,
     OnlineOrderSync,
     OnlineOutboxStatus,
+    SaleLineType,
+    ServiceMode,
     StockReservationStatus,
+    TenderType,
 )
 from app.shared.exceptions import (
     CrossStoreReference,
+    DomainError,
     InsufficientStock,
     MenuItemNotFound,
     MenuItemUnavailable,
@@ -57,6 +70,10 @@ logger = logging.getLogger(__name__)
 
 # 現金單保留份數多久（docs/44 §3.7）：到期只放掉保留，單子不取消。
 RESERVATION_TTL = timedelta(minutes=30)
+# 線上 LINE Pay 單保留 10 分鐘（docs/44 §3.7）：客人在手機上付，過期雲端就不請款（C10）。
+LINEPAY_RESERVATION_TTL = timedelta(minutes=10)
+_LINE_PAY = "LINE_PAY"
+_TX_ID = re.compile(r"^\d{1,20}$")
 # 回報失敗的重試間隔（第 n 次失敗後等多久；超過就一直用最後一個）。
 OUTBOX_BACKOFF = (
     timedelta(seconds=5),
@@ -94,6 +111,14 @@ class CartLine:
     description: str
     online_unit_price: Decimal
     unit_price: Decimal
+
+
+@dataclass(frozen=True)
+class SettleResult:
+    """線上 LINE Pay 已付款單的成立結果：成立了有 sale_id；沒辦法自動成立有 attention（原因）。"""
+
+    sale_id: int | None
+    attention: str | None
 
 
 @dataclass(frozen=True)
@@ -172,7 +197,13 @@ class OnlineOrdersService:
         if not isinstance(remote_id, str) or not _REMOTE_ID.match(remote_id):
             logger.warning("online order with bad id skipped")
             return None
-        if await self._repo.by_remote_id(store_id, remote_id) is not None:
+        existing = await self._repo.by_remote_id(store_id, remote_id)
+        if existing is not None:
+            # 已匯入、後來才用 LINE Pay 付清的單：記下付款資料，POS 頁面據此成立銷售（O5b）。
+            payment = _paid_linepay(raw)
+            if payment is not None and existing.linepay_transaction_id is None:
+                existing.linepay_order_id, existing.linepay_transaction_id = payment
+                await self._repo.flush()
             return None
         try:
             order = _order_from_cloud(store_id, raw)
@@ -233,7 +264,7 @@ class OnlineOrdersService:
                 online_order_id=order.id,
                 consumed=consumed,
                 status=StockReservationStatus.ACTIVE,
-                expires_at=utc_now() + RESERVATION_TTL,
+                expires_at=utc_now() + _reservation_ttl(order),
             )
         )
 
@@ -357,6 +388,11 @@ class OnlineOrdersService:
         """帶入結帳的內容：照 POS 目前的菜單重新計價（不看剩幾份，結帳時才扣）。"""
         order = await self._order(store_id, order_id)
         self._ensure_open(order)
+        if order.payment_method == _LINE_PAY:
+            # 客人選了線上 LINE Pay：在這裡收現金，客人那邊又付成功就會收兩次錢。
+            raise OnlineOrderConflict(
+                "這張單客人選了 LINE Pay，付好會自動成立；客人想改付現金，請先取消這張再重新點"
+            )
         lines: list[CartLine] = []
         for line in order.lines:
             if _is_retail(line):
@@ -545,6 +581,77 @@ class OnlineOrdersService:
         order.handover_items = None
         await self._repo.flush()
 
+    async def settle_paid(
+        self, store_id: int, order_id: int, *, actor_user_id: int
+    ) -> SettleResult:
+        """客人在線上已用 LINE Pay 付清：由開著的 POS 頁面成立銷售（docs/44 §4.4.2）。
+
+        以客人已付金額為準、一律原價不套活動；POS 現在的價格和客人付的不同就**不成立**、
+        把原因記在單上給店員處理（回 `attention`）。已成立過的直接回原銷售
+        （兩台 POS 同時看到也只成立一筆）。
+        LINE Pay 只記帳、不再扣款；發票照客人填的手機條碼／統編開，沒填印紙本。
+        """
+        # 函式內 import：sales 已在模組層 import 本模組（結帳時呼叫 begin_checkout／
+        # mark_settled），打破循環。
+        from app.modules.sales.service import SalesService
+
+        order = await self._order(store_id, order_id, for_update=True)
+        if order.sync_status == OnlineOrderSync.SETTLED and order.sale_id is not None:
+            return SettleResult(sale_id=order.sale_id, attention=None)
+        if order.sync_status == OnlineOrderSync.VOIDED:
+            raise OnlineOrderConflict("這張線上單已經取消了")
+        if (
+            order.payment_method != _LINE_PAY
+            or order.linepay_transaction_id is None
+            or order.linepay_order_id is None
+        ):
+            raise OnlineOrderConflict("這張線上單還沒用 LINE Pay 付款")
+        sales = SalesService(self._session)
+        lines = [_sale_line(line) for line in order.lines]
+        # 沒開電子發票的店不能帶發票欄位（照櫃檯結帳的規則）：客人填的載具就用不到了。
+        einvoice = (
+            await StoreSettingsService(self._session).get_effective_settings(store_id)
+        ).einvoice_enabled
+        overrides = await sales.online_campaign_overrides(store_id)
+        quote = await sales.quote_sale(
+            store_id, lines=lines, disabled_campaigns=overrides, online_order_id=order.id
+        )
+        if quote.total != order.total:
+            order.attention = (
+                f"客人用 LINE Pay 付了 {format_ntd(order.total)} 元，"
+                f"POS 現在算 {format_ntd(quote.total)} 元"
+                "（菜單改過價）；沒有自動成立，請到 LINE Pay 後台核對後手動處理"
+            )[:300]
+            await self._repo.flush()
+            return SettleResult(sale_id=None, attention=order.attention)
+        try:
+            # 成立失敗（例如櫃檯剛好把最後一件賣掉）整筆退回 savepoint、原因記在單上給店員看。
+            async with self._session.begin_nested():
+                sale = await sales.create_sale(
+                    store_id,
+                    actor_user_id,
+                    lines=lines,
+                    tenders=[TenderInput(tender_type=TenderType.LINE_PAY, amount=order.total)],
+                    idempotency_key=f"online-linepay-{order.remote_id}",
+                    disabled_campaigns=overrides,
+                    service_mode=ServiceMode(order.service_mode),
+                    table_no=order.table_label if order.service_mode == "DINE_IN" else None,
+                    invoice_info=_invoice_info(order) if einvoice else None,
+                    online_order_id=order.id,
+                    online_linepay=OnlineLinePayCapture(
+                        order_id=order.linepay_order_id,
+                        transaction_id=order.linepay_transaction_id,
+                        amount=order.total,
+                    ),
+                )
+        except DomainError as exc:
+            order.attention = f"客人已用 LINE Pay 付款，但沒辦法自動成立：{exc}"[:300]
+            await self._repo.flush()
+            return SettleResult(sale_id=None, attention=order.attention)
+        order.attention = None
+        await self._repo.flush()
+        return SettleResult(sale_id=sale.id, attention=None)
+
     async def hand_over(self, store_id: int, order_id: int, *, actor_user_id: int) -> OnlineOrder:
         """店員把帶回家商品交給客人：結單、寫稽核、回報雲端（客人頁顯示已領取）。重按＝不動。"""
         order = await self._order(store_id, order_id, for_update=True)
@@ -626,6 +733,8 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
         raise ValueError("bad service mode")
     note = raw.get("note")
     table = raw.get("table_label")
+    paid = _paid_linepay(raw)
+    invoice = _invoice(raw)
     return OnlineOrder(
         store_id=store_id,
         remote_id=str(raw["id"]),
@@ -634,6 +743,10 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
         menu_version=int(raw["menu_version"]),
         total=Decimal(int(raw["total"])),
         payment_method=str(raw["payment_method"])[:10],
+        linepay_order_id=paid[0] if paid else None,
+        linepay_transaction_id=paid[1] if paid else None,
+        invoice_carrier=invoice[0],
+        invoice_tax_id=invoice[1],
         note=str(note)[:200] if note else None,
         lines=lines,
         remote_created_at=datetime.fromisoformat(str(raw["created_at"]).replace("Z", "+00:00")),
@@ -646,3 +759,56 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
 def _is_retail(line: dict[str, Any]) -> bool:
     """這一行是帶回家商品（一般商品）而不是餐飲。"""
     return line.get("catalog_product_id") is not None
+
+
+def _paid_linepay(raw: dict[str, Any]) -> tuple[str, str] | None:
+    """雲端回報 LINE Pay 已付款：（LINE Pay 訂單號, 交易號）。交易號一律是字串（19 位數字）。"""
+    payment = raw.get("payment")
+    if raw.get("payment_status") != "PAID" or not isinstance(payment, dict):
+        return None
+    order_id, tx = payment.get("order_id"), payment.get("transaction_id")
+    if not isinstance(order_id, str) or not isinstance(tx, str) or not _TX_ID.match(tx):
+        return None
+    if int(payment.get("amount", -1)) != int(raw["total"]):
+        return None
+    return order_id[:64], tx
+
+
+def _invoice(raw: dict[str, Any]) -> tuple[str | None, str | None]:
+    """客人填的發票資料（手機條碼, 統編）；格式不對就當沒填（印紙本）。"""
+    invoice = raw.get("invoice")
+    if not isinstance(invoice, dict):
+        return None, None
+    carrier, tax_id = invoice.get("carrier"), invoice.get("tax_id")
+    carrier_ok = isinstance(carrier, str) and re.fullmatch(r"/[0-9A-Z.+-]{7}", carrier)
+    tax_ok = isinstance(tax_id, str) and re.fullmatch(r"\d{8}", tax_id)
+    return (carrier if carrier_ok else None), (tax_id if tax_ok else None)
+
+
+def _reservation_ttl(order: OnlineOrder) -> timedelta:
+    return LINEPAY_RESERVATION_TTL if order.payment_method == _LINE_PAY else RESERVATION_TTL
+
+
+def _sale_line(line: dict[str, Any]) -> SaleLineInput:
+    """線上單的一行 → 銷售明細（餐飲＋選項，或帶回家的一般商品）。"""
+    if _is_retail(line):
+        return SaleLineInput(
+            line_type=SaleLineType.CATALOG,
+            catalog_product_id=int(line["catalog_product_id"]),
+            qty=int(line["qty"]),
+        )
+    return SaleLineInput(
+        line_type=SaleLineType.MENU,
+        menu_item_id=int(line["item_id"]),
+        qty=int(line["qty"]),
+        menu_option_ids=tuple(int(o) for o in line["option_ids"]),
+    )
+
+
+def _invoice_info(order: OnlineOrder) -> InvoiceInfoInput | None:
+    """客人填的手機條碼或統編；都沒填＝印紙本證明聯。"""
+    if order.invoice_tax_id is not None:
+        return InvoiceInfoInput(buyer_tax_id=order.invoice_tax_id)
+    if order.invoice_carrier is not None:
+        return InvoiceInfoInput(carrier_type=CARRIER_TYPE_MOBILE, carrier_id=order.invoice_carrier)
+    return None

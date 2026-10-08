@@ -55,6 +55,10 @@ class OnlineOrderRead(BaseModel):
     """帶回家商品交貨：NONE（沒有）／AWAITING（待交貨）／HANDED_OVER（已交貨）。"""
     handover_items: list[HandoverItemRead] | None
     """要交給客人的商品＝實際結帳的品項與數量（不是客人原本點的）。"""
+    linepay_paid: bool
+    """客人已在線上用 LINE Pay 付清（POS 頁面據此成立銷售，docs/44 §4.4.2）。"""
+    attention: str | None
+    """沒辦法自動成立銷售的原因（給店員看）。"""
 
     @classmethod
     def from_row(cls, row: OnlineOrder) -> "OnlineOrderRead":
@@ -74,6 +78,8 @@ class OnlineOrderRead(BaseModel):
             reject_reason=row.reject_reason,
             sale_id=row.sale_id,
             fulfillment_status=row.fulfillment_status,
+            linepay_paid=row.linepay_transaction_id is not None,
+            attention=row.attention,
             handover_items=(
                 None
                 if row.handover_items is None
@@ -159,3 +165,9 @@ class OnlineCartRead(BaseModel):
 
 class OnlineAcceptingRequest(BaseModel):
     accepting: bool
+
+
+class OnlineSettlePaidRead(BaseModel):
+    """線上 LINE Pay 已付款單成立的結果。"""
+
+    sale_id: int

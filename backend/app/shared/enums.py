@@ -735,6 +735,14 @@ class OnlineOrderHold(StrEnum):
     REJECTED = "REJECTED"
 
 
+class LinePayChannel(StrEnum):
+    """LINE Pay 收款來源：門市掃客人條碼（OFFLINE）或客人在線上點餐用手機付
+    （ONLINE，docs/44 §4.4.2）。"""
+
+    OFFLINE = "OFFLINE"
+    ONLINE = "ONLINE"
+
+
 class OnlineOrderFulfillment(StrEnum):
     """帶回家商品的交貨（docs/63 §13）。
 

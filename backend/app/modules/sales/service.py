@@ -54,6 +54,7 @@ from app.modules.sales.inputs import (
     InvoiceInfoInput,
     LinePayReturnRecovery,
     LinePayReturnRecoveryLine,
+    OnlineLinePayCapture,
     SaleLineInput,
     TenderInput,
     menu_line_key,
@@ -101,6 +102,7 @@ from app.shared.enums import (
     InvoiceType,
     InvoiceVoidReason,
     ItemKind,
+    LinePayChannel,
     LinePayRefundStatus,
     LinePayStatus,
     OwnershipType,
@@ -962,6 +964,8 @@ class SalesService:
         # 補單（LINE Pay 已扣款、結果不明後補成立本機銷售）：這筆交易**已經發生**，
         # 只是在補帳，所以不能用「商品現在還賣不賣」去擋，否則錢收了、帳補不出來。
         rebuilding_paid_sale: bool = False,
+        # 客人在線上點餐已用 LINE Pay 付清（docs/44 §4.4.2）：只記帳、不再扣款。
+        online_linepay: OnlineLinePayCapture | None = None,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -1072,7 +1076,22 @@ class SalesService:
         # ①冪等鍵必填——orderId 由冪等鍵確定性導出（非 sale.id），rollback/retry 恆同號、
         #   先 check(orderId) 防重複扣款。無鍵則無法安全重試 → 擋。
         # ②每筆 LINE_PAY 須帶 oneTimeKey（掃客人碼）。③client 必須注入（router 依 config 建）。
-        if line_pay_tenders:
+        if online_linepay is not None:
+            # 線上已付款：一定掛線上單、只有這一筆 LINE Pay、金額等於客人付的；
+            # 不碰客顯、不需付款碼。
+            if (
+                online_order_id is None
+                or idempotency_key is None
+                or normalized_tenders is None
+                or len(normalized_tenders) != 1
+                or len(line_pay_tenders) != 1
+                or line_pay_tenders[0].amount != online_linepay.amount
+            ):
+                raise InvalidSaleTender(
+                    "線上 LINE Pay 已付款的單只能以客人付的金額、單一 LINE Pay 成立"
+                )
+            reconciled_order_id: str | None = None
+        elif line_pay_tenders:
             if (
                 online_order_id is not None
                 and reconciled_linepay_result is None
@@ -1159,7 +1178,8 @@ class SalesService:
         settings = await self._settings.get_effective_settings(store_id)
         # LINE Pay 功能閘門（docs/30）：未啟用即拒帶 LINE_PAY tender 的結帳（fail-closed，
         # 先於任何庫存/收款副作用）。設定於上方共享鎖下讀取、全程沿用同份（免請求內漂移）。
-        if line_pay_tenders and not settings.linepay_enabled:
+        # 線上已付款的單不擋：錢已經在客人手機上付了，只是補記帳。
+        if line_pay_tenders and not settings.linepay_enabled and online_linepay is None:
             raise LinePayChargeFailed("本店未啟用 LINE Pay 收款（請於設定頁啟用）")
         # fail-closed（Codex 第廿四輪）：einvoice 啟用時，**HTTP 客戶端**必須帶
         # expected_einvoice_enabled 宣告其觀察值——省略者不得靜默開出預設 B2C（會漏收
@@ -1363,6 +1383,7 @@ class SalesService:
             reconciled_linepay_order_id=reconciled_order_id if line_pay_tenders else None,
             reconciled_linepay_result=reconciled_linepay_result,
             linepay_attempt=linepay_attempt,
+            online_linepay=online_linepay,
         )
 
         # 簽署餘額快照的鎖定比對（Codex K5 第六/十輪）：置於 _apply_tenders **之後**——現金已
@@ -1518,6 +1539,7 @@ class SalesService:
         reconciled_linepay_order_id: str | None = None,
         reconciled_linepay_result: LinePayResult | None = None,
         linepay_attempt: LinePayAttemptState | None = None,
+        online_linepay: OnlineLinePayCapture | None = None,
     ) -> str | None:
         """落地收款：現金入錢櫃 SALE_IN、購物金扣帳本 DEBIT、行動支付僅記 tender（非現金、不進
         抽屜，docs/30），並記 sale_tenders（含手續費快照）。
@@ -1561,16 +1583,20 @@ class SalesService:
                 # 非現金、不進抽屜；手續費快照為店家成本。API 授權（fail-closed）見下。
                 fee = Decimal(round_ntd(tender.amount * settings.linepay_fee_pct))
                 assert idempotency_key is not None  # create_sale 已於前置守衛強制
-                carrier = await self._charge_line_pay(
-                    store_id,
-                    sale,
-                    tender,
-                    idempotency_key,
-                    linepay_client,
-                    order_id_override=reconciled_linepay_order_id,
-                    reconciled_result=reconciled_linepay_result,
-                    attempt_state=linepay_attempt,
-                )
+                carrier: str | None = None
+                if online_linepay is not None:
+                    await self._record_online_line_pay(store_id, sale, online_linepay)
+                else:
+                    carrier = await self._charge_line_pay(
+                        store_id,
+                        sale,
+                        tender,
+                        idempotency_key,
+                        linepay_client,
+                        order_id_override=reconciled_linepay_order_id,
+                        reconciled_result=reconciled_linepay_result,
+                        attempt_state=linepay_attempt,
+                    )
                 if carrier is not None:
                     linepay_carrier = carrier
             await self._repo.add_tender(
@@ -1583,6 +1609,28 @@ class SalesService:
                 )
             )
         return linepay_carrier
+
+    async def _record_online_line_pay(
+        self, store_id: int, sale: Sale, capture: OnlineLinePayCapture
+    ) -> None:
+        """線上點餐已付清的 LINE Pay（docs/44 §4.4.2）：只記交易、不呼叫 LINE Pay。
+
+        之後作廢／退貨照一般 LINE Pay 退款流程，因 channel=ONLINE 會改用交易號退款。
+        同一個交易號只能記一次（order_id 唯一），重送不會記兩筆。
+        """
+        await self._repo.add_linepay_transaction(
+            LinePayTransaction(
+                store_id=store_id,
+                sale_id=sale.id,
+                order_id=capture.order_id,
+                transaction_id=capture.transaction_id,
+                status=LinePayStatus.COMPLETE,
+                amount=capture.amount,
+                refunded_amount=Decimal(0),
+                raw_response={"source": "online_order", "transaction_id": capture.transaction_id},
+                channel=LinePayChannel.ONLINE.value,
+            )
+        )
 
     async def _charge_line_pay(
         self,
@@ -1729,6 +1777,7 @@ class SalesService:
             refund_key=refund_key,
             amount=remaining,
             client=client,
+            online_transaction_id=_online_transaction(txn),
         )
         await self._apply_ledger_truth(store_id, txn)
 
@@ -1777,6 +1826,7 @@ class SalesService:
             client=client,
             recovery_kind="RETURN" if recovery_payload is not None else None,
             recovery_payload=recovery_payload,
+            online_transaction_id=_online_transaction(txn),
         )
         await self._apply_ledger_truth(store_id, txn)
         return True
@@ -2026,6 +2076,7 @@ class SalesService:
         client: LinePayClient,
         recovery_kind: str | None = None,
         recovery_payload: dict[str, object] | None = None,
+        online_transaction_id: str | None = None,
     ) -> None:
         """向平台送退款，以**獨立交易**的 append-only 日誌防重退（Codex adversarial finding #1）。
 
@@ -2114,7 +2165,9 @@ class SalesService:
             await ledger.commit()
 
         # Phase 2：呼叫平台（傳輸錯誤 → 保留 PENDING 並上拋，下次重試即 ambiguous）
-        result = await client.refund(order_id=order_id, refund_amount=amount)
+        result = await client.refund(
+            order_id=order_id, refund_amount=amount, transaction_id=online_transaction_id
+        )
         succeeded = result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED
 
         # Phase 3：獨立提交終態
@@ -3773,6 +3826,11 @@ class SalesService:
             consignment_sales.append((item.id, disc.line_total, item.commission_pct))
         return disc.line_total
 
+    async def online_campaign_overrides(self, store_id: int) -> list[CampaignOverrideInput]:
+        """線上單一律原價（docs/44 §3.8）：把現在生效的每個活動都標「這筆不套用」，並記下原因。"""
+        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
+        return [CampaignOverrideInput(campaign_id=p.id, reason="線上訂單一律原價") for p in promos]
+
     async def _effective_promos(
         self, store_id: int, disabled_campaigns: Sequence[CampaignOverrideInput] | None
     ) -> tuple[list[PromoCampaign], list[tuple[PromoCampaign, str | None]]]:
@@ -4128,3 +4186,8 @@ class SalesService:
             ]
         )
         return disc.line_total
+
+
+def _online_transaction(txn: LinePayTransaction) -> str | None:
+    """線上點餐付的 LINE Pay 要用交易號退款；門市掃碼的回 None（照舊用 orderId）。"""
+    return txn.transaction_id if txn.channel == LinePayChannel.ONLINE.value else None

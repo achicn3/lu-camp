@@ -16,6 +16,7 @@ from app.modules.onlineorder.orders_schemas import (
     OnlineCartRead,
     OnlineOrderRead,
     OnlineOrdersRead,
+    OnlineSettlePaidRead,
 )
 from app.modules.onlineorder.orders_service import OnlineOrdersService
 from app.modules.onlineorder.router import get_online_order_client
@@ -77,6 +78,31 @@ async def cancel_online_order(
         raise _http_error(exc) from exc
     await session.commit()
     return OnlineOrderRead.from_row(order)
+
+
+@router.post(
+    "/{order_id}/settle-paid",
+    response_model=OnlineSettlePaidRead,
+    operation_id="settlePaidOnlineOrder",
+)
+async def settle_paid_online_order(
+    order_id: int, session: SessionDep, user: UserDep, client: ClientDep
+) -> OnlineSettlePaidRead:
+    """客人在線上已用 LINE Pay 付清：開著的 POS 頁面呼叫，成立銷售（docs/44 §4.4.2）。
+
+    價格對不上時不成立，把原因記在單上（先存下來）再回 409，店員在清單上看得到。
+    """
+    try:
+        result = await OnlineOrdersService(session, client).settle_paid(
+            user.store_id, order_id, actor_user_id=user.id
+        )
+    except _Errors as exc:
+        await session.rollback()
+        raise _http_error(exc) from exc
+    await session.commit()
+    if result.sale_id is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.attention)
+    return OnlineSettlePaidRead(sale_id=result.sale_id)
 
 
 @router.post(

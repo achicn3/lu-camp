@@ -104,6 +104,11 @@ def refund_path(order_id: str) -> str:
     return f"/v4/payments/orders/{order_id}/refund"
 
 
+def online_refund_path(transaction_id: str) -> str:
+    """線上付款（Online API v4）的退款吃交易號（docs/44 §4.4、§4.5 C6）。"""
+    return f"/v4/payments/{transaction_id}/refund"
+
+
 def sign_auth(*, channel_secret: str, api_path: str, body: str, nonce: str) -> str:
     """X-LINE-Authorization：base64(HMAC-SHA256(key=Secret, msg=Secret+apiPath+body+nonce))。
 
@@ -391,9 +396,15 @@ class LinePayClient:
         )
         return parse_check_result(resp)
 
-    async def refund(self, *, order_id: str, refund_amount: Decimal) -> LinePayResult:
-        """退款（以 orderId；退貨/作廢反轉）。回 LinePayResult（0000＝成功、1165＝已退款）。"""
-        path = refund_path(order_id)
+    async def refund(
+        self, *, order_id: str, refund_amount: Decimal, transaction_id: str | None = None
+    ) -> LinePayResult:
+        """退款（退貨/作廢反轉）。回 LinePayResult（0000＝成功、1165＝已退款）。
+
+        門市掃碼的收款以 orderId 退；客人在線上點餐付的（帶 `transaction_id`）
+        走 Online API 的交易號端點。
+        """
+        path = online_refund_path(transaction_id) if transaction_id else refund_path(order_id)
         body_obj: dict[str, object] = {"refundAmount": int(refund_amount)}
         body = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":"))
         resp = await self._transport.send(

@@ -121,3 +121,16 @@ class CampaignOverrideInput:
 
     campaign_id: int
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OnlineLinePayCapture:
+    """客人在線上點餐已用 LINE Pay 付清（docs/44 §4.4.2）：成立銷售時只記帳、
+    **不再向 LINE Pay 扣款**。
+
+    `order_id` 是雲端向 LINE Pay 要付款時用的訂單號；`transaction_id` 一律是字串（19 位數字）。
+    """
+
+    order_id: str
+    transaction_id: str
+    amount: Decimal
