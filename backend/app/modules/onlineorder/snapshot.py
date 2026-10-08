@@ -48,6 +48,7 @@ def build_snapshot(
     day: date,
     presentations: Mapping[int, dict[str, Any]] | None = None,
     experiences: Sequence[dict[str, Any]] = (),
+    retail: Sequence[dict[str, Any]] = (),
 ) -> Snapshot:
     """組快照。品項依傳入順序（菜單排序）；分類只列有品項的，依分類排序。"""
     shown = [d for d in details if d.item.archived_at is None and d.item.is_available]
@@ -83,6 +84,8 @@ def build_snapshot(
         ],
         # 手沖體驗卡（docs/63 §4）：只引用上面已列出的品項與選項；價格由客人頁照原品項算。
         "experiences": list(experiences),
+        # 帶回家零售商品（docs/63 §13）：價格是商品含稅售價、remaining 是現量；不含成本。
+        "retail": list(retail),
     }
 
 
@@ -105,4 +108,6 @@ def snapshot_text(snapshot: Snapshot) -> str:
         parts += [str(exp.get(k) or "") for k in ("title", "tag", "origin", "notes", "description")]
         for include in exp.get("includes", []):
             parts += [str(include.get("title") or ""), str(include.get("detail") or "")]
+    for product in snapshot.get("retail", []):
+        parts += [str(product.get(k) or "") for k in ("name", "description", "category")]
     return "".join(parts)

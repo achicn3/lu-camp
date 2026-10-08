@@ -10,6 +10,7 @@ import io
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -22,6 +23,7 @@ from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
+from app.modules.inventory.models import CatalogProduct, Category
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.models import OnlineMenuPublication
 from app.modules.onlineorder.router import get_online_order_client
@@ -511,4 +513,99 @@ async def test_publish_includes_active_valid_experiences_with_public_fields_only
     ]
     encoded = json.dumps(menu)
     for forbidden in ("unit_cost", "store_id", "menu_item_id", "is_active", "sort_order"):
+        assert forbidden not in encoded
+
+
+async def test_publish_includes_active_retail_listings_with_their_photo_and_no_cost(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """帶回家商品（M1d）：啟用的才發佈；價格、庫存來自商品；停售的標不可售；照片一併推上去。"""
+    _, manager = await _seed(db_session)
+    await _menu(client, manager)
+    category = Category(store_id=_STORE["id"], name="咖啡豆", target_margin_pct=40)
+    db_session.add(category)
+    await db_session.flush()
+    products = [
+        CatalogProduct(
+            store_id=_STORE["id"],
+            sku=sku,
+            name=name,
+            category_id=category.id,
+            unit_price=Decimal(price),
+            unit_cost=Decimal(200),
+            quantity_on_hand=qty,
+            is_active=active,
+        )
+        for sku, name, price, qty, active in (
+            ("BEAN-1", "耶加雪菲 200g", 450, 4, True),
+            ("DRIP-1", "濾掛 10 入", 320, 0, True),
+            ("OLD-1", "停售的豆子", 400, 9, False),
+            ("HIDE-1", "沒上線的", 100, 9, True),
+        )
+    ]
+    db_session.add_all(products)
+    await db_session.flush()
+    bean, drip, old, hidden = products
+    listings = {}
+    for product, extra in (
+        (bean, {"description": "柑橘、茉莉", "role": "bean", "sort_order": 1}),
+        (drip, {"role": "drip"}),
+        (old, {}),
+        (hidden, {"is_active": False}),
+    ):
+        resp = await client.post(
+            "/api/v1/online-order/retail",
+            json={"catalog_product_id": product.id, **extra},
+            headers=_auth(manager),
+        )
+        assert resp.status_code == 201, resp.text
+        listings[product.id] = resp.json()["id"]
+    photo = await client.post(
+        f"/api/v1/online-order/retail/{listings[bean.id]}/photo",
+        files={"file": ("bean.jpg", _jpeg((90, 60, 40)), "image/jpeg")},
+        headers=_auth(manager),
+    )
+    sha = photo.json()["photo_sha256"]
+
+    response = await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert response.status_code == 200, response.text
+    menu = worker.menu()
+    assert menu["retail"] == [
+        {
+            "id": drip.id,
+            "name": "濾掛 10 入",
+            "description": None,
+            "category": "咖啡豆",
+            "unit_price": 320,
+            "photo": None,
+            "role": "drip",
+            "available": True,
+            "remaining": 0,
+        },
+        {
+            "id": old.id,
+            "name": "停售的豆子",
+            "description": None,
+            "category": "咖啡豆",
+            "unit_price": 400,
+            "photo": None,
+            "role": None,
+            "available": False,
+            "remaining": 9,
+        },
+        {
+            "id": bean.id,
+            "name": "耶加雪菲 200g",
+            "description": "柑橘、茉莉",
+            "category": "咖啡豆",
+            "unit_price": 450,
+            "photo": sha,
+            "role": "bean",
+            "available": True,
+            "remaining": 4,
+        },
+    ]
+    assert f"/integration/photos/{sha}" in worker.paths()
+    encoded = json.dumps(menu)
+    for forbidden in ("unit_cost", "BEAN-1", "沒上線的", "catalog_product_id"):
         assert forbidden not in encoded

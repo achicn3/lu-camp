@@ -4,6 +4,8 @@
 照片沿用菜單照片表（同一家店、依內容雜湊去重）。跨模組只經 inventory／menu service（CLAUDE.md §2）。
 """
 
+from typing import Any
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -142,6 +144,38 @@ class RetailListingService:
                 {"photo_sha256": sha},
             )
         return await self._read(store_id, row)
+
+    async def snapshot_retail(self, store_id: int) -> list[dict[str, Any]]:
+        """發佈用：啟用中的帶回家商品（依排序）；商品停售標不可售。不含成本、SKU、店內欄位名。
+
+        `id` 用商品 id（一個商品只會有一筆設定），送單與可售同步都用它。
+        """
+        rows = [r for r in await self._repo.list_for_store(store_id) if r.is_active]
+        products = [await self._product(store_id, r.catalog_product_id) for r in rows]
+        names = await self._inventory.category_names(
+            store_id, sorted({p.category_id for p in products if p.category_id is not None})
+        )
+        return [
+            {
+                "id": product.id,
+                "name": product.name,
+                "description": row.description,
+                "category": names.get(product.category_id) if product.category_id else None,
+                "unit_price": int(product.unit_price),
+                "photo": row.photo_sha256,
+                "role": None if row.role is None else row.role.value,
+                "available": product.is_active,
+                "remaining": max(product.quantity_on_hand, 0),
+            }
+            for row, product in zip(rows, products, strict=True)
+        ]
+
+    async def availability(self, store_id: int) -> list[dict[str, Any]]:
+        """可售同步用（每 5 秒）：啟用中的帶回家商品現在能不能賣、還有幾件。"""
+        return [
+            {"id": r["id"], "available": r["available"], "remaining": r["remaining"]}
+            for r in sorted(await self.snapshot_retail(store_id), key=lambda r: r["id"])
+        ]
 
     async def _audit(
         self,

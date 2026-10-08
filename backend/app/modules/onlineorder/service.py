@@ -23,6 +23,7 @@ from app.modules.onlineorder.font import subset_font
 from app.modules.onlineorder.models import OnlineMenuPublication, OnlineTableCode
 from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.repository import OnlineOrderRepository
+from app.modules.onlineorder.retail_service import RetailListingService
 from app.modules.onlineorder.snapshot import Snapshot, build_snapshot, snapshot_text
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.service import StoreService
@@ -151,6 +152,7 @@ class OnlineOrderService:
                     if d.item.archived_at is None and d.item.is_available
                 },
             ),
+            retail=await RetailListingService(self._session).snapshot_retail(store_id),
         )
         return snapshot
 
@@ -174,7 +176,9 @@ class OnlineOrderService:
             font_pushed = True
 
         items = snapshot["items"]
-        photos = sorted({str(i["photo"]) for i in items if i["photo"] is not None})
+        photos = sorted(
+            {str(i["photo"]) for i in [*items, *snapshot["retail"]] if i["photo"] is not None}
+        )
         done = await self._repo.pushed(store_id, PHOTO, photos)
         menu = MenuService(self._session)
         photos_pushed = 0

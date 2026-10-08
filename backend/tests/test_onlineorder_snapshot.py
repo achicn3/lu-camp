@@ -130,6 +130,7 @@ def test_snapshot_shape_and_money_as_whole_yuan() -> None:
             }
         ],
         "experiences": [],
+        "retail": [],
     }
 
 
