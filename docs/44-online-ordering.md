@@ -278,6 +278,29 @@ LINE Pay Online API v4（2026-10-01 查官方文件：`POST /v4/payments/request
 - 沙盒付款頁要用**真的 LINE 帳號**登入或用 LINE App 掃 QR 授權，無法全自動化。
   自動測試改用假 LINE Pay 伺服器；真沙盒驗收由店主手機掃碼配合。
 
+#### 4.4.2 O5 實作設計（2026-10-08）
+
+**店主裁示**：客人結帳頁可填手機條碼載具／統一編號（沒填就印紙本證明聯，客人到櫃檯拿）；已付款線上單由店內
+後端自動成立銷售，**POS 頁面開著就自動響一聲、印出餐單**（沒載具再印紙本發票），POS 沒開時付款的單打開 POS
+醒目提示「N 分鐘前已付款」並補印；先用沙盒 Channel，正式待店主向 LINE Pay 確認。
+
+**O5a 雲端與客人頁**
+- 送單可選 `LINE_PAY`（Worker 沒設 LINE Pay 憑證就不顯示這個選項），帶選填 `invoice`：`carrier`（手機條碼
+  `/` 開頭 8 碼）或 `tax_id`（8 碼統編，擇一）。建單照舊（驗價、冪等、上限、Turnstile、限量先等 POS 保留）。
+- 付款由客人頁發起：`POST /api/orders/:token/linepay` → Worker 呼叫 `request`（`orderId`＝線上單 ID＋第幾次付款，
+  每次重付都是新的）、`redirectUrls` 指回**客人自己的訂單頁** `/order/:token?linepay=return|cancel`，回 `paymentUrl`。
+  需要保留的單要 POS 回 `HELD` 才能付。`transactionId` 從**原始回應文字**取字串（19 位超過 JS 安全整數）。
+- 導回後客人頁呼叫 `POST /api/orders/:token/linepay/confirm`：D1 條件更新 `PENDING→CONFIRMING`（只有一個請求贏，C2），
+  確認保留仍有效（C10）→ `confirm`（金額＝訂單金額）→ `0000` 記 `PAID`；明確失敗記 `FAILED`；逾時／連不上維持
+  `CONFIRMING`（C7，不可判失敗）。取消導回記 `CANCELLED`，客人可以重付或改到櫃檯付現。
+- **補查（C7）**：POS 每次拉單時，Worker 對 `CONFIRMING`、以及導回前就關掉頁面的 `PENDING` 付款呼叫 `check`：
+  `0123` 已完成→`PAID`；`0110` 已授權未請款→（保留仍有效才）`confirm`；`0000` 客人還沒付→不動；明確查無→`FAILED`。
+  每筆最多每 30 秒查一次。
+- 拉單時已付款的 LINE Pay 單帶 `payment`（`transaction_id` 字串、金額）與 `invoice`，給 O5b 自動成立銷售。
+
+**O5b 店內自動成立銷售**（下一波）：以客人已付金額成交（POS 菜單價不同只標註）、tender＝LINE_PAY 線上
+（帶 transactionId，不再扣款）、依載具／統編開發票、POS 自動列印、作廢／退貨走 LINE Pay 線上退款、回報 REFUNDED。
+
 ### 4.5 一致性（全部要有測試）
 
 | # | 情境 | 保證 |
