@@ -1,9 +1,9 @@
-"""客人點餐頁的手寫字型子集（docs/44 §3.4；店主 2026-10-02 選定辰宇落雁體）。
+"""客人點餐頁的手寫字型子集（docs/44 §3.4；店主 2026-10-08 改用霞鶩文楷 TC，原為辰宇落雁體）。
 
-整檔約 9.5 MB，發佈菜單時只抽出菜單文字＋固定介面文字用到的字，做成 WOFF2（通常幾十 KB）。
+整檔約 15 MB，發佈菜單時只抽出菜單文字＋固定介面文字用到的字，做成 WOFF2（通常幾十到一百多 KB）。
 
-OFL 授權：此字型有保留字型名稱「辰宇落雁／Chenyuluoyan」，子集屬修改版、**不得沿用保留名稱**，
-所以名稱一律改成 `LukengHand`；著作權聲明與授權（name ID 0、13、14）原樣保留。見 fonts/README.md。
+OFL 授權：子集屬修改版，名稱一律改成 `LukengHand`；著作權聲明與授權（name ID 0、13、14）原樣保留。
+見 fonts/README.md。
 """
 
 import hashlib
@@ -15,7 +15,7 @@ from pathlib import Path
 from fontTools import subset
 from fontTools.ttLib import TTFont
 
-FONT_PATH = Path(__file__).parent / "fonts" / "ChenYuluoyan-2.0-Thin.ttf"
+FONT_PATH = Path(__file__).parent / "fonts" / "LXGWWenKaiTC-Regular.ttf"
 SUBSET_FAMILY = "LukengHand"
 
 # 點餐頁固定會出現的字（按鈕、問候、提示）。改了點餐頁文案要一起補上，否則那幾個字會掉回系統字型。

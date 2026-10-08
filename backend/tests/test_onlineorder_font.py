@@ -1,6 +1,6 @@
-"""手寫字型子集（docs/44 §3.4；店主 2026-10-02 選定辰宇落雁體）。
+"""手寫字型子集（docs/44 §3.4；店主 2026-10-08 改用霞鶩文楷 TC，原為辰宇落雁體）。
 
-整檔 9.5 MB 不能給客人下載，發佈時只抽菜單用到的字。OFL 保留字型名稱：子集一律改名 LukengHand。
+整檔 15 MB 不能給客人下載，發佈時只抽菜單用到的字。子集一律改名 LukengHand、保留原著作權與授權。
 """
 
 import io
@@ -36,8 +36,9 @@ def test_subset_is_renamed_but_keeps_copyright_and_license() -> None:
     names = _open(subset_font("咖啡").content)["name"]
     family = names.getDebugName(1)
     assert family == SUBSET_FAMILY
-    assert "辰宇落雁" not in (names.getDebugName(4) or "")
-    assert "Chenyuluoyan" not in (names.getDebugName(6) or "")
+    assert "WenKai" not in (names.getDebugName(4) or "")
+    assert "WenKai" not in (names.getDebugName(6) or "")
+    assert "LXGW" in (names.getDebugName(0) or "")  # 霞鶩文楷的著作權聲明原樣保留
     assert "Copyright" in (names.getDebugName(0) or "")
     assert "Open Font License" in (names.getDebugName(13) or "")
 
