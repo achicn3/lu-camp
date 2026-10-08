@@ -80,7 +80,7 @@ function cart(extra: Partial<Cart> = {}): Cart {
     table_no: "A1",
     note: null,
     lines: [
-      { menu_item_id: 5, menu_option_ids: [9], qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
+      { line_no: 1, menu_item_id: 5, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
     ],
     online_total: "300",
     total: "300",
@@ -153,7 +153,7 @@ describe("POS 線上訂單", () => {
 
   it("帶入結帳：價格變了先列出差額，店員確認才帶入", async () => {
     const changed = cart({
-      lines: [{ menu_item_id: 5, menu_option_ids: [9], qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160" }],
+      lines: [{ line_no: 1, menu_item_id: 5, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160" }],
       total: "320",
     });
     stubFetch((url) => (url.endsWith("/cart") ? json(changed) : json(overview([order(1)]))));

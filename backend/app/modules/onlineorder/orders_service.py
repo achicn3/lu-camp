@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.time import store_date, store_day_bounds, utc_now
 from app.modules.menu.service import MenuService
 from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.models import (
     OnlineOrder,
     OnlineOrderLink,
@@ -76,8 +77,11 @@ class PullResult:
 
 @dataclass(frozen=True)
 class CartLine:
+    line_no: int
+    """雲端訂單的行號：同品項同選項可能有兩行（體驗卡＋一般點），POS 靠它分開。"""
     menu_item_id: int
     menu_option_ids: list[int]
+    experience_id: int | None
     qty: int
     description: str
     online_unit_price: Decimal
@@ -107,6 +111,7 @@ class OnlineOrdersService:
         self._client = client
         self._repo = OnlineOrdersRepository(session)
         self._menu = MenuService(session)
+        self._experiences = MenuExperienceService(session)
 
     def _require_client(self, store_id: int) -> OnlineOrderClient:
         if self._client is None or self._client.store_id != store_id:
@@ -334,12 +339,17 @@ class OnlineOrdersService:
                 )
             except SaleLineInvalid as exc:
                 raise OnlineOrderConflict(f"{exc}（菜單選項改過了，請和客人確認）") from exc
+            experience_id = line.get("experience_id")
             lines.append(
                 CartLine(
+                    line_no=int(line["line_no"]),
                     menu_item_id=item.id,
                     menu_option_ids=option_ids,
+                    experience_id=experience_id,
                     qty=qty,
-                    description=selection.description,
+                    description=await self._describe(
+                        store_id, selection.description, experience_id, str(line["name"])
+                    ),
                     online_unit_price=Decimal(line["unit_price"]),
                     unit_price=selection.unit_price,
                 )
@@ -447,6 +457,15 @@ class OnlineOrdersService:
         )
         await self._repo.flush()
 
+    async def _describe(
+        self, store_id: int, description: str, experience_id: int | None, ordered_name: str
+    ) -> str:
+        """體驗卡的行冠上卡片標題（店員才知道要帶體驗）；卡片已刪就沿用客人送單時的品名。"""
+        if experience_id is None:
+            return description
+        title = await self._experiences.title_of(store_id, experience_id)
+        return ordered_name if title is None else f"{title}・{description}"
+
     async def set_accepting(self, store_id: int, accepting: bool) -> OnlineOrderLink:
         """暫停／恢復接單（雲端那邊生效）；恢復也會清掉雲端自動暫停的原因。"""
         data = await self._require_client(store_id).set_accepting(accepting)
@@ -471,6 +490,12 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
             "qty": int(line["qty"]),
             "line_total": int(line["line_total"]),
             "limited": bool(line["limited"]),
+            # 體驗卡來的行（M1c）；舊版雲端沒有這個鍵
+            **(
+                {"experience_id": int(line["experience_id"])}
+                if line.get("experience_id") is not None
+                else {}
+            ),
         }
         for line in raw["lines"]
     ]

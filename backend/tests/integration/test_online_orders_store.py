@@ -36,12 +36,14 @@ from app.modules.customerdisplay.service import CartSessionConflict, CustomerDis
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.models import (
     OnlineOrder,
     OnlineOrderOutbox,
     StockReservation,
 )
 from app.modules.onlineorder.orders_service import OnlineOrdersService
+from app.modules.onlineorder.presentation_schemas import MenuExperienceWriteRequest
 from app.modules.onlineorder.router import get_online_order_client
 from app.modules.onlineorder.scheduler import tick_once
 from app.modules.onlineorder.signing import canonical_string
@@ -403,8 +405,10 @@ async def test_cart_reprices_with_current_menu(
     body = resp.json()
     assert body["lines"] == [
         {
+            "line_no": 1,
             "menu_item_id": ctx.latte,
             "menu_option_ids": [],
+            "experience_id": None,
             "qty": 2,
             "description": "拿鐵",
             "online_unit_price": "150",
@@ -413,6 +417,34 @@ async def test_cart_reprices_with_current_menu(
     ]
     assert (body["online_total"], body["total"]) == ("300", "320")
     assert (body["service_mode"], body["table_no"]) == ("DINE_IN", "A1")
+
+
+async def test_cart_keeps_experience_lines_apart_and_labelled(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """同品項同選項、一行是體驗卡一行是一般點：帶入 POS 要分得開，體驗那行看得出是體驗。"""
+    exp = await MenuExperienceService(db_session).create(
+        ctx.store_id,
+        MenuExperienceWriteRequest(menu_item_id=ctx.latte, title="拿鐵體驗"),
+        actor_user_id=ctx.clerk_id,
+    )
+    card = {**_line(1, ctx.latte, "拿鐵體驗・拿鐵", 150), "experience_id": exp.id}
+    gone = {**_line(3, ctx.latte, "已下架體驗・拿鐵", 150), "experience_id": 999999}
+    row = await _pulled(
+        db_session, ctx, _rid(40), [card, _line(2, ctx.latte, "拿鐵", 150), gone]
+    )
+    resp = await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))
+    assert resp.status_code == 200, resp.text
+    lines = resp.json()["lines"]
+    assert [(x["line_no"], x["experience_id"], x["description"]) for x in lines] == [
+        (1, exp.id, "拿鐵體驗・拿鐵"),
+        (2, None, "拿鐵"),
+        # 卡片已刪：沿用客人送單時的品名，照樣看得出是體驗
+        (3, 999999, "已下架體驗・拿鐵"),
+    ]
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    order = next(o for o in listed.json()["orders"] if o["id"] == row.id)
+    assert [x["experience_id"] for x in order["lines"]] == [exp.id, None, 999999]
 
 
 async def test_checkout_converts_reservation_and_reports_settled(

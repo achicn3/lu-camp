@@ -22,6 +22,8 @@ class OnlineOrderLineRead(BaseModel):
     qty: int
     line_total: int
     limited: bool
+    experience_id: int | None = None
+    """體驗卡來的行（M1c）。"""
 
 
 class OnlineOrderRead(BaseModel):
@@ -84,8 +86,10 @@ class OnlineOrdersRead(BaseModel):
 
 
 class OnlineCartLineRead(BaseModel):
+    line_no: int
     menu_item_id: int
     menu_option_ids: list[int]
+    experience_id: int | None
     qty: int
     description: str
     online_unit_price: NTDOut
@@ -113,8 +117,10 @@ class OnlineCartRead(BaseModel):
             note=order.note,
             lines=[
                 OnlineCartLineRead(
+                    line_no=line.line_no,
                     menu_item_id=line.menu_item_id,
                     menu_option_ids=line.menu_option_ids,
+                    experience_id=line.experience_id,
                     qty=line.qty,
                     description=line.description,
                     online_unit_price=line.online_unit_price,

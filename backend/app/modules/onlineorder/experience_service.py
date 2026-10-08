@@ -121,6 +121,11 @@ class MenuExperienceService:
         await self._repo.delete(row)
         await self._audit(store_id, actor_user_id, "DELETE", experience_id, before, None)
 
+    async def title_of(self, store_id: int, experience_id: int) -> str | None:
+        """體驗卡現在的標題；卡片已刪回 None（呼叫端改用送單當時的品名）。"""
+        row = await self._repo.get(store_id, experience_id)
+        return None if row is None else row.title
+
     async def _audit(
         self,
         store_id: int,

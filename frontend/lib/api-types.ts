@@ -8924,6 +8924,10 @@ export interface components {
         OnlineCartLineRead: {
             /** Description */
             description: string;
+            /** Experience Id */
+            experience_id: number | null;
+            /** Line No */
+            line_no: number;
             /** Menu Item Id */
             menu_item_id: number;
             /** Menu Option Ids */
@@ -8970,6 +8974,8 @@ export interface components {
         };
         /** OnlineOrderLineRead */
         OnlineOrderLineRead: {
+            /** Experience Id */
+            experience_id?: number | null;
             /** Item Id */
             item_id: number;
             /** Limited */

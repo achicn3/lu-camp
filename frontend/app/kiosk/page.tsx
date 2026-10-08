@@ -856,7 +856,8 @@ function CartScreen({
                   ? " is-updated"
                   : ""
             }`}
-            key={item.item_key}
+            // 線上單的體驗卡與一般點可能同品項同選項（item_key 相同），加上位置才不會被 React 併成一筆。
+            key={`${item.item_key}:${index}`}
           >
             <div>
               <h2>

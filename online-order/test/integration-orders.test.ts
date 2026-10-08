@@ -28,7 +28,9 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 let n = 0;
-async function place(lines = [{ item_id: 5, option_ids: [], qty: 1 }]): Promise<string> {
+type PlaceLine = { item_id: number; option_ids: number[]; qty: number; experience_id?: number };
+
+async function place(lines: PlaceLine[] = [{ item_id: 5, option_ids: [], qty: 1 }]): Promise<string> {
   const resp = await exports.default.fetch(
     new Request("https://order.test/api/orders", {
       method: "POST",
@@ -83,6 +85,23 @@ describe("POS 拉單", () => {
     expect(o.lines).toEqual([expect.objectContaining({ item_id: 5, qty: 1, option_ids: [] })]);
     expect((await report(o.id, { sync_status: "IMPORTED" })).status).toBe(200);
     expect((await pull()).orders).toHaveLength(0);
+  });
+
+  it("體驗卡的行拉單時帶 experience_id（POS 才分得開同品項的一般點）", async () => {
+    const card = {
+      id: 9, item_id: 5, option_ids: [], title: "拿鐵體驗", tag: null, origin: null, notes: null,
+      description: null, includes: [], theme: "honey", art: "none", effect: "random",
+    };
+    await integration("PUT", "/integration/menu", JSON.stringify({ ...MENU, version: 4, experiences: [card] }));
+    await place([
+      { item_id: 5, option_ids: [], qty: 1, experience_id: 9 },
+      { item_id: 5, option_ids: [], qty: 1 },
+    ]);
+    const o = (await pull()).orders[0]!;
+    expect(o.lines.map((l) => [l.item_id, (l as { experience_id?: number | null }).experience_id ?? null])).toEqual([
+      [5, 9],
+      [5, null],
+    ]);
   });
 
   it("拉單＝心跳：沒拉超過 2 分鐘客人就不能下單", async () => {

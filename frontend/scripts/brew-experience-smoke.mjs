@@ -10,9 +10,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
 
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+
 assert.equal(process.env.SMOKE_ALLOW_WRITE, "1", "需明確允許寫入隔離測試環境");
 const API = process.env.SMOKE_API ?? "http://localhost:8114";
 const ORDER = process.env.SMOKE_ORDER ?? "http://127.0.0.1:8799";
+const BASE = process.env.SMOKE_BASE ?? "http://localhost:3500";
+const USERNAME = process.env.SMOKE_USERNAME ?? "dev-manager";
+const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp/lu-camp-shots/brew-experience");
 mkdirSync(SHOTS, { recursive: true });
 
@@ -41,10 +46,7 @@ const ok = (name, pass, detail = "") => {
   console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `：${detail}` : ""}`);
 };
 
-token = (await api("POST", "/auth/login", {
-  username: process.env.SMOKE_USERNAME ?? "dev-manager",
-  password: process.env.SMOKE_PASSWORD ?? "dev-test-123456",
-})).access_token;
+token = (await api("POST", "/auth/login", { username: USERNAME, password: PASSWORD })).access_token;
 const run = randomUUID().slice(0, 6);
 const brew = await api("POST", "/menu-items", { name: `手沖咖啡-${run}`, unit_price: "220", category: `手沖-${run}` });
 const beans = await api("POST", "/menu-option-groups", {
@@ -162,6 +164,51 @@ try {
   ok("POS 線上單：品名帶體驗、品項是原手沖咖啡", brewLine?.name?.startsWith(`${title}・`) === true, JSON.stringify(brewLine));
   await api("POST", `/online-orders/${order.id}/cancel`);
   ok("頁面無 JS 例外", errors.length === 0, errors.join(" | "));
+
+  // 同品項同選項：一行體驗卡、一行一般點（Codex M1c 第一輪）。帶入 POS 要分成兩行、體驗那行看得出是體驗，
+  // 改其中一行的數量、移除其中一行都不能動到另一行。
+  const options = [beans.options[0].id, temp.options[1].id];
+  const twin = await fetch(`${ORDER}/api/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: `lk_dev=${randomUUID().replaceAll("-", "")}` },
+    body: JSON.stringify({
+      idempotency_key: randomUUID(), table_code: code, payment_method: "CASH",
+      turnstile_token: "XXXX.DUMMY.TOKEN.XXXX", note: `雙胞胎-${run}`,
+      lines: [
+        { item_id: brew.id, option_ids: options, qty: 1, experience_id: card.id },
+        { item_id: brew.id, option_ids: options, qty: 1 },
+      ],
+    }),
+  });
+  ok("同品項同選項的體驗＋一般點可以一起送出", twin.status === 201 || twin.status === 200, String(twin.status));
+  const twinOrder = await waitFor(async () => (await api("GET", "/online-orders")).orders.find((o) => o.note === `雙胞胎-${run}`), "POS 拉到雙胞胎單");
+  const pos = await (await browser.newContext({ viewport: { width: 1280, height: 1000 } })).newPage();
+  pos.on("pageerror", (error) => errors.push(`POS: ${String(error)}`));
+  await skipOpeningCheckRedirect(pos, BASE);
+  await pos.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await pos.fill('input[name="username"]', USERNAME);
+  await pos.fill('input[name="password"]', PASSWORD);
+  await pos.click('button:has-text("登入")');
+  await pos.waitForURL(`${BASE}/`);
+  await pos.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await pos.getByRole("button", { name: /線上訂單/ }).click();
+  const sheet = pos.getByRole("dialog", { name: "線上訂單" });
+  await sheet.getByRole("listitem").filter({ hasText: `雙胞胎-${run}` }).getByRole("button", { name: "帶入結帳" }).click();
+  await sheet.waitFor({ state: "detached" });
+  const cardName = `${title}・手沖咖啡-${run}（蜜桃蹦蹦、冰）`;
+  const plainName = `手沖咖啡-${run}（蜜桃蹦蹦、冰）`;
+  const cardQty = pos.getByLabel(`${cardName} 數量`, { exact: true });
+  const plainQty = pos.getByLabel(`${plainName} 數量`, { exact: true });
+  await cardQty.waitFor();
+  ok("POS 分成兩行，體驗那行冠上卡片標題", (await cardQty.count()) === 1 && (await plainQty.count()) === 1);
+  await pos.screenshot({ path: join(SHOTS, "05-pos-twin.png") });
+  await plainQty.fill("2");
+  ok("改一般點的數量，體驗那行不跟著變", (await plainQty.inputValue()) === "2" && (await cardQty.inputValue()) === "1");
+  await pos.getByRole("button", { name: `移除 ${plainName}`, exact: true }).click();
+  ok("移除一般點，體驗那行還在", (await plainQty.count()) === 0 && (await cardQty.count()) === 1);
+  await pos.getByRole("button", { name: "取消帶入" }).click();
+  await api("POST", `/online-orders/${twinOrder.id}/cancel`);
+  ok("POS 頁面無 JS 例外", !errors.some((e) => e.startsWith("POS:")), errors.join(" | "));
 } catch (error) {
   ok("流程例外", false, String(error));
   await page.screenshot({ path: join(SHOTS, "zz-error.png"), fullPage: true }).catch(() => {});

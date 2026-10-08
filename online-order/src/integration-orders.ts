@@ -47,7 +47,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
       ? []
       : (
           await env.DB.prepare(
-            `SELECT order_id, line_no, item_id, name, option_ids, unit_price, qty, line_total, limited ` +
+            `SELECT order_id, line_no, item_id, name, option_ids, unit_price, qty, line_total, limited, experience_id ` +
               `FROM order_lines WHERE order_id IN (${ids.map(() => "?").join(",")}) ORDER BY order_id, line_no`,
           )
             .bind(...ids)
@@ -61,6 +61,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
               qty: number;
               line_total: number;
               limited: number;
+              experience_id: number | null;
             }>()
         ).results;
   return json({

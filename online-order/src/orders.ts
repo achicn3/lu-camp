@@ -280,7 +280,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     ...priced.lines.map((l, i) =>
       env.DB.prepare(
         "INSERT INTO order_lines (order_id, store_id, line_no, item_id, name, option_ids, unit_price, qty, " +
-          `line_total, limited) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
+          `line_total, limited, experience_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
       ).bind(
         orderId,
         storeId,
@@ -292,6 +292,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
         l.qty,
         l.line_total,
         l.limited ? 1 : 0,
+        l.experience_id ?? null,
         orderId,
       ),
     ),

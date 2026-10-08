@@ -87,6 +87,7 @@ import {
   type OnlineCart,
   OnlineOrdersPanel,
 } from "@/features/online-orders/OnlineOrdersPanel";
+import { onlineCartLines } from "@/features/online-orders/onlineCartLines";
 import { CampaignPanel } from "@/features/pos/CampaignPanel";
 import { disabledCampaignsSignature } from "@/features/pos/campaignOverrides";
 import { formatSalePaymentSummary } from "@/lib/payment";
@@ -2479,17 +2480,7 @@ export default function PosPage() {
   /** 線上單帶入購物車（購物車是空的才會被呼叫）：品項照 POS 現在的價格、內用外帶與桌號一起帶。 */
   function loadOnlineOrder(cart: OnlineCart) {
     clerkAddedRef.current = true;
-    setLines(
-      cart.lines.map((line) => ({
-        key: menuLineKey(line.menu_item_id, line.menu_option_ids),
-        lineType: "MENU",
-        description: line.description,
-        unitPrice: parseNtd(line.unit_price) ?? 0,
-        qty: line.qty,
-        menuItemId: line.menu_item_id,
-        ...(line.menu_option_ids.length > 0 ? { menuOptionIds: line.menu_option_ids } : {}),
-      })),
-    );
+    setLines(onlineCartLines(cart.lines));
     setDineIn({
       mode: cart.service_mode === "TAKEOUT" ? "TAKEOUT" : "DINE_IN",
       tableNo: cart.service_mode === "TAKEOUT" ? null : cart.table_no,

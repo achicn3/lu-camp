@@ -229,6 +229,14 @@ A/B Test 放最後，先有可用的事件品質與足夠樣本。
 - **煙霧**：`brew-experience-smoke.mjs`（客人頁，六種動畫逐一翻開、插畫真的載入、補選、購物車、加購、送單到 POS）
   28/28；`menu-experience-admin-smoke.mjs`（後台新增／編輯／停用／刪除、加購角色、手機寬度）15/15。
   截圖 `~/tmp/lu-camp-shots/brew-experience/`、`menu-experience-admin/`。
-- **部署順序**：先升級正式機（migration），**再部署 Worker，最後才從 POS 重新發佈**——舊 Worker 不認識
-  `role`／`experiences` 鍵，會拒收新快照。升級說明見 docs/66。
+- **POS 帶入**：雲端訂單行記下 `experience_id`（D1 migration `0005_order_line_experience`），店內拉單保留它。
+  帶入 POS 時體驗卡那行冠上卡片**現在**的標題（卡片已刪就沿用客人送單時的品名），購物車鍵與同品項同選項的
+  一般點分開——改數量、移除、折扣互不影響（Codex M1c 第一輪）。顧客螢幕的清單也以位置區分同鍵的兩行。
+  **未涵蓋**：銷售紀錄、出餐單、收據仍只寫原品項（銷售行沒有可存卡片標題的欄位）；POS 在簽署／付款中途重新整理
+  而從伺服器還原時，兩行會回到同一個鍵、標題也回到原品項名。
+- **部署順序**：先升級正式機（migration），**再套用雲端 D1 `0005`、部署 Worker，最後才從 POS 重新發佈**——
+  舊 Worker 不認識 `role`／`experiences` 鍵，會拒收新快照；新 Worker 寫訂單行要用到 `experience_id` 欄位。
+  升級說明見 docs/66。
+- **已知風險（店主裁示不修，2026-10-08）**：體驗卡預選了「必選 2 項」群組中的 1 項時，客人頁仍要求再選 2 項，
+  選滿會被雲端以 `invalid_options` 擋下（Codex M1c 第一輪 medium）。現行豆子群組都是單選，發生機率極低。
 - M1d 零售商品接單、O5 線上 LINE Pay、M2 人氣與分析仍待做。

@@ -12510,6 +12510,21 @@
             "title": "Description",
             "type": "string"
           },
+          "experience_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experience Id"
+          },
+          "line_no": {
+            "title": "Line No",
+            "type": "integer"
+          },
           "menu_item_id": {
             "title": "Menu Item Id",
             "type": "integer"
@@ -12535,8 +12550,10 @@
           }
         },
         "required": [
+          "line_no",
           "menu_item_id",
           "menu_option_ids",
+          "experience_id",
           "qty",
           "description",
           "online_unit_price",
@@ -12641,6 +12658,17 @@
       },
       "OnlineOrderLineRead": {
         "properties": {
+          "experience_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experience Id"
+          },
           "item_id": {
             "title": "Item Id",
             "type": "integer"

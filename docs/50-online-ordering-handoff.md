@@ -141,7 +141,9 @@ M1a／M1b 已合併 main；M1c 手沖體驗卡＋加購在 `feat/brew-experience
 ### 2026-10-08：M1c 手沖體驗卡與加購
 
 `feat/brew-experience`：體驗卡＝既有品項＋預選選項＋卡面文字（不存價格／庫存）、六種抽卡動畫或隨機、Codex 繪製的水彩 JPG 插畫、
-購物車下方最多兩項的加購推薦。**部署順序：正式機 migration → Worker → 才從 POS 重新發佈**（舊 Worker 拒收含 `experiences`／`role` 的快照）。
+購物車下方最多兩項的加購推薦；帶入 POS 時體驗卡那行冠上卡片標題、與同品項一般點分開。
+**部署順序：正式機 migration → 雲端 D1 `0005` → Worker → 才從 POS 重新發佈**（舊 Worker 拒收含 `experiences`／`role` 的快照）。
+已知風險（裁示不修）：預選「必選 2 項」群組中的 1 項時客人頁會要求選滿 2 項、送單被擋；現行豆子群組都是單選。
 坑：卡片動 opacity 會被壓平成 2D、翻面露出鏡像背面——動畫只准動 transform；`wrangler dev` 啟動後才加的 `public/` 檔會被 SPA 退回成 HTML，要重開。
 詳見 [docs/63 §12](63-online-menu-experience-plan.md#12-m1c-手沖體驗卡與餐飲加購2026-10-08feat-brew-experience)。
 
