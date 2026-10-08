@@ -12,6 +12,7 @@
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -498,7 +499,14 @@ class OnlineOrdersService:
             await self._release(store_id, reservation, StockReservationStatus.CONVERTED)
         await self._repo.flush()
 
-    async def mark_settled(self, store_id: int, order_id: int, *, sale_id: int) -> None:
+    async def mark_settled(
+        self,
+        store_id: int,
+        order_id: int,
+        *,
+        sale_id: int,
+        take_home: Sequence[tuple[int, int]] = (),
+    ) -> None:
         """銷售成立（同一交易）：線上單標已付款、掛上銷售單，回報雲端。"""
         order = await self._order(store_id, order_id, for_update=True)
         order.sync_status = OnlineOrderSync.SETTLED
@@ -508,11 +516,33 @@ class OnlineOrdersService:
             "sync_status": OnlineOrderSync.SETTLED,
             "payment_status": OnlineOrderPayment.PAID,
         }
-        # 有帶回家商品：付了錢還要等店員交貨才算結單（docs/63 §13）。
-        if any(_is_retail(line) for line in order.lines):
+        # 有帶回家商品：付了錢還要等店員交貨才算結單（docs/63 §13）。要交的照**實際結帳**的
+        # 一般商品（`take_home`：(商品, 數量)）——客人在櫃檯改數量或不買了，清單跟著變。
+        if take_home and any(_is_retail(line) for line in order.lines):
             order.fulfillment_status = OnlineOrderFulfillment.AWAITING
+            order.handover_items = [
+                {
+                    "catalog_product_id": product_id,
+                    "name": await self._product_name(store_id, product_id),
+                    "qty": qty,
+                }
+                for product_id, qty in take_home
+            ]
             report["fulfillment"] = OnlineOrderFulfillment.AWAITING
         self._enqueue(order, report)
+        await self._repo.flush()
+
+    async def _product_name(self, store_id: int, product_id: int) -> str:
+        product = await self._inventory.get_catalog(store_id, product_id)
+        return product.name if product is not None else f"商品 {product_id}"
+
+    async def sale_voided(self, store_id: int, sale_id: int) -> None:
+        """銷售作廢（同一交易）：掛著它的線上單不再待交貨，也不能再按已交貨（Codex M1d 第一輪）。"""
+        order = await self._repo.by_sale(store_id, sale_id)
+        if order is None or order.fulfillment_status != OnlineOrderFulfillment.AWAITING:
+            return
+        order.fulfillment_status = OnlineOrderFulfillment.NONE
+        order.handover_items = None
         await self._repo.flush()
 
     async def hand_over(self, store_id: int, order_id: int, *, actor_user_id: int) -> OnlineOrder:

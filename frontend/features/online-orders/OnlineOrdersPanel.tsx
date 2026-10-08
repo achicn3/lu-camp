@@ -284,6 +284,12 @@ export function OnlineOrdersPanel({
                       {order.hold_status === "REJECTED" && order.reject_reason && (
                         <p className="form-error">庫存不足：{order.reject_reason}（客人那邊已顯示，請客人重新點）</p>
                       )}
+                      {isAwaitingHandover(order) && (order.handover_items ?? []).length > 0 && (
+                        <p className="online-order-handover">
+                          要交給客人：
+                          {(order.handover_items ?? []).map((item) => `${item.name} ×${item.qty}`).join("、")}
+                        </p>
+                      )}
                       {isAwaitingHandover(order) && (
                         <div className="online-order-actions">
                           <span>把帶回家的商品交給客人後再按。</span>

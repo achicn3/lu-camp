@@ -7482,6 +7482,29 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HandoverItemRead": {
+        "properties": {
+          "catalog_product_id": {
+            "title": "Catalog Product Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "catalog_product_id",
+          "name",
+          "qty"
+        ],
+        "title": "HandoverItemRead",
+        "type": "object"
+      },
       "HealthResponse": {
         "description": "`/health` 回應。",
         "properties": {
@@ -12785,6 +12808,20 @@
             "title": "Fulfillment Status",
             "type": "string"
           },
+          "handover_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HandoverItemRead"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handover Items"
+          },
           "hold_status": {
             "title": "Hold Status",
             "type": "string"
@@ -12884,7 +12921,8 @@
           "payment_status",
           "reject_reason",
           "sale_id",
-          "fulfillment_status"
+          "fulfillment_status",
+          "handover_items"
         ],
         "title": "OnlineOrderRead",
         "type": "object"

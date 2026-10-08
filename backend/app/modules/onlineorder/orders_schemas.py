@@ -29,6 +29,12 @@ class OnlineOrderLineRead(BaseModel):
     """體驗卡來的行（M1c）。"""
 
 
+class HandoverItemRead(BaseModel):
+    catalog_product_id: int
+    name: str
+    qty: int
+
+
 class OnlineOrderRead(BaseModel):
     id: int
     remote_id: str
@@ -47,6 +53,8 @@ class OnlineOrderRead(BaseModel):
     sale_id: int | None
     fulfillment_status: str
     """帶回家商品交貨：NONE（沒有）／AWAITING（待交貨）／HANDED_OVER（已交貨）。"""
+    handover_items: list[HandoverItemRead] | None
+    """要交給客人的商品＝實際結帳的品項與數量（不是客人原本點的）。"""
 
     @classmethod
     def from_row(cls, row: OnlineOrder) -> "OnlineOrderRead":
@@ -66,6 +74,11 @@ class OnlineOrderRead(BaseModel):
             reject_reason=row.reject_reason,
             sale_id=row.sale_id,
             fulfillment_status=row.fulfillment_status,
+            handover_items=(
+                None
+                if row.handover_items is None
+                else [HandoverItemRead.model_validate(i) for i in row.handover_items]
+            ),
         )
 
 

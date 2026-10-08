@@ -58,6 +58,7 @@ function order(id: number, extra: Partial<Order> = {}): Order {
     reject_reason: null,
     sale_id: null,
     fulfillment_status: "NONE",
+    handover_items: null,
     ...extra,
   };
 }
@@ -199,8 +200,10 @@ describe("POS 線上訂單", () => {
       payment_status: "PAID",
       sale_id: 99,
       fulfillment_status: "AWAITING",
+      // 客人點 2 包、櫃檯改成 1 包：交貨照實際結帳
+      handover_items: [{ catalog_product_id: 41, name: "耶加雪菲 200g", qty: 1 }],
       lines: [
-        { line_no: 1, item_id: null, catalog_product_id: 41, name: "耶加雪菲 200g", option_ids: [], unit_price: 450, qty: 1, line_total: 450, limited: true },
+        { line_no: 1, item_id: null, catalog_product_id: 41, name: "耶加雪菲 200g", option_ids: [], unit_price: 450, qty: 2, line_total: 900, limited: true },
         { line_no: 2, item_id: 5, name: "拿鐵", option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false },
       ],
     });
@@ -216,7 +219,7 @@ describe("POS 線上訂單", () => {
     await user.click(screen.getByRole("button", { name: /線上訂單/ }));
     const row = screen.getByRole("listitem", { name: /桌號 A1/ });
     expect(row.textContent).toContain("已付款・待交貨");
-    expect(row.textContent).toContain("耶加雪菲 200g ×1（帶回家）");
+    expect(row.textContent).toContain("要交給客人：耶加雪菲 200g ×1");
     expect(row.textContent).not.toContain("拿鐵 ×1（帶回家）");
     expect(screen.queryByRole("button", { name: "帶入結帳" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "已交貨" }));

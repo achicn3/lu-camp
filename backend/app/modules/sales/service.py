@@ -1468,8 +1468,13 @@ class SalesService:
                 sale_id=sale.id,
             )
         if online_order_id is not None:
+            take_home: dict[int, int] = {}
+            for line in lines:
+                if line.line_type is SaleLineType.CATALOG and line.catalog_product_id is not None:
+                    pid = line.catalog_product_id
+                    take_home[pid] = take_home.get(pid, 0) + line.qty
             await OnlineOrdersService(self._session, None).mark_settled(
-                store_id, online_order_id, sale_id=sale.id
+                store_id, online_order_id, sale_id=sale.id, take_home=list(take_home.items())
             )
         if cart is not None:
             now = datetime.now(UTC)
@@ -2706,6 +2711,8 @@ class SalesService:
         before = sale.status.value
         sale.status = SaleStatus.VOIDED
         await self._session.flush()
+        # 線上單的帶回家商品還沒交：作廢後不能再交（docs/63 §13；Codex M1d 第一輪）。
+        await OnlineOrdersService(self._session, None).sale_voided(sale.store_id, sale.id)
         await write_audit_log(
             self._session,
             store_id=sale.store_id,

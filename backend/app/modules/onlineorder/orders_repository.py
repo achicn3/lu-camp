@@ -47,6 +47,15 @@ class OnlineOrdersRepository:
         row: OnlineOrder | None = await self._session.scalar(stmt)
         return row
 
+    async def by_sale(self, store_id: int, sale_id: int) -> OnlineOrder | None:
+        """成立這筆銷售的線上單（鎖住，作廢時同一交易內改它）。"""
+        row: OnlineOrder | None = await self._session.scalar(
+            select(OnlineOrder)
+            .where(OnlineOrder.store_id == store_id, OnlineOrder.sale_id == sale_id)
+            .with_for_update()
+        )
+        return row
+
     async def list_since(self, store_id: int, since: datetime) -> Sequence[OnlineOrder]:
         """今天的單＋還沒處理完的舊單（未付款、沒取消，或還沒交貨），新的在前。"""
         return (

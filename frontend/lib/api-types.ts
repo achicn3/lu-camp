@@ -7273,6 +7273,15 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HandoverItemRead */
+        HandoverItemRead: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Name */
+            name: string;
+            /** Qty */
+            qty: number;
+        };
         /**
          * HealthResponse
          * @description `/health` 回應。
@@ -9093,6 +9102,8 @@ export interface components {
             created_at: string;
             /** Fulfillment Status */
             fulfillment_status: string;
+            /** Handover Items */
+            handover_items: components["schemas"]["HandoverItemRead"][] | null;
             /** Hold Status */
             hold_status: string;
             /** Id */

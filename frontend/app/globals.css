@@ -6600,3 +6600,4 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .retail-form .menu-photo-empty { width: 120px; height: 120px; }
 .retail-form .menu-photo-actions { flex-direction: row; align-items: center; }
 .retail-form .menu-photo-actions .btn-ghost { width: auto; padding: 0 var(--sp-4); display: inline-flex; align-items: center; }
+.online-order-handover { margin: var(--sp-1) 0 0; font-weight: 600; color: var(--accent); }

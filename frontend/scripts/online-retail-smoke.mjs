@@ -156,6 +156,7 @@ try {
   const paidRow = desk.getByRole("dialog", { name: "線上訂單" }).getByRole("listitem").filter({ hasText: note });
   await paidRow.getByText("已付款・待交貨").waitFor({ timeout: 15000 });
   ok("付了錢還留在清單：已付款・待交貨", true);
+  ok("列出要交給客人的商品（照實際結帳）", (await paidRow.innerText()).includes(`要交給客人：${name} ×1`));
   await desk.screenshot({ path: join(SHOTS, "05-pos-awaiting.png") });
   await guest.getByText("已付款。帶回家商品請到櫃檯領取。").waitFor({ timeout: 30000 });
   ok("客人頁：已付款、請到櫃檯領取", true);

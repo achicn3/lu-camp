@@ -271,6 +271,8 @@ class OnlineOrder(Base, TimestampMixin):
         String(12), default="NONE", server_default=text("'NONE'")
     )
     handed_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 要交的商品＝實際結帳的一般商品與數量（[{catalog_product_id, name, qty}]），不是客人原本點的。
+    handover_items: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     handed_over_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 

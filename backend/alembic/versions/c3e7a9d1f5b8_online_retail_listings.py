@@ -11,6 +11,7 @@ Revises: b7d4f1a3c9e2
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection
 
 revision = "c3e7a9d1f5b8"
@@ -103,6 +104,8 @@ def upgrade() -> None:
     op.add_column(
         "online_orders", sa.Column("handed_over_at", sa.DateTime(timezone=True), nullable=True)
     )
+    # 要交給客人的帶回家商品：照實際結帳的品項與數量（店員可能在櫃檯改過數量）。
+    op.add_column("online_orders", sa.Column("handover_items", JSONB(), nullable=True))
     op.add_column(
         "online_orders",
         sa.Column("handed_over_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
@@ -144,6 +147,7 @@ def downgrade() -> None:
     _reasons(_OLD_REASONS)
     op.drop_constraint("ck_online_orders_handed_over", "online_orders", type_="check")
     op.drop_constraint("ck_online_orders_fulfillment", "online_orders", type_="check")
+    op.drop_column("online_orders", "handover_items")
     op.drop_column("online_orders", "handed_over_by")
     op.drop_column("online_orders", "handed_over_at")
     op.drop_column("online_orders", "fulfillment_status")

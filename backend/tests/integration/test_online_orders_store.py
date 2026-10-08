@@ -1061,3 +1061,61 @@ async def test_menu_only_order_needs_no_handover(
     assert row.fulfillment_status == "NONE"
     resp = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
     assert resp.status_code == 409
+
+
+async def test_handover_follows_what_was_actually_sold_not_what_was_ordered(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """客人點 2 包、到櫃檯只買 1 包：交貨清單照實際結帳的 1 包（Codex M1d 第一輪）。"""
+    bean = await _bean(db_session, ctx)
+    row = await _pulled(
+        db_session, ctx, _rid(56), [_retail_line(1, bean.id, qty=2)], "HOLD_REQUESTED"
+    )
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": bean.id, "qty": 1}],
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "online-retail-56"),
+    )
+    assert sale.status_code == 201, sale.text
+    assert await _on_hand(db_session, bean) == 2  # 保留的 2 包加回、賣掉 1 包
+    listed = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
+    mine = next(o for o in listed.json()["orders"] if o["id"] == row.id)
+    assert mine["fulfillment_status"] == "AWAITING"
+    assert mine["handover_items"] == [
+        {"catalog_product_id": bean.id, "name": "耶加雪菲 200g", "qty": 1}
+    ]
+
+
+async def test_voided_sale_is_no_longer_awaiting_handover(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """收了錢又作廢：線上單不再待交貨、也不能按已交貨（Codex M1d 第一輪）。"""
+    bean = await _bean(db_session, ctx)
+    row = await _pulled(
+        db_session, ctx, _rid(57), [_retail_line(1, bean.id)], "HOLD_REQUESTED"
+    )
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": bean.id, "qty": 1}],
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, "online-retail-57"),
+    )
+    assert sale.status_code == 201, sale.text
+    mgr = await db_session.scalar(
+        select(User).where(User.store_id == ctx.store_id, User.username == "mgr")
+    )
+    assert mgr is not None
+    manager = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=ctx.store_id)
+    voided = await client.post(
+        f"/api/v1/sales/{sale.json()['id']}/void", json={}, headers=_h(manager)
+    )
+    assert voided.status_code == 200, voided.text
+    row = await _order_row(db_session, _rid(57))
+    assert row.fulfillment_status == "NONE"
+    resp = await client.post(f"/api/v1/online-orders/{row.id}/hand-over", headers=_h(ctx.clerk))
+    assert resp.status_code == 409
