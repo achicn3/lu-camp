@@ -2230,6 +2230,17 @@ class InventoryService:
             )
         )
 
+    async def purchase_in_by_receipt(
+        self, store_id: int, receipt_ids: list[int]
+    ) -> dict[int, dict[int, int]]:
+        """{收貨批次: {商品: 入庫數量}}；採購算每批收貨金額用（進項發票對帳，docs/70 §5.3）。"""
+        result: dict[int, dict[int, int]] = {}
+        for receipt_id, product_id, qty in await self._repo.purchase_in_by_receipt(
+            store_id, receipt_ids
+        ):
+            result.setdefault(receipt_id, {})[product_id] = qty
+        return result
+
     async def set_catalog_cost(self, store_id: int, catalog_id: int, unit_cost: Decimal) -> None:
         """把一般商品成本設為指定進價（採購單更正後重算最近一次進貨用）；已成交的成本快照不受影響。"""
         product = await self._repo.get_catalog_for_update(store_id, catalog_id)

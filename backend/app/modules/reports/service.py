@@ -90,13 +90,6 @@ from app.shared.enums import (
 from app.shared.exceptions import DomainError
 
 
-def _require_amount(value: Decimal | None, number: str | None, field: str) -> Decimal:
-    """進項發票的金額缺一不可（有 DB 約束保證）；真的缺就明確報錯，不要默默當 0。"""
-    if value is None:
-        raise DomainError(f"進項發票 {number or '(無號碼)'} 缺少{field}，無法產出申報清單")
-    return value
-
-
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -668,7 +661,7 @@ class ReportsService:
         """
         invoices = await self._einvoice.invoices_in_period(store_id, date_from, date_to)
         allowance_rows = await self._einvoice.allowances_in_period(store_id, date_from, date_to)
-        receipts = await self._purchasing.input_invoices_in_period(store_id, date_from, date_to)
+        purchases = await self._purchasing.input_invoices_in_period(store_id, date_from, date_to)
 
         issued: list[InvoiceRegisterRow] = []
         voided: list[InvoiceRegisterRow] = []
@@ -729,17 +722,20 @@ class ReportsService:
 
         input_invoices = [
             InvoiceRegisterRow(
-                number=receipt.invoice_number,
-                issued_on=receipt.invoice_date,
-                counterparty=supplier_name,
-                # DB 約束保證「有號碼就一定有三個金額」；真的是 None 就是資料壞了，
-                # 用 `or 0` 會把它悄悄變成 0 混進申報數字（§9 錯誤處理要明確）。
-                net=_require_amount(receipt.invoice_net, receipt.invoice_number, "未稅"),
-                tax=_require_amount(receipt.invoice_tax, receipt.invoice_number, "稅額"),
-                total=_require_amount(receipt.invoice_total, receipt.invoice_number, "總額"),
-                reference=f"採購單 #{receipt.purchase_order_id}",
+                number=invoice.invoice_number,
+                issued_on=invoice.invoice_date,
+                counterparty=invoice.supplier_name,
+                net=invoice.invoice_net,
+                tax=invoice.invoice_tax,
+                total=invoice.invoice_total,
+                # 一張發票可涵蓋多張採購單的收貨（docs/70 §5）。
+                reference="採購單 "
+                + "、".join(
+                    f"#{po_id}"
+                    for po_id in sorted({receipt.purchase_order_id for receipt in invoice.receipts})
+                ),
             )
-            for receipt, supplier_name in receipts
+            for invoice in purchases
         ]
 
         # 手開紙本的單退貨／作廢時，電子端不會有折讓或作廢（docs/36 由店家線下辦紙本），

@@ -27,6 +27,7 @@ from app.shared.enums import (
     Grade,
     OwnershipType,
     SerializedItemStatus,
+    StockDirection,
     StockReason,
 )
 
@@ -1002,6 +1003,30 @@ class InventoryRepository:
             .order_by(StockMovement.created_at.asc(), StockMovement.id.asc())
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def purchase_in_by_receipt(
+        self, store_id: int, receipt_ids: list[int]
+    ) -> list[tuple[int, int, int]]:
+        """各收貨批次入庫的（批次 id, 商品 id, 數量）——收貨當下寫的 PURCHASE 入庫帳。"""
+        if not receipt_ids:
+            return []
+        stmt = (
+            select(
+                StockMovement.ref_id,
+                StockMovement.catalog_product_id,
+                func.sum(StockMovement.qty),
+            )
+            .where(
+                StockMovement.store_id == store_id,
+                StockMovement.ref_type == "goods_receipt",
+                StockMovement.ref_id.in_(receipt_ids),
+                StockMovement.reason == StockReason.PURCHASE,
+                StockMovement.direction == StockDirection.IN,
+            )
+            .group_by(StockMovement.ref_id, StockMovement.catalog_product_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(int(r[0]), int(r[1]), int(r[2])) for r in rows]
 
     async def movements_for_bulk(self, store_id: int, bulk_lot_id: int) -> list[StockMovement]:
         """某散裝批的庫存異動帳（時間升冪；明細頁歷史用，§4 店別範圍）。"""

@@ -212,8 +212,11 @@ class ReceivePurchaseOrderRequest(BaseModel):
 
 
 class InputInvoiceRead(BaseModel):
+    """收貨批次上顯示的進項發票摘要（點進去看整張：`getInputInvoice`）。"""
+
     model_config = ConfigDict(from_attributes=True)
 
+    id: int
     invoice_number: str
     invoice_date: date
     invoice_total: NTDAmount
@@ -222,7 +225,7 @@ class InputInvoiceRead(BaseModel):
 
 
 class GoodsReceiptRead(BaseModel):
-    """單一收貨批次（分批收貨事件）＋其選填進項發票。"""
+    """單一收貨批次（分批收貨事件）＋所掛的進項發票（沒有＝還沒開發票）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -233,17 +236,40 @@ class GoodsReceiptRead(BaseModel):
 
     @classmethod
     def from_model(cls, receipt: "GoodsReceipt") -> "GoodsReceiptRead":
-        invoice = (
-            InputInvoiceRead.model_validate(receipt) if receipt.invoice_number is not None else None
-        )
+        invoice = receipt.input_invoice
         return cls.model_validate(
             {
                 "id": receipt.id,
                 "received_at": receipt.received_at,
                 "received_by": receipt.received_by,
-                "invoice": invoice,
+                "invoice": None if invoice is None else InputInvoiceRead.model_validate(invoice),
             }
         )
+
+
+class InputInvoiceWrite(InputInvoiceIn):
+    """登錄／修改一張進項發票（docs/70 §5.2）：涵蓋哪幾批收貨（至少一批、同一供應商）。"""
+
+    supplier_id: int
+    receipt_ids: list[int] = Field(min_length=1)
+
+
+class ReceiptAmountRead(BaseModel):
+    """一批收貨與它的金額（這批各商品收到的數量 × 採購單進價）。"""
+
+    receipt_id: int
+    purchase_order_id: int
+    received_at: datetime
+    amount: NTDAmount
+
+
+class InputInvoiceDetailRead(InputInvoiceRead):
+    supplier_id: int
+    supplier_name: str
+    created_at: datetime
+    receipts: list[ReceiptAmountRead]
+    # 涵蓋收貨的金額合計；與發票含稅不一致只提醒不擋（運費、折扣、尾差）。
+    receipts_total: NTDAmount
 
 
 class ReceivePurchaseOrderResult(BaseModel):

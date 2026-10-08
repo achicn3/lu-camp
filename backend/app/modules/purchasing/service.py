@@ -14,6 +14,7 @@ from app.core.money import MAX_NTD
 from app.modules.inventory.service import InventoryService
 from app.modules.purchasing.models import (
     GoodsReceipt,
+    InputInvoice,
     PurchaseOrder,
     PurchaseOrderLine,
     Supplier,
@@ -21,6 +22,7 @@ from app.modules.purchasing.models import (
 from app.modules.purchasing.repository import PurchasingRepository
 from app.modules.purchasing.schemas import (
     InputInvoiceIn,
+    InputInvoiceWrite,
     PurchaseOrderCreate,
     PurchaseOrderUpdate,
     ReceiveLineIn,
@@ -30,16 +32,18 @@ from app.modules.purchasing.schemas import (
 from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
+    DuplicateInputInvoice,
     IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
+    InputInvoiceInvalid,
+    InputInvoiceNotFound,
     InvalidPurchaseOrder,
-    PurchaseOrderEditForbidden,
     PurchaseOrderNotCancellable,
     PurchaseOrderNotEditable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
-    PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    PurchasingManagerOnly,
     SupplierInactive,
     SupplierNotFound,
 )
@@ -264,7 +268,7 @@ class PurchasingService:
         if purchase_order.status == PurchaseOrderStatus.CANCELLED:
             raise PurchaseOrderNotEditable(f"採購單 {purchase_order_id} 已取消，不能修改")
         if purchase_order.status != PurchaseOrderStatus.DRAFT and not actor_is_manager:
-            raise PurchaseOrderEditForbidden("已下單或已收貨的採購單只有管理者能修改")
+            raise PurchasingManagerOnly("已下單或已收貨的採購單只有管理者能修改")
         has_receipts = purchase_order.status in (
             PurchaseOrderStatus.PARTIAL,
             PurchaseOrderStatus.RECEIVED,
@@ -355,6 +359,11 @@ class PurchasingService:
             raise CrossStoreReference(f"供應商 {supplier_id} 不屬於 store {store_id}")
         if not supplier.is_active:
             raise SupplierInactive(f"供應商「{supplier.name}」已停用，不能改成它")
+        if any(receipt.input_invoice_id is not None for receipt in purchase_order.receipts):
+            raise InvalidPurchaseOrder(
+                f"這張採購單的收貨已登在「{purchase_order.supplier_name}」的進項發票上，"
+                "請先到進項發票把這幾批移除，再換供應商"
+            )
         purchase_order.supplier_id = supplier.id
         purchase_order.supplier_name = supplier.name
 
@@ -471,7 +480,7 @@ class PurchasingService:
 
     async def input_invoices_in_period(
         self, store_id: int, date_from: datetime, date_to: datetime
-    ) -> list[tuple[GoodsReceipt, str]]:
+    ) -> list[InputInvoice]:
         """期間內的進項發票（申報月報；跨模組供 reports 用，§2 經 service）。"""
         return await self._repo.input_invoices_in_period(store_id, date_from, date_to)
 
@@ -528,43 +537,6 @@ class PurchasingService:
         self, store_id: int, purchase_order_id: int
     ) -> PurchaseOrder | None:
         return await self._repo.get_purchase_order(store_id, purchase_order_id)
-
-    @staticmethod
-    def _invoice_fields(invoice: "InputInvoiceIn") -> dict[str, object]:
-        """Copy the three authoritative amounts printed on the supplier's invoice."""
-        return {
-            "invoice_number": invoice.invoice_number,
-            "invoice_date": invoice.invoice_date,
-            "invoice_total": Decimal(invoice.invoice_total),
-            "invoice_net": Decimal(invoice.invoice_net),
-            "invoice_tax": Decimal(invoice.invoice_tax),
-        }
-
-    async def register_input_invoice(
-        self,
-        store_id: int,
-        purchase_order_id: int,
-        receipt_id: int,
-        *,
-        invoice: "InputInvoiceIn",
-    ) -> GoodsReceipt:
-        """補登某收貨批次的進項發票（漏登可事後補登；已登錄不可覆寫——打錯屬更正流程，另議）。"""
-        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
-        if purchase_order is None:
-            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
-        receipt = next((r for r in purchase_order.receipts if r.id == receipt_id), None)
-        if receipt is None:
-            raise PurchaseOrderNotReceived(
-                f"採購單 {purchase_order_id} 無收貨批次 {receipt_id}，無法登錄進項發票"
-            )
-        if receipt.invoice_number is not None:
-            raise InputInvoiceAlreadySet(
-                f"收貨批次 {receipt_id} 已登錄發票 {receipt.invoice_number}，不可覆寫"
-            )
-        for key, value in self._invoice_fields(invoice).items():
-            setattr(receipt, key, value)
-        await self._session.flush()
-        return receipt
 
     async def receive_purchase_order(
         self,
@@ -629,9 +601,12 @@ class PurchasingService:
         if not to_receive:
             raise InvalidPurchaseOrder("收貨至少需一筆明細")
 
-        invoice_fields: dict[str, object] = {}
-        if invoice is not None:
-            invoice_fields = self._invoice_fields(invoice)
+        # 隨貨發票：同供應商已登過同一張（整月合併開）就掛上去，否則新建一張只掛這批。
+        existing_invoice = (
+            None
+            if invoice is None
+            else await self._matching_invoice(store_id, purchase_order.supplier_id, invoice)
+        )
         # 先建收貨批次取得 id，庫存異動以 ref_type="goods_receipt" 指向本批。
         # 冪等鍵/指紋落在同一交易：並行首寫互撞由 (store, key) 唯一索引擋下（router 回放）。
         receipt = await self._repo.add_receipt(
@@ -641,9 +616,19 @@ class PurchasingService:
                 received_by=actor_user_id,
                 idempotency_key=idempotency_key,
                 request_fingerprint=request_fingerprint,
-                **invoice_fields,
             )
         )
+        if invoice is not None:
+            target = existing_invoice or await self._repo.add_input_invoice(
+                InputInvoice(
+                    store_id=store_id,
+                    supplier_id=purchase_order.supplier_id,
+                    supplier_name=purchase_order.supplier_name,
+                    created_by=actor_user_id,
+                    **self._invoice_values(invoice),
+                )
+            )
+            receipt.input_invoice_id = target.id
         for po_line, qty in to_receive:
             await self._inventory.restock_catalog_items(
                 store_id,
@@ -677,6 +662,242 @@ class PurchasingService:
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
         return refreshed, receipt
+
+    # ── 進項發票（docs/70 §5）────────────────────────────────────────
+
+    @staticmethod
+    def _invoice_values(invoice: InputInvoiceIn) -> dict[str, Any]:
+        """照錄供應商原始發票上的號碼、日期與三個金額。"""
+        return {
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date,
+            "invoice_total": Decimal(invoice.invoice_total),
+            "invoice_net": Decimal(invoice.invoice_net),
+            "invoice_tax": Decimal(invoice.invoice_tax),
+        }
+
+    async def _matching_invoice(
+        self, store_id: int, supplier_id: int, invoice: InputInvoiceIn
+    ) -> InputInvoice | None:
+        """同號同日已登錄：同供應商、同金額＝同一張（回傳它）；否則是重複入帳 → 擋。"""
+        found = await self._repo.find_input_invoice(
+            store_id, invoice.invoice_number, invoice.invoice_date
+        )
+        if found is None:
+            return None
+        values = self._invoice_values(invoice)
+        same = found.supplier_id == supplier_id and all(
+            getattr(found, key) == values[key]
+            for key in ("invoice_total", "invoice_net", "invoice_tax")
+        )
+        if not same:
+            raise DuplicateInputInvoice(
+                f"發票 {invoice.invoice_number}（{invoice.invoice_date}）已登錄過"
+                f"（{found.supplier_name}，含稅 {found.invoice_total}），不可重複入帳；"
+                "金額填錯請到進項發票修改"
+            )
+        return found
+
+    async def _claim_receipts(
+        self,
+        store_id: int,
+        supplier_id: int,
+        receipt_ids: list[int],
+        *,
+        invoice_id: int | None,
+    ) -> list[GoodsReceipt]:
+        """驗證並鎖住要掛上的收貨：都存在、都是這家供應商、沒掛在別張發票上。"""
+        wanted = sorted(set(receipt_ids))
+        receipts = await self._repo.receipts_for_update(store_id, wanted)
+        if len(receipts) != len(wanted):
+            raise InputInvoiceInvalid("有收貨批次找不到，請重新整理後再選")
+        suppliers = await self._repo.suppliers_of_orders(
+            store_id, [r.purchase_order_id for r in receipts]
+        )
+        for receipt in receipts:
+            if suppliers[receipt.purchase_order_id] != supplier_id:
+                order = await self._repo.get_purchase_order(store_id, receipt.purchase_order_id)
+                name = order.supplier_name if order is not None else ""
+                raise InputInvoiceInvalid(
+                    f"採購單 #{receipt.purchase_order_id} 的收貨是「{name}」的，"
+                    "不能放進別家供應商的發票"
+                )
+            if receipt.input_invoice_id not in (None, invoice_id):
+                raise InputInvoiceAlreadySet(
+                    f"採購單 #{receipt.purchase_order_id} 這批收貨已經登在別張發票上"
+                )
+        return receipts
+
+    async def _invoice_supplier(self, store_id: int, supplier_id: int) -> Supplier:
+        supplier = await self._repo.get_supplier(store_id, supplier_id)
+        if supplier is None:
+            raise CrossStoreReference(f"供應商 {supplier_id} 不屬於 store {store_id}")
+        return supplier
+
+    async def create_input_invoice(
+        self, store_id: int, payload: InputInvoiceWrite, *, actor_user_id: int
+    ) -> InputInvoice:
+        """登錄一張進項發票並掛上它涵蓋的收貨（收貨後隔月才開也行）。"""
+        supplier = await self._invoice_supplier(store_id, payload.supplier_id)
+        receipts = await self._claim_receipts(
+            store_id, supplier.id, payload.receipt_ids, invoice_id=None
+        )
+        if await self._repo.find_input_invoice(
+            store_id, payload.invoice_number, payload.invoice_date
+        ):
+            raise DuplicateInputInvoice(
+                f"發票 {payload.invoice_number}（{payload.invoice_date}）已登錄過，不可重複入帳"
+            )
+        invoice = await self._repo.add_input_invoice(
+            InputInvoice(
+                store_id=store_id,
+                supplier_id=supplier.id,
+                supplier_name=supplier.name,
+                created_by=actor_user_id,
+                **self._invoice_values(payload),
+            )
+        )
+        for receipt in receipts:
+            receipt.input_invoice_id = invoice.id
+        await self._session.flush()
+        return await self._reloaded_invoice(store_id, invoice.id)
+
+    async def update_input_invoice(
+        self,
+        store_id: int,
+        invoice_id: int,
+        payload: InputInvoiceWrite,
+        *,
+        actor_user_id: int,
+        actor_is_manager: bool,
+    ) -> InputInvoice:
+        """更正一張進項發票（號碼、日期、金額、涵蓋的收貨）；限管理者，前後值寫稽核。"""
+        if not actor_is_manager:
+            raise PurchasingManagerOnly("進項發票登錄後只有管理者能修改")
+        invoice = await self._locked_invoice(store_id, invoice_id)
+        before = self._invoice_snapshot(invoice)
+        supplier = await self._invoice_supplier(store_id, payload.supplier_id)
+        receipts = await self._claim_receipts(
+            store_id, supplier.id, payload.receipt_ids, invoice_id=invoice.id
+        )
+        same_key = await self._repo.find_input_invoice(
+            store_id, payload.invoice_number, payload.invoice_date
+        )
+        if same_key is not None and same_key.id != invoice.id:
+            raise DuplicateInputInvoice(
+                f"發票 {payload.invoice_number}（{payload.invoice_date}）已登錄過，不可重複入帳"
+            )
+        keep = {receipt.id for receipt in receipts}
+        for receipt in list(invoice.receipts):
+            if receipt.id not in keep:
+                receipt.input_invoice_id = None
+        for receipt in receipts:
+            receipt.input_invoice_id = invoice.id
+        if supplier.id != invoice.supplier_id:
+            invoice.supplier_id = supplier.id
+            invoice.supplier_name = supplier.name
+        for key, value in self._invoice_values(payload).items():
+            setattr(invoice, key, value)
+        await self._session.flush()
+        updated = await self._reloaded_invoice(store_id, invoice.id)
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_INPUT_INVOICE",
+            entity_type="purchase_input_invoice",
+            entity_id=str(invoice.id),
+            before=before,
+            after=self._invoice_snapshot(updated),
+        )
+        return updated
+
+    async def delete_input_invoice(
+        self, store_id: int, invoice_id: int, *, actor_user_id: int, actor_is_manager: bool
+    ) -> None:
+        """刪掉登錯的發票；它涵蓋的收貨回到「還沒開發票」。限管理者，寫稽核。"""
+        if not actor_is_manager:
+            raise PurchasingManagerOnly("進項發票登錄後只有管理者能刪除")
+        invoice = await self._locked_invoice(store_id, invoice_id)
+        before = self._invoice_snapshot(invoice)
+        for receipt in list(invoice.receipts):
+            receipt.input_invoice_id = None
+        await self._session.flush()
+        await self._session.delete(invoice)
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="DELETE_INPUT_INVOICE",
+            entity_type="purchase_input_invoice",
+            entity_id=str(invoice_id),
+            before=before,
+            after=None,
+        )
+
+    async def _locked_invoice(self, store_id: int, invoice_id: int) -> InputInvoice:
+        invoice = await self._repo.get_input_invoice(store_id, invoice_id, for_update=True)
+        if invoice is None:
+            raise InputInvoiceNotFound(f"找不到進項發票 {invoice_id}")
+        await self._session.refresh(invoice, ["receipts"])
+        return invoice
+
+    async def _reloaded_invoice(self, store_id: int, invoice_id: int) -> InputInvoice:
+        invoice = await self._repo.get_input_invoice(store_id, invoice_id)
+        assert invoice is not None
+        await self._session.refresh(invoice, ["receipts"])
+        return invoice
+
+    @staticmethod
+    def _invoice_snapshot(invoice: InputInvoice) -> dict[str, Any]:
+        return {
+            "supplier_id": invoice.supplier_id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date.isoformat(),
+            "invoice_net": str(invoice.invoice_net),
+            "invoice_tax": str(invoice.invoice_tax),
+            "invoice_total": str(invoice.invoice_total),
+            "receipt_ids": sorted(receipt.id for receipt in invoice.receipts),
+        }
+
+    async def get_input_invoice(self, store_id: int, invoice_id: int) -> InputInvoice | None:
+        return await self._repo.get_input_invoice(store_id, invoice_id)
+
+    async def list_input_invoices(
+        self, store_id: int, *, supplier_id: int | None = None, limit: int = 50, offset: int = 0
+    ) -> list[InputInvoice]:
+        return await self._repo.list_input_invoices(
+            store_id, supplier_id=supplier_id, limit=limit, offset=offset
+        )
+
+    async def count_input_invoices(self, store_id: int, *, supplier_id: int | None = None) -> int:
+        return await self._repo.count_input_invoices(store_id, supplier_id=supplier_id)
+
+    async def uninvoiced_receipts(self, store_id: int, supplier_id: int) -> list[GoodsReceipt]:
+        """某供應商還沒開發票的收貨批次（登錄發票時勾選用）。"""
+        return await self._repo.uninvoiced_receipts(store_id, supplier_id)
+
+    async def receipt_amounts(
+        self, store_id: int, receipts: list[GoodsReceipt]
+    ) -> dict[int, Decimal]:
+        """{收貨批次: 金額}＝這批各商品入庫數量 × 該採購單的進價（進項發票對帳提示用）。"""
+        quantities = await self._inventory.purchase_in_by_receipt(
+            store_id, [receipt.id for receipt in receipts]
+        )
+        costs = await self._repo.unit_costs_of_orders(
+            store_id, sorted({receipt.purchase_order_id for receipt in receipts})
+        )
+        return {
+            receipt.id: sum(
+                (
+                    Decimal(qty) * costs.get((receipt.purchase_order_id, product), Decimal(0))
+                    for product, qty in quantities.get(receipt.id, {}).items()
+                ),
+                Decimal(0),
+            )
+            for receipt in receipts
+        }
 
     @staticmethod
     def _receive_fingerprint(

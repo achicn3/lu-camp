@@ -113,35 +113,57 @@ class PurchaseOrderLine(Base):
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="lines")
 
 
-class GoodsReceipt(Base):
-    """採購收貨紀錄（一次收貨事件）。分批收貨下一張 PO 可有多筆 receipt，各自選填進項發票。"""
+class InputInvoice(Base, TimestampMixin):
+    """進項發票（供應商開給店家的發票；docs/70 §5、ADR-030）。
 
-    __tablename__ = "goods_receipts"
+    獨立於收貨：一張發票可涵蓋多批收貨（跨採購單、須同一供應商），收貨後隔月才開也能事後登錄。
+    三個金額照錄原始發票，DB CHECK 守恆（未稅＋稅額＝含稅）。同店同號同日的實體發票只能入帳一次。
+    """
+
+    __tablename__ = "purchase_input_invoices"
     __table_args__ = (
-        # 進項發票一致性：全空（未登錄）或全備；金額守恆 net + tax = total。
         CheckConstraint(
-            "(invoice_number IS NULL AND invoice_date IS NULL AND invoice_total IS NULL"
-            " AND invoice_net IS NULL AND invoice_tax IS NULL)"
-            " OR (invoice_number IS NOT NULL AND invoice_date IS NOT NULL"
-            " AND invoice_total IS NOT NULL AND invoice_net IS NOT NULL"
-            " AND invoice_tax IS NOT NULL AND invoice_net + invoice_tax = invoice_total)",
-            name="ck_goods_receipts_invoice_consistent",
+            "invoice_net >= 0 AND invoice_tax >= 0 AND invoice_total > 0"
+            " AND invoice_net + invoice_tax = invoice_total",
+            name="ck_purchase_input_invoices_amounts",
         ),
         # 號碼格式：2 英文大寫＋8 數字（台灣統一發票字軌）。
         CheckConstraint(
-            "invoice_number IS NULL OR invoice_number ~ '^[A-Z]{2}[0-9]{8}$'",
-            name="ck_goods_receipts_invoice_number_format",
+            "invoice_number ~ '^[A-Z]{2}[0-9]{8}$'",
+            name="ck_purchase_input_invoices_number_format",
         ),
-        # 同店同號同日的實體發票只能入帳一次（Codex 第一輪 high：重複登錄會虛增進貨/進項稅且
-        # 不可覆寫難以回復）；字軌跨期回收屬不同日期、不受此限。
-        Index(
-            "uq_goods_receipts_store_invoice",
+        # 重複登錄會虛增進貨／進項稅；字軌跨期回收屬不同日期、不受此限。
+        UniqueConstraint(
             "store_id",
             "invoice_number",
             "invoice_date",
-            unique=True,
-            postgresql_where=text("invoice_number IS NOT NULL"),
+            name="uq_purchase_input_invoices_store_number_date",
         ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
+    # 登錄當下的供應商名快照（申報月報顯示用；供應商改名不改寫歷史）。
+    supplier_name: Mapped[str] = mapped_column(String(150))
+    invoice_number: Mapped[str] = mapped_column(String(10))
+    invoice_date: Mapped[date] = mapped_column(Date)
+    invoice_total: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    invoice_net: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    invoice_tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    receipts: Mapped[list["GoodsReceipt"]] = relationship(
+        back_populates="input_invoice", lazy="selectin", order_by="GoodsReceipt.id"
+    )
+
+
+class GoodsReceipt(Base):
+    """採購收貨紀錄（一次收貨事件）。分批收貨下一張 PO 可有多筆 receipt；
+    每批最多掛一張進項發票（`input_invoice_id`），一張發票可掛多批。"""
+
+    __tablename__ = "goods_receipts"
+    __table_args__ = (
         # 分批收貨冪等：同店同 Idempotency-Key 只成立一筆收貨（防網路重試重複入庫）。
         Index(
             "uq_goods_receipts_store_idempotency",
@@ -160,14 +182,12 @@ class GoodsReceipt(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    # 進項發票（裁示 2026-07-11）：供應商開立的發票於**收貨時**選填登錄（漏登可事後補登一次）。
-    # 號碼＝2 英文＋8 數字；三個整數金額照錄原始發票，DB CHECK 守恆與一致性
-    # （要嘛全空、要嘛號碼/日期/三金額齊備且 net+tax=total）。
-    invoice_number: Mapped[str | None] = mapped_column(String(10))
-    invoice_date: Mapped[date | None] = mapped_column(Date)
-    invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
-    invoice_net: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
-    invoice_tax: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    input_invoice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("purchase_input_invoices.id"), index=True
+    )
+    input_invoice: Mapped[InputInvoice | None] = relationship(
+        back_populates="receipts", lazy="selectin"
+    )
     # 分批收貨冪等鍵＋請求指紋（同 key 重送回原結果、不同 payload → 409）。
     idempotency_key: Mapped[str | None] = mapped_column(String(80))
     request_fingerprint: Mapped[str | None] = mapped_column(String(64))

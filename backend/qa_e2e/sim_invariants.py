@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +42,7 @@ from qa_e2e.longrun_invariants import (
     check,
 )
 
+_INVOICE_NUMBER = re.compile(r"^[A-Z]{2}[0-9]{8}$")
 _MANIFEST = Path(
     os.environ.get("SIM_MANIFEST_PATH", str(Path(__file__).with_name("sim_manifest.json")))
 )
@@ -307,38 +309,40 @@ async def s2_acquisition_binding(session: AsyncSession) -> None:
 
 
 async def s3_input_invoice(session: AsyncSession) -> None:
-    """S3：進項發票——全空或全備；net+tax=total；同店同號同日唯一；格式 2英8數。"""
+    """S3：進項發票（docs/70 §5）——net+tax=total；同店同號同日唯一；格式 2英8數；
+    涵蓋的收貨都是發票那家供應商的。"""
     rows = (
         await session.execute(
             text(
-                """
-        SELECT id,
-          (invoice_number IS NULL) AS n0, (invoice_date IS NULL) AS d0,
-          (invoice_total IS NULL) AS t0,
-          invoice_number, invoice_total, invoice_net, invoice_tax
-        FROM goods_receipts
-        """
+                "SELECT id, invoice_number, invoice_total, invoice_net, invoice_tax"
+                " FROM purchase_input_invoices"
             )
         )
     ).all()
-    partial = [r[0] for r in rows if len({r[1], r[2], r[3]}) != 1]
-    check("S3 進項發票全空或全備", len(partial) == 0, f"半套 receipt={partial[:5]}")
-    with_inv = [r for r in rows if not r[1]]
-    bad_sum = [r[0] for r in with_inv if (r[6] or 0) + (r[7] or 0) != (r[5] or 0)]
-    check("S3 net+tax=total", len(bad_sum) == 0, f"不守恆 {bad_sum[:5]}（發票共{len(with_inv)}張）")
-    import re
-
-    bad_fmt = [r[0] for r in with_inv if not re.match(r"^[A-Z]{2}[0-9]{8}$", r[4] or "")]
+    bad_sum = [r[0] for r in rows if r[3] + r[4] != r[2]]
+    check("S3 net+tax=total", len(bad_sum) == 0, f"不守恆 {bad_sum[:5]}（發票共{len(rows)}張）")
+    bad_fmt = [r[0] for r in rows if not _INVOICE_NUMBER.match(r[1])]
     check("S3 號碼格式 2英8數", len(bad_fmt) == 0, f"格式錯 {bad_fmt[:5]}")
     dup = (
         await session.execute(
             text(
-                "SELECT invoice_number FROM goods_receipts WHERE invoice_number IS NOT NULL "
+                "SELECT invoice_number FROM purchase_input_invoices "
                 "GROUP BY store_id, invoice_number, invoice_date HAVING COUNT(*) > 1"
             )
         )
     ).all()
     check("S3 同店同號同日唯一", len(dup) == 0, f"重複 {[r[0] for r in dup][:5]}")
+    foreign = (
+        await session.execute(
+            text(
+                "SELECT gr.id FROM goods_receipts gr"
+                " JOIN purchase_input_invoices inv ON inv.id = gr.input_invoice_id"
+                " JOIN purchase_orders po ON po.id = gr.purchase_order_id"
+                " WHERE po.supplier_id <> inv.supplier_id"
+            )
+        )
+    ).all()
+    check("S3 收貨與發票同供應商", len(foreign) == 0, f"不符 receipt={[r[0] for r in foreign][:5]}")
 
 
 async def s4_member_points(session: AsyncSession) -> None:

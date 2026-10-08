@@ -1,5 +1,7 @@
 """purchasing 路由：供應商、採購單與補貨收貨。"""
 
+from collections.abc import Awaitable
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -8,12 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
+from app.modules.purchasing.models import InputInvoice
 from app.modules.purchasing.schemas import (
-    InputInvoiceIn,
-    InputInvoiceRead,
+    InputInvoiceDetailRead,
+    InputInvoiceWrite,
     PurchaseOrderCreate,
     PurchaseOrderRead,
     PurchaseOrderUpdate,
+    ReceiptAmountRead,
     ReceivePurchaseOrderRequest,
     ReceivePurchaseOrderResult,
     SupplierCreate,
@@ -25,17 +29,19 @@ from app.shared.enums import PurchaseOrderStatus, UserRole
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
+    DuplicateInputInvoice,
     IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
+    InputInvoiceInvalid,
+    InputInvoiceNotFound,
     InsufficientStock,
     InvalidPurchaseOrder,
-    PurchaseOrderEditForbidden,
     PurchaseOrderNotCancellable,
     PurchaseOrderNotEditable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
-    PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    PurchasingManagerOnly,
     SupplierInactive,
     SupplierNotFound,
 )
@@ -57,17 +63,23 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     PurchaseOrderNotSubmittable: status.HTTP_409_CONFLICT,
     PurchaseOrderNotCancellable: status.HTTP_409_CONFLICT,
     InputInvoiceAlreadySet: status.HTTP_409_CONFLICT,
-    PurchaseOrderNotReceived: status.HTTP_409_CONFLICT,
+    InputInvoiceInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    InputInvoiceNotFound: status.HTTP_404_NOT_FOUND,
+    DuplicateInputInvoice: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     PurchaseOrderNotEditable: status.HTTP_409_CONFLICT,
     InsufficientStock: status.HTTP_409_CONFLICT,
-    PurchaseOrderEditForbidden: status.HTTP_403_FORBIDDEN,
+    PurchasingManagerOnly: status.HTTP_403_FORBIDDEN,
 }
 
 _ERROR_CODE_BY_EXC: dict[type[DomainError], str] = {
     IdempotencyKeyConflict: "IDEMPOTENCY_KEY_CONFLICT",
     PurchaseOrderNotReceivable: "PURCHASE_ORDER_NOT_RECEIVABLE",
+    DuplicateInputInvoice: "DUPLICATE_INPUT_INVOICE",
 }
+
+# 同店同號同日的進項發票只能一張（併發登錄撞到時轉 409）。
+_INPUT_INVOICE_UNIQUE = "uq_purchase_input_invoices_store_number_date"
 
 
 def _map_domain_error(exc: DomainError) -> HTTPException:
@@ -407,12 +419,8 @@ async def receive_purchase_order(
                 receipt_id=receipt.id,
                 purchase_order=PurchaseOrderRead.from_model(purchase_order),
             )
-        if "uq_goods_receipts_store_invoice" in str(exc.orig):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
-                headers={ERROR_CODE_HEADER: "DUPLICATE_INPUT_INVOICE"},
-            ) from exc
+        if _INPUT_INVOICE_UNIQUE in str(exc.orig):
+            raise _duplicate_invoice() from exc
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="收貨失敗",
@@ -425,32 +433,196 @@ async def receive_purchase_order(
     )
 
 
-@router.post(
-    "/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice",
-    response_model=InputInvoiceRead,
-    operation_id="registerInputInvoice",
-)
-async def register_input_invoice(
-    purchase_order_id: int,
-    receipt_id: int,
-    payload: InputInvoiceIn,
-    session: SessionDep,
-    user: CurrentUserDep,
-) -> InputInvoiceRead:
-    """補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。"""
-    svc = PurchasingService(session)
-    try:
-        receipt = await svc.register_input_invoice(
-            user.store_id, purchase_order_id, receipt_id, invoice=payload
+# ── 進項發票（docs/70 §5）──────────────────────────────────────────
+
+
+def _duplicate_invoice() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="這張發票（同號同日）已登錄過，不可重複入帳",
+        headers={ERROR_CODE_HEADER: "DUPLICATE_INPUT_INVOICE"},
+    )
+
+
+async def _invoice_detail(
+    svc: PurchasingService, store_id: int, invoice: InputInvoice
+) -> InputInvoiceDetailRead:
+    amounts = await svc.receipt_amounts(store_id, invoice.receipts)
+    receipts = [
+        ReceiptAmountRead(
+            receipt_id=receipt.id,
+            purchase_order_id=receipt.purchase_order_id,
+            received_at=receipt.received_at,
+            amount=amounts[receipt.id],
         )
+        for receipt in invoice.receipts
+    ]
+    return InputInvoiceDetailRead(
+        id=invoice.id,
+        supplier_id=invoice.supplier_id,
+        supplier_name=invoice.supplier_name,
+        invoice_number=invoice.invoice_number,
+        invoice_date=invoice.invoice_date,
+        invoice_total=invoice.invoice_total,
+        invoice_net=invoice.invoice_net,
+        invoice_tax=invoice.invoice_tax,
+        created_at=invoice.created_at,
+        receipts=receipts,
+        receipts_total=sum((r.amount for r in receipts), Decimal(0)),
+    )
+
+
+async def _commit_invoice(
+    session: AsyncSession, svc: PurchasingService, store_id: int, writing: Awaitable[InputInvoice]
+) -> InputInvoiceDetailRead:
+    """建立／修改發票共用：領域錯誤照表轉、同號同日併發撞唯一鍵轉 409。"""
+    try:
+        invoice = await writing
+        detail = await _invoice_detail(svc, store_id, invoice)
     except DomainError as exc:
         await session.rollback()
         raise _map_domain_error(exc) from exc
     except IntegrityError as exc:
         await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
-        ) from exc
+        if _INPUT_INVOICE_UNIQUE in str(exc.orig):
+            raise _duplicate_invoice() from exc
+        raise
     await session.commit()
-    return InputInvoiceRead.model_validate(receipt)
+    return detail
+
+
+@router.get(
+    "/purchase-input-invoices",
+    response_model=list[InputInvoiceDetailRead],
+    operation_id="listInputInvoices",
+)
+async def list_input_invoices(
+    session: SessionDep,
+    user: CurrentUserDep,
+    supplier_id: Annotated[int | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[InputInvoiceDetailRead]:
+    """進項發票清單（發票日期新到舊），可依供應商篩選。"""
+    svc = PurchasingService(session)
+    invoices = await svc.list_input_invoices(
+        user.store_id, supplier_id=supplier_id, limit=limit, offset=offset
+    )
+    return [await _invoice_detail(svc, user.store_id, invoice) for invoice in invoices]
+
+
+@router.get(
+    "/purchase-input-invoices/count",
+    response_model=ListCountRead,
+    operation_id="countInputInvoices",
+)
+async def count_input_invoices(
+    session: SessionDep,
+    user: CurrentUserDep,
+    supplier_id: Annotated[int | None, Query()] = None,
+) -> ListCountRead:
+    total = await PurchasingService(session).count_input_invoices(
+        user.store_id, supplier_id=supplier_id
+    )
+    return ListCountRead(count=total)
+
+
+@router.get(
+    "/purchase-input-invoices/{invoice_id}",
+    response_model=InputInvoiceDetailRead,
+    operation_id="getInputInvoice",
+)
+async def get_input_invoice(
+    invoice_id: int, session: SessionDep, user: CurrentUserDep
+) -> InputInvoiceDetailRead:
+    svc = PurchasingService(session)
+    invoice = await svc.get_input_invoice(user.store_id, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到進項發票")
+    return await _invoice_detail(svc, user.store_id, invoice)
+
+
+@router.post(
+    "/purchase-input-invoices",
+    response_model=InputInvoiceDetailRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createInputInvoice",
+)
+async def create_input_invoice(
+    payload: InputInvoiceWrite, session: SessionDep, user: CurrentUserDep
+) -> InputInvoiceDetailRead:
+    """登錄進項發票並掛上它涵蓋的收貨（可多批、跨採購單，須同一供應商）。"""
+    svc = PurchasingService(session)
+    return await _commit_invoice(
+        session,
+        svc,
+        user.store_id,
+        svc.create_input_invoice(user.store_id, payload, actor_user_id=user.id),
+    )
+
+
+@router.put(
+    "/purchase-input-invoices/{invoice_id}",
+    response_model=InputInvoiceDetailRead,
+    operation_id="updateInputInvoice",
+)
+async def update_input_invoice(
+    invoice_id: int, payload: InputInvoiceWrite, session: SessionDep, user: CurrentUserDep
+) -> InputInvoiceDetailRead:
+    """更正進項發票（號碼、日期、金額、涵蓋的收貨）；限管理者。"""
+    svc = PurchasingService(session)
+    return await _commit_invoice(
+        session,
+        svc,
+        user.store_id,
+        svc.update_input_invoice(
+            user.store_id,
+            invoice_id,
+            payload,
+            actor_user_id=user.id,
+            actor_is_manager=user.role == UserRole.MANAGER,
+        ),
+    )
+
+
+@router.delete(
+    "/purchase-input-invoices/{invoice_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteInputInvoice",
+)
+async def delete_input_invoice(invoice_id: int, session: SessionDep, user: CurrentUserDep) -> None:
+    """刪掉登錯的發票（涵蓋的收貨回到還沒開發票）；限管理者。"""
+    try:
+        await PurchasingService(session).delete_input_invoice(
+            user.store_id,
+            invoice_id,
+            actor_user_id=user.id,
+            actor_is_manager=user.role == UserRole.MANAGER,
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+
+
+@router.get(
+    "/suppliers/{supplier_id}/uninvoiced-receipts",
+    response_model=list[ReceiptAmountRead],
+    operation_id="listUninvoicedReceipts",
+)
+async def list_uninvoiced_receipts(
+    supplier_id: int, session: SessionDep, user: CurrentUserDep
+) -> list[ReceiptAmountRead]:
+    """某供應商還沒開發票的收貨批次與金額（登錄發票時勾選）。"""
+    svc = PurchasingService(session)
+    receipts = await svc.uninvoiced_receipts(user.store_id, supplier_id)
+    amounts = await svc.receipt_amounts(user.store_id, receipts)
+    return [
+        ReceiptAmountRead(
+            receipt_id=receipt.id,
+            purchase_order_id=receipt.purchase_order_id,
+            received_at=receipt.received_at,
+            amount=amounts[receipt.id],
+        )
+        for receipt in receipts
+    ]

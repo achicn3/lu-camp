@@ -1,6 +1,6 @@
 """purchasing 資料存取層。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.time import store_date, store_period_end_day
 from app.modules.purchasing.models import (
     GoodsReceipt,
+    InputInvoice,
     PurchaseOrder,
     PurchaseOrderLine,
     Supplier,
@@ -181,25 +182,125 @@ class PurchasingRepository:
 
     async def input_invoices_in_period(
         self, store_id: int, date_from: datetime, date_to: datetime
-    ) -> list[tuple[GoodsReceipt, str]]:
-        """期間內已登記進項發票的收貨批次＋供應商名（申報月報）。
+    ) -> list[InputInvoice]:
+        """期間內的進項發票（申報月報；涵蓋的收貨隨 selectin 載入）。
 
         以**發票日期**歸期（與銷項同口徑）；收貨與發票日期常不同月，用收貨日會錯月。
         界線換算成台灣日曆日（同 einvoice：對 UTC 取 date() 會整條往前挪一天）。
         """
         stmt = (
-            select(GoodsReceipt, PurchaseOrder.supplier_name)
+            select(InputInvoice)
+            .where(
+                InputInvoice.store_id == store_id,
+                InputInvoice.invoice_date >= store_date(date_from),
+                InputInvoice.invoice_date <= store_period_end_day(date_to),
+            )
+            .order_by(InputInvoice.invoice_date, InputInvoice.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def add_input_invoice(self, invoice: InputInvoice) -> InputInvoice:
+        self._session.add(invoice)
+        await self._session.flush()
+        return invoice
+
+    async def get_input_invoice(
+        self, store_id: int, invoice_id: int, *, for_update: bool = False
+    ) -> InputInvoice | None:
+        stmt = select(InputInvoice).where(
+            InputInvoice.id == invoice_id, InputInvoice.store_id == store_id
+        )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result: InputInvoice | None = await self._session.scalar(stmt)
+        return result
+
+    async def find_input_invoice(
+        self, store_id: int, invoice_number: str, invoice_date: date
+    ) -> InputInvoice | None:
+        stmt = select(InputInvoice).where(
+            InputInvoice.store_id == store_id,
+            InputInvoice.invoice_number == invoice_number,
+            InputInvoice.invoice_date == invoice_date,
+        )
+        result: InputInvoice | None = await self._session.scalar(stmt)
+        return result
+
+    @staticmethod
+    def _input_invoices_where(stmt: Any, store_id: int, supplier_id: int | None) -> Any:
+        """清單與總筆數共用同一組篩選。"""
+        stmt = stmt.where(InputInvoice.store_id == store_id)
+        if supplier_id is not None:
+            stmt = stmt.where(InputInvoice.supplier_id == supplier_id)
+        return stmt
+
+    async def list_input_invoices(
+        self, store_id: int, *, supplier_id: int | None, limit: int, offset: int
+    ) -> list[InputInvoice]:
+        stmt = (
+            self._input_invoices_where(select(InputInvoice), store_id, supplier_id)
+            .order_by(InputInvoice.invoice_date.desc(), InputInvoice.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def count_input_invoices(self, store_id: int, *, supplier_id: int | None) -> int:
+        stmt = self._input_invoices_where(
+            select(func.count()).select_from(InputInvoice), store_id, supplier_id
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def receipts_for_update(
+        self, store_id: int, receipt_ids: list[int]
+    ) -> list[GoodsReceipt]:
+        """要掛到發票上的收貨批次（鎖列：兩張發票同時搶同一批時序列化）。"""
+        stmt = (
+            select(GoodsReceipt)
+            .where(GoodsReceipt.store_id == store_id, GoodsReceipt.id.in_(receipt_ids))
+            .with_for_update(of=GoodsReceipt)
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def uninvoiced_receipts(self, store_id: int, supplier_id: int) -> list[GoodsReceipt]:
+        stmt = (
+            select(GoodsReceipt)
             .join(PurchaseOrder, PurchaseOrder.id == GoodsReceipt.purchase_order_id)
             .where(
                 GoodsReceipt.store_id == store_id,
-                GoodsReceipt.invoice_number.is_not(None),
-                GoodsReceipt.invoice_date >= store_date(date_from),
-                GoodsReceipt.invoice_date <= store_period_end_day(date_to),
+                GoodsReceipt.input_invoice_id.is_(None),
+                PurchaseOrder.supplier_id == supplier_id,
             )
-            .order_by(GoodsReceipt.invoice_date, GoodsReceipt.id)
+            .order_by(GoodsReceipt.received_at, GoodsReceipt.id)
         )
-        rows = await self._session.execute(stmt)
-        return [(receipt, supplier_name) for receipt, supplier_name in rows.all()]
+        return list((await self._session.scalars(stmt)).all())
+
+    async def suppliers_of_orders(self, store_id: int, po_ids: list[int]) -> dict[int, int]:
+        """{採購單: 供應商}。"""
+        if not po_ids:
+            return {}
+        stmt = select(PurchaseOrder.id, PurchaseOrder.supplier_id).where(
+            PurchaseOrder.store_id == store_id, PurchaseOrder.id.in_(po_ids)
+        )
+        return {int(r[0]): int(r[1]) for r in (await self._session.execute(stmt)).all()}
+
+    async def unit_costs_of_orders(
+        self, store_id: int, po_ids: list[int]
+    ) -> dict[tuple[int, int], Decimal]:
+        """{(採購單, 商品): 進價}。"""
+        if not po_ids:
+            return {}
+        stmt = select(
+            PurchaseOrderLine.purchase_order_id,
+            PurchaseOrderLine.catalog_product_id,
+            PurchaseOrderLine.unit_cost,
+        ).where(
+            PurchaseOrderLine.store_id == store_id,
+            PurchaseOrderLine.purchase_order_id.in_(po_ids),
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {(int(r[0]), int(r[1])): r[2] for r in rows}
 
     async def count_purchase_orders(
         self,

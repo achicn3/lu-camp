@@ -233,15 +233,19 @@ class PurchaseOrderNotReceivable(DomainError):
 
 
 class InputInvoiceInvalid(DomainError):
-    """進項發票資料不合法（號碼格式/金額）。"""
+    """進項發票涵蓋的收貨不合法（不存在、不是這家供應商的）。"""
 
 
 class InputInvoiceAlreadySet(DomainError):
-    """該收貨單已登錄進項發票，不可重複登錄/覆寫。"""
+    """這批收貨已經掛在別張進項發票上（一批最多一張）。"""
 
 
-class PurchaseOrderNotReceived(DomainError):
-    """採購單尚未收貨，無法補登進項發票。"""
+class InputInvoiceNotFound(DomainError):
+    """指定的進項發票不存在（或不屬於本店）。"""
+
+
+class DuplicateInputInvoice(DomainError):
+    """同店同號同日的進項發票已登錄過（而且不是同一家、同金額的那張）。"""
 
 
 class InvalidPurchaseOrder(DomainError):
@@ -260,8 +264,8 @@ class PurchaseOrderNotEditable(DomainError):
     """採購單目前不可修改（已取消）。"""
 
 
-class PurchaseOrderEditForbidden(DomainError):
-    """已下單／已收貨的採購單只有管理者能改（docs/70 §2）。"""
+class PurchasingManagerOnly(DomainError):
+    """只有管理者能做：改已下單／已收貨的採購單、改或刪進項發票（docs/70 §2）。"""
 
 
 class DuplicateSupplier(DomainError):

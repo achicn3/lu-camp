@@ -137,6 +137,7 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("寄售-結算數", "SELECT count(*) FROM consignment_settlements"),
     ("採購-單數", "SELECT count(*) FROM purchase_orders"),
     ("採購-收貨數", "SELECT count(*) FROM goods_receipts"),
+    ("採購-進項發票數", "SELECT count(*) FROM purchase_input_invoices"),
     ("採購-明細筆數", "SELECT count(*) FROM purchase_order_lines"),
     ("採購-供應商數", "SELECT count(*) FROM suppliers"),
     ("活動-檔數", "SELECT count(*) FROM campaigns"),

@@ -63,6 +63,7 @@ from app.modules.customerdisplay.service import CustomerDisplayService, DevicePr
 from app.modules.menu.service import MenuService
 from app.modules.purchasing.schemas import (
     InputInvoiceIn,
+    InputInvoiceWrite,
     PurchaseOrderCreate,
     PurchaseOrderLineCreate,
     ReceiveLineIn,
@@ -1050,19 +1051,20 @@ async def _po_step(sim: Sim, day_date: date) -> None:
             if invoice is not None:
                 sim.stats["input_invoices"] += 1
             elif total > 0 and _RNG.random() < 0.5:
-                # 漏登 → 事後補登一次
+                # 漏登 → 事後在進項發票登錄（docs/70 §5）
                 invoice_net, invoice_tax = split_tax_inclusive(Decimal(total), Decimal("0.05"))
-                await purch.register_input_invoice(
+                await purch.create_input_invoice(
                     sim.store_id,
-                    po_id,
-                    receipt.id,
-                    invoice=InputInvoiceIn(
+                    InputInvoiceWrite(
+                        supplier_id=po.supplier_id,
+                        receipt_ids=[receipt.id],
                         invoice_number=sim.next_invoice_number(),
                         invoice_date=day_date,
                         invoice_net=Decimal(invoice_net),
                         invoice_tax=Decimal(invoice_tax),
                         invoice_total=Decimal(total),
                     ),
+                    actor_user_id=sim.clerk_id,
                 )
                 await sim.s.commit()
                 sim.stats["input_invoices"] += 1

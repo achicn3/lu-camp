@@ -18,7 +18,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
-from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, Supplier
+from app.modules.purchasing.models import GoodsReceipt, InputInvoice, PurchaseOrder, Supplier
 from app.modules.returns.models import CustomerReturn, ReturnLine
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
@@ -206,16 +206,25 @@ async def test_invoice_register_lists_the_period_by_category(
     )
     db_session.add(po)
     await db_session.flush()
+    invoice = InputInvoice(
+        store_id=store_id,
+        supplier_id=supplier.id,
+        supplier_name=supplier.name,
+        invoice_number="BB20000001",
+        invoice_date=date(2026, 9, 9),
+        invoice_net=Decimal(1000),
+        invoice_tax=Decimal(50),
+        invoice_total=Decimal(1050),
+        created_by=clerk_id,
+    )
+    db_session.add(invoice)
+    await db_session.flush()
     db_session.add(
         GoodsReceipt(
             store_id=store_id,
             purchase_order_id=po.id,
             received_by=clerk_id,
-            invoice_number="BB20000001",
-            invoice_date=date(2026, 9, 9),
-            invoice_net=Decimal(1000),
-            invoice_tax=Decimal(50),
-            invoice_total=Decimal(1050),
+            input_invoice_id=invoice.id,
             received_at=inside,
         )
     )
@@ -737,16 +746,25 @@ async def _input_invoice(
     session.add(po)
     await session.flush()
     net = Decimal(int(Decimal(total) / Decimal("1.05")))
+    invoice = InputInvoice(
+        store_id=store_id,
+        supplier_id=supplier.id,
+        supplier_name=supplier.name,
+        invoice_number=number,
+        invoice_date=when,
+        invoice_net=net,
+        invoice_tax=Decimal(total) - net,
+        invoice_total=Decimal(total),
+        created_by=clerk_id,
+    )
+    session.add(invoice)
+    await session.flush()
     session.add(
         GoodsReceipt(
             store_id=store_id,
             purchase_order_id=po.id,
             received_by=clerk_id,
-            invoice_number=number,
-            invoice_date=when,
-            invoice_net=net,
-            invoice_tax=Decimal(total) - net,
-            invoice_total=Decimal(total),
+            input_invoice_id=invoice.id,
         )
     )
     await session.flush()
