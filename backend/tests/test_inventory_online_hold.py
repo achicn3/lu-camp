@@ -10,7 +10,11 @@ from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.inventory.service import InventoryService
 from app.modules.store.models import Store
 from app.shared.enums import StockDirection, StockReason
-from app.shared.exceptions import CrossStoreReference, InsufficientStock
+from app.shared.exceptions import (
+    CrossStoreReference,
+    InsufficientStock,
+    OwnershipValidationError,
+)
 
 
 async def _product(session: AsyncSession, *, qty: int = 3, active: bool = True) -> CatalogProduct:
@@ -74,4 +78,38 @@ async def test_hold_refuses_inactive_or_other_store(db_session: AsyncSession) ->
     with pytest.raises(CrossStoreReference):
         await InventoryService(db_session).hold_catalog_for_online_order(
             product.store_id + 999, product.id, 1, online_order_id=1
+        )
+
+
+async def test_stocktake_counts_held_goods_as_still_on_the_shelf(db_session: AsyncSession) -> None:
+    """盤點時保留的貨還在架上：實點 5、線上保留 2 → 可賣 3；
+    之後取消加回才不會變 7（Codex M1d 第一輪）。"""
+    product = await _product(db_session, qty=5)
+    svc = InventoryService(db_session)
+    await svc.hold_catalog_for_online_order(product.store_id, product.id, 2, online_order_id=9)
+    delta = await svc.adjust_catalog_to_count(
+        product.store_id, product.id, 5, ref_type="stocktake", ref_id=1
+    )
+    assert delta == 0
+    await db_session.refresh(product)
+    assert product.quantity_on_hand == 3
+    # 實際少了一包：可賣的跟著少一包，保留不動
+    assert (
+        await svc.adjust_catalog_to_count(
+            product.store_id, product.id, 4, ref_type="stocktake", ref_id=2
+        )
+        == -1
+    )
+    await svc.release_online_hold(product.store_id, product.id, 2, online_order_id=9)
+    await db_session.refresh(product)
+    assert product.quantity_on_hand == 4
+
+
+async def test_stocktake_below_held_quantity_is_refused(db_session: AsyncSession) -> None:
+    product = await _product(db_session, qty=5)
+    svc = InventoryService(db_session)
+    await svc.hold_catalog_for_online_order(product.store_id, product.id, 2, online_order_id=9)
+    with pytest.raises(OwnershipValidationError, match="線上單保留"):
+        await svc.adjust_catalog_to_count(
+            product.store_id, product.id, 1, ref_type="stocktake", ref_id=1
         )

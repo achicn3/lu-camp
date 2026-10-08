@@ -2233,15 +2233,26 @@ class InventoryService:
 
         以 FOR UPDATE 重讀現量計差額（delta = counted − current），避免清掉盤點期間的銷售；
         差額 0 不寫帳。回傳 delta（正＝盤盈、負＝盤虧）。實點數不可為負。
+
+        線上單保留的貨（docs/63 §13）還在架上、但已從現量扣掉：可賣的＝實點 − 保留中，
+        否則之後保留加回會多出那幾件（Codex M1d 第一輪）。
+        保留的量在持商品列鎖時讀，與保留／加回互斥。
         """
         if counted_qty < 0:
             raise OwnershipValidationError("實點數不可為負")
         product = await self._repo.get_catalog_for_update(store_id, catalog_id)
         if product is None:
             raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
-        delta = counted_qty - product.quantity_on_hand
+        held = await self._repo.online_held_qty(store_id, catalog_id)
+        if counted_qty < held:
+            raise OwnershipValidationError(
+                f"「{product.name}」有 {held} 件被線上單保留，實點數不能比它少；"
+                "請先到 POS 線上訂單結帳或取消那張單再盤點"
+            )
+        target = counted_qty - held
+        delta = target - product.quantity_on_hand
         if delta != 0:
-            product.quantity_on_hand = counted_qty
+            product.quantity_on_hand = target
             await self._repo.add_stock_movement(
                 StockMovement(
                     store_id=store_id,

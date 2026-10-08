@@ -22,7 +22,13 @@ from app.modules.inventory.models import (
     SerializedItem,
     StockMovement,
 )
-from app.shared.enums import BulkLotStatus, Grade, OwnershipType, SerializedItemStatus
+from app.shared.enums import (
+    BulkLotStatus,
+    Grade,
+    OwnershipType,
+    SerializedItemStatus,
+    StockReason,
+)
 
 
 class InventoryRepository:
@@ -948,6 +954,22 @@ class InventoryRepository:
         return result.rowcount == 1
 
     # ── 庫存異動帳 ──
+    async def online_held_qty(self, store_id: int, catalog_id: int) -> int:
+        """線上單還保留著的件數＝ONLINE_HOLD 扣掉 ONLINE_RELEASE（docs/63 §13）。"""
+        signed = case(
+            (StockMovement.reason == StockReason.ONLINE_HOLD, StockMovement.qty),
+            (StockMovement.reason == StockReason.ONLINE_RELEASE, -StockMovement.qty),
+            else_=0,
+        )
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(signed), 0)).where(
+                StockMovement.store_id == store_id,
+                StockMovement.catalog_product_id == catalog_id,
+                StockMovement.reason.in_((StockReason.ONLINE_HOLD, StockReason.ONLINE_RELEASE)),
+            )
+        )
+        return int(total or 0)
+
     async def add_stock_movement(self, movement: StockMovement) -> StockMovement:
         self._session.add(movement)
         await self._session.flush()
