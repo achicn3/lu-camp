@@ -110,6 +110,8 @@ export function OnlinePublishPanel() {
         </p>
       )}
       {s !== undefined && s.tables.length > 0 && (
+        <details className="online-publish-tables">
+        <summary>客人掃碼的網址與重發 QR（{s.tables.length} 個）</summary>
         <div className="inv-table-wrap">
           <table className="inv-table">
             <thead>
@@ -140,6 +142,7 @@ export function OnlinePublishPanel() {
             </tbody>
           </table>
         </div>
+        </details>
       )}
       {rotating !== null && (
         <ConfirmDialog

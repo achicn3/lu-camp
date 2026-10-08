@@ -6470,3 +6470,94 @@ body:has(.intake-customer, .acq-select-void-dialog) {
     grid-column: 1 / -1;
   }
 }
+
+/* 手沖體驗卡管理（docs/63 §4、M1c）：配色色票與客人頁卡面同一組顏色 */
+.menu-experiences { max-width: 760px; }
+.menu-experiences-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.menu-experiences-head h2 { margin: 0; }
+.menu-experience-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.menu-experience-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); }
+.menu-experience-row.is-off { opacity: .6; }
+.menu-experience-text { display: grid; gap: 2px; min-width: 0; }
+.menu-experience-text span, .menu-experience-text small { color: var(--ink-soft); overflow-wrap: anywhere; }
+.menu-experience-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+.menu-experience-swatch { display: inline-block; width: 24px; height: 32px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); flex: none; }
+.brew-swatch-peach { background: linear-gradient(160deg, #fbe7e1, #f6d6cf); }
+.brew-swatch-honey { background: linear-gradient(160deg, #fbf1dd, #f4e3c3); }
+.brew-swatch-citrus { background: linear-gradient(160deg, #e8eef0, #d9e3e6); }
+.brew-swatch-wine { background: linear-gradient(160deg, #f3e3e4, #e9d0d3); }
+.brew-swatch-forest { background: linear-gradient(160deg, #e6ece0, #d4dfcc); }
+.brew-swatch-ink { background: linear-gradient(160deg, #2a2c2f, #1c1e20); box-shadow: inset 0 0 0 1px #c8a96a; }
+.menu-experience-form { display: grid; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--accent); border-radius: var(--radius); }
+.menu-experience-form > fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp-3); min-width: 0; }
+.menu-experience-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-3); }
+.menu-experience-group { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-2) var(--sp-3); display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.menu-experience-include { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: var(--sp-2); }
+@media (max-width: 520px) { .menu-experience-include { grid-template-columns: minmax(0, 1fr) auto; } .menu-experience-include input + input { grid-column: 1 / -1; grid-row: 2; } }
+.menu-experience-themes { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.menu-experience-themes legend { margin-bottom: var(--sp-2); }
+.menu-experience-theme { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+
+/* 手沖體驗卡新增／編輯頁：左邊分區表單、右邊即時卡面預覽（桌機黏在畫面上） */
+.exp-page { display: grid; gap: var(--sp-3); }
+.exp-form { display: grid; gap: var(--sp-4); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 960px) {
+  .exp-form { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  .exp-form-side { position: sticky; top: calc(var(--app-header-height) + var(--sp-4)); }
+}
+.exp-form-main { display: grid; gap: var(--sp-4); min-width: 0; }
+.exp-block { max-width: none; margin: 0; border: 1px solid var(--border); }
+.exp-block-title { padding: 0 var(--sp-1); font-weight: 700; font-size: 17px; }
+.exp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--sp-3); }
+.exp-groups { display: grid; gap: var(--sp-2); }
+.exp-group { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-2) var(--sp-3); display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.exp-include { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: var(--sp-2); }
+@media (max-width: 560px) {
+  .exp-include { grid-template-columns: minmax(0, 1fr) auto; }
+  .exp-include input + input { grid-column: 1 / -1; grid-row: 2; }
+}
+.exp-add-include { justify-self: start; }
+.exp-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--sp-2); }
+.exp-theme { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.exp-theme.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.exp-theme input { margin: 0; accent-color: var(--accent); }
+.exp-form-side { display: grid; gap: var(--sp-3); }
+.exp-actions { display: flex; gap: var(--sp-2); }
+.exp-actions .btn-primary { flex: 1; }
+/* 預覽色同客人頁卡面（online-order/public/app.css 的 brew-theme-*） */
+.exp-preview { display: flex; flex-direction: column; gap: 6px; aspect-ratio: 5 / 7; padding: 18px; border-radius: 18px; color: #3a2a24; overflow: hidden; box-shadow: 0 16px 32px rgba(0, 0, 0, .18); --exp-accent: #c56f66; --exp-ink: #b2483f; }
+.exp-theme-peach { background: linear-gradient(160deg, #fbe7e1, #f6d6cf 55%, #f3e4dc); }
+.exp-theme-honey { background: linear-gradient(160deg, #fbf1dd, #f4e3c3 55%, #f8eedd); --exp-accent: #b88a46; --exp-ink: #9a6a22; }
+.exp-theme-citrus { background: linear-gradient(160deg, #e8eef0, #d9e3e6 55%, #eef1ee); --exp-accent: #5f7b86; --exp-ink: #2f4f7a; }
+.exp-theme-wine { background: linear-gradient(160deg, #f3e3e4, #e9d0d3 55%, #f2e6e4); --exp-accent: #9b4e5c; --exp-ink: #8d2f3e; }
+.exp-theme-forest { background: linear-gradient(160deg, #e6ece0, #d4dfcc 55%, #eef0e6); --exp-accent: #5c7a4c; --exp-ink: #3f5f2f; }
+.exp-theme-ink { background: linear-gradient(160deg, #2a2c2f, #1c1e20 60%, #24262a); color: #efe8da; --exp-accent: #c8a96a; --exp-ink: #e2cb8f; }
+.exp-preview h3 { margin: 4px 0 0; font-size: 26px; line-height: 1.25; overflow-wrap: anywhere; }
+.exp-preview-tag { align-self: flex-start; font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--exp-accent); color: #fff; }
+.exp-preview-origin { margin: 0; font-size: 12.5px; opacity: .8; }
+.exp-preview-notes { margin: 4px 0 0; padding-top: 6px; border-top: 1px dashed rgba(60, 40, 30, .25); font-weight: 700; font-size: 13.5px; color: var(--exp-ink); }
+.exp-preview-desc { margin: 0; font-size: 13px; line-height: 1.7; opacity: .9; overflow: hidden; }
+.exp-preview-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; padding-top: 8px; border-top: 1px solid rgba(60, 40, 30, .2); font-size: 13px; }
+.exp-preview-foot strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.online-publish-tables > summary { cursor: pointer; padding: var(--sp-2) 0; font-weight: 600; color: var(--accent); }
+.menu-experiences-head > div { display: grid; gap: var(--sp-1); max-width: 520px; }
+.menu-experiences-head .hint { margin: 0; }
+/* 體驗卡頁的下拉選單與包含項目輸入框，跟其他欄位同一個樣子（全站 .field input 的尺寸） */
+.exp-form select,
+.exp-include input {
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-3);
+  font-size: var(--text-md);
+  background: var(--surface);
+  color: var(--ink);
+}
+.exp-form select:focus, .exp-include input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* <a> 與 <button> 做成的同款按鈕：字級一致（button 預設字級比較小） */
+.menu-experience-actions .btn-ghost,
+.menu-experience-actions .btn-danger,
+.exp-form .btn-ghost {
+  font-size: var(--text-sm);
+  min-height: 40px;
+}

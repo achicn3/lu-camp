@@ -9,6 +9,17 @@ import type { components } from "@/lib/api-types";
 
 type Presentation = components["schemas"]["MenuPresentationRead"];
 type Update = components["schemas"]["MenuPresentationUpdateRequest"];
+type Role = NonNullable<Update["role"]>;
+/** 加購角色（docs/63 §6）：咖啡→推甜點、甜點→推咖啡、手沖體驗→推咖啡豆／濾掛、咖啡豆→推濾掛／其他豆款。 */
+const ROLE_OPTIONS: { value: Role | ""; label: string }[] = [
+  { value: "", label: "不參與加購" },
+  { value: "coffee", label: "咖啡" },
+  { value: "dessert", label: "甜點" },
+  { value: "experience", label: "手沖體驗" },
+  { value: "bean", label: "咖啡豆" },
+  { value: "drip", label: "濾掛" },
+  { value: "other", label: "其他" },
+];
 function detail(error: unknown, fallback: string): string {
   return error && typeof error === "object" && "detail" in error && typeof error.detail === "string" ? error.detail : fallback;
 }
@@ -51,6 +62,7 @@ function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation
   const [showRemaining, setShowRemaining] = useState(initial.show_remaining);
   const [threshold, setThreshold] = useState(String(initial.low_stock_threshold));
   const [hideSoldOut, setHideSoldOut] = useState(initial.hide_sold_out);
+  const [role, setRole] = useState<Role | "">(initial.role ?? "");
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: async (body: Update) => {
@@ -70,7 +82,7 @@ function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation
       if (threshold.trim() === "" || !Number.isInteger(value) || value < 0 || value > 9999) { setError("低庫存門檻請填 0–9999 的整數。"); return; }
       save.mutate({ flavor_description: flavor.trim() || null, audience_description: audience.trim() || null,
         is_recommended: recommended, is_new: isNew, limited_on: limitedOn || null,
-        show_remaining: showRemaining, low_stock_threshold: value, hide_sold_out: hideSoldOut });
+        show_remaining: showRemaining, low_stock_threshold: value, hide_sold_out: hideSoldOut, role: role || null });
     }}>
       <fieldset disabled={save.isPending}>
         <label className="field"><span className="field-label">風味描述</span><input value={flavor} maxLength={120} placeholder="例如：蜜桃・花香・甜感" onChange={(event) => setFlavor(event.target.value)} /></label>
@@ -81,6 +93,12 @@ function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation
         </div>
         <label className="field"><span className="field-label">今日限定日期</span><input type="date" value={limitedOn} onChange={(event) => setLimitedOn(event.target.value)} /></label>
         <p className="hint">只在指定的台北日期顯示「今日限定」標籤，清空日期即可取消標籤。</p>
+        <label className="field"><span className="field-label">加購角色</span>
+          <select value={role} onChange={(event) => setRole(event.target.value as Role | "")}>
+            {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+        <p className="hint">客人點了咖啡，購物車下方會推「甜點」角色的品項（反之亦然）；最多推 2 項、不會自動加入。</p>
         <h3>庫存顯示</h3>
         <div className="menu-presentation-checks"><label><input type="checkbox" checked={showRemaining} onChange={(event) => setShowRemaining(event.target.checked)} />低庫存時顯示剩餘數量</label></div>
         <label className="field"><span className="field-label">低庫存顯示門檻</span><input type="number" min={0} max={9999} step={1} required value={threshold} onChange={(event) => setThreshold(event.target.value)} /></label>

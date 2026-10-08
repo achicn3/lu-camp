@@ -4,7 +4,8 @@
 // 「選項群組」分頁管理溫度／加購等選項；品項列「選項」欄設定掛哪些群組與介紹（O2）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { type FormEvent, type KeyboardEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { type FormEvent, type KeyboardEvent, Suspense, useState } from "react";
 
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
@@ -12,6 +13,7 @@ import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
 import { MenuOrderingSection } from "@/features/menu/MenuOrderingSection";
 import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
+import { ExperienceSection } from "@/features/menu/ExperienceSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { api } from "@/lib/api";
@@ -492,8 +494,23 @@ const MENU_SECTIONS = [
 ] as const;
 type MenuSection = (typeof MENU_SECTIONS)[number]["key"];
 
+/** ?section=online 直接開那個分頁（例：體驗卡存好後回「線上發布」）。 */
+function sectionFrom(value: string | null): MenuSection {
+  return MENU_SECTIONS.find((entry) => entry.key === value)?.key ?? "items";
+}
+
 export default function MenuPage() {
-  const [section, setSection] = useState<MenuSection>("items");
+  // useSearchParams 需要 Suspense 邊界（Next App Router）。
+  return (
+    <Suspense fallback={<p>載入中…</p>}>
+      <MenuPageContent />
+    </Suspense>
+  );
+}
+
+function MenuPageContent() {
+  const params = useSearchParams();
+  const [section, setSection] = useState<MenuSection>(() => sectionFrom(params.get("section")));
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
@@ -727,6 +744,7 @@ export default function MenuPage() {
         hidden={section !== "online"}
       >
         <OnlinePublishPanel />
+        <ExperienceSection />
       </div>
     </section>
   );

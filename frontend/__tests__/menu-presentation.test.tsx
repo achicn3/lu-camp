@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 
-const defaults = { menu_item_id: 7, flavor_description: null, audience_description: null, is_recommended: false, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false };
+const defaults = { menu_item_id: 7, flavor_description: null, audience_description: null, is_recommended: false, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false, role: null };
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }); }
 function mount(onDone = vi.fn(), onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,7 +29,21 @@ it("載入設定後可儲存風味、推薦與低庫存政策，不送價格或�
   await user.click(screen.getByLabelText("售完後完全隱藏"));
   await user.click(screen.getByRole("button", { name: "儲存設定" }));
   await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
-  expect(body).toEqual({ flavor_description: "蜜桃・花香", audience_description: "喜歡果香的人", is_recommended: true, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 3, hide_sold_out: true });
+  expect(body).toEqual({ flavor_description: "蜜桃・花香", audience_description: "喜歡果香的人", is_recommended: true, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 3, hide_sold_out: true, role: null });
+});
+
+it("可以設定加購角色（例：甜點），客人點咖啡時會推它", async () => {
+  let body: Record<string, unknown> | undefined;
+  vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+    if (input.method === "PUT") { body = await input.json(); return response({ ...defaults, ...body }); }
+    return response(defaults);
+  }));
+  const done = vi.fn(); mount(done);
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("加購角色"), "dessert");
+  await user.click(screen.getByRole("button", { name: "儲存設定" }));
+  await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+  expect(body?.role).toBe("dessert");
 });
 
 it("讀取失敗不能把預設值蓋回後台，可以重試", async () => {
