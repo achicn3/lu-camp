@@ -66,7 +66,7 @@ O4 現金線上點餐：雲端送單（O4a）、雲端拉單／回報（O4b 雲�
 
 2026-10-06 新增菜單體驗需求見 [docs/63](./63-online-menu-experience-plan.md)。順序調整為：
 **O4 穩定化與審查 → M1a 後台呈現設定 → M1b 手機首頁與菜單 → M1c 手沖體驗／餐飲加購 → M1d 零售商品整合 → O5 → M2 推薦與分析**。
-M1a／M1b 已合併 main；M1c 手沖體驗卡＋加購在 `feat/brew-experience`（migration `a6c2e8f4d1b7`，docs/63 §12、升級 docs/66）；M1d 待實作。資料層／POS／結帳／報表必須與 UI 同波驗收。人氣榜與分析不擋第一階段上線。
+M1a–M1c 已合併 main（M1c 升級 docs/66）；M1d 帶回家零售商品＋交貨在 `feat/online-retail-items`（migration `c3e7a9d1f5b8`、D1 `0006`，docs/63 §13、升級 docs/68）。資料層／POS／結帳／報表必須與 UI 同波驗收。人氣榜與分析不擋第一階段上線。
 
 | 順序 | 項目 | 說明 |
 |------|------|------|
@@ -137,6 +137,12 @@ M1a／M1b 已合併 main；M1c 手沖體驗卡＋加購在 `feat/brew-experience
 - **辰宇落雁體有保留字型名稱**：子集一律改名 `LukengHand`，不可改回原名（OFL）。
 - `test_passwords_are_hashed_not_stored` 約 4% 隨機紅（雜湊剛好含 "pw"），已裁示不修，單獨重跑確認即可。
 
+
+### 2026-10-08：M1d 帶回家零售商品與交貨
+
+從現有一般商品挑上線（後台「線上發布」分頁）；客人頁「帶回家」區、提醒到櫃檯領取；POS 拉單時直接扣現量保留（`ONLINE_HOLD`），
+帶入結帳先加回再賣（`ONLINE_RELEASE`＋`SALE`），付款後線上單「待交貨」，按「已交貨」才結單、客人頁顯示已領取。
+**部署順序：正式機 migration → 雲端 D1 `0006`（重建 `order_lines`）→ Worker → 從 POS 發佈。** 詳見 [docs/63 §13](63-online-menu-experience-plan.md#13-m1d-零售商品上線與帶回家交貨2026-10-08-店主裁示設計)。
 
 ### 2026-10-08：M1c 手沖體驗卡與加購
 

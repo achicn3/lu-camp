@@ -59,6 +59,7 @@
 - [MacBook 正式機：升級到 2026-10-08 版（混合付款的購物金不課稅）](./65-macbook-upgrade-store-credit-allowance.md)
 - [MacBook 正式機：升級到 2026-10-08 版（手沖體驗卡＋加購角色）](./66-macbook-upgrade-brew-experience.md)
 - [MacBook 正式機：升級到 2026-10-08 版（購物金一律扣掉後開發票）](./67-macbook-upgrade-store-credit-deduct-only.md)
+- [MacBook 正式機：升級到 2026-10-08 版（線上點餐「帶回家」零售商品＋交貨）](./68-macbook-upgrade-online-retail.md)
 
 ## 評估與後續實作
 

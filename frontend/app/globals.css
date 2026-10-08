@@ -6582,3 +6582,21 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .retail-pick-option.is-on { border-color: var(--accent); background: #f0f5ef; }
 .retail-pick-option input { margin: 3px 0 0; width: 18px; height: 18px; accent-color: var(--accent); }
 .retail-fixed { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+/* 編輯頁的介紹欄跟其他輸入框同一個樣子（體驗卡、帶回家商品共用） */
+.exp-form textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-size: var(--text-md);
+  background: var(--surface);
+  color: var(--ink);
+  resize: vertical;
+}
+.exp-form textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 帶回家商品編輯頁的照片：大一點的縮圖，按鈕並排、不撐滿 */
+.retail-form .menu-photo-cell { grid-template-columns: 120px auto; justify-content: start; gap: var(--sp-3); }
+.retail-form .menu-photo-thumb,
+.retail-form .menu-photo-empty { width: 120px; height: 120px; }
+.retail-form .menu-photo-actions { flex-direction: row; align-items: center; }
+.retail-form .menu-photo-actions .btn-ghost { width: auto; padding: 0 var(--sp-4); display: inline-flex; align-items: center; }
