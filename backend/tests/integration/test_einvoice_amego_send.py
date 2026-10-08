@@ -510,9 +510,7 @@ async def test_mixed_refund_allowance_excludes_store_credit_already_allowanced(
     300 已折讓過，第一次全退購物金 → 不再折讓；第二次購物金 100＋LINE 100 → 只折讓 LINE 那 100。"""
     store_id, clerk_id, _code = await _seed(db_session)
     await db_session.execute(
-        update(StoreSettings)
-        .where(StoreSettings.store_id == store_id)
-        .values(linepay_enabled=True)
+        update(StoreSettings).where(StoreSettings.store_id == store_id).values(linepay_enabled=True)
     )
     member = Contact(store_id=store_id, name="混合付款會員", roles=["MEMBER"])
     product = CatalogProduct(
