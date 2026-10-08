@@ -18,7 +18,7 @@
 ## 2. 升級步驟
 
 照 docs/43 §3 的指令依序做。`alembic current` 應顯示 **`b7d4f1a3c9e2 (head)`**
-（若同時拉到 docs/66 手沖體驗卡的版本，head 會是那一版之後的 migration，以 `alembic heads` 只有一個為準）。
+（docs/66 手沖體驗卡的 `a6c2e8f4d1b7` 會一起補上，它在這一版之前）。
 
 ## 3. 驗證（每一項都回報結果）
 
@@ -39,11 +39,11 @@ cd <repo 目錄>
 # 4.1 停後端
 launchctl bootout gui/$(id -u)/com.lucamp.backend
 
-# 4.2 還在新程式時降一版（只降到 e3a9c5d1f7b2，指定版本號，不要降更多）
+# 4.2 還在新程式時降一版（只降到 a6c2e8f4d1b7，指定版本號，不要降更多）
 cd backend
 set -a; source ../.env; set +a
-/opt/homebrew/bin/uv run alembic downgrade e3a9c5d1f7b2
-/opt/homebrew/bin/uv run alembic current   # 應顯示 e3a9c5d1f7b2
+/opt/homebrew/bin/uv run alembic downgrade a6c2e8f4d1b7
+/opt/homebrew/bin/uv run alembic current   # 應顯示 a6c2e8f4d1b7
 cd ..
 
 # 4.3 再退程式、重 build、重啟

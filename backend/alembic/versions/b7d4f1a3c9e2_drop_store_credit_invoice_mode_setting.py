@@ -4,14 +4,14 @@ ADR-029 原本可在設定切換「扣掉購物金後開」／「整筆開＋購
 `invoices.store_credit_mode` 保留——切換期間用折讓模式開出的舊發票，作廢／退貨仍要照它處理。
 
 Revision ID: b7d4f1a3c9e2
-Revises: e3a9c5d1f7b2
+Revises: a6c2e8f4d1b7
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "b7d4f1a3c9e2"
-down_revision = "e3a9c5d1f7b2"
+down_revision = "a6c2e8f4d1b7"
 branch_labels = None
 depends_on = None
 
