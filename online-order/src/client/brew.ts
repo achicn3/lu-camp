@@ -368,7 +368,7 @@ export async function drawExperience(view: ExperienceView, from: HTMLElement, op
   const root = el("div", "brew-stage");
   root.setAttribute("role", "dialog");
   root.setAttribute("aria-modal", "true");
-  root.setAttribute("aria-label", `${view.experience.title}・手沖體驗`);
+  root.setAttribute("aria-label", `${view.experience.title} · 手沖體驗`);
   const card = buildCard(view, priceLabel);
   root.append(card);
   document.body.append(root);
@@ -434,7 +434,7 @@ function openPanel(view: ExperienceView, card: HTMLElement, root: HTMLElement, p
   peek.remove();
   const panel = el("section", "brew-panel");
   panel.setAttribute("aria-label", "體驗內容");
-  panel.append(el("h4", "brew-panel-title", `${view.experience.title}・手沖體驗`));
+  panel.append(el("h4", "brew-panel-title", `${view.experience.title} · 手沖體驗`));
   if (view.experience.includes.length) {
     const list = el("ul", "brew-includes");
     for (const include of view.experience.includes) {

@@ -129,6 +129,7 @@ def test_snapshot_shape_and_money_as_whole_yuan() -> None:
                 ],
             }
         ],
+        "experiences": [],
     }
 
 
@@ -206,7 +207,6 @@ def test_snapshot_text_covers_everything_customers_read() -> None:
     text = snapshot_text(snap)
     for word in ("露坑", "咖啡", "拿鐵", "濃縮咖啡加鮮奶", "奶", "鮮奶"):
         assert word in text
-
 
 
 def test_snapshot_text_includes_presentation_copy() -> None:
