@@ -82,6 +82,8 @@ try {
   ok("卡面預覽即時顯示標題與價格", (await preview.innerText()).includes(title) && (await preview.innerText()).includes("$280 起"));
   await form.getByLabel("抽卡動畫").selectOption("truck");
   await form.getByLabel("蜜桃粉").check();
+  ok("卡面預覽帶出插畫", await preview.locator("img.exp-preview-art").evaluate((img) =>
+    img.decode().then(() => img.naturalWidth > 0, () => false)));
   await page.screenshot({ path: join(SHOTS, "01-form.png"), fullPage: true });
   await form.getByRole("button", { name: "儲存體驗卡" }).click();
   await page.waitForURL(/\/menu\?section=online$/);

@@ -205,9 +205,13 @@ export function ExperienceForm({ initial, items, onDone, onCancel }: {
           {origin.trim() && <p className="exp-preview-origin">{origin}</p>}
           {notes.trim() && <p className="exp-preview-notes">{notes}</p>}
           {description.trim() && <p className="exp-preview-desc">{description}</p>}
+          {art !== "none" && (
+            // eslint-disable-next-line @next/next/no-img-element -- 已壓好的 480px 靜態 JPG，不需要最佳化管線
+            <img className="exp-preview-art" src={`/brew/${art}.jpg`} alt="" width={240} height={240} />
+          )}
           <div className="exp-preview-foot"><span>手沖體驗</span><strong>{item ? price : "—"}</strong></div>
         </article>
-        <p className="hint">插畫與抽卡動畫要在線上菜單上看（發佈後用手機掃 QR）。</p>
+        <p className="hint">抽卡動畫要在線上菜單上看（發佈後用手機掃 QR）。</p>
         {error !== null && <p role="alert" className="form-error">{error}</p>}
         <div className="exp-actions">
           <button type="submit" className="btn-primary" disabled={save.isPending}>{save.isPending ? "儲存中…" : "儲存體驗卡"}</button>

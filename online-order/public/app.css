@@ -289,7 +289,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 }
 .brew-theme-ink.brew-mini, .brew-theme-ink.brew-front { color: var(--ink); }
 .brew-mini:active { transform: scale(.98); }
-.brew-mini .brew-art { width: 100%; aspect-ratio: 1; }
+.brew-art {
+  display: block; height: auto; aspect-ratio: 1; object-fit: cover; pointer-events: none;
+  /* 水彩圖底是米白紙色：邊緣淡出，淺色卡再用 multiply 讓紙色融進卡面配色。 */
+  -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+  mix-blend-mode: multiply;
+}
+.brew-theme-ink .brew-art { mix-blend-mode: normal; }
+.brew-mini .brew-art { width: 100%; }
 .brew-mini-title { font-family: var(--hand); font-size: 20px; line-height: 1.3; letter-spacing: .04em; overflow-wrap: anywhere; }
 .brew-mini-origin { font-size: 12px; opacity: .75; line-height: 1.4; overflow-wrap: anywhere; }
 .brew-mini-off { font-size: 12px; color: var(--brew-ink); }
@@ -316,7 +324,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   box-shadow: 0 30px 60px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .4);
   padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 8px;
 }
-.brew-front .brew-art { position: absolute; right: -8px; bottom: 34px; width: 54%; opacity: .92; pointer-events: none; }
+.brew-front .brew-art { position: absolute; right: -10px; bottom: 30px; width: 58%; opacity: .95; }
 .brew-title { margin: 4px 0 0; font-family: var(--hand); font-weight: 400; font-size: clamp(26px, 8vw, 32px); line-height: 1.2; letter-spacing: .06em; overflow-wrap: anywhere; }
 .brew-origin { margin: 0; font-size: 12.5px; opacity: .8; line-height: 1.5; }
 .brew-notes { margin: 6px 0 0; padding-top: 8px; border-top: 1px dashed rgba(60, 40, 30, .25); font-size: 13.5px; font-weight: 700; line-height: 1.6; color: var(--brew-ink); }

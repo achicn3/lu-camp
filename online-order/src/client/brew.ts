@@ -19,16 +19,12 @@ const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(re
 const play = (node: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
   node.animate(frames, { fill: "forwards", ...options }).finished.then(() => undefined, () => undefined);
 
-// ── 插畫（固定 SVG 字串，每張十幾個圖形）──
-const flower = (x: number, y: number, s = 1) =>
-  `<g transform="translate(${x} ${y}) scale(${s})">${[0, 72, 144, 216, 288].map((r) => `<ellipse cx="0" cy="-7" rx="4.6" ry="7" fill="#fffaf3" stroke="#e8d9c8" stroke-width=".6" transform="rotate(${r})"/>`).join("")}<circle r="2.6" fill="#e3b84d"/></g>`;
-const leaf = (x: number, y: number, r: number, c = "#7f9a63") =>
-  `<path d="M0 0c10-10 26-10 34 0-10 10-24 10-34 0z" fill="${c}" transform="translate(${x} ${y}) rotate(${r})"/>`;
+// ── 插畫（Codex 繪製的水彩 JPG，放 public/brew/；店家只能從固定清單選，不接受任意網址）──
 const ART: Record<string, string> = {
-  peach: `<defs><radialGradient id="pk" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="#ffe0c6"/><stop offset=".55" stop-color="#f6a48f"/><stop offset="1" stop-color="#d9675c"/></radialGradient><radialGradient id="ly" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#e46a6e"/><stop offset="1" stop-color="#9c2f3a"/></radialGradient></defs>${leaf(58, 30, -40)}${leaf(66, 34, 10, "#93ad74")}<circle cx="66" cy="70" r="34" fill="url(#pk)"/><path d="M66 38c-8 14-8 46 2 64" fill="none" stroke="#c9584f" stroke-width="1.4" opacity=".5"/><circle cx="32" cy="92" r="14" fill="url(#ly)"/>${flower(30, 34, 1.1)}${flower(96, 28, .9)}`,
-  vanilla: `<defs><linearGradient id="hn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7c45a"/><stop offset="1" stop-color="#d98a1d"/></linearGradient></defs>${leaf(20, 40, -20, "#8aa06c")}${leaf(70, 18, 30, "#9cb37e")}<path d="M18 92c18-6 40-26 70-60" fill="none" stroke="#3b2618" stroke-width="5" stroke-linecap="round"/><rect x="54" y="62" width="40" height="40" rx="10" fill="url(#hn)" stroke="#b77417"/><rect x="56" y="56" width="36" height="9" rx="4" fill="#e6d3b0"/><path d="M90 40l-14 26" stroke="#b5874f" stroke-width="3" stroke-linecap="round"/><ellipse cx="30" cy="104" rx="9" ry="6" fill="#a87447"/><ellipse cx="44" cy="108" rx="8" ry="5.6" fill="#c08c5c"/>${flower(92, 30, 1.2)}`,
-  citrus: `<defs><radialGradient id="lm" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff6c9"/><stop offset=".8" stop-color="#f6d65e"/><stop offset="1" stop-color="#e5b52f"/></radialGradient><radialGradient id="lg" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#e6f2b8"/><stop offset=".85" stop-color="#9cc15a"/><stop offset="1" stop-color="#6f9a3a"/></radialGradient></defs>${leaf(40, 24, -30, "#7e9a60")}${leaf(78, 26, 20, "#8fae70")}<circle cx="52" cy="70" r="28" fill="url(#lm)" stroke="#e1b13a" stroke-width="2"/><g stroke="#fff4c4" stroke-width="1.4">${[0, 45, 90, 135].map((r) => `<line x1="28" y1="70" x2="76" y2="70" transform="rotate(${r} 52 70)"/>`).join("")}</g><circle cx="88" cy="88" r="20" fill="url(#lg)" stroke="#6f9a3a" stroke-width="1.6"/>${flower(24, 40, 1)}${flower(98, 46, .85)}`,
-  rum: `<defs><linearGradient id="rm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e2a14b"/><stop offset="1" stop-color="#9c5418"/></linearGradient><radialGradient id="ch" cx=".35" cy=".3" r=".7"><stop offset="0" stop-color="#d4485a"/><stop offset="1" stop-color="#6d1424"/></radialGradient><radialGradient id="gp" cx=".35" cy=".3" r=".7"><stop offset="0" stop-color="#7a5a8c"/><stop offset="1" stop-color="#2f1d3f"/></radialGradient></defs><path d="M78 10h30v40c0 8-6 14-15 14s-15-6-15-14z" fill="#7a4a2a" opacity=".55"/><path d="M40 22h34c0 22-6 36-17 36S40 44 40 22z" fill="rgba(255,255,255,.35)" stroke="#e9dfd2" stroke-width="1.4"/><path d="M42 34h30c-1 13-7 22-15 22s-14-9-15-22z" fill="url(#rm)"/><path d="M57 58v26M46 86h22" stroke="#e9dfd2" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="84" r="11" fill="url(#ch)"/><circle cx="40" cy="90" r="10" fill="url(#ch)"/>${[[82, 82], [94, 80], [88, 92], [100, 92], [94, 103], [82, 100]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="7" fill="url(#gp)"/>`).join("")}${flower(20, 44, .8)}`,
+  peach: "/brew/peach.jpg",
+  vanilla: "/brew/vanilla.jpg",
+  citrus: "/brew/citrus.jpg",
+  rum: "/brew/rum.jpg",
 };
 
 function svg(markup: string, viewBox: string, className: string): SVGSVGElement {
@@ -41,9 +37,16 @@ function svg(markup: string, viewBox: string, className: string): SVGSVGElement 
   node.innerHTML = markup.replace(/id="(\w+)"/g, `id="$1-${id}"`).replace(/url\(#(\w+)\)/g, `url(#$1-${id})`);
   return node;
 }
-function art(experience: MenuExperienceView): SVGSVGElement | null {
-  const markup = ART[experience.art];
-  return markup ? svg(markup, "0 0 120 120", "brew-art") : null;
+function art(experience: MenuExperienceView): HTMLImageElement | null {
+  const src = ART[experience.art];
+  if (!src) return null;
+  const image = el("img", "brew-art");
+  image.src = src;
+  image.alt = "";
+  image.decoding = "async";
+  image.width = 360;
+  image.height = 360;
+  return image;
 }
 
 const CARD_BACK = `<defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2cb8f"/><stop offset=".5" stop-color="#c4a766"/><stop offset="1" stop-color="#8f7a48"/></linearGradient></defs><rect x="10" y="10" width="230" height="330" rx="14" fill="none" stroke="url(#gb)" stroke-width="1.5"/><rect x="18" y="18" width="214" height="314" rx="10" fill="none" stroke="#c4a766" stroke-opacity=".35" stroke-width=".8"/><g fill="none" stroke="#c4a766" stroke-opacity=".14">${Array.from({ length: 9 }, (_, i) => `<path d="M18 ${232 + i * 11}c40-16 70 10 110-4s60-18 104 2"/>`).join("")}</g><circle cx="125" cy="150" r="56" fill="#141516" stroke="url(#gb)" stroke-width="1.4"/><path d="M92 172 116 132l10 15 9-12 24 37" fill="none" stroke="url(#gb)" stroke-width="2.4" stroke-linejoin="round"/><path d="M108 172l9-11 6 6" fill="none" stroke="#c4a766" stroke-width="1.6"/><text x="125" y="236" text-anchor="middle" font-size="22" fill="#c4a766" letter-spacing="6">露坑</text><text x="125" y="258" text-anchor="middle" font-style="italic" font-size="13" fill="#8f7a48" letter-spacing="2">Brew Experience</text>`;

@@ -6539,6 +6539,16 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .exp-preview-desc { margin: 0; font-size: 13px; line-height: 1.7; opacity: .9; overflow: hidden; }
 .exp-preview-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; padding-top: 8px; border-top: 1px solid rgba(60, 40, 30, .2); font-size: 13px; }
 .exp-preview-foot strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.exp-preview { position: relative; }
+.exp-preview > :not(.exp-preview-art) { position: relative; z-index: 1; }
+/* 與線上菜單同一張水彩圖、同一種淡邊＋融色。 */
+.exp-preview-art {
+  position: absolute; right: -10px; bottom: 30px; width: 58%; height: auto; aspect-ratio: 1; opacity: .95; pointer-events: none;
+  -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+  mix-blend-mode: multiply;
+}
+.exp-theme-ink .exp-preview-art { mix-blend-mode: normal; }
 .online-publish-tables > summary { cursor: pointer; padding: var(--sp-2) 0; font-weight: 600; color: var(--accent); }
 .menu-experiences-head > div { display: grid; gap: var(--sp-1); max-width: 520px; }
 .menu-experiences-head .hint { margin: 0; }

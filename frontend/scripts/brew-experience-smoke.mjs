@@ -85,6 +85,9 @@ try {
   await mini().waitFor();
   ok("首頁出現手沖體驗小卡", (await mini().innerText()).includes(title));
   ok("首頁入口有「手沖體驗」", (await page.getByRole("button", { name: "手沖體驗", exact: true }).count()) === 1);
+  const artLoaded = await mini().locator("img.brew-art").evaluate((img) =>
+    img.decode().then(() => img.naturalWidth > 0, () => false));
+  ok("小卡插畫（水彩 JPG）真的載入", artLoaded);
   await page.locator("#experiences").screenshot({ path: join(SHOTS, "01-deck.png") });
 
   // 六種抽卡動畫逐一跑：每種都要翻到正面、出現「看體驗內容」，期間不得有 JS 例外。
@@ -164,6 +167,10 @@ try {
   await page.screenshot({ path: join(SHOTS, "zz-error.png"), fullPage: true }).catch(() => {});
 } finally {
   await api("PUT", `/online-order/experiences/${card.id}`, { ...card, id: undefined, is_active: false }).catch(() => {});
+  // 加購只推兩樣：本輪的咖啡／甜點角色要拿掉，否則下一輪會被這次的戚風佔掉名額。
+  for (const id of [latte.id, cake.id]) {
+    await api("PUT", `/online-order/menu-items/${id}/presentation`, role(null)).catch(() => {});
+  }
   await browser.close();
 }
 const failed = results.filter((pass) => !pass).length;
