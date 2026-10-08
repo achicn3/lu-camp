@@ -15,7 +15,7 @@ from itertools import count
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.contacts.models import Contact
@@ -30,7 +30,6 @@ from app.modules.inventory.models import CatalogProduct
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
-from app.modules.settings.models import StoreSettings
 from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     EInvoiceAction,
@@ -40,7 +39,6 @@ from app.shared.enums import (
     InvoiceVoidReason,
     SaleInvoiceStatus,
     SaleLineType,
-    StoreCreditInvoiceMode,
     TenderType,
     UploadStatus,
 )
@@ -49,6 +47,7 @@ from tests.integration.customer_display_helpers import (
     prepare_signed_store_credit_cart,
     signed_return_consent,
 )
+from tests.integration.legacy_store_credit_helpers import mark_legacy_allowance_invoice
 from tests.integration.test_einvoice_amego_send import (
     _QUERY_ALLOWANCE_NOT_FOUND,
     _client,
@@ -97,11 +96,6 @@ async def _mixed_sale(
 ) -> tuple[int, int, int]:
     """開一筆購物金＋現金的 $1,000 交易；回傳 (store_id, clerk_id, sale_id)。"""
     store_id, clerk_id, _code = await _seed(session)
-    await session.execute(
-        update(StoreSettings)
-        .where(StoreSettings.store_id == store_id)
-        .values(store_credit_invoice_mode=StoreCreditInvoiceMode.ALLOWANCE)
-    )
     n = next(_seq)
     member = Contact(store_id=store_id, name=f"混合會員{n}", roles=["MEMBER"])
     product = CatalogProduct(
@@ -147,6 +141,8 @@ async def _mixed_sale(
         cart_session_id=signed.cart_session_id,
         cart_revision=signed.cart_revision,
     )
+    # 新單一律扣掉購物金後開；這裡模擬舊模式（整筆開＋購物金折讓）時期開出的發票。
+    await mark_legacy_allowance_invoice(session, sale.id)
     return store_id, clerk_id, sale.id
 
 

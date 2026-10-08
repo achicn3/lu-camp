@@ -1427,11 +1427,9 @@ class SalesService:
             is_b2b = info.buyer_tax_id is not None
             donate = info.npoban is not None
             has_carrier = info.carrier_type is not None and info.carrier_id is not None
-            # 混合付款：設定為「扣掉購物金後開」→ 發票只開非購物金的金額，品項於上送時
-            # 依比例扣；「整筆開＋購物金折讓」→ 照整筆開，平台開立後自動折讓（店主 2026-10-08）。
-            credit_mode = (
-                settings.store_credit_invoice_mode if store_credit_amount > 0 else None
-            )
+            # 混合付款一律扣掉購物金後開：發票只開非購物金的金額，品項於上送時依比例扣
+            # （店主 2026-10-08 統一；ADR-029）。
+            credit_mode = StoreCreditInvoiceMode.DEDUCT if store_credit_amount > 0 else None
             await self._einvoice.create_pending_invoice(
                 store_id,
                 sale_id=sale.id,

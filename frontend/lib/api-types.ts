@@ -10604,7 +10604,6 @@ export interface components {
             store_credit_engine_params: {
                 [key: string]: unknown;
             };
-            store_credit_invoice_mode: components["schemas"]["StoreCreditInvoiceMode"];
             /** Store Credit Min Spend */
             store_credit_min_spend: string;
             /** Store Id */
@@ -10670,7 +10669,6 @@ export interface components {
             store_credit_engine_params?: {
                 [key: string]: unknown;
             } | null;
-            store_credit_invoice_mode?: components["schemas"]["StoreCreditInvoiceMode"] | null;
             /** Store Credit Min Spend */
             store_credit_min_spend?: number | string | null;
             /** Taiwanpay Fee Pct */
@@ -11036,16 +11034,6 @@ export interface components {
          * @enum {string}
          */
         StoreCreditEntryType: "CREDIT" | "DEBIT" | "REFUND" | "REVERSAL" | "ADJUSTMENT";
-        /**
-         * StoreCreditInvoiceMode
-         * @description 混合付款（購物金＋其他）的發票怎麼開（settings.store_credit_invoice_mode；店主 2026-10-08）。
-         *
-         *     DEDUCT＝扣掉購物金後開發票，品項金額依比例扣（預設）；ALLOWANCE＝照整筆開發票，平台
-         *     確認開立後自動對購物金開折讓（ADR-029）。結帳當下的模式記在 invoices.store_credit_mode，
-         *     之後改設定不影響既有發票。
-         * @enum {string}
-         */
-        StoreCreditInvoiceMode: "DEDUCT" | "ALLOWANCE";
         /**
          * StoreCreditSourceType
          * @description 購物金分錄來源（docs/16 §1.1；source_id 可追溯 acquisition / sale）。

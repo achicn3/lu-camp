@@ -393,11 +393,11 @@ class InvoiceAllowanceSource(StrEnum):
 
 
 class StoreCreditInvoiceMode(StrEnum):
-    """混合付款（購物金＋其他）的發票怎麼開（settings.store_credit_invoice_mode；店主 2026-10-08）。
+    """混合付款（購物金＋其他）的發票怎麼開，記在 invoices.store_credit_mode（ADR-029）。
 
-    DEDUCT＝扣掉購物金後開發票，品項金額依比例扣（預設）；ALLOWANCE＝照整筆開發票，平台
-    確認開立後自動對購物金開折讓（ADR-029）。結帳當下的模式記在 invoices.store_credit_mode，
-    之後改設定不影響既有發票。
+    DEDUCT＝扣掉購物金後開發票，品項金額依比例扣——2026-10-08 起新單一律如此（店主統一，
+    不再提供切換）。ALLOWANCE＝照整筆開、平台確認開立後自動對購物金開折讓；只剩切換期間
+    開出的舊發票，作廢／退貨／補送折讓仍要照它處理，所以保留。
     """
 
     DEDUCT = "DEDUCT"

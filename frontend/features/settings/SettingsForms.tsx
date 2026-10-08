@@ -11,7 +11,6 @@ import { formatNtd, parseNtd } from "@/lib/money";
 
 type SettingsRead = components["schemas"]["SettingsRead"];
 type SettingsPatch = components["schemas"]["SettingsUpdateRequest"];
-type StoreCreditInvoiceMode = SettingsRead["store_credit_invoice_mode"];
 
 /** 送出前的檢查結果：要送的變更，或給店主看的錯誤訊息。 */
 type BuildResult = { body: SettingsPatch } | { error: string };
@@ -199,19 +198,15 @@ export function InvoiceTaxForm({
 }) {
   const initialTax = ratePercentValue(settings.tax_rate);
   const [einvoice, setEinvoice] = useState(settings.einvoice_enabled);
-  const [mode, setMode] = useState<StoreCreditInvoiceMode>(settings.store_credit_invoice_mode);
   const [tax, setTax] = useState(initialTax);
   const dirty =
-    einvoice !== settings.einvoice_enabled ||
-    mode !== settings.store_credit_invoice_mode ||
-    tax.trim() !== initialTax;
+    einvoice !== settings.einvoice_enabled || tax.trim() !== initialTax;
 
   function build(): BuildResult {
     const taxRate = parseRateInput(tax);
     if (taxRate === null) return { error: "稅率請輸入有效百分比數字" };
     const body: SettingsPatch = {};
     if (einvoice !== settings.einvoice_enabled) body.einvoice_enabled = einvoice;
-    if (mode !== settings.store_credit_invoice_mode) body.store_credit_invoice_mode = mode;
     // 以數值比較：後端回 "0.0500"，畫面組回來可能是 "0.0500" 或 "0.05"，字串不等但值相同。
     if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
     return { body };
@@ -234,38 +229,10 @@ export function InvoiceTaxForm({
         checked={einvoice}
         onChange={setEinvoice}
       />
-      <fieldset className="settings-choice">
-        <legend className="field-label">購物金＋其他付款時，發票怎麼開</legend>
-        <label className={`settings-choice-option ${mode === "DEDUCT" ? "is-on" : ""}`}>
-          <input
-            type="radio"
-            name="store_credit_invoice_mode"
-            value="DEDUCT"
-            checked={mode === "DEDUCT"}
-            onChange={() => setMode("DEDUCT")}
-          />
-          <span>
-            <span className="settings-switch-title">扣掉購物金後開發票</span>
-            <span className="hint">品項金額照比例扣。例：$1,000 用購物金 $300 → 發票開 $700。</span>
-          </span>
-        </label>
-        <label className={`settings-choice-option ${mode === "ALLOWANCE" ? "is-on" : ""}`}>
-          <input
-            type="radio"
-            name="store_credit_invoice_mode"
-            value="ALLOWANCE"
-            checked={mode === "ALLOWANCE"}
-            onChange={() => setMode("ALLOWANCE")}
-          />
-          <span>
-            <span className="settings-switch-title">整筆開發票，再自動開購物金折讓</span>
-            <span className="hint">
-              例：$1,000 用購物金 $300 → 發票開 $1,000，平台開好後自動折讓 $300。
-            </span>
-          </span>
-        </label>
-        <span className="hint">只影響之後的交易，已開的發票照原本的方式處理。</span>
-      </fieldset>
+      <p className="hint">
+        購物金＋其他付款時，發票扣掉購物金後開，品項金額照比例扣。例：$1,000 用購物金 $300 →
+        發票開 $700。
+      </p>
       <NumberField
         name="tax_rate"
         label="營業稅率"

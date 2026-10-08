@@ -169,20 +169,15 @@ async def test_acquisition_label_auto_print_defaults_on_and_can_be_turned_off(
     assert again.json()["auto_print_acquisition_labels"] is False
 
 
-async def test_store_credit_invoice_mode_defaults_to_deduct_and_can_switch(
+async def test_store_credit_invoice_mode_is_no_longer_a_setting(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """混合付款的發票：預設扣掉購物金後開；可切成整筆開＋購物金折讓（店主 2026-10-08）。"""
+    """混合付款一律扣掉購物金後開發票，不再能切換（店主 2026-10-08 統一）；舊前端送來也無作用。"""
     token = await _seed_user(db_session, UserRole.MANAGER)
     got = await client.get("/api/v1/settings", headers=_auth(token))
-    assert got.json()["store_credit_invoice_mode"] == "DEDUCT"
+    assert "store_credit_invoice_mode" not in got.json()
     resp = await client.patch(
         "/api/v1/settings", json={"store_credit_invoice_mode": "ALLOWANCE"}, headers=_auth(token)
     )
     assert resp.status_code == 200, resp.text
-    again = await client.get("/api/v1/settings", headers=_auth(token))
-    assert again.json()["store_credit_invoice_mode"] == "ALLOWANCE"
-    bad = await client.patch(
-        "/api/v1/settings", json={"store_credit_invoice_mode": "NOPE"}, headers=_auth(token)
-    )
-    assert bad.status_code == 422
+    assert "store_credit_invoice_mode" not in resp.json()

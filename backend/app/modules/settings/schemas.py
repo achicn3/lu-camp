@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from app.core.money import format_ntd, format_rate
 from app.modules.settings.defaults import MAX_DINE_IN_TABLE_LENGTH, MAX_DINE_IN_TABLES
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
-from app.shared.enums import StoreCreditInvoiceMode
 
 RateOut = Annotated[Decimal, PlainSerializer(format_rate, return_type=str)]
 RateOutOpt = Annotated[
@@ -58,7 +57,6 @@ class SettingsRead(BaseModel):
     dine_in_tables: list[str]
     print_kitchen_ticket: bool
     auto_print_acquisition_labels: bool
-    store_credit_invoice_mode: StoreCreditInvoiceMode
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -109,8 +107,6 @@ class SettingsUpdateRequest(BaseModel):
     dine_in_tables: list[str] | None = None
     print_kitchen_ticket: bool | None = None
     auto_print_acquisition_labels: bool | None = None
-    # 混合付款的發票：DEDUCT 扣掉購物金後開／ALLOWANCE 整筆開＋購物金折讓（店主 2026-10-08）。
-    store_credit_invoice_mode: StoreCreditInvoiceMode | None = None
 
     @field_validator("dine_in_tables")
     @classmethod

@@ -65,12 +65,19 @@ try {
   const top = await page.locator("#settings-store-credit").evaluate((el) => el.getBoundingClientRect().top);
   ok("點目錄跳到該區（標題沒被頂欄蓋住）", top >= 56 && top < 200, `top=${Math.round(top)}`);
 
-  // 混合付款發票方式：切成折讓模式、存、重新整理仍是折讓；最後還原。
+  // 混合付款一律扣掉購物金後開發票（店主 2026-10-08 統一）：只有說明、沒有切換。
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
   const invoiceForm = page.getByRole("form", { name: "電子發票" });
-  const deduct = invoiceForm.getByLabel(/扣掉購物金後開發票/);
-  ok("預設（或目前）方式有被選上", (await deduct.isChecked()) === (original.store_credit_invoice_mode !== "ALLOWANCE"));
-  await invoiceForm.getByLabel(/整筆開發票，再自動開購物金折讓/).check();
+  ok(
+    "發票區寫明購物金扣掉後開、沒有切換選項",
+    (await invoiceForm.getByText(/購物金＋其他付款時，發票扣掉購物金後開/).count()) === 1 &&
+      (await invoiceForm.locator('input[name="store_credit_invoice_mode"]').count()) === 0,
+  );
+  // 未存提示／離開確認：改「開電子發票」開關來測，存好後重新整理確認，最後還原。
+  const einvoice = invoiceForm.getByLabel(/開電子發票/);
+  const wasOn = await einvoice.isChecked();
+  // 開關的 checkbox 被樣式軌道蓋住，像人一樣點整個標籤
+  await invoiceForm.locator("label.settings-switch", { hasText: "開電子發票" }).click();
   ok("改了就顯示「有未儲存的變更」", await invoiceForm.getByText("有未儲存的變更").isVisible());
   // 卡片回報「未儲存」給整頁是下一個 render，等一下再數
   await nav.locator(".settings-nav-dot").first().waitFor({ timeout: 5000 }).catch(() => {});
@@ -93,11 +100,8 @@ try {
   ok("存好後提示消失", (await invoiceForm.getByText("有未儲存的變更").count()) === 0);
   await page.reload({ waitUntil: "networkidle" });
   const reloaded = page.getByRole("form", { name: "電子發票" });
-  ok(
-    "重新整理後仍是「整筆開＋購物金折讓」",
-    await reloaded.getByLabel(/整筆開發票，再自動開購物金折讓/).isChecked(),
-  );
-  ok("後端也存成 ALLOWANCE", (await settings(token)).store_credit_invoice_mode === "ALLOWANCE");
+  ok("重新整理後是剛存的值", (await reloaded.getByLabel(/開電子發票/).isChecked()) === !wasOn);
+  ok("後端也存好了", (await settings(token)).einvoice_enabled === !wasOn);
 
   // 手機：整頁不橫向捲動、目錄在頂端可橫滑
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -127,7 +131,7 @@ try {
   ok("煙霧流程例外", false, String(err));
 } finally {
   // 還原店家原本的設定（煙霧不可留下改過的設定）
-  await settings(token, { store_credit_invoice_mode: original.store_credit_invoice_mode });
+  await settings(token, { einvoice_enabled: original.einvoice_enabled });
   await browser.close();
 }
 

@@ -13,7 +13,7 @@ from decimal import Decimal
 from itertools import count
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.contacts.models import Contact
@@ -23,11 +23,9 @@ from app.modules.inventory.models import CatalogProduct
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
-from app.modules.settings.models import StoreSettings
 from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     EInvoiceAction,
-    InvoiceAllowanceSource,
     InvoiceStatus,
     SaleInvoiceStatus,
     SaleLineType,
@@ -279,40 +277,13 @@ async def test_same_month_full_return_still_voids_the_invoice(db_session: AsyncS
     assert await _sale_status(db_session, store_id, sale_id) is SaleInvoiceStatus.PENDING_VOID
 
 
-# ── 兩種模式切換（設定）──────────────────────────────────────────────
-
-
-async def _set_mode(session: AsyncSession, store_id: int, mode: StoreCreditInvoiceMode) -> None:
-    await session.execute(
-        update(StoreSettings)
-        .where(StoreSettings.store_id == store_id)
-        .values(store_credit_invoice_mode=mode)
-    )
+# ── 結帳記下的開票方式 ──────────────────────────────────────────────
 
 
 async def test_invoice_records_the_mode_used_at_checkout(db_session: AsyncSession) -> None:
     _store_id, _clerk, sale_id = await _mixed_sale(db_session)
     invoice = await _invoice(db_session, sale_id)
     assert invoice.store_credit_mode is StoreCreditInvoiceMode.DEDUCT
-
-
-async def test_switching_mode_later_does_not_change_an_existing_invoice(
-    db_session: AsyncSession,
-) -> None:
-    """結帳時是「扣掉購物金」：之後改成折讓模式，這張發票開立時也不會補開購物金折讓。"""
-    store_id, _clerk, sale_id = await _mixed_sale(db_session)
-    await _set_mode(db_session, store_id, StoreCreditInvoiceMode.ALLOWANCE)
-    await _issue(db_session, store_id)
-
-    invoice = await _invoice(db_session, sale_id)
-    assert invoice.total == Decimal(700)
-    rows = await db_session.scalars(
-        select(InvoiceAllowance).where(
-            InvoiceAllowance.invoice_id == invoice.id,
-            InvoiceAllowance.source == InvoiceAllowanceSource.STORE_CREDIT,
-        )
-    )
-    assert list(rows.all()) == []
 
 
 async def test_cash_only_sale_has_no_store_credit_mode(db_session: AsyncSession) -> None:

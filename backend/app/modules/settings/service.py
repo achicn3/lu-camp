@@ -33,7 +33,6 @@ from app.modules.settings.defaults import (
     DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE,
     DEFAULT_SIGNATURE_PNG_RETENTION_DAYS,
     DEFAULT_STORE_CREDIT_ENGINE_PARAMS,
-    DEFAULT_STORE_CREDIT_INVOICE_MODE,
     DEFAULT_STORE_CREDIT_MIN_SPEND,
     DEFAULT_TAX_RATE,
 )
@@ -81,7 +80,6 @@ def _new_settings(store_id: int) -> StoreSettings:
         dine_in_tables=list(DEFAULT_DINE_IN_TABLES),
         print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
         auto_print_acquisition_labels=DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
-        store_credit_invoice_mode=DEFAULT_STORE_CREDIT_INVOICE_MODE,
     )
 
 

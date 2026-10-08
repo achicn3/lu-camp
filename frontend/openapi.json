@@ -16902,9 +16902,6 @@
             "title": "Store Credit Engine Params",
             "type": "object"
           },
-          "store_credit_invoice_mode": {
-            "$ref": "#/components/schemas/StoreCreditInvoiceMode"
-          },
           "store_credit_min_spend": {
             "title": "Store Credit Min Spend",
             "type": "string"
@@ -16948,8 +16945,7 @@
           "backup_offpeak_hour",
           "dine_in_tables",
           "print_kitchen_ticket",
-          "auto_print_acquisition_labels",
-          "store_credit_invoice_mode"
+          "auto_print_acquisition_labels"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -17259,16 +17255,6 @@
               }
             ],
             "title": "Store Credit Engine Params"
-          },
-          "store_credit_invoice_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StoreCreditInvoiceMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "store_credit_min_spend": {
             "anyOf": [
@@ -18448,15 +18434,6 @@
           "ADJUSTMENT"
         ],
         "title": "StoreCreditEntryType",
-        "type": "string"
-      },
-      "StoreCreditInvoiceMode": {
-        "description": "混合付款（購物金＋其他）的發票怎麼開（settings.store_credit_invoice_mode；店主 2026-10-08）。\n\nDEDUCT＝扣掉購物金後開發票，品項金額依比例扣（預設）；ALLOWANCE＝照整筆開發票，平台\n確認開立後自動對購物金開折讓（ADR-029）。結帳當下的模式記在 invoices.store_credit_mode，\n之後改設定不影響既有發票。",
-        "enum": [
-          "DEDUCT",
-          "ALLOWANCE"
-        ],
-        "title": "StoreCreditInvoiceMode",
         "type": "string"
       },
       "StoreCreditSourceType": {

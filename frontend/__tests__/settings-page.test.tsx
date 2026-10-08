@@ -42,7 +42,6 @@ const SETTINGS = {
   print_kitchen_ticket: true,
   auto_print_acquisition_labels: true,
   require_acquisition_affidavit: false,
-  store_credit_invoice_mode: "DEDUCT",
 };
 
 const SUGGESTION = {
@@ -335,26 +334,18 @@ describe("/settings", () => {
     expect(JSON.parse(bodies[0])).toEqual({ auto_print_acquisition_labels: false });
   });
 
-  it("混合付款的發票方式可切成「整筆開＋購物金折讓」，只送這一欄", async () => {
+  it("混合付款一律扣掉購物金後開發票：只有說明、沒有切換（店主 2026-10-08 統一）", async () => {
     loginAs("MANAGER");
-    const bodies: string[] = [];
-    stubFetch((url, init) => {
+    stubFetch((url) => {
       if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
       if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
-      if (url.includes("/settings") && init?.method === "PATCH") {
-        bodies.push(String(init.body));
-        return json({ ...SETTINGS, store_credit_invoice_mode: "ALLOWANCE" });
-      }
       if (url.includes("/settings")) return json(SETTINGS);
       return null;
     });
     renderPage();
-    const deduct = (await screen.findByLabelText(/扣掉購物金後開發票/)) as HTMLInputElement;
-    expect(deduct.checked).toBe(true);
-    await userEvent.click(screen.getByLabelText(/整筆開發票，再自動開購物金折讓/));
-    await userEvent.click(screen.getByRole("button", { name: "儲存發票設定" }));
-    await waitFor(() => expect(bodies).toHaveLength(1));
-    expect(JSON.parse(bodies[0])).toEqual({ store_credit_invoice_mode: "ALLOWANCE" });
+    expect(await screen.findByText(/購物金＋其他付款時，發票扣掉購物金後開/)).toBeTruthy();
+    expect(screen.queryByLabelText(/整筆開發票，再自動開購物金折讓/)).toBeNull();
+    expect(document.querySelector('input[name="store_credit_invoice_mode"]')).toBeNull();
   });
 
   it("可打開「收購一定要客人簽名」，只送這一欄", async () => {

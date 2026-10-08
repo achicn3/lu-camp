@@ -41,7 +41,6 @@ from app.shared.enums import (
     OwnershipType,
     SaleInvoiceStatus,
     SaleLineType,
-    StoreCreditInvoiceMode,
     TenderType,
     UploadStatus,
     UserRole,
@@ -58,6 +57,7 @@ from tests.integration.customer_display_helpers import (
     prepare_signed_store_credit_cart,
     signed_return_consent,
 )
+from tests.integration.legacy_store_credit_helpers import mark_legacy_allowance_invoice
 
 # f0401 成功回應樣板（doc 回應欄位；invoice_time 為 Unix 秒）。
 _F0401_OK = {
@@ -512,7 +512,7 @@ async def test_mixed_refund_allowance_excludes_store_credit_already_allowanced(
     await db_session.execute(
         update(StoreSettings)
         .where(StoreSettings.store_id == store_id)
-        .values(linepay_enabled=True, store_credit_invoice_mode=StoreCreditInvoiceMode.ALLOWANCE)
+        .values(linepay_enabled=True)
     )
     member = Contact(store_id=store_id, name="混合付款會員", roles=["MEMBER"])
     product = CatalogProduct(
@@ -582,6 +582,8 @@ async def test_mixed_refund_allowance_excludes_store_credit_already_allowanced(
         cart_revision=signed.cart_revision,
         linepay_client=line_client,
     )
+    # 模擬舊模式（整筆開＋購物金折讓）時期開出的發票：新單一律扣掉購物金後開。
+    await mark_legacy_allowance_invoice(db_session, sale.id)
     einvoice = EInvoiceService(db_session)
     await einvoice.send_via_amego(
         store_id,
