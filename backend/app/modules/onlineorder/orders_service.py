@@ -298,6 +298,10 @@ class OnlineOrdersService:
             # 可能已扣款的商品不能釋放給下一位客人；明確未付款後才恢復到期處理。
             if await self._payment_pending(store_id, order.id):
                 continue
+            # 客人已在線上用 LINE Pay 付清（POS 頁面還沒開來成立銷售）：份數要留給他
+            # （Codex O5 第三輪）。
+            if order.linepay_transaction_id is not None:
+                continue
             reservation = await self._repo.reservation(store_id, order.id, for_update=True)
             if (
                 reservation is None

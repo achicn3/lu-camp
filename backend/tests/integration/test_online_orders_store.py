@@ -1318,3 +1318,27 @@ async def test_cancelling_linepay_order_asks_the_cloud_first(
         (_rid(75), {"sync_status": "VOIDED", "payment_status": "CANCELLED"})
     ]
     assert (await _order_row(db_session, _rid(75))).sync_status == "VOIDED"
+
+
+async def test_paid_linepay_order_keeps_its_reservation_past_expiry(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """客人付了錢、POS 頁面沒開：保留到期也不能放掉。
+
+    否則份數被別人買走，付了錢卻拿不到（Codex O5 第三輪）。
+    """
+    raw = {
+        **_order(_rid(76), [_line(1, ctx.cake, "戚風", 90, limited=True)]),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+        "hold_status": "HOLD_REQUESTED",
+    }
+    await _pull_raw(db_session, ctx, raw)
+    assert await _cake_left(db_session, ctx) == 2
+    paid = {**_paid(_rid(76), [_line(1, ctx.cake, "戚風", 90, limited=True)])}
+    await _pull_raw(db_session, ctx, paid)
+    expired = await _svc(db_session, ctx).expire_reservations(
+        ctx.store_id, now=utc_now() + timedelta(hours=1)
+    )
+    assert expired == 0
+    assert await _cake_left(db_session, ctx) == 2
