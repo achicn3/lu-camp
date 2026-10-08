@@ -428,7 +428,7 @@ function paymentChoice(): {
   const listeners: (() => void)[] = [];
   const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
   const extra = el("div", "invoice-fields");
-  const kind = el("select") as HTMLSelectElement; kind.id = "invoice-kind";
+  const kind = el("select") as HTMLSelectElement; kind.id = "invoice-kind"; kind.setAttribute("aria-label", "發票");
   for (const [value, label] of [["paper", "紙本（到櫃檯拿）"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
     const option = el("option", "", label) as HTMLOptionElement; option.value = value!; kind.append(option);
   }
@@ -439,8 +439,8 @@ function paymentChoice(): {
     code.inputMode = kind.value === "tax" ? "numeric" : "text";
     code.setAttribute("aria-label", kind.value === "carrier" ? "手機條碼" : "統一編號");
   });
-  const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind, code);
-  extra.append(kindLabel);
+  const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind);
+  extra.append(kindLabel, code);
   for (const [value, label, hint] of [["CASH", "現金", "到櫃台付款後才會製作"], ["LINE_PAY", "LINE Pay", "現在付，付好就開始製作"]] as const) {
     const option = el("label", "pay-option");
     const radio = el("input") as HTMLInputElement; radio.type = "radio"; radio.name = "pay-method"; radio.value = value;

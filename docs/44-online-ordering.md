@@ -298,8 +298,23 @@ LINE Pay Online API v4（2026-10-01 查官方文件：`POST /v4/payments/request
   每筆最多每 30 秒查一次。
 - 拉單時已付款的 LINE Pay 單帶 `payment`（`transaction_id` 字串、金額）與 `invoice`，給 O5b 自動成立銷售。
 
-**O5b 店內自動成立銷售**（下一波）：以客人已付金額成交（POS 菜單價不同只標註）、tender＝LINE_PAY 線上
-（帶 transactionId，不再扣款）、依載具／統編開發票、POS 自動列印、作廢／退貨走 LINE Pay 線上退款、回報 REFUNDED。
+**O5b 店內成立銷售**
+- **由開著的 POS 頁面成立**（不是背景工作自己成立）：拉單時記下雲端回報的付款（LINE Pay 訂單號＋交易號）；POS 頁面
+  看到「已付款、還沒成立」的單就呼叫 `POST /online-orders/:id/settle-paid`（記在當時登入的店員名下），成立後響一聲、
+  出餐單、開發票（有手機條碼／統編就帶；店家沒開電子發票就不帶）、沒載具印證明聯，結果列在 POS 上方提示（超過 3 分鐘
+  的單會寫「這是 N 分鐘前下的單」）。POS 沒開時付款的單，打開 POS 就補成立、補印。
+- 一律**原價、不套門市活動**（每個生效活動記一筆「線上訂單一律原價」的不套用）；POS 現在算的金額和客人付的不同，
+  或成立時出錯（例如櫃檯剛把最後一件賣掉），**不成立**、原因記在單上（`attention`），清單標「LINE Pay 已付款・需要處理」。
+- 收款記成 LINE_PAY tender＋`linepay_transactions(channel=ONLINE)`，**不呼叫 LINE Pay**；作廢／退貨照一般 LINE Pay
+  退款流程，因 channel=ONLINE 改走 `POST /v4/payments/{transactionId}/refund`（durable 退款日誌照用）。
+- **客人選 LINE Pay、還沒付清的單不能「帶入結帳」收現金**（客人那邊同時付成功就會收兩次錢）；客人想改付現金，店員
+  先取消這張（雲端就不會再請款）再在 POS 重新點。這類單不算待處理、不響。
+- 線上 LINE Pay 單的限量保留 10 分鐘（現金單 30 分鐘），到期雲端就不請款。
+- **尚未做**：作廢／退貨後回報雲端 REFUNDED（客人頁仍顯示已付款）。
+
+**驗證**：Worker 202 測試（含假 LINE Pay 的請款／補查／取消／保留過期）、後端線上單與 LINE Pay 相關 455 測試、
+`online-linepay-smoke.mjs` 11/11（假 LINE Pay 伺服器：付款→導回已付款→POS 自動成立並提示→作廢以交易號退款；取消→
+客人頁沒扣款、POS 等待付款不能收現）。**真沙盒驗收**要店主用手機 LINE 掃碼走一次（§4.4.1）。
 
 ### 4.5 一致性（全部要有測試）
 
