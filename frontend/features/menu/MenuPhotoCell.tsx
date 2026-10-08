@@ -1,5 +1,6 @@
 "use client";
 // 菜單品項的照片欄（docs/44 §3.4；O1d）：縮圖＋上傳／換照片＋移除。
+// 線上帶回家商品（docs/63 §13）用同一個元件，`target="retail"` 時改打它的照片端點。
 // 轉檔（WebP、縮圖、去掉 GPS）全在後端做；這裡只先擋超過 10 MB 的檔，省得白傳。
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
@@ -18,9 +19,11 @@ function extractDetail(error: unknown): string | null {
 export function MenuPhotoCell({
   item,
   onChanged,
+  target = "menu-item",
 }: {
   item: { id: number; name: string; photo_sha256?: string | null };
   onChanged: () => void;
+  target?: "menu-item" | "retail";
 }) {
   const inputId = useId();
   const [error, setError] = useState<string | null>(null);
@@ -28,16 +31,25 @@ export function MenuPhotoCell({
 
   const upload = useMutation({
     mutationFn: async (file: File) => {
-      const { data, error: err } = await api.POST("/api/v1/menu-items/{item_id}/photo", {
-        params: { path: { item_id: item.id } },
-        // 型別上 file 是 string（OpenAPI 的 binary）；實際送 multipart，由 bodySerializer 組 FormData。
+      // 型別上 file 是 string（OpenAPI 的 binary）；實際送 multipart，由 bodySerializer 組 FormData。
+      const multipart = {
         body: { file: "" },
         bodySerializer: () => {
           const form = new FormData();
           form.append("file", file, file.name);
           return form;
         },
-      });
+      };
+      const { data, error: err } =
+        target === "retail"
+          ? await api.POST("/api/v1/online-order/retail/{listing_id}/photo", {
+              params: { path: { listing_id: item.id } },
+              ...multipart,
+            })
+          : await api.POST("/api/v1/menu-items/{item_id}/photo", {
+              params: { path: { item_id: item.id } },
+              ...multipart,
+            });
       if (!data) throw new Error(extractDetail(err) ?? "上傳照片失敗");
       return data;
     },
@@ -50,9 +62,14 @@ export function MenuPhotoCell({
 
   const remove = useMutation({
     mutationFn: async () => {
-      const { data, error: err } = await api.DELETE("/api/v1/menu-items/{item_id}/photo", {
-        params: { path: { item_id: item.id } },
-      });
+      const { data, error: err } =
+        target === "retail"
+          ? await api.DELETE("/api/v1/online-order/retail/{listing_id}/photo", {
+              params: { path: { listing_id: item.id } },
+            })
+          : await api.DELETE("/api/v1/menu-items/{item_id}/photo", {
+              params: { path: { item_id: item.id } },
+            });
       if (!data) throw new Error(extractDetail(err) ?? "移除照片失敗");
       return data;
     },

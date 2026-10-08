@@ -6571,3 +6571,14 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   font-size: var(--text-sm);
   min-height: 40px;
 }
+
+/* 帶回家商品（docs/63 §13）：挑商品的選項卡與固定商品資訊。 */
+.retail-pick { display: grid; gap: var(--sp-2); }
+.retail-pick-option {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--sp-3); align-items: start;
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
+}
+.retail-pick-option > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.retail-pick-option.is-on { border-color: var(--accent); background: #f0f5ef; }
+.retail-pick-option input { margin: 3px 0 0; width: 18px; height: 18px; accent-color: var(--accent); }
+.retail-fixed { display: flex; flex-direction: column; gap: 4px; margin: 0; }

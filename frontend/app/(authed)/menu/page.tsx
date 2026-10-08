@@ -14,6 +14,7 @@ import { MenuOrderingSection } from "@/features/menu/MenuOrderingSection";
 import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
 import { ExperienceSection } from "@/features/menu/ExperienceSection";
+import { RetailSection } from "@/features/menu/RetailSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { api } from "@/lib/api";
@@ -745,6 +746,7 @@ function MenuPageContent() {
       >
         <OnlinePublishPanel />
         <ExperienceSection />
+        <RetailSection />
       </div>
     </section>
   );
