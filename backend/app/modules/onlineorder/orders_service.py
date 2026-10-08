@@ -215,13 +215,16 @@ class OnlineOrdersService:
             await self._repo.flush()
             report: dict[str, str] = {"sync_status": OnlineOrderSync.IMPORTED}
             if raw.get("hold_status") == _HOLD_REQUESTED:
-                await self._reserve(store_id, order)
+                expires_at = await self._reserve(store_id, order)
                 report["hold_status"] = order.hold_status
+                if expires_at is not None:
+                    # 雲端在到期前就不再請款，不靠之後的到期回報準時送達（Codex O5 第一輪）。
+                    report["hold_expires_at"] = expires_at.isoformat()
             self._enqueue(order, report)
             await self._repo.flush()
         return order
 
-    async def _reserve(self, store_id: int, order: OnlineOrder) -> None:
+    async def _reserve(self, store_id: int, order: OnlineOrder) -> datetime | None:
         """在同一交易內扣每日限量份數（保留）；任何一行不夠就整張不扣、標 REJECTED。"""
         consumed: list[dict[str, Any]] = []
         try:
@@ -256,17 +259,19 @@ class OnlineOrdersService:
         ) as exc:
             order.hold_status = OnlineOrderHold.REJECTED
             order.reject_reason = str(exc)[:300]
-            return
+            return None
         order.hold_status = OnlineOrderHold.HELD
+        expires_at = utc_now() + _reservation_ttl(order)
         self._repo.add(
             StockReservation(
                 store_id=store_id,
                 online_order_id=order.id,
                 consumed=consumed,
                 status=StockReservationStatus.ACTIVE,
-                expires_at=utc_now() + _reservation_ttl(order),
+                expires_at=expires_at,
             )
         )
+        return expires_at
 
     async def _release(
         self, store_id: int, reservation: StockReservation, status: StockReservationStatus
@@ -490,6 +495,14 @@ class OnlineOrdersService:
             raise OnlineOrderConflict(
                 "此線上單正在付款或付款結果待確認，不能取消；請先完成付款對帳"
             )
+        payload: dict[str, str] = {
+            "sync_status": OnlineOrderSync.VOIDED,
+            "payment_status": OnlineOrderPayment.CANCELLED,
+        }
+        if order.payment_method == _LINE_PAY:
+            # 客人可能正在手機上付：先請雲端取消（雲端說已在請款／已付款就擋），成功才在店內取消。
+            # 先在店內取消、雲端晚幾秒才知道，客人剛好付成功就收了錢卻沒有銷售（Codex O5 第一輪）。
+            await self._cancel_in_cloud(store_id, order, payload)
         reservation = await self._repo.reservation(store_id, order.id, for_update=True)
         if reservation is not None and reservation.status == StockReservationStatus.ACTIVE:
             await self._release(store_id, reservation, StockReservationStatus.RELEASED)
@@ -497,10 +510,8 @@ class OnlineOrdersService:
         order.payment_status = OnlineOrderPayment.CANCELLED
         order.cancelled_at = utc_now()
         order.cancelled_by = actor_user_id
-        self._enqueue(
-            order,
-            {"sync_status": OnlineOrderSync.VOIDED, "payment_status": OnlineOrderPayment.CANCELLED},
-        )
+        if order.payment_method != _LINE_PAY:
+            self._enqueue(order, payload)
         await self._repo.flush()
         return order
 
@@ -651,6 +662,23 @@ class OnlineOrdersService:
         order.attention = None
         await self._repo.flush()
         return SettleResult(sale_id=sale.id, attention=None)
+
+    async def _cancel_in_cloud(
+        self, store_id: int, order: OnlineOrder, payload: dict[str, str]
+    ) -> None:
+        client = self._require_client(store_id)
+        try:
+            code, error = await client.report_status(order.remote_id, payload)
+        except OnlineOrderPushFailed as exc:
+            raise OnlineOrderConflict(
+                "連不上線上點餐雲端，LINE Pay 的單暫時不能取消，請稍後再試"
+            ) from exc
+        if code == 409 and error == "invalid_transition":
+            raise OnlineOrderConflict(
+                "客人正在用 LINE Pay 付款或已經付好了，不能取消；付好會自動成立，請稍候"
+            )
+        if code >= 300:
+            raise OnlineOrderConflict(f"線上點餐雲端沒有接受取消（{code} {error}），請稍後再試")
 
     async def hand_over(self, store_id: int, order_id: int, *, actor_user_id: int) -> OnlineOrder:
         """店員把帶回家商品交給客人：結單、寫稽核、回報雲端（客人頁顯示已領取）。重按＝不動。"""

@@ -9,6 +9,8 @@ import { checkPayment, confirmPayment, type LinePayConfig, linePayConfig, reques
 
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const RECHECK_MS = 30_000;
+// 保留到期前多久就不再開始付款／請款：POS 在到期時才放掉份數，兩邊時鐘差一點也不會撞。
+const HOLD_MARGIN_MS = 60_000;
 const RECONCILE_BATCH = 5;
 
 interface PaymentRow {
@@ -20,12 +22,14 @@ interface PaymentRow {
   sync_status: string;
   linepay_attempt: number;
   linepay_transaction_id: string | null;
+  linepay_payment_url: string | null;
+  hold_expires_at: number | null;
   needs_hold: number;
 }
 
 const SELECT_PAYMENT =
   "SELECT id, total, payment_method, payment_status, hold_status, sync_status, linepay_attempt, " +
-  "linepay_transaction_id, EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = orders.id AND l.limited = 1) " +
+  "linepay_transaction_id, linepay_payment_url, hold_expires_at, EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = orders.id AND l.limited = 1) " +
   "AS needs_hold FROM orders";
 
 async function byToken(env: Env, storeId: number, token: string): Promise<PaymentRow | null> {
@@ -34,12 +38,19 @@ async function byToken(env: Env, storeId: number, token: string): Promise<Paymen
   return env.DB.prepare(`${SELECT_PAYMENT} WHERE store_id = ? AND token_hash = ?`).bind(storeId, hash).first<PaymentRow>();
 }
 
-/** 有限量品項的單：POS 保留成功（HELD）才能付；被拒、過期、取消都不行。 */
-function holdProblem(row: PaymentRow): string | null {
+/** 有限量品項的單：POS 保留成功（HELD）且離到期還有 1 分鐘以上才能付；被拒、過期、取消都不行。 */
+function holdProblem(row: PaymentRow, now = Date.now()): string | null {
   if (row.sync_status === "VOIDED") return "order_cancelled";
-  if (row.needs_hold === 1 && row.hold_status !== "HELD") return row.hold_status === "HOLD_REQUESTED" ? "hold_pending" : "hold_expired";
+  if (row.needs_hold !== 1) return null;
+  if (row.hold_status !== "HELD") return row.hold_status === "HOLD_REQUESTED" ? "hold_pending" : "hold_expired";
+  if (row.hold_expires_at !== null && row.hold_expires_at - HOLD_MARGIN_MS <= now) return "hold_expired";
   return null;
 }
+
+/** 請款前最後一次檢查保留（與改成 CONFIRMING 同一句 SQL，POS 的到期回報插不進來）。 */
+const HOLD_STILL_VALID =
+  "(NOT EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = orders.id AND l.limited = 1) OR " +
+  "(hold_status = 'HELD' AND sync_status != 'VOIDED' AND (hold_expires_at IS NULL OR hold_expires_at > ?)))";
 
 async function record(env: Env, storeId: number, id: string, from: string, to: string, now: number): Promise<void> {
   await env.DB.prepare(
@@ -50,12 +61,14 @@ async function record(env: Env, storeId: number, id: string, from: string, to: s
 /** 條件更新付款狀態；回傳是否真的改到（別的請求先改了就是 false）。 */
 async function move(
   env: Env, storeId: number, row: PaymentRow, from: string[], to: string, extra: Record<string, unknown> = {}, now = Date.now(),
+  guard: { sql: string; binds: unknown[] } | null = null,
 ): Promise<boolean> {
   const sets = Object.keys(extra).map((k) => `${k} = ?`);
   const result = await env.DB.prepare(
     `UPDATE orders SET payment_status = ?, updated_at = ?, row_version = row_version + 1${sets.map((s) => `, ${s}`).join("")} ` +
-      `WHERE store_id = ? AND id = ? AND payment_status IN (${from.map(() => "?").join(",")})`,
-  ).bind(to, now, ...Object.values(extra), storeId, row.id, ...from).run();
+      `WHERE store_id = ? AND id = ? AND payment_status IN (${from.map(() => "?").join(",")})` +
+      (guard ? ` AND ${guard.sql}` : ""),
+  ).bind(to, now, ...Object.values(extra), storeId, row.id, ...from, ...(guard?.binds ?? [])).run();
   if (result.meta.changes !== 1) return false;
   if (!from.includes(to) || from.length > 1) await record(env, storeId, row.id, row.payment_status, to, now);
   return true;
@@ -71,8 +84,15 @@ export async function startLinePay(req: Request, env: Env, storeId: number, toke
   if (!["UNPAID", "PENDING"].includes(row.payment_status)) return error("payment_in_progress", 409);
   const problem = holdProblem(row);
   if (problem !== null) return error(problem, 409);
+  // 付款中再按一次（或開了兩個分頁）：沿用原連結，不另開交易——另開的話，前一筆若剛好授權請款，
+  // 交易號會被新的蓋掉，店內記錯交易、之後退不了款（Codex O5 第一輪）。
+  if (row.payment_status === "PENDING" && row.linepay_payment_url !== null) {
+    return json({ payment_url: row.linepay_payment_url });
+  }
   const attempt = row.linepay_attempt + 1;
-  if (!(await move(env, storeId, row, ["UNPAID", "PENDING"], "PENDING", { linepay_attempt: attempt, linepay_result: null }))) {
+  if (!(await move(env, storeId, row, ["UNPAID"], "PENDING", {
+    linepay_attempt: attempt, linepay_result: null, linepay_transaction_id: null, linepay_payment_url: null,
+  }))) {
     return error("payment_in_progress", 409);
   }
   const origin = new URL(req.url).origin;
@@ -88,9 +108,11 @@ export async function startLinePay(req: Request, env: Env, storeId: number, toke
     await move(env, storeId, { ...row, payment_status: "PENDING" }, ["PENDING"], "UNPAID", { linepay_result: "FAILED" });
     return error("linepay_request_failed", 502);
   }
+  // 只寫進「還是這一次、還在付款中、還沒有交易號」的單：晚到的舊回應不能改到新的付款。
   await env.DB.prepare(
     "UPDATE orders SET linepay_transaction_id = ?, linepay_payment_url = ?, linepay_checked_at = NULL " +
-      "WHERE store_id = ? AND id = ? AND linepay_attempt = ?",
+      "WHERE store_id = ? AND id = ? AND linepay_attempt = ? AND payment_status = 'PENDING' " +
+      "AND linepay_transaction_id IS NULL",
   ).bind(reply.transactionId, reply.paymentUrl, storeId, row.id, attempt).run();
   return json({ payment_url: reply.paymentUrl });
 }
@@ -103,7 +125,19 @@ async function capture(env: Env, storeId: number, config: LinePayConfig, row: Pa
     await move(env, storeId, row, ["PENDING"], "UNPAID", { linepay_result: "EXPIRED" });
     return "EXPIRED";
   }
-  if (!(await move(env, storeId, row, ["PENDING"], "CONFIRMING", { linepay_checked_at: Date.now() }))) return "CONFIRMING";
+  const now = Date.now();
+  const claimed = await move(env, storeId, row, ["PENDING"], "CONFIRMING", { linepay_checked_at: now }, now, {
+    sql: HOLD_STILL_VALID, binds: [now + HOLD_MARGIN_MS],
+  });
+  if (!claimed) {
+    // 沒搶到：可能別的請求正在請款，也可能保留剛好在這一刻到期——重讀判斷。
+    const fresh = await env.DB.prepare(`${SELECT_PAYMENT} WHERE store_id = ? AND id = ?`).bind(storeId, row.id).first<PaymentRow>();
+    if (fresh !== null && fresh.payment_status === "PENDING" && holdProblem(fresh) !== null) {
+      await move(env, storeId, fresh, ["PENDING"], "UNPAID", { linepay_result: "EXPIRED" });
+      return "EXPIRED";
+    }
+    return "CONFIRMING";
+  }
   const confirming = { ...row, payment_status: "CONFIRMING" };
   const reply = await confirmPayment(config, tx, row.total);
   if (reply.code === "0000") {

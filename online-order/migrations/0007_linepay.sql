@@ -8,4 +8,6 @@ ALTER TABLE orders ADD COLUMN linepay_transaction_id TEXT;   -- 19 位數字，�
 ALTER TABLE orders ADD COLUMN linepay_payment_url TEXT;
 ALTER TABLE orders ADD COLUMN linepay_result TEXT;           -- CANCELLED／FAILED／EXPIRED
 ALTER TABLE orders ADD COLUMN linepay_checked_at INTEGER;    -- 最後一次補查（epoch ms）
+-- POS 保留限量份數的到期時間（epoch ms）：雲端在到期前 1 分鐘就不再請款，不靠 POS 的到期回報準時送達。
+ALTER TABLE orders ADD COLUMN hold_expires_at INTEGER;
 CREATE INDEX ix_orders_linepay_open ON orders (store_id, payment_status) WHERE payment_method = 'LINE_PAY';

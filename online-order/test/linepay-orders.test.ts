@@ -169,6 +169,37 @@ describe("線上 LINE Pay", () => {
     expect(fake.confirmCalls).toBe(0);
   });
 
+  it("付款中再按一次付款：沿用原連結，不另開一筆交易（交易號不會被蓋掉，Codex O5 第一輪）", async () => {
+    const { body } = await place();
+    const first = (await (await post(`/api/orders/${body.token}/linepay`)).json()) as { payment_url: string };
+    const again = (await (await post(`/api/orders/${body.token}/linepay`)).json()) as { payment_url: string };
+    expect(again.payment_url).toBe(first.payment_url);
+    expect(fake.txs.size).toBe(1);
+    authorize();
+    expect((await post(`/api/orders/${body.token}/linepay/confirm`)).status).toBe(200);
+    const order = (await pull()).orders.find((o) => o.payment_status === "PAID")!;
+    expect(order.payment?.transaction_id).toBe([...fake.txs.keys()][0]);
+  });
+
+  it("保留快到期（POS 回報的到期時間前 1 分鐘）就不請款，不靠 POS 的到期回報準時到（Codex O5 第一輪）", async () => {
+    const { body } = await place({}, [{ item_id: 6, option_ids: [], qty: 1 }]);
+    const id = (await pull()).orders[0]!.id;
+    const soon = new Date(Date.now() + 30_000).toISOString(); // 剩 30 秒
+    await integration("POST", `/integration/orders/${id}/status`, JSON.stringify({
+      sync_status: "IMPORTED", hold_status: "HELD", hold_expires_at: soon,
+    }));
+    // 剩不到 1 分鐘：連付款都不開始
+    expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(409);
+    const later = new Date(Date.now() + 5 * 60_000).toISOString();
+    await env.DB.prepare("UPDATE orders SET hold_expires_at = ?").bind(Date.parse(later)).run();
+    expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(200);
+    authorize();
+    // 客人付到一半保留到期了（POS 的 NONE 回報還沒到）
+    await env.DB.prepare("UPDATE orders SET hold_expires_at = ?").bind(Date.now() + 10_000).run();
+    expect((await post(`/api/orders/${body.token}/linepay/confirm`)).status).toBe(409);
+    expect(fake.confirmCalls).toBe(0);
+  });
+
   it("發票資料：手機條碼 / 開頭 8 碼、統編 8 位數字，兩個不能同時填", async () => {
     for (const invoice of [{ carrier: "ABC12345" }, { tax_id: "1234" }, { carrier: "/ABC+123", tax_id: "12345678" }]) {
       expect((await place({ invoice })).status).toBe(422);

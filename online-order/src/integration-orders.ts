@@ -20,6 +20,7 @@ interface OrderRow {
   hold_status: string;
   fulfillment: string;
   payment_status: string;
+  hold_expires_at: number | null;
   row_version: number;
 }
 
@@ -116,7 +117,14 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   });
 }
 
-type Target = { sync_status?: string; hold_status?: string; payment_status?: string; fulfillment?: string };
+type Target = {
+  sync_status?: string;
+  hold_status?: string;
+  payment_status?: string;
+  fulfillment?: string;
+  /** 保留到期時間（epoch ms）；只跟著 HELD 一起報。 */
+  hold_expires_at?: number;
+};
 
 function parseTarget(raw: Uint8Array): Target | null {
   let v: unknown;
@@ -126,7 +134,7 @@ function parseTarget(raw: Uint8Array): Target | null {
     return null;
   }
   if (typeof v !== "object" || v === null) return null;
-  const { sync_status, hold_status, payment_status, fulfillment, ...rest } = v as Record<string, unknown>;
+  const { sync_status, hold_status, payment_status, fulfillment, hold_expires_at, ...rest } = v as Record<string, unknown>;
   if (Object.keys(rest).length > 0) return null;
   const t: Target = {};
   if (sync_status !== undefined) {
@@ -140,6 +148,11 @@ function parseTarget(raw: Uint8Array): Target | null {
   if (payment_status !== undefined) {
     if (typeof payment_status !== "string" || !PAYMENT_TARGETS.has(payment_status)) return null;
     t.payment_status = payment_status;
+  }
+  if (hold_expires_at !== undefined) {
+    const at = typeof hold_expires_at === "string" ? Date.parse(hold_expires_at) : Number.NaN;
+    if (hold_status !== "HELD" || Number.isNaN(at)) return null;
+    t.hold_expires_at = at;
   }
   if (fulfillment !== undefined) {
     if (typeof fulfillment !== "string" || !FULFILLMENT_TARGETS.has(fulfillment)) return null;
@@ -192,7 +205,7 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
   const target = parseTarget(raw);
   if (target === null) return error("invalid_status", 422);
   const row = await env.DB.prepare(
-    "SELECT id, sync_status, hold_status, payment_status, fulfillment, row_version FROM orders " +
+    "SELECT id, sync_status, hold_status, payment_status, fulfillment, hold_expires_at, row_version FROM orders " +
       "WHERE store_id = ? AND id = ?",
   )
     .bind(storeId, id)
@@ -208,14 +221,21 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
     fulfillment: target.fulfillment ?? row.fulfillment,
   };
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== row[k]);
-  if (changed.length === 0) return json({ id, ...next });
+  // 保留到期時間：跟著 HELD 報；不再是 HELD 就清掉。
+  const expires = target.hold_expires_at ?? (next.hold_status === "HELD" ? row.hold_expires_at : null);
+  if (changed.length === 0) {
+    if (expires !== row.hold_expires_at) {
+      await env.DB.prepare("UPDATE orders SET hold_expires_at = ? WHERE store_id = ? AND id = ?").bind(expires, storeId, id).run();
+    }
+    return json({ id, ...next });
+  }
   const now = Date.now();
   const results = await env.DB.batch([
     // 樂觀鎖：拿到的版本若已被別的回報改過，這次不寫（下面回 409，POS 會重拉重報）。
     env.DB.prepare(
-      "UPDATE orders SET sync_status = ?, hold_status = ?, payment_status = ?, fulfillment = ?, updated_at = ?, " +
-        "row_version = row_version + 1 WHERE store_id = ? AND id = ? AND row_version = ?",
-    ).bind(next.sync_status, next.hold_status, next.payment_status, next.fulfillment, now, storeId, id, row.row_version),
+      "UPDATE orders SET sync_status = ?, hold_status = ?, payment_status = ?, fulfillment = ?, hold_expires_at = ?, " +
+        "updated_at = ?, row_version = row_version + 1 WHERE store_id = ? AND id = ? AND row_version = ?",
+    ).bind(next.sync_status, next.hold_status, next.payment_status, next.fulfillment, expires, now, storeId, id, row.row_version),
     ...changed.map((k) =>
       env.DB.prepare(
         "INSERT INTO order_events (store_id, order_id, kind, from_state, to_state, source, at) " +

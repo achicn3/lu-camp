@@ -287,7 +287,17 @@ async def test_limited_line_is_reserved_by_consuming_daily_stock(
         select(StockReservation).where(StockReservation.online_order_id == row.id)
     )
     assert reservation is not None and reservation.status == "ACTIVE"
-    assert ctx.worker.reports == [(_rid(2), {"sync_status": "IMPORTED", "hold_status": "HELD"})]
+    # 保留成功一併回報到期時間：雲端在到期前就不再請款（Codex O5 第一輪）
+    assert ctx.worker.reports == [
+        (
+            _rid(2),
+            {
+                "sync_status": "IMPORTED",
+                "hold_status": "HELD",
+                "hold_expires_at": reservation.expires_at.isoformat(),
+            },
+        )
+    ]
 
 
 async def test_not_enough_stock_rejects_without_touching_stock(
@@ -1279,3 +1289,32 @@ class _RefundTransport(LinePayTransport):
             "returnMessage": "Success.",
             "info": {"refundTransactionId": 1},
         }
+
+
+async def test_cancelling_linepay_order_asks_the_cloud_first(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """客人選 LINE Pay 的單：先請雲端取消（雲端說已在請款／已付款就不取消），成功才在店內取消。
+
+    店內先取消、雲端晚幾秒才知道的話，客人剛好在那幾秒付成功就會被收了錢卻沒有銷售
+    （Codex O5 第一輪）。
+    """
+    raw = {
+        **_order(_rid(75), [_line(1, ctx.latte, "拿鐵", 150)]),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+    }
+    row = await _pull_raw(db_session, ctx, raw)
+    ctx.worker.status_reply = (409, {"error": "invalid_transition"})
+    refused = await client.post(f"/api/v1/online-orders/{row.id}/cancel", headers=_h(ctx.clerk))
+    assert refused.status_code == 409
+    assert "正在用 LINE Pay 付款" in refused.json()["detail"]
+    assert (await _order_row(db_session, _rid(75))).sync_status == "IMPORTED"
+    ctx.worker.status_reply = None
+    ctx.worker.reports.clear()
+    done = await client.post(f"/api/v1/online-orders/{row.id}/cancel", headers=_h(ctx.clerk))
+    assert done.status_code == 200, done.text
+    assert ctx.worker.reports == [
+        (_rid(75), {"sync_status": "VOIDED", "payment_status": "CANCELLED"})
+    ]
+    assert (await _order_row(db_session, _rid(75))).sync_status == "VOIDED"
