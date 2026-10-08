@@ -9,7 +9,9 @@ type Line = OnlineCart["lines"][number];
 function line(no: number, overrides: Partial<Line> = {}): Line {
   return {
     line_no: no,
+    line_type: "MENU",
     menu_item_id: 7,
+    catalog_product_id: null,
     menu_option_ids: [3, 1],
     experience_id: null,
     qty: 1,
@@ -64,5 +66,19 @@ describe("POS 從伺服器還原購物車（Codex M1c 第二輪）", () => {
     expect(lines.map((l) => l.key)).toEqual([key, `${key}#2`, "C:5"]);
     expect(setQty(lines, lines[1]!.key, 5).map((l) => l.qty)).toEqual([1, 5, 1]);
     expect(removeLine(lines, lines[0]!.key)).toHaveLength(2);
+  });
+});
+
+describe("帶回家商品（docs/63 §13、M1d）", () => {
+  it("帶入成一般商品行：鍵與掃碼加入的一致，數量照單", () => {
+    const [bean] = onlineCartLines([
+      line(1, {
+        line_type: "CATALOG", menu_item_id: null, catalog_product_id: 41, menu_option_ids: [],
+        description: "耶加雪菲 200g", unit_price: "450", qty: 2,
+      }),
+    ]);
+    expect(bean).toEqual({
+      key: "C:41", lineType: "CATALOG", description: "耶加雪菲 200g", unitPrice: 450, qty: 2, catalogProductId: 41,
+    });
   });
 });

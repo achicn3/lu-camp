@@ -2,6 +2,7 @@
 // POS 線上訂單（docs/44 §4.3；O4c）：客人掃桌上 QR 點的現金單。每 5 秒更新；有新單響一聲、徽章顯示
 // 還沒處理的張數。客人到櫃台 → 店員按「帶入結帳」（用 POS 目前的菜單重新計價，價格變了先給店員看差額）
 // → 照平常結帳收錢；結帳成立時那張線上單自動標已付款。客人沒來可以取消（保留的份數會加回）。
+// 有帶回家商品的單付了錢還要「已交貨」才結單（docs/63 §13）：付款與交貨分開。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
@@ -38,6 +39,11 @@ export function isOpen(order: Order): boolean {
 }
 
 /** 這次新出現、還沒處理的單（第一次載入不算新，免得一開 POS 就響）。 */
+/** 付了錢、帶回家商品還沒交給客人。 */
+export function isAwaitingHandover(order: Order): boolean {
+  return order.fulfillment_status === "AWAITING";
+}
+
 export function newOpenOrderIds(seen: Set<number> | null, orders: Order[]): number[] {
   if (seen === null) return [];
   return orders.filter((o) => isOpen(o) && !seen.has(o.id)).map((o) => o.id);
@@ -65,6 +71,8 @@ function chime() {
 }
 
 function statusLabel(order: Order): { text: string; tone: string } {
+  if (isAwaitingHandover(order)) return { text: "已付款・待交貨", tone: "open" };
+  if (order.fulfillment_status === "HANDED_OVER") return { text: "已交貨", tone: "done" };
   if (order.sync_status === "SETTLED") return { text: "已結帳", tone: "done" };
   if (order.sync_status === "VOIDED") return { text: "已取消", tone: "muted" };
   if (order.hold_status === "REJECTED") return { text: "庫存不足", tone: "danger" };
@@ -155,6 +163,21 @@ export function OnlineOrdersPanel({
     onError: (e: Error) => setError(e.message),
   });
 
+  const handOver = useMutation({
+    mutationFn: async (orderId: number) => {
+      const { data: row, error: apiErr } = await api.POST("/api/v1/online-orders/{order_id}/hand-over", {
+        params: { path: { order_id: orderId } },
+      });
+      if (!row) throw new Error(detail(apiErr) ?? "交貨沒記上，請再按一次");
+      return row;
+    },
+    onSuccess: () => {
+      setError(null);
+      refresh();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   const accepting = useMutation({
     mutationFn: async (next: boolean) => {
       const { data: row, error: apiErr } = await api.PUT("/api/v1/online-orders/accepting", {
@@ -171,9 +194,10 @@ export function OnlineOrdersPanel({
   });
 
   if (!data?.configured) return null;
-  const openCount = orders.filter(isOpen).length;
+  const openCount = orders.filter((o) => isOpen(o) || isAwaitingHandover(o)).length;
   const paused = data.accepting === false;
-  const sorted = [...orders].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)));
+  const pending = (o: Order) => Number(isOpen(o) || isAwaitingHandover(o));
+  const sorted = [...orders].sort((a, b) => pending(b) - pending(a));
 
   return (
     <>
@@ -252,12 +276,26 @@ export function OnlineOrdersPanel({
                         {order.lines.map((line) => (
                           <li key={line.line_no}>
                             {line.name} ×{line.qty}
+                            {line.catalog_product_id != null ? "（帶回家）" : ""}
                           </li>
                         ))}
                       </ul>
                       {order.note && <p className="online-order-note">備註：{order.note}</p>}
                       {order.hold_status === "REJECTED" && order.reject_reason && (
                         <p className="form-error">庫存不足：{order.reject_reason}（客人那邊已顯示，請客人重新點）</p>
+                      )}
+                      {isAwaitingHandover(order) && (
+                        <div className="online-order-actions">
+                          <span>把帶回家的商品交給客人後再按。</span>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={handOver.isPending}
+                            onClick={() => handOver.mutate(order.id)}
+                          >
+                            已交貨
+                          </button>
+                        </div>
                       )}
                       {isOpen(order) && (
                         <div className="online-order-actions">
@@ -307,7 +345,7 @@ export function OnlineOrdersPanel({
                 {priceCheck.lines
                   .filter((l) => l.unit_price !== l.online_unit_price)
                   .map((l) => (
-                    <li key={`${l.menu_item_id}-${l.menu_option_ids.join(",")}`}>
+                    <li key={l.line_no}>
                       {l.description}：客人看到 {money(l.online_unit_price)} → 現在 {money(l.unit_price)}
                     </li>
                   ))}

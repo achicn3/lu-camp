@@ -57,6 +57,7 @@ function order(id: number, extra: Partial<Order> = {}): Order {
     payment_status: "UNPAID",
     reject_reason: null,
     sale_id: null,
+    fulfillment_status: "NONE",
     ...extra,
   };
 }
@@ -80,7 +81,7 @@ function cart(extra: Partial<Cart> = {}): Cart {
     table_no: "A1",
     note: null,
     lines: [
-      { line_no: 1, menu_item_id: 5, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
+      { line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
     ],
     online_total: "300",
     total: "300",
@@ -153,7 +154,7 @@ describe("POS 線上訂單", () => {
 
   it("帶入結帳：價格變了先列出差額，店員確認才帶入", async () => {
     const changed = cart({
-      lines: [{ line_no: 1, menu_item_id: 5, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160" }],
+      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160" }],
       total: "320",
     });
     stubFetch((url) => (url.endsWith("/cart") ? json(changed) : json(overview([order(1)]))));
@@ -190,6 +191,38 @@ describe("POS 線上訂單", () => {
     expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(false);
     await user.click(screen.getByRole("button", { name: "確定取消" }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/online-orders/1/cancel") && c.method === "POST")).toBe(true));
+  });
+
+  it("帶回家商品付了錢還沒交：列在清單上、標待交貨，按「已交貨」才結單（docs/63 §13）", async () => {
+    const paid = order(7, {
+      sync_status: "SETTLED",
+      payment_status: "PAID",
+      sale_id: 99,
+      fulfillment_status: "AWAITING",
+      lines: [
+        { line_no: 1, item_id: null, catalog_product_id: 41, name: "耶加雪菲 200g", option_ids: [], unit_price: 450, qty: 1, line_total: 450, limited: true },
+        { line_no: 2, item_id: 5, name: "拿鐵", option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false },
+      ],
+    });
+    const calls = stubFetch((url, method) =>
+      url.endsWith("/online-orders/7/hand-over") && method === "POST"
+        ? json({ ...paid, fulfillment_status: "HANDED_OVER" })
+        : json(overview([paid])),
+    );
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    // 徽章也算待交貨的單，店員才不會忘了
+    expect((await screen.findByRole("button", { name: /線上訂單/ })).textContent).toContain("1");
+    await user.click(screen.getByRole("button", { name: /線上訂單/ }));
+    const row = screen.getByRole("listitem", { name: /桌號 A1/ });
+    expect(row.textContent).toContain("已付款・待交貨");
+    expect(row.textContent).toContain("耶加雪菲 200g ×1（帶回家）");
+    expect(row.textContent).not.toContain("拿鐵 ×1（帶回家）");
+    expect(screen.queryByRole("button", { name: "帶入結帳" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "已交貨" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith("/online-orders/7/hand-over") && c.method === "POST")).toBe(true),
+    );
   });
 
   it("暫停接單送到雲端", async () => {

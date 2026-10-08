@@ -2902,6 +2902,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/retail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Retail Listings */
+        get: operations["listRetailListings"];
+        put?: never;
+        /** Create Retail Listing */
+        post: operations["createRetailListing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/retail/{listing_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Retail Listing */
+        put: operations["updateRetailListing"];
+        post?: never;
+        /** Delete Retail Listing */
+        delete: operations["deleteRetailListing"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/retail/{listing_id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Retail Listing Photo
+         * @description 上傳／更換照片：轉成 WebP、長邊 1200、去掉 EXIF（含 GPS），同菜單品項照片。
+         */
+        post: operations["uploadRetailListingPhoto"];
+        /** Remove Retail Listing Photo */
+        delete: operations["removeRetailListingPhoto"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/status": {
         parameters: {
             query?: never;
@@ -2998,6 +3055,26 @@ export interface paths {
         get: operations["getOnlineOrderCart"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-orders/{order_id}/hand-over": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand Over Online Order
+         * @description 帶回家商品交給客人了：結單（docs/63 §13）。店員可按；重按不出錯。
+         */
+        post: operations["handOverOnlineOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4900,6 +4977,14 @@ export interface components {
         BackupTrigger: "SCHEDULED" | "MANUAL";
         /** Body_uploadMenuItemPhoto */
         Body_uploadMenuItemPhoto: {
+            /**
+             * File
+             * @description JPEG／PNG／WebP／HEIC，10 MB 以內
+             */
+            file: string;
+        };
+        /** Body_uploadRetailListingPhoto */
+        Body_uploadRetailListingPhoto: {
             /**
              * File
              * @description JPEG／PNG／WebP／HEIC，10 MB 以內
@@ -8922,14 +9007,18 @@ export interface components {
         };
         /** OnlineCartLineRead */
         OnlineCartLineRead: {
+            /** Catalog Product Id */
+            catalog_product_id: number | null;
             /** Description */
             description: string;
             /** Experience Id */
             experience_id: number | null;
             /** Line No */
             line_no: number;
+            /** Line Type */
+            line_type: string;
             /** Menu Item Id */
-            menu_item_id: number;
+            menu_item_id: number | null;
             /** Menu Option Ids */
             menu_option_ids: number[];
             /** Online Unit Price */
@@ -8974,10 +9063,12 @@ export interface components {
         };
         /** OnlineOrderLineRead */
         OnlineOrderLineRead: {
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
             /** Experience Id */
             experience_id?: number | null;
             /** Item Id */
-            item_id: number;
+            item_id?: number | null;
             /** Limited */
             limited: boolean;
             /** Line No */
@@ -9000,6 +9091,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Fulfillment Status */
+            fulfillment_status: string;
             /** Hold Status */
             hold_status: string;
             /** Id */
@@ -9646,6 +9739,59 @@ export interface components {
             confirm_text: string;
             /** Source R2 Key */
             source_r2_key: string;
+        };
+        /** RetailListingRead */
+        RetailListingRead: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Category Name */
+            category_name: string | null;
+            /** Description */
+            description?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Photo Sha256 */
+            photo_sha256: string | null;
+            /** Product Active */
+            product_active: boolean;
+            /** Product Name */
+            product_name: string;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            role?: components["schemas"]["MenuUpsellRole"] | null;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * RetailListingWriteRequest
+         * @description 整筆替換；價格、成本、庫存、分類一律來自原商品。
+         */
+        RetailListingWriteRequest: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Description */
+            description?: string | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            role?: components["schemas"]["MenuUpsellRole"] | null;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
         };
         /** ReturnCreateRequest */
         ReturnCreateRequest: {
@@ -17072,6 +17218,189 @@ export interface operations {
             };
         };
     };
+    listRetailListings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailListingRead"][];
+                };
+            };
+        };
+    };
+    createRetailListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailListingWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateRetailListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailListingWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteRetailListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uploadRetailListingPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_uploadRetailListingPhoto"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    removeRetailListingPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getOnlineOrderStatus: {
         parameters: {
             query?: never;
@@ -17225,6 +17554,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OnlineCartRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    handOverOnlineOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrderRead"];
                 };
             };
             /** @description Validation Error */
