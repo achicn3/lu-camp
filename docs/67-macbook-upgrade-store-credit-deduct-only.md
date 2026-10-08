@@ -29,5 +29,30 @@
 
 ## 4. 出問題怎麼退
 
-- 只退程式：`git checkout <記下的 commit>`，再照 docs/43 §6 重 build 前端、`install-launchd.sh`。
-- 降版 `b7d4f1a3c9e2` 會把設定欄位加回來（預設「扣掉購物金後開」），可以放心降。
+**這次和 docs/43 §6 不同：不能只退程式。** 升級後設定表少了一個欄位，舊程式讀設定時會找不到它，
+設定頁打不開、**結帳也會失敗**。一定要**先用新程式把資料庫降一版、再退程式**（這支降版只是把欄位加回來、
+預設「扣掉購物金後開」，不刪任何資料，可以放心做）。
+
+```bash
+cd <repo 目錄>
+
+# 4.1 停後端
+launchctl bootout gui/$(id -u)/com.lucamp.backend
+
+# 4.2 還在新程式時降一版（只降到 e3a9c5d1f7b2，指定版本號，不要降更多）
+cd backend
+set -a; source ../.env; set +a
+/opt/homebrew/bin/uv run alembic downgrade e3a9c5d1f7b2
+/opt/homebrew/bin/uv run alembic current   # 應顯示 e3a9c5d1f7b2
+cd ..
+
+# 4.3 再退程式、重 build、重啟
+git checkout <§2.1 記下的 commit>
+cd frontend && /opt/homebrew/bin/pnpm install && cd ..
+scripts/launchd/rebuild-frontend.sh
+scripts/launchd/install-launchd.sh
+```
+
+退完請**店主**打開「設定」（要打得開）、在 POS 結一筆現金交易（要結得成），兩項都回報結果。
+若 4.2 出錯：**停下來、不要退程式**，把錯誤原文給店主看——後端先維持新程式（照 4.3 的最後一行
+`install-launchd.sh` 重新載入即可照常營業）。
