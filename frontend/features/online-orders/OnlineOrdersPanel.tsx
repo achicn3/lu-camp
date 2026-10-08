@@ -15,6 +15,7 @@ type Order = components["schemas"]["OnlineOrderRead"];
 type Overview = components["schemas"]["OnlineOrdersRead"];
 export type OnlineCart = components["schemas"]["OnlineCartRead"];
 
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000];
 const POLL_MS = 5000;
 // 現金單超過這麼久沒來付就標黃提醒（docs/44 §4.3）；第一版不自動取消。
 const WAITING_WARN_MIN = 30;
@@ -146,8 +147,13 @@ export function OnlineOrdersPanel({
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ONLINE_ORDERS_KEY });
 
-  // 線上 LINE Pay 付好了：開著的 POS 自動成立銷售（每張只試一次；失敗的原因後端記在單上）。
+  // 線上 LINE Pay 付好了：開著的 POS 自動成立銷售。後端判定成立不了的（價格不符等）原因記在單上、
+  // 不再自動試；連線或伺服器問題則隔一段時間再試（5、15、60 秒…），店員也可以按「重試」（Codex O5 第一輪）。
   const settling = useRef<Set<number>>(new Set());
+  const [failures, setFailures] = useState<Map<number, { count: number; nextAt: number; message: string }>>(
+    () => new Map(),
+  );
+  const [retryTick, setRetryTick] = useState(0);
   const settle = useMutation({
     mutationFn: async (target: Order) => {
       const { data: result, error: apiErr } = await api.POST("/api/v1/online-orders/{order_id}/settle-paid", {
@@ -157,20 +163,43 @@ export function OnlineOrdersPanel({
       return { saleId: result.sale_id, target };
     },
     onSuccess: ({ saleId, target }) => {
+      // 成立了就不再碰這張（清單下一次更新就會是已結帳）。
+      setFailures((prev) => {
+        const next = new Map(prev);
+        next.delete(target.id);
+        return next;
+      });
       chime();
       onPaidSettled?.(saleId, target);
       refresh();
     },
-    onError: () => refresh(),
+    onError: (err: Error, target) => {
+      settling.current.delete(target.id);
+      const count = (failures.get(target.id)?.count ?? 0) + 1;
+      const delay = RETRY_DELAYS_MS[Math.min(count, RETRY_DELAYS_MS.length) - 1] ?? 60_000;
+      setFailures((prev) => new Map(prev).set(target.id, { count, nextAt: Date.now() + delay, message: err.message }));
+      window.setTimeout(() => setRetryTick((tick) => tick + 1), delay);
+      refresh();
+    },
   });
   useEffect(() => {
     if (!onPaidSettled || !data) return;
+    const now = Date.now();
     for (const target of data.orders) {
       if (!needsSettle(target) || settling.current.has(target.id)) continue;
+      const failure = failures.get(target.id);
+      if (failure !== undefined && failure.nextAt > now) continue;
       settling.current.add(target.id);
       settle.mutate(target);
     }
-  }, [data, onPaidSettled, settle]);
+  }, [data, onPaidSettled, settle, failures, retryTick]);
+  const retryNow = (id: number) =>
+    setFailures((prev) => {
+      const next = new Map(prev);
+      const failure = next.get(id);
+      if (failure !== undefined) next.set(id, { ...failure, nextAt: 0 });
+      return next;
+    });
 
   const load = useMutation({
     mutationFn: async (orderId: number) => {
@@ -333,6 +362,16 @@ export function OnlineOrdersPanel({
                       {order.note && <p className="online-order-note">備註：{order.note}</p>}
                       {order.attention != null && order.sync_status === "IMPORTED" && (
                         <p className="form-error">{order.attention}</p>
+                      )}
+                      {needsSettle(order) && failures.has(order.id) && (
+                        <div className="online-order-actions">
+                          <span className="form-error">
+                            客人已付款，但自動成立沒成功（{failures.get(order.id)?.message}），稍後會再試。
+                          </span>
+                          <button type="button" className="btn-primary" onClick={() => retryNow(order.id)}>
+                            重試
+                          </button>
+                        </div>
                       )}
                       {isAwaitingLinePay(order) && (
                         <div className="online-order-actions">

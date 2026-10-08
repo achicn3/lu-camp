@@ -98,7 +98,7 @@ const ok = (name, pass, detail = "") => { results.push(pass); console.log(`${pas
 
 token = (await must("POST", "/auth/login", { username: USERNAME, password: PASSWORD })).access_token;
 const run = randomUUID().slice(0, 6);
-const latte = await must("POST", "/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: `咖啡-${run}` });
+await must("POST", "/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: `咖啡-${run}` });
 const settings = await must("GET", "/settings");
 await must("PATCH", "/settings", { dine_in_tables: [...new Set([...(settings.dine_in_tables ?? []), "A1"])] });
 await must("POST", "/online-order/publish");

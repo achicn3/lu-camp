@@ -255,6 +255,28 @@ describe("POS 線上訂單", () => {
     expect(calls.filter((c) => c.url.endsWith("/settle-paid")).length).toBe(1);
   });
 
+  it("自動成立遇到連線問題：不會就此卡住，之後會再試（Codex O5 第一輪）", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const paid = order(11, { payment_method: "LINE_PAY", linepay_paid: true });
+      let attempts = 0;
+      stubFetch((url, method) => {
+        if (url.endsWith("/online-orders/11/settle-paid") && method === "POST") {
+          attempts += 1;
+          return attempts === 1 ? json({ detail: "伺服器忙" }, 503) : json({ sale_id: 77 });
+        }
+        return json(overview([paid]));
+      });
+      const settled = vi.fn();
+      wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} onPaidSettled={settled} />);
+      await waitFor(() => expect(attempts).toBe(1));
+      await vi.advanceTimersByTimeAsync(15_000);
+      await waitFor(() => expect(settled).toHaveBeenCalledWith(77, expect.objectContaining({ id: 11 })));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("沒辦法自動成立：寫出原因、不再自動重試", async () => {
     const stuck = order(10, {
       payment_method: "LINE_PAY", linepay_paid: true,
