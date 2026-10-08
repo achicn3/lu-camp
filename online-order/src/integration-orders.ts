@@ -43,7 +43,8 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   // 新單，加上「已匯入、後來才用 LINE Pay 付清」的單（POS 要據此自動成立銷售，O5b）。
   const orders = await env.DB.prepare(
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-      "note, created_at, linepay_transaction_id, invoice_carrier, invoice_tax_id FROM orders WHERE store_id = ? AND " +
+      "note, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders " +
+      "WHERE store_id = ? AND " +
       "(sync_status = 'NEW' OR (sync_status = 'IMPORTED' AND payment_method = 'LINE_PAY' AND payment_status = 'PAID')) " +
       "ORDER BY created_at, id LIMIT ?",
   )
@@ -55,6 +56,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
       payment_status: string;
       total: number;
       linepay_transaction_id: string | null;
+      linepay_attempt: number;
       invoice_carrier: string | null;
       invoice_tax_id: string | null;
     }>();
@@ -85,12 +87,20 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   return json({
     ...(await storeMeta(env, storeId)),
     server_time: new Date(now).toISOString(),
-    orders: orders.results.map(({ linepay_transaction_id, invoice_carrier, invoice_tax_id, ...o }) => ({
+    orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, ...o }) => ({
       ...o,
       created_at: new Date(o.created_at).toISOString(),
       // LINE Pay 已付款：交易號（字串）與金額，POS 據此成立銷售、不再扣款（O5b）。
       ...(o.payment_method === "LINE_PAY" && o.payment_status === "PAID" && linepay_transaction_id !== null
-        ? { payment: { method: "LINE_PAY", transaction_id: linepay_transaction_id, amount: o.total } }
+        ? {
+          payment: {
+            method: "LINE_PAY",
+            transaction_id: linepay_transaction_id,
+            // 向 LINE Pay 要付款時用的訂單號（線上單 ID＋第幾次付款），店內記帳用。
+            order_id: `${o.id}-${linepay_attempt}`,
+            amount: o.total,
+          },
+        }
         : {}),
       ...(invoice_carrier !== null || invoice_tax_id !== null || o.payment_method === "LINE_PAY"
         ? { invoice: { carrier: invoice_carrier, tax_id: invoice_tax_id } }

@@ -115,7 +115,9 @@ describe("線上 LINE Pay", () => {
     expect(fake.confirmCalls).toBe(1);
     // POS 拉單看得到付款資料（交易號字串）與發票載具
     const order = (await pull()).orders.find((o) => o.payment_status === "PAID")!;
-    expect(order.payment).toEqual({ method: "LINE_PAY", transaction_id: [...fake.txs.keys()][0], amount: 150 });
+    expect(order.payment).toEqual({
+      method: "LINE_PAY", transaction_id: [...fake.txs.keys()][0], order_id: `${order.id}-1`, amount: 150,
+    });
     expect(order.invoice).toEqual({ carrier: "/ABC+123", tax_id: null });
   });
 
