@@ -23,6 +23,7 @@
     "worker-configuration.d.ts"
   ],
   "exclude": [
-    "src/client/app.ts"
+    "src/client/app.ts",
+    "src/client/brew.ts"
   ]
 }

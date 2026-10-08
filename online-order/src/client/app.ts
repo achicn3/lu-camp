@@ -1,7 +1,11 @@
 // 客人掃碼點餐頁（docs/44 §4.2）。菜單文字一律 textContent，不拼 HTML。
+import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
-import { homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, tableCodeFromPath, visibleItems } from "./logic";
-import type { MenuItemView, MenuSnapshot, TableView } from "./types";
+import {
+  experienceView, homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText,
+  tableCodeFromPath, upsellSuggestions, visibleItems, type ExperienceView,
+} from "./logic";
+import { UPSELL_ROLES, type MenuItemView, type MenuSnapshot, type TableView, type UpsellRole } from "./types";
 
 const POLL_MS = 5000;
 const MENU_REFRESH_MS = 15000;
@@ -9,6 +13,7 @@ const ALL = -1;
 const CART_KEY = "lk_cart_v1";
 const DRAFT_KEY = "lk_order_draft_v1";
 const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
+const UPSELL_KEY = "lk_upsell_skip_v1";
 
 interface StoreStatus { accepting: boolean; turnstile_site_key?: string | null }
 interface OrderLine { name: string; qty: number; line_total: number }
@@ -70,7 +75,8 @@ function readCart(): CartLine[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((line): line is CartLine => typeof line === "object" && line !== null &&
       Number.isInteger(line.item_id) && Number.isInteger(line.qty) && Array.isArray(line.option_ids) &&
-      line.option_ids.every(Number.isInteger));
+      line.option_ids.every(Number.isInteger) &&
+      (line.experience_id === undefined || Number.isInteger(line.experience_id)));
   } catch { return []; }
 }
 function readDraft(): Draft | null {
@@ -254,9 +260,15 @@ function renderMenu(snapshot: MenuSnapshot): void {
   tabs.hidden = false;
   list.replaceChildren(...(menuHome ? [] : visibleItems(snapshot.items).filter((item) => activeCategory === ALL || item.category_id === activeCategory).map((item) => itemRow(item))));
   if (!menuHome && !list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
+  const experiences = (snapshot.experiences ?? [])
+    .map((experience) => experienceView(snapshot, experience))
+    .filter((view): view is ExperienceView => view !== null);
+  $("experiences").hidden = experiences.length === 0;
+  $("experience-list").replaceChildren(...(menuHome ? experiences.map((view) => experienceMini(view, (from) => openExperience(view, from))) : []));
   $("recommendations").hidden = selection.recommended.length === 0;
   $("recommended-list").replaceChildren(...(menuHome ? selection.recommended.map((item) => itemRow(item, true)) : []));
   const shortcuts: HTMLElement[] = [];
+  if (experiences.length) shortcuts.push(button("手沖體驗", () => $("experiences").scrollIntoView({ block: "start" }), "shortcut"));
   if (selection.recommended.length) shortcuts.push(button("露坑推薦", () => $("recommendations").scrollIntoView({ block: "start" }), "shortcut"));
   const preferred = [selection.categories.find((category) => category.name === "咖啡"),
     selection.categories.find((category) => category.name === "甜點") ?? selection.categories.find((category) => category.name === "今日甜點"),
@@ -321,6 +333,8 @@ function renderCart(): void {
     row.append(info, controls); body.append(row);
   });
   body.append(el("p", "cart-total", `合計 ${money(priced.total)}`));
+  const upsell = upsellBlock();
+  if (upsell) body.append(upsell);
   const noteLabel = el("label", "note-label", "備註（最多 60 字）");
   const note = el("textarea") as HTMLTextAreaElement; note.id = "order-note"; note.maxLength = 60;
   note.rows = 2; note.value = sessionStorage.getItem("lk_note") ?? "";
@@ -329,6 +343,60 @@ function renderCart(): void {
   body.append(el("p", "payment-note", "付款方式：現金 · 到櫃台付款後才會製作。"));
   body.append(button("送出現金訂單", () => void startCheckout(note.value)));
   showScreen("cart");
+}
+function skippedUpsell(): Set<UpsellRole> {
+  try {
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(UPSELL_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((role): role is UpsellRole => UPSELL_ROLES.includes(role)) : []);
+  } catch { return new Set(); }
+}
+const UPSELL_COPY: Partial<Record<UpsellRole, string>> = { dessert: "配個甜的？", coffee: "要不要來杯咖啡？" };
+/** 購物車下方的「配個…？」（docs/63 §6）：不跳視窗、不自動加入、不打折；略過就不再推同一類。 */
+function upsellBlock(): HTMLElement | null {
+  if (menu === null) return null;
+  const picks = upsellSuggestions(menu, cart, skippedUpsell());
+  if (!picks.length) return null;
+  const roles = [...new Set(picks.map((item) => item.presentation?.role).filter((role): role is UpsellRole => !!role))];
+  const box = el("section", "upsell");
+  box.setAttribute("aria-label", "加購推薦");
+  box.append(el("p", "upsell-title", roles.length === 1 ? UPSELL_COPY[roles[0]!] ?? "要不要再帶一個？" : "要不要再帶一個？"));
+  for (const item of picks) {
+    const row = el("div", "upsell-item");
+    const info = el("div"); info.append(el("b", "", item.name), el("span", "item-price", ` ${priceText(item)}`));
+    row.append(info, button(item.option_groups.length ? "選擇選項" : "一起帶", () => {
+      if (menu === null) return;
+      if (item.option_groups.length) { openDetail(item); return; }
+      try { cart = addLine(menu, cart, { item_id: item.id, option_ids: [], qty: 1 }); saveCart(); renderFooter(); renderCart(); }
+      catch (reason) { showMessage(cartError(reason)); }
+    }, "item-add"));
+    box.append(row);
+  }
+  box.append(button("不用了", () => {
+    const skipped = skippedUpsell();
+    roles.forEach((role) => skipped.add(role));
+    sessionStorage.setItem(UPSELL_KEY, JSON.stringify([...skipped]));
+    box.remove();
+  }, "upsell-skip"));
+  return box;
+}
+function openExperience(view: ExperienceView, from: HTMLElement): void {
+  void drawExperience(view, from, {
+    onAdd: (optionIds, qty) => {
+      if (menu === null) return "菜單已更新，請重新選擇。";
+      try {
+        cart = addLine(menu, cart, { item_id: view.item.id, option_ids: optionIds, qty, experience_id: view.experience.id });
+      } catch (reason) {
+        const code = reason instanceof Error ? reason.message : "";
+        return code === "invalid_options" ? "請先選好下面的選項。" : cartError(reason);
+      }
+      saveCart(); renderFooter(); clearMessage();
+      $("cart-feedback").textContent = `已加入${view.experience.title}`;
+      if (feedbackTimer !== null) clearTimeout(feedbackTimer);
+      feedbackTimer = window.setTimeout(() => { $("cart-feedback").textContent = ""; }, 2500);
+      return null;
+    },
+    onClose: () => undefined,
+  });
 }
 function updateCartQty(index: number, qty: number): void {
   if (menu === null) return;
