@@ -1,7 +1,7 @@
 """手沖體驗卡與加購角色（docs/63 §4、§6；M1c；店主 2026-10-08）。
 
-- 新表 online_menu_experiences：既有品項＋預選選項的呈現（標題、風味、包含內容、配色、插畫、抽卡動畫），
-  不存價格／成本／庫存。原品項真刪時 cascade。
+- 新表 online_menu_experiences：既有品項＋預選選項的呈現（標題、風味、包含內容、
+  配色、插畫、抽卡動畫），不存價格／成本／庫存。原品項真刪時 cascade。
 - online_menu_presentations 加 role（加購角色；NULL＝不參與加購）。
 
 Revision ID: a6c2e8f4d1b7
