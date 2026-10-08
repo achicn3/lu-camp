@@ -182,6 +182,9 @@ try {
   await guest.screenshot({ path: join(SHOTS, "zz-guest.png"), fullPage: true }).catch(() => {});
   await desk.screenshot({ path: join(SHOTS, "zz-desk.png"), fullPage: true }).catch(() => {});
 } finally {
+  // 取消這次留下來沒付的單：留著會占住同一個 IP 的未付款上限，下一個煙霧就送不了單
+  const left = (await api("GET", "/online-orders")).body?.orders?.filter((o) => o.note?.endsWith(run) && o.sync_status === "IMPORTED") ?? [];
+  for (const o of left) await api("POST", `/online-orders/${o.id}/cancel`);
   await browser.close();
   fake.close();
 }
