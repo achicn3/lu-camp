@@ -41,6 +41,7 @@ from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.models import (
     OnlineOrder,
+    OnlineOrderLink,
     OnlineOrderOutbox,
     StockReservation,
 )
@@ -1342,3 +1343,36 @@ async def test_paid_linepay_order_keeps_its_reservation_past_expiry(
     )
     assert expired == 0
     assert await _cake_left(db_session, ctx) == 2
+
+
+async def test_linepay_reservation_released_only_after_hearing_from_cloud_past_expiry(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """連不上雲端時不放掉 LINE Pay 單的保留：客人可能在到期前付好了、只是 POS 還沒拉到
+    （Codex O5 第四輪）。
+
+    雲端在到期前 1 分鐘就不再請款，所以到期之後成功拉過一次單、還沒看到付款，才確定沒付。
+    """
+    raw = {
+        **_order(_rid(77), [_line(1, ctx.cake, "戚風", 90, limited=True)]),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+        "hold_status": "HOLD_REQUESTED",
+    }
+    row = await _pull_raw(db_session, ctx, raw)
+    reservation = await db_session.scalar(
+        select(StockReservation).where(StockReservation.online_order_id == row.id)
+    )
+    assert reservation is not None
+    later = reservation.expires_at + timedelta(minutes=5)
+    svc = _svc(db_session, ctx)
+    # 最後一次成功拉單在到期之前：不放
+    assert await svc.expire_reservations(ctx.store_id, now=later) == 0
+    assert await _cake_left(db_session, ctx) == 2
+    # 到期之後成功拉過單（雲端沒說已付）：放
+    link = await db_session.get(OnlineOrderLink, ctx.store_id)
+    assert link is not None
+    link.last_pull_at = reservation.expires_at + timedelta(seconds=30)
+    await db_session.flush()
+    assert await svc.expire_reservations(ctx.store_id, now=later) == 1
+    assert await _cake_left(db_session, ctx) == 3

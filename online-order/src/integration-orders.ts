@@ -7,6 +7,7 @@ import { error, json } from "./http";
 import { reconcileLinePay } from "./linepay-orders";
 
 const PULL_LIMIT = 50;
+const PAID_UPDATE_LIMIT = 20;
 const ORDER_ID = /^[0-9a-f]{32}$/;
 
 const SYNC_TARGETS = new Set(["IMPORTED", "SETTLED", "VOIDED"]);
@@ -41,26 +42,31 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
     .run();
   // 順便補查卡在付款中的 LINE Pay（docs/44 §4.5 C7）。
   await reconcileLinePay(env, storeId, now);
-  // 新單，加上「已匯入、後來才用 LINE Pay 付清」的單（POS 要據此自動成立銷售，O5b）。
-  const orders = await env.DB.prepare(
+  // 新單，加上「已匯入、後來才用 LINE Pay 付清」的單（POS 要據此自動成立銷售，O5b）。兩種分開名額：
+  // 卡住沒成立的已付款單（例如價格不符等店員處理）再多，也擋不住新單進來（Codex O5 第四輪）。
+  const columns =
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-      "note, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders " +
-      "WHERE store_id = ? AND " +
-      "(sync_status = 'NEW' OR (sync_status = 'IMPORTED' AND payment_method = 'LINE_PAY' AND payment_status = 'PAID')) " +
-      "ORDER BY created_at, id LIMIT ?",
-  )
-    .bind(storeId, PULL_LIMIT)
-    .all<Record<string, unknown> & {
-      id: string;
-      created_at: number;
-      payment_method: string;
-      payment_status: string;
-      total: number;
-      linepay_transaction_id: string | null;
-      linepay_attempt: number;
-      invoice_carrier: string | null;
-      invoice_tax_id: string | null;
-    }>();
+    "note, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
+  type PulledRow = Record<string, unknown> & {
+    id: string;
+    created_at: number;
+    payment_method: string;
+    payment_status: string;
+    total: number;
+    linepay_transaction_id: string | null;
+    linepay_attempt: number;
+    invoice_carrier: string | null;
+    invoice_tax_id: string | null;
+  };
+  const [fresh, paid] = await env.DB.batch<PulledRow>([
+    env.DB.prepare(`${columns}WHERE store_id = ? AND sync_status = 'NEW' ORDER BY created_at, id LIMIT ?`)
+      .bind(storeId, PULL_LIMIT),
+    env.DB.prepare(
+      `${columns}WHERE store_id = ? AND sync_status = 'IMPORTED' AND payment_method = 'LINE_PAY' ` +
+        "AND payment_status = 'PAID' ORDER BY updated_at, id LIMIT ?",
+    ).bind(storeId, PAID_UPDATE_LIMIT),
+  ]);
+  const orders = { results: [...(fresh?.results ?? []), ...(paid?.results ?? [])] };
   const ids = orders.results.map((o) => o.id);
   const lines =
     ids.length === 0

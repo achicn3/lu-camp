@@ -294,6 +294,8 @@ class OnlineOrdersService:
         """現金單保留到期就加回份數；單子不取消（客人之後來付，結帳會重新檢查份數）。"""
         moment = now or utc_now()
         expired = 0
+        link = await self._repo.link(store_id)
+        last_heard = link.last_pull_at if link is not None else None
         for order in await self._repo.expired_orders(store_id, moment):
             # 可能已扣款的商品不能釋放給下一位客人；明確未付款後才恢復到期處理。
             if await self._payment_pending(store_id, order.id):
@@ -307,6 +309,12 @@ class OnlineOrdersService:
                 reservation is None
                 or reservation.status != StockReservationStatus.ACTIVE
                 or reservation.expires_at > moment
+            ):
+                continue
+            # LINE Pay 單：雲端在到期前 1 分鐘就不再請款，所以要「到期之後成功拉過一次單、
+            # 還沒看到付款」才確定客人沒付；連不上雲端時寧可多留（Codex O5 第四輪）。
+            if order.payment_method == _LINE_PAY and (
+                last_heard is None or last_heard <= reservation.expires_at
             ):
                 continue
             await self._release(store_id, reservation, StockReservationStatus.EXPIRED)

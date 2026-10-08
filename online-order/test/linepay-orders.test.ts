@@ -226,6 +226,19 @@ describe("線上 LINE Pay", () => {
     expect(row?.linepay_transaction_id).not.toBe(oldTx);
   });
 
+  it("卡住沒成立的已付款單再多，也擋不住新單進 POS（新單與付款更新分開名額，Codex O5 第四輪）", async () => {
+    const stmts = Array.from({ length: 60 }, (_, i) => env.DB.prepare(
+      "INSERT INTO orders (id, store_id, token_hash, idem_key, fingerprint, device_id, ip_hash, service_mode, menu_version, " +
+        "total, payment_method, payment_status, sync_status, hold_status, created_at, updated_at, linepay_transaction_id) " +
+        "VALUES (?, 1, ?, ?, 'f', 'd', 'i', 'TAKEOUT', 1, 150, 'LINE_PAY', 'PAID', 'IMPORTED', 'NONE', ?, ?, '1')",
+    ).bind(i.toString(16).padStart(32, "0"), `h${i}`, `k${i}`.padEnd(16, "x"), i, i));
+    await env.DB.batch(stmts);
+    const { body } = await place({ payment_method: "CASH" });
+    expect(body.status).toBeTruthy();
+    const pulled = await pull();
+    expect(pulled.orders.some((o) => o.payment_status === "UNPAID")).toBe(true);
+  });
+
   it("發票資料：手機條碼 / 開頭 8 碼、統編 8 位數字，兩個不能同時填", async () => {
     for (const invoice of [{ carrier: "ABC12345" }, { tax_id: "1234" }, { carrier: "/ABC+123", tax_id: "12345678" }]) {
       expect((await place({ invoice })).status).toBe(422);
