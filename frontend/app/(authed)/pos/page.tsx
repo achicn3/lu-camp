@@ -38,6 +38,7 @@ import {
   setQty,
   toSaleLines,
   togglePromoFree,
+  uniqueLineKeys,
   unmarkGift,
 } from "@/features/pos/cart";
 import {
@@ -1456,7 +1457,7 @@ export default function PosPage() {
       const overwrote = clerkAddedRef.current;
       try {
       if (payload) {
-        const restoredLines: CartLine[] = payload.lines.map((line, index) => {
+        const restoredLines: CartLine[] = uniqueLineKeys(payload.lines.map((line, index) => {
             const gift = line.line_kind === "GIFT";
             const snapshot = cart.snapshot.items[index];
             const base = payloadLineKey(line);
@@ -1479,7 +1480,7 @@ export default function PosPage() {
               giftNote: line.gift_note ?? undefined,
               promoFree: line.promo_free ? true : undefined,
             };
-        });
+        }));
         const withNotes = await withFreshNotes(restoredLines);
         if (isStale()) return;
         setLines(withNotes);
@@ -1488,15 +1489,11 @@ export default function PosPage() {
           (payload.adjustments ?? []).map((adjustment, index) => ({
             id: `restored-${index}`,
             scope: adjustment.scope,
+            // 指向去重後的那一行（同鍵兩行時，折扣才不會掛到另一行）
             targetKey:
               adjustment.target_line_index == null
                 ? null
-                : (() => {
-                    const line = payload.lines[adjustment.target_line_index];
-                    if (!line) return null;
-                    const base = payloadLineKey(line);
-                    return line.line_kind === "GIFT" ? `G:${base}` : base;
-                  })(),
+                : (restoredLines[adjustment.target_line_index]?.key ?? null),
             method: adjustment.method,
             value: parseNtd(adjustment.value) ?? 0,
             reasonId: adjustment.reason_id ?? null,
@@ -1505,7 +1502,7 @@ export default function PosPage() {
         );
       } else {
         // 升級前建立的舊購物車沒有這份資料：只能以快照重建（贈品原因與折扣無從得知）。
-        const withNotes = await withFreshNotes(restoreLines(cart.snapshot.items));
+        const withNotes = await withFreshNotes(uniqueLineKeys(restoreLines(cart.snapshot.items)));
         if (isStale()) return;
         setLines(withNotes);
         setDiscountDrafts([]);

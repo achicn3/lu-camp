@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { onlineCartLines } from "@/features/online-orders/onlineCartLines";
 import type { OnlineCart } from "@/features/online-orders/OnlineOrdersPanel";
-import { menuLineKey, removeLine, setQty } from "@/features/pos/cart";
+import { menuLineKey, removeLine, setQty, uniqueLineKeys } from "@/features/pos/cart";
 
 type Line = OnlineCart["lines"][number];
 
@@ -49,5 +49,20 @@ describe("線上單帶入 POS 購物車（M1c；Codex 審查）", () => {
     const [plain] = onlineCartLines([line(1, { menu_option_ids: [] })]);
     expect(plain).not.toHaveProperty("menuOptionIds");
     expect(plain?.key).toBe(menuLineKey(7, []));
+  });
+});
+
+describe("POS 從伺服器還原購物車（Codex M1c 第二輪）", () => {
+  it("還原後同鍵的兩行另給鍵，改數量／移除互不影響；沒重複的鍵不動", () => {
+    const base = { lineType: "MENU" as const, description: "手沖咖啡（蜜桃蹦蹦、冰）", unitPrice: 290, qty: 1, menuItemId: 7 };
+    const key = menuLineKey(7, [1, 3]);
+    const lines = uniqueLineKeys([
+      { ...base, key },
+      { ...base, key, qty: 2 },
+      { ...base, key: "C:5", lineType: "CATALOG" as const },
+    ]);
+    expect(lines.map((l) => l.key)).toEqual([key, `${key}#2`, "C:5"]);
+    expect(setQty(lines, lines[1]!.key, 5).map((l) => l.qty)).toEqual([1, 5, 1]);
+    expect(removeLine(lines, lines[0]!.key)).toHaveLength(2);
   });
 });

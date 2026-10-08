@@ -159,6 +159,19 @@ export function addLine(
   return { lines: [...lines, incoming], duplicateSerialized: false, cappedAt: null };
 }
 
+/**
+ * 購物車鍵去重：同鍵的後幾行加 `#序號`。POS 的增減／移除／折扣都以鍵指認，同鍵會一次動到兩行——
+ * 線上單的體驗卡與同品項同選項的一般點，從伺服器還原時就會撞鍵（Codex M1c 第二輪）。
+ */
+export function uniqueLineKeys(lines: CartLine[]): CartLine[] {
+  const seen = new Map<string, number>();
+  return lines.map((line) => {
+    const count = (seen.get(line.key) ?? 0) + 1;
+    seen.set(line.key, count);
+    return count === 1 ? line : { ...line, key: `${line.key}#${count}` };
+  });
+}
+
 export function removeLine(lines: CartLine[], key: string): CartLine[] {
   return lines.filter((l) => l.key !== key);
 }
