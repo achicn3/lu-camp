@@ -277,6 +277,24 @@ describe("POS 線上訂單", () => {
     }
   });
 
+  it("成立了但回應沒回來：清單變已結帳時照樣交給 POS 出單（Codex O5 第二輪）", async () => {
+    const paid = order(12, { payment_method: "LINE_PAY", linepay_paid: true });
+    let settledOnServer = false;
+    stubFetch((url, method) => {
+      if (url.endsWith("/online-orders/12/settle-paid") && method === "POST") {
+        settledOnServer = true;
+        throw new TypeError("network down"); // 後端其實成立了，回應遺失
+      }
+      return json(overview([
+        settledOnServer ? { ...paid, sync_status: "SETTLED", payment_status: "PAID", sale_id: 55 } : paid,
+      ]));
+    });
+    const settled = vi.fn();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} onPaidSettled={settled} />);
+    await waitFor(() => expect(settled).toHaveBeenCalledWith(55, expect.objectContaining({ id: 12 })), { timeout: 8000 });
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+
   it("沒辦法自動成立：寫出原因、不再自動重試", async () => {
     const stuck = order(10, {
       payment_method: "LINE_PAY", linepay_paid: true,

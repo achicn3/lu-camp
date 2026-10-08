@@ -6,6 +6,8 @@ export interface LinePayConfig {
   channelId: string;
   channelSecret: string;
   apiBase: string;
+  /** 讀取逾時；預設 20 秒（官方 confirm／check 下限）。補查用較短的，結果不明下次再查。 */
+  timeoutMs?: number;
 }
 
 export interface LinePayReply {
@@ -62,7 +64,7 @@ async function call(config: LinePayConfig, method: "GET" | "POST", path: string,
         "X-LINE-Authorization": await lineSignature(config.channelSecret, path, body, nonce),
       },
       body: method === "POST" ? body : undefined,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(config.timeoutMs ?? TIMEOUT_MS),
     });
     return parseLinePay(await resp.text());
   } catch {

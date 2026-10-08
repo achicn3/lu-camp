@@ -150,6 +150,10 @@ export function OnlineOrdersPanel({
   // 線上 LINE Pay 付好了：開著的 POS 自動成立銷售。後端判定成立不了的（價格不符等）原因記在單上、
   // 不再自動試；連線或伺服器問題則隔一段時間再試（5、15、60 秒…），店員也可以按「重試」（Codex O5 第一輪）。
   const settling = useRef<Set<number>>(new Set());
+  // 這台 POS 試過要成立的單、以及已經交給 POS 出單的單：成立了但回應遺失時，
+  // 清單一變成已結帳就照樣出單（Codex O5 第二輪）。
+  const attempted = useRef<Set<number>>(new Set());
+  const handed = useRef<Set<number>>(new Set());
   const [failures, setFailures] = useState<Map<number, { count: number; nextAt: number; message: string }>>(
     () => new Map(),
   );
@@ -169,8 +173,11 @@ export function OnlineOrdersPanel({
         next.delete(target.id);
         return next;
       });
-      chime();
-      onPaidSettled?.(saleId, target);
+      if (!handed.current.has(target.id)) {
+        handed.current.add(target.id);
+        chime();
+        onPaidSettled?.(saleId, target);
+      }
       refresh();
     },
     onError: (err: Error, target) => {
@@ -186,10 +193,22 @@ export function OnlineOrdersPanel({
     if (!onPaidSettled || !data) return;
     const now = Date.now();
     for (const target of data.orders) {
+      if (
+        attempted.current.has(target.id) &&
+        !handed.current.has(target.id) &&
+        target.sync_status === "SETTLED" &&
+        target.sale_id != null
+      ) {
+        handed.current.add(target.id);
+        chime();
+        onPaidSettled(target.sale_id, target);
+        continue;
+      }
       if (!needsSettle(target) || settling.current.has(target.id)) continue;
       const failure = failures.get(target.id);
       if (failure !== undefined && failure.nextAt > now) continue;
       settling.current.add(target.id);
+      attempted.current.add(target.id);
       settle.mutate(target);
     }
   }, [data, onPaidSettled, settle, failures, retryTick]);

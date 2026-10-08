@@ -200,6 +200,32 @@ describe("線上 LINE Pay", () => {
     expect(fake.confirmCalls).toBe(0);
   });
 
+  it("補查途中客人取消又重付：舊交易不能被請款記到新的付款上（Codex O5 第二輪）", async () => {
+    const { body } = await place();
+    await post(`/api/orders/${body.token}/linepay`);
+    authorize(0);
+    const [oldTx] = [...fake.txs.keys()];
+    // 補查查舊交易時（等 LINE Pay 回應的空檔），客人取消、又開了一筆新的付款
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith(`/requests/${oldTx}/check`)) {
+        vi.mocked(fetch).mockImplementation(original);
+        await post(`/api/orders/${body.token}/linepay/cancel`);
+        await post(`/api/orders/${body.token}/linepay`);
+      }
+      return original(input, init);
+    });
+    await env.DB.prepare("UPDATE orders SET linepay_checked_at = 0, updated_at = 0").run();
+    await pull();
+    expect(fake.confirmCalls).toBe(0); // 舊交易沒被請款
+    const row = await env.DB.prepare("SELECT payment_status, linepay_attempt, linepay_transaction_id FROM orders").first<{
+      payment_status: string; linepay_attempt: number; linepay_transaction_id: string;
+    }>();
+    expect(row).toMatchObject({ payment_status: "PENDING", linepay_attempt: 2 });
+    expect(row?.linepay_transaction_id).not.toBe(oldTx);
+  });
+
   it("發票資料：手機條碼 / 開頭 8 碼、統編 8 位數字，兩個不能同時填", async () => {
     for (const invoice of [{ carrier: "ABC12345" }, { tax_id: "1234" }, { carrier: "/ABC+123", tax_id: "12345678" }]) {
       expect((await place({ invoice })).status).toBe(422);

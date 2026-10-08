@@ -11,7 +11,11 @@ const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const RECHECK_MS = 30_000;
 // 保留到期前多久就不再開始付款／請款：POS 在到期時才放掉份數，兩邊時鐘差一點也不會撞。
 const HOLD_MARGIN_MS = 60_000;
-const RECONCILE_BATCH = 5;
+const RECONCILE_BATCH = 3;
+// 補查跟著 POS 拉單一起跑：單次 LINE Pay 呼叫最多等 4 秒、整輪超過 6 秒就不再開始下一筆，
+// 免得 LINE Pay 慢的時候拖住拉單（POS 只等 20 秒），連現金單都進不來（Codex O5 第二輪）。
+const RECONCILE_CALL_MS = 4_000;
+const RECONCILE_BUDGET_MS = 6_000;
 
 interface PaymentRow {
   id: string;
@@ -67,8 +71,13 @@ async function move(
   const result = await env.DB.prepare(
     `UPDATE orders SET payment_status = ?, updated_at = ?, row_version = row_version + 1${sets.map((s) => `, ${s}`).join("")} ` +
       `WHERE store_id = ? AND id = ? AND payment_status IN (${from.map(() => "?").join(",")})` +
+      // 綁定是哪一次付款、哪一筆交易：中途客人取消又重付，舊的處理不能改到新的付款（Codex O5 第二輪）。
+      " AND linepay_attempt = ? AND linepay_transaction_id IS ?" +
       (guard ? ` AND ${guard.sql}` : ""),
-  ).bind(to, now, ...Object.values(extra), storeId, row.id, ...from, ...(guard?.binds ?? [])).run();
+  ).bind(
+    to, now, ...Object.values(extra), storeId, row.id, ...from,
+    row.linepay_attempt, row.linepay_transaction_id, ...(guard?.binds ?? []),
+  ).run();
   if (result.meta.changes !== 1) return false;
   if (!from.includes(to) || from.length > 1) await record(env, storeId, row.id, row.payment_status, to, now);
   return true;
@@ -105,7 +114,8 @@ export async function startLinePay(req: Request, env: Env, storeId: number, toke
   });
   if (reply.code !== "0000" || reply.transactionId === null || reply.paymentUrl === null) {
     // 連不到付款頁：沒有任何授權發生，回到未付款讓客人重試或改付現。
-    await move(env, storeId, { ...row, payment_status: "PENDING" }, ["PENDING"], "UNPAID", { linepay_result: "FAILED" });
+    await move(env, storeId, { ...row, payment_status: "PENDING", linepay_attempt: attempt, linepay_transaction_id: null },
+      ["PENDING"], "UNPAID", { linepay_result: "FAILED" });
     return error("linepay_request_failed", 502);
   }
   // 只寫進「還是這一次、還在付款中、還沒有交易號」的單：晚到的舊回應不能改到新的付款。
@@ -191,8 +201,10 @@ export async function cancelLinePay(env: Env, storeId: number, token: string): P
 
 /** POS 拉單時補查（C7）：確認中、或客人授權後沒回訂單頁的付款，每筆最多每 30 秒查一次。 */
 export async function reconcileLinePay(env: Env, storeId: number, now = Date.now()): Promise<void> {
-  const config = linePayConfig(env);
-  if (config === null) return;
+  const base = linePayConfig(env);
+  if (base === null) return;
+  const config: LinePayConfig = { ...base, timeoutMs: RECONCILE_CALL_MS };
+  const started = Date.now();
   const due = await env.DB.prepare(
     `${SELECT_PAYMENT} WHERE store_id = ? AND payment_method = 'LINE_PAY' AND payment_status IN ('PENDING', 'CONFIRMING') ` +
       "AND linepay_transaction_id IS NOT NULL AND COALESCE(linepay_checked_at, 0) < ? " +
@@ -201,6 +213,7 @@ export async function reconcileLinePay(env: Env, storeId: number, now = Date.now
       "ORDER BY updated_at LIMIT ?",
   ).bind(storeId, now - RECHECK_MS, now - RECHECK_MS, RECONCILE_BATCH).all<PaymentRow>();
   for (const row of due.results) {
+    if (Date.now() - started > RECONCILE_BUDGET_MS) break;
     await env.DB.prepare("UPDATE orders SET linepay_checked_at = ? WHERE store_id = ? AND id = ?").bind(now, storeId, row.id).run();
     if (row.payment_status === "CONFIRMING") {
       const check = await checkPayment(config, row.linepay_transaction_id ?? "");
