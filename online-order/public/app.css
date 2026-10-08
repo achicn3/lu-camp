@@ -421,3 +421,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .take-home-group .item { padding: 18px 0; border-bottom: 1px solid var(--line); }
 .take-home-group .item:last-child { border-bottom: 0; }
 .take-home-note { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 6px; color: var(--gold); font-size: 15px; }
+
+/* 付款方式（docs/44 §4.4.2）：現金／LINE Pay；LINE Pay 可填手機條碼或統編。 */
+.pay-methods { border: 0; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.pay-methods legend { margin-bottom: 6px; color: var(--soft); font-size: 15px; }
+.pay-option { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.pay-option:has(input:checked) { border-color: var(--gold); }
+.pay-option input { margin: 4px 0 0; width: 18px; height: 18px; accent-color: var(--gold); }
+.pay-option span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pay-option small { color: var(--soft); font-size: 13px; }
+.invoice-fields { margin-top: 8px; }
+.invoice-fields select, .invoice-fields input { width: 100%; min-height: 44px; margin-top: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #151719; color: var(--ink); font: inherit; font-size: 16px; }

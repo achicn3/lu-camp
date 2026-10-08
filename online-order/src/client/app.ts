@@ -19,17 +19,25 @@ const DRAFT_KEY = "lk_order_draft_v1";
 const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
 const UPSELL_KEY = "lk_upsell_skip_v1";
 
-interface StoreStatus { accepting: boolean; turnstile_site_key?: string | null }
+interface StoreStatus { accepting: boolean; turnstile_site_key?: string | null; linepay?: boolean }
+type PayMethod = "CASH" | "LINE_PAY";
+interface InvoiceInput { carrier: string | null; tax_id: string | null }
+const PAY_KEY = "lk_pay_v1";
+const MOBILE_CARRIER = /^\/[0-9A-Z.+-]{7}$/;
+const TAX_ID = /^\d{8}$/;
 interface OrderLine { name: string; qty: number; line_total: number; take_home?: boolean }
 interface OrderView {
   status: string; table_label: string | null; service_mode: string;
   total: number; note: string | null; created_at: string; lines: OrderLine[];
   /** 帶回家商品交貨（docs/63 §13）；舊版雲端沒有這欄。 */
   fulfillment?: "NONE" | "AWAITING" | "HANDED_OVER";
+  payment_method?: PayMethod;
+  /** LINE Pay 上一次沒付成的原因。 */
+  linepay_result?: "CANCELLED" | "FAILED" | "EXPIRED" | null;
 }
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
-  idempotency_key: string; table_code: string | null; payment_method: "CASH";
+  idempotency_key: string; table_code: string | null; payment_method: PayMethod; invoice?: InvoiceInput;
   note: string; lines: CartLine[]; blocked?: boolean;
 }
 interface TurnstileApi {
@@ -93,7 +101,7 @@ function readDraft(): Draft | null {
     if (typeof value !== "object" || value === null) return null;
     const draft = value as Partial<Draft>;
     return typeof draft.idempotency_key === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(draft.idempotency_key) &&
-      (draft.table_code === null || typeof draft.table_code === "string") && draft.payment_method === "CASH" &&
+      (draft.table_code === null || typeof draft.table_code === "string") && (draft.payment_method === "CASH" || draft.payment_method === "LINE_PAY") &&
       typeof draft.note === "string" && Array.isArray(draft.lines) ? draft as Draft : null;
   } catch { return null; }
 }
@@ -395,10 +403,68 @@ function renderCart(): void {
   note.rows = 2; note.value = sessionStorage.getItem("lk_note") ?? "";
   note.addEventListener("input", () => sessionStorage.setItem("lk_note", note.value));
   noteLabel.append(note); body.append(noteLabel);
-  body.append(el("p", "payment-note", "付款方式：現金 · 到櫃台付款後才會製作。"));
+  const payment = paymentChoice();
+  body.append(payment.node);
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
-  body.append(button("送出現金訂單", () => void startCheckout(note.value)));
+  const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
+    const invoice = payment.invoice();
+    if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
+    void startCheckout(note.value, payment.method(), invoice);
+  });
+  payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單"; });
+  body.append(submit);
   showScreen("cart");
+}
+/** 付款方式（docs/44 §4.4.2）：店家有開 LINE Pay 才能選；LINE Pay 可填手機條碼或統編，沒填印紙本。 */
+function paymentChoice(): {
+  node: HTMLElement; method: () => PayMethod; invoice: () => InvoiceInput | null; onChange: (fn: () => void) => void;
+} {
+  const box = el("div", "pay-choice");
+  if (!status?.linepay) {
+    box.append(el("p", "payment-note", "付款方式：現金 · 到櫃台付款後才會製作。"));
+    return { node: box, method: () => "CASH", invoice: () => ({ carrier: null, tax_id: null }), onChange: () => undefined };
+  }
+  let method: PayMethod = sessionStorage.getItem(PAY_KEY) === "LINE_PAY" ? "LINE_PAY" : "CASH";
+  const listeners: (() => void)[] = [];
+  const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
+  const extra = el("div", "invoice-fields");
+  const kind = el("select") as HTMLSelectElement; kind.id = "invoice-kind";
+  for (const [value, label] of [["paper", "紙本（到櫃檯拿）"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
+    const option = el("option", "", label) as HTMLOptionElement; option.value = value!; kind.append(option);
+  }
+  const code = el("input") as HTMLInputElement; code.id = "invoice-code"; code.autocomplete = "off"; code.hidden = true;
+  kind.addEventListener("change", () => {
+    code.hidden = kind.value === "paper"; code.value = "";
+    code.placeholder = kind.value === "carrier" ? "/ABC+123" : "12345678";
+    code.inputMode = kind.value === "tax" ? "numeric" : "text";
+    code.setAttribute("aria-label", kind.value === "carrier" ? "手機條碼" : "統一編號");
+  });
+  const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind, code);
+  extra.append(kindLabel);
+  for (const [value, label, hint] of [["CASH", "現金", "到櫃台付款後才會製作"], ["LINE_PAY", "LINE Pay", "現在付，付好就開始製作"]] as const) {
+    const option = el("label", "pay-option");
+    const radio = el("input") as HTMLInputElement; radio.type = "radio"; radio.name = "pay-method"; radio.value = value;
+    radio.checked = method === value;
+    radio.addEventListener("change", () => {
+      method = value; sessionStorage.setItem(PAY_KEY, value); extra.hidden = value !== "LINE_PAY";
+      listeners.forEach((fn) => fn());
+    });
+    const text = el("span"); text.append(el("b", "", label), el("small", "", hint));
+    option.append(radio, text); group.append(option);
+  }
+  extra.hidden = method !== "LINE_PAY";
+  box.append(group, extra);
+  return {
+    node: box,
+    method: () => method,
+    invoice: () => {
+      if (method !== "LINE_PAY" || kind.value === "paper") return { carrier: null, tax_id: null };
+      const value = code.value.trim().toUpperCase();
+      if (kind.value === "carrier") return MOBILE_CARRIER.test(value) ? { carrier: value, tax_id: null } : null;
+      return TAX_ID.test(value) ? { carrier: null, tax_id: value } : null;
+    },
+    onChange: (fn) => listeners.push(fn),
+  };
 }
 function skippedUpsell(): Set<UpsellRole> {
   try {
@@ -508,7 +574,7 @@ function newDraft(note: string): Draft {
   return { idempotency_key: crypto.randomUUID(), table_code: tableCode, payment_method: "CASH",
     note: note.trim(), lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }) };
 }
-async function startCheckout(note: string): Promise<void> {
+async function startCheckout(note: string, method: PayMethod = "CASH", invoice: InvoiceInput = { carrier: null, tax_id: null }): Promise<void> {
   if (menu === null || checkoutStarting || submitting) return;
   checkoutStarting = true;
   try {
@@ -518,7 +584,8 @@ async function startCheckout(note: string): Promise<void> {
   const live = await getJson<StoreStatus>("/api/status"); status = live.body;
   if (!status?.accepting) { showMessage("目前暫停接單，請到櫃台點餐。"); return; }
   if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃台點餐。"); return; }
-  const draft = newDraft(note);
+  if (method === "LINE_PAY" && !status.linepay) { showMessage("LINE Pay 暫時不能用，請改用現金。"); return; }
+  const draft = { ...newDraft(note), payment_method: method, invoice };
   localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   await submitDraft(draft);
   } finally { checkoutStarting = false; }
@@ -535,11 +602,15 @@ async function submitDraft(draft: Draft): Promise<void> {
     body.querySelector(".message")!.textContent = "正在送出訂單…";
     const resp = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ idempotency_key: draft.idempotency_key, table_code: draft.table_code,
-        payment_method: draft.payment_method, note: draft.note, lines: draft.lines, turnstile_token: token }) });
+        payment_method: draft.payment_method, note: draft.note, lines: draft.lines, turnstile_token: token,
+        ...(draft.payment_method === "LINE_PAY" && draft.invoice ? { invoice: draft.invoice } : {}) }) });
     if (resp.ok) {
       const created = await resp.json() as OrderCreated;
       localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(CART_KEY); sessionStorage.removeItem("lk_note");
-      cart = []; renderFooter(); history.pushState(null, "", `/order/${created.token}`); await openOrder(created.token); return;
+      cart = []; renderFooter(); history.pushState(null, "", `/order/${created.token}`);
+      // LINE Pay：不用等保留的單直接去付款；要等 POS 確認限量的，留在訂單頁等「前往付款」。
+      if (draft.payment_method === "LINE_PAY" && created.status !== "HOLD_REQUESTED" && await goLinePay(created.token)) return;
+      await openOrder(created.token); return;
     }
     const result = await resp.json() as { error?: string };
     if (resp.status === 409) {
@@ -557,9 +628,52 @@ async function submitDraft(draft: Draft): Promise<void> {
     renderCart(); showMessage("連線中斷，尚未確認訂單是否成立。請按「重試確認訂單」。");
   } finally { submitting = false; challengeToken = ""; }
 }
+/** 向雲端要 LINE Pay 付款連結並跳過去；失敗回 false（留在訂單頁顯示原因）。 */
+async function goLinePay(token: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`/api/orders/${token}/linepay`, { method: "POST", headers: { Accept: "application/json" } });
+    if (!resp.ok) {
+      const result = await resp.json() as { error?: string };
+      showMessage(result.error === "hold_pending" ? "正在確認限量品項，確認後就能付款。"
+        : result.error === "hold_expired" ? "保留時間已過，請回菜單重新點。" : "暫時連不上 LINE Pay，請稍後再試或到櫃檯付現金。");
+      return false;
+    }
+    const { payment_url } = await resp.json() as { payment_url: string };
+    location.assign(payment_url);
+    return true;
+  } catch {
+    showMessage("連線中斷，請稍後再試。"); return false;
+  }
+}
+/** 從 LINE Pay 導回訂單頁：付好了就請款、取消就記取消，然後把網址上的參數拿掉。 */
+async function settleLinePayReturn(token: string): Promise<void> {
+  const mode = new URLSearchParams(location.search).get("linepay");
+  if (mode !== "return" && mode !== "cancel") return;
+  history.replaceState(history.state, "", `/order/${token}`);
+  try {
+    await fetch(`/api/orders/${token}/linepay/${mode === "return" ? "confirm" : "cancel"}`, { method: "POST" });
+  } catch { /* 請款結果不明：雲端會補查，訂單頁照常更新 */ }
+}
+function linePayState(view: OrderView): string | null {
+  if (view.payment_method !== "LINE_PAY") return null;
+  switch (view.status) {
+    case "PENDING": return "等待 LINE Pay 付款。如果已經付了，請稍候確認。";
+    case "CONFIRMING": return "付款確認中，請稍候，不要重複付款。";
+    case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項，確認後就能用 LINE Pay 付款。";
+    case "UNPAID":
+      if (view.linepay_result === "EXPIRED") return "保留時間已過、沒有扣款。請回菜單重新點。";
+      if (view.linepay_result === "CANCELLED") return "LINE Pay 付款已取消，沒有扣款。可以重新付款，或到櫃台付現金。";
+      if (view.linepay_result === "FAILED") return "LINE Pay 付款沒有成功，沒有扣款。可以重新付款，或到櫃台付現金。";
+      return "訂單已收到，請用 LINE Pay 付款，或到櫃台付現金。";
+    case "PAID": return "LINE Pay 已付款，開始製作囉。";
+    default: return null;
+  }
+}
 function orderState(view: OrderView): string {
   if (view.fulfillment === "HANDED_OVER") return "已領取，謝謝你。";
   if (view.fulfillment === "AWAITING") return "已付款。帶回家商品請到櫃檯領取。";
+  const linePay = linePayState(view);
+  if (linePay !== null) return linePay;
   switch (view.status) {
     case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項。請稍候。";
     case "HELD": return "訂單已確認。請到櫃台付現金，付款後才會製作。";
@@ -589,10 +703,16 @@ async function refreshOrder(): Promise<void> {
   }
   body.append(el("p", "cart-total", `合計 ${money(view.total)}`));
   if (view.note) body.append(el("p", "", `備註：${view.note}`));
+  const canPay = view.payment_method === "LINE_PAY" && (view.status === "UNPAID" || view.status === "PENDING") &&
+    view.linepay_result !== "EXPIRED";
+  if (canPay && activeOrder !== null) {
+    const token = activeOrder;
+    body.append(button(view.status === "PENDING" ? "前往 LINE Pay 付款" : "用 LINE Pay 付款", () => void goLinePay(token)));
+  }
   body.append(el("p", "order-hint", "可儲存此頁網址，稍後查看付款狀態。"));
   if (view.status === "REJECTED" || view.status === "CANCELLED")
     body.append(button("返回菜單", () => { history.pushState(null, "", tableCode ? `/t/${tableCode}` : "/"); activeOrder = null; showScreen("menu"); }));
-  // 付了錢但帶回家商品還沒交：繼續更新，交貨後客人頁才會變「已領取」。
+  // 付了錢但帶回家商品還沒交：繼續更新，交貨後客人頁才會變「已領取」。LINE Pay 付款中也繼續更新。
   const done = ["PAID", "REJECTED", "CANCELLED", "REFUNDED"].includes(view.status) && view.fulfillment !== "AWAITING";
   if (done && pollTimer !== null) {
     clearInterval(pollTimer); pollTimer = null;
@@ -635,6 +755,7 @@ async function refreshAvailability(): Promise<void> {
 async function openOrder(token: string): Promise<void> {
   activeOrder = token; showScreen("order");
   $("order-body").replaceChildren(el("p", "", "正在載入訂單…"));
+  await settleLinePayReturn(token);
   if (pollTimer !== null) clearInterval(pollTimer);
   pollTimer = window.setInterval(() => void refreshOrder(), POLL_MS);
   await refreshOrder();
