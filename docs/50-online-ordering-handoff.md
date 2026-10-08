@@ -66,7 +66,7 @@ O4 現金線上點餐：雲端送單（O4a）、雲端拉單／回報（O4b 雲�
 
 2026-10-06 新增菜單體驗需求見 [docs/63](./63-online-menu-experience-plan.md)。順序調整為：
 **O4 穩定化與審查 → M1a 後台呈現設定 → M1b 手機首頁與菜單 → M1c 手沖體驗／餐飲加購 → M1d 零售商品整合 → O5 → M2 推薦與分析**。
-M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`（未合併／部署），migration `d8f2a4c6e901`；M1b–M1d 待實作。資料層／POS／結帳／報表必須與 UI 同波驗收。人氣榜與分析不擋第一階段上線。
+M1a／M1b 已合併 main；M1c 手沖體驗卡＋加購在 `feat/brew-experience`（migration `a6c2e8f4d1b7`，docs/63 §12、升級 docs/66）；M1d 待實作。資料層／POS／結帳／報表必須與 UI 同波驗收。人氣榜與分析不擋第一階段上線。
 
 | 順序 | 項目 | 說明 |
 |------|------|------|
@@ -137,6 +137,13 @@ M1a 已於 2026-10-07 實作在 `feat/online-menu-presentation`（未合併／�
 - **辰宇落雁體有保留字型名稱**：子集一律改名 `LukengHand`，不可改回原名（OFL）。
 - `test_passwords_are_hashed_not_stored` 約 4% 隨機紅（雜湊剛好含 "pw"），已裁示不修，單獨重跑確認即可。
 
+
+### 2026-10-08：M1c 手沖體驗卡與加購
+
+`feat/brew-experience`：體驗卡＝既有品項＋預選選項＋卡面文字（不存價格／庫存）、六種抽卡動畫或隨機、Codex 繪製的水彩 JPG 插畫、
+購物車下方最多兩項的加購推薦。**部署順序：正式機 migration → Worker → 才從 POS 重新發佈**（舊 Worker 拒收含 `experiences`／`role` 的快照）。
+坑：卡片動 opacity 會被壓平成 2D、翻面露出鏡像背面——動畫只准動 transform；`wrangler dev` 啟動後才加的 `public/` 檔會被 SPA 退回成 HTML，要重開。
+詳見 [docs/63 §12](63-online-menu-experience-plan.md#12-m1c-手沖體驗卡與餐飲加購2026-10-08feat-brew-experience)。
 
 ### 2026-10-07：M1b 與餐飲管理分組（功能分支，未部署）
 

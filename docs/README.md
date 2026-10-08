@@ -57,6 +57,7 @@
 - [MacBook 正式機：升級到 2026-10-04 版（組合包袋裝條碼）](./61-macbook-upgrade-bundle-packs.md)
 - [MacBook 正式機：升級到 2026-10-08 版（線上點餐：店內收單＋菜單管理改版）](./64-macbook-upgrade-online-orders-store.md)
 - [MacBook 正式機：升級到 2026-10-08 版（混合付款的購物金不課稅）](./65-macbook-upgrade-store-credit-allowance.md)
+- [MacBook 正式機：升級到 2026-10-08 版（手沖體驗卡＋加購角色）](./66-macbook-upgrade-brew-experience.md)
 
 ## 評估與後續實作
 
