@@ -1059,6 +1059,12 @@ class SalesService:
                 )
             if cart.buyer_contact_id != buyer_contact_id:
                 raise SignatureContentMismatch("POS 購物車的會員與實際結帳不一致")
+            # 購物車綁的線上單必須與結帳一致（含「都沒有」），**不分付款方式**、先於動庫存／收款
+            # （Codex O4 第三輪）：漏帶就收了錢卻沒標已付款、之後還能再帶入收一次；
+            # 換成別張則把錢記到錯的單上。
+            saved_online_id = (cart.staff_payload or {}).get("online_order_id")
+            if (saved_online_id if isinstance(saved_online_id, int) else None) != online_order_id:
+                raise SignatureContentMismatch("POS 購物車的線上訂單與實際結帳不一致")
         elif cart_revision is not None:
             raise SignatureContentMismatch("帶 cart_revision 時必須同時帶 cart_session_id")
         # LINE Pay 收款前置守衛（docs/30 P2；先於動庫存/收款）：
@@ -1066,10 +1072,6 @@ class SalesService:
         #   先 check(orderId) 防重複扣款。無鍵則無法安全重試 → 擋。
         # ②每筆 LINE_PAY 須帶 oneTimeKey（掃客人碼）。③client 必須注入（router 依 config 建）。
         if line_pay_tenders:
-            if online_order_id is not None and cart is not None:
-                saved_online_id = (cart.staff_payload or {}).get("online_order_id")
-                if saved_online_id != online_order_id:
-                    raise SignatureContentMismatch("POS 購物車的線上訂單與實際結帳不一致")
             if (
                 online_order_id is not None
                 and reconciled_linepay_result is None

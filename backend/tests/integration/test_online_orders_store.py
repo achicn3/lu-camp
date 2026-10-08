@@ -45,10 +45,12 @@ from app.modules.onlineorder.orders_service import OnlineOrdersService
 from app.modules.onlineorder.router import get_online_order_client
 from app.modules.onlineorder.scheduler import tick_once
 from app.modules.onlineorder.signing import canonical_string
+from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import UserRole
-from app.shared.exceptions import OnlineOrderNotConfigured
+from app.shared.enums import SaleLineType, ServiceMode, TenderType, UserRole
+from app.shared.exceptions import OnlineOrderNotConfigured, SignatureContentMismatch
 from tests.integration.customer_display_helpers import (
     CustomerDisplayAwareClient,
     ensure_paired_customer_display,
@@ -773,6 +775,78 @@ async def test_customer_display_cart_counts_the_bound_orders_reservation(
     )
     assert cart.revision == 1
     assert await _cake_left(db_session, ctx) == 0
+
+
+async def _bound_cart(db_session: AsyncSession, ctx: Ctx, order_id: int) -> tuple[int, int]:
+    """配好顧客螢幕、把線上單帶進購物車；回傳 (cart_session_id, revision)。"""
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=ctx.store_id, actor_user_id=ctx.clerk_id
+    )
+    cart = await CustomerDisplayService(db_session).upsert_cart(
+        ctx.store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+                "service_mode": "TAKEOUT",
+                "tenders": [{"tender_type": "CASH", "amount": "150"}],
+                "online_order_id": order_id,
+            }
+        ),
+        actor_user_id=ctx.clerk_id,
+    )
+    return cart.id, cart.revision
+
+
+@pytest.mark.parametrize("variant", ["omitted", "substituted"])
+async def test_checkout_must_match_the_carts_bound_online_order(
+    db_session: AsyncSession, ctx: Ctx, variant: str
+) -> None:
+    """購物車綁了線上單 A：結帳漏帶編號或換成 B 一律擋下（Codex O4 第三輪 high）。
+
+    否則 A 收了錢卻仍是未付款、之後還能再帶入收一次；換成 B 則把錢記到別張單上。
+    """
+    first = await _pulled(db_session, ctx, _rid(81), [_line(1, ctx.latte, "拿鐵", 150)])
+    other = await _pulled(db_session, ctx, _rid(82), [_line(1, ctx.latte, "拿鐵", 150)])
+    cart_id, revision = await _bound_cart(db_session, ctx, first.id)
+    async def checkout(online_order_id: int | None, key: str) -> None:
+        await SalesService(db_session).create_sale(
+            ctx.store_id,
+            ctx.clerk_id,
+            lines=[SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=ctx.latte, qty=1)],
+            tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(150))],
+            service_mode=ServiceMode.TAKEOUT,
+            idempotency_key=key,
+            cart_session_id=cart_id,
+            cart_revision=revision,
+            online_order_id=online_order_id,
+        )
+
+    with pytest.raises(SignatureContentMismatch):
+        await checkout(None if variant == "omitted" else other.id, f"bound-{variant}")
+    assert (await _order_row(db_session, _rid(82))).payment_status != "PAID"
+    # LINE Pay 也一樣：在任何請款之前就擋（這裡沒給 LINE Pay client，若沒擋會先撞別的錯）
+    with pytest.raises(SignatureContentMismatch):
+        await SalesService(db_session).create_sale(
+            ctx.store_id,
+            ctx.clerk_id,
+            lines=[SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=ctx.latte, qty=1)],
+            tenders=[
+                TenderInput(
+                    tender_type=TenderType.LINE_PAY,
+                    amount=Decimal(150),
+                    line_pay_one_time_key="OTK-bound",
+                )
+            ],
+            service_mode=ServiceMode.TAKEOUT,
+            idempotency_key=f"bound-lp-{variant}",
+            cart_session_id=cart_id,
+            cart_revision=revision,
+            online_order_id=None if variant == "omitted" else other.id,
+        )
+    # 帶對的那張才收得了錢，並標成已付款
+    await checkout(first.id, f"bound-ok-{variant}")
+    assert (await _order_row(db_session, _rid(81))).payment_status == "PAID"
 
 
 @pytest.mark.parametrize("first_online", [False, True])
