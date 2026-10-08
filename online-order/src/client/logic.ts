@@ -1,7 +1,8 @@
 // 客人點餐頁的純邏輯（不碰 DOM，好測）。
 import type {
-  MenuExperienceView, MenuItemView, MenuPresentation, MenuSnapshot, OptionGroupView, UpsellRole,
+  MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, UpsellRole,
 } from "./types";
+import { isRetailLine } from "../pricing";
 import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
@@ -133,26 +134,69 @@ const UPSELL_TARGETS: Partial<Record<UpsellRole, UpsellRole[]>> = {
 };
 const UPSELL_LIMIT = 2;
 
-/** 購物車下方的「配個…？」：依角色挑可售、沒在車裡的，最多 2 項；略過過的方向不再推。 */
+/** 加購推薦的一項：餐飲品項或帶回家商品（兩種 id 各自編號）。 */
+export type UpsellPick =
+  | ({ kind: "menu"; role: UpsellRole } & MenuItemView)
+  | ({ kind: "retail"; role: UpsellRole } & MenuRetailView);
+
+/** 購物車下方的「配個…？」：依角色挑可售、沒在車裡的，最多 2 項；略過過的方向不再推。
+ *  餐飲照菜單順序在前，帶回家商品（咖啡豆／濾掛）接在後面。 */
 export function upsellSuggestions(
   menu: MenuSnapshot,
   cart: readonly CartLine[],
   dismissed: ReadonlySet<UpsellRole>,
-): MenuItemView[] {
+): UpsellPick[] {
   const byId = new Map(menu.items.map((entry) => [entry.id, entry]));
-  const inCart = new Set(cart.map((line) => line.item_id));
+  const retail = menu.retail ?? [];
+  const retailById = new Map(retail.map((entry) => [entry.id, entry]));
+  const inCart = new Set<number>();
+  const retailInCart = new Set<number>();
   const wanted: UpsellRole[] = [];
   for (const line of cart) {
-    const role = line.experience_id !== undefined ? "experience" : byId.get(line.item_id)?.presentation?.role;
+    let role: UpsellRole | null | undefined;
+    if (isRetailLine(line)) {
+      retailInCart.add(line.catalog_product_id);
+      role = retailById.get(line.catalog_product_id)?.role;
+    } else {
+      inCart.add(line.item_id);
+      role = line.experience_id !== undefined ? "experience" : byId.get(line.item_id)?.presentation?.role;
+    }
     for (const target of (role ? UPSELL_TARGETS[role] : undefined) ?? []) {
       if (!dismissed.has(target) && !wanted.includes(target)) wanted.push(target);
     }
   }
   if (wanted.length === 0) return [];
-  return visibleItems(menu.items)
-    .filter((entry) => {
-      const role = entry.presentation?.role;
-      return role != null && wanted.includes(role) && !inCart.has(entry.id) && !itemSoldOut(entry);
-    })
-    .slice(0, UPSELL_LIMIT);
+  const picks: UpsellPick[] = [];
+  for (const entry of visibleItems(menu.items)) {
+    const role = entry.presentation?.role;
+    if (role != null && wanted.includes(role) && !inCart.has(entry.id) && !itemSoldOut(entry)) {
+      picks.push({ kind: "menu", role, ...entry });
+    }
+  }
+  for (const entry of retail) {
+    if (entry.role !== null && wanted.includes(entry.role) && !retailInCart.has(entry.id) && !retailSoldOut(entry)) {
+      picks.push({ kind: "retail", ...entry, role: entry.role });
+    }
+  }
+  return picks.slice(0, UPSELL_LIMIT);
+}
+
+/** 帶回家商品不能賣：停售或沒貨。 */
+export function retailSoldOut(product: MenuRetailView): boolean {
+  return !product.available || product.remaining <= 0;
+}
+
+const RETAIL_OTHER = "其他";
+
+/** 「帶回家」區依商品分類分組（照快照順序；沒分類的放「其他」最後）。 */
+export function retailGroups(menu: MenuSnapshot): { category: string; products: MenuRetailView[] }[] {
+  const groups = new Map<string, MenuRetailView[]>();
+  for (const product of menu.retail ?? []) {
+    const key = product.category ?? RETAIL_OTHER;
+    groups.set(key, [...(groups.get(key) ?? []), product]);
+  }
+  const ordered = [...groups.entries()].filter(([key]) => key !== RETAIL_OTHER);
+  const other = groups.get(RETAIL_OTHER);
+  if (other) ordered.push([RETAIL_OTHER, other]);
+  return ordered.map(([category, products]) => ({ category, products }));
 }

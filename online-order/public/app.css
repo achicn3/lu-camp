@@ -414,3 +414,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .upsell-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .upsell-item b { font-family: var(--hand); font-weight: 400; font-size: 20px; overflow-wrap: anywhere; }
 .upsell-skip { justify-self: start; min-height: 40px; border: 0; background: none; color: var(--soft); text-decoration: underline; cursor: pointer; }
+
+/* 帶回家零售商品（docs/63 §13）：依分類分組；提醒到櫃檯領取。 */
+.take-home-list { display: grid; gap: 8px; }
+.take-home-category { margin: 18px 0 0; font-family: var(--hand); font-weight: 400; font-size: 20px; color: var(--gold); letter-spacing: .04em; }
+.take-home-group .item { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.take-home-group .item:last-child { border-bottom: 0; }
+.take-home-note { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 6px; color: var(--gold); font-size: 15px; }

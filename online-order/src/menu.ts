@@ -1,7 +1,9 @@
 // 菜單快照（docs/44 §3.5）：店內 POS 發佈、客人讀目前生效的版本。
 // 快照內容由店內 backend 組好（已驗證過的菜單），這裡只檢查形狀，擋住格式錯誤的發佈。
 import { error, json, sha256Hex } from "./http";
-import { BREW_ARTS, BREW_EFFECTS, BREW_THEMES, UPSELL_ROLES, type MenuSnapshot } from "./client/types";
+import {
+  BREW_ARTS, BREW_EFFECTS, BREW_THEMES, RETAIL_ROLES, UPSELL_ROLES, type MenuSnapshot,
+} from "./client/types";
 import type { AvailabilityUpdate } from "./availability";
 
 export const MENU_MAX_BYTES = 512 * 1024;
@@ -78,6 +80,23 @@ function validExperiences(value: unknown, itemIds: Set<unknown>): boolean {
     (BREW_EFFECTS as readonly unknown[]).includes(e.effect));
 }
 
+/** 帶回家商品（docs/63 §13）：只收公開欄位，不收成本／SKU；角色只能是咖啡豆或濾掛。 */
+function validRetail(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  const seen = new Set<unknown>();
+  return value.every((r: unknown) => {
+    if (!isRecord(r) || !keysAre(r, ["id", "name", "description", "category", "unit_price", "photo",
+      "role", "available", "remaining"])) return false;
+    if (!isPositiveInt(r.id) || seen.has(r.id)) return false;
+    seen.add(r.id);
+    return textUpTo(r.name, 150, false) && textUpTo(r.description, 300) && textUpTo(r.category, 100) &&
+      isWholeYuan(r.unit_price) && (r.photo === null || (typeof r.photo === "string" && /^[0-9a-f]{64}$/.test(r.photo))) &&
+      (r.role === null || (RETAIL_ROLES as readonly unknown[]).includes(r.role)) &&
+      typeof r.available === "boolean" && Number.isSafeInteger(r.remaining) && (r.remaining as number) >= 0;
+  });
+}
+
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
@@ -85,6 +104,7 @@ export function validSnapshot(s: unknown): s is { version: number; published_at:
   if (!Array.isArray(o.categories) || !Array.isArray(o.items)) return false;
   const itemIds = new Set(o.items.map((item: unknown) => (isRecord(item) ? item.id : undefined)));
   if (!validExperiences(o.experiences, itemIds)) return false;
+  if (!validRetail(o.retail)) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;
@@ -153,6 +173,7 @@ async function loadEffectiveMenu(
   const state = JSON.parse(row.availability) as AvailabilityUpdate;
   const items = new Map(state.items.map((entry) => [entry.id, entry]));
   const options = new Map(state.options.map((entry) => [entry.id, entry]));
+  const retail = new Map((state.retail ?? []).map((entry) => [entry.id, entry]));
   return {
     revision: row.revision ?? 0,
     menu: {
@@ -175,6 +196,13 @@ async function loadEffectiveMenu(
             }),
           })),
         };
+      }),
+      // 帶回家商品：同步沒列到＝不可賣（下架、或可售同步較舊的店內版本）。
+      ...(menu.retail === undefined ? {} : {
+        retail: menu.retail.map((product) => {
+          const current = retail.get(product.id);
+          return { ...product, available: current?.available ?? false, remaining: current?.remaining ?? 0 };
+        }),
       }),
     },
   };

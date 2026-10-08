@@ -1,12 +1,12 @@
 // 送單驗價（docs/44 §3.2、§8.1 T4、§8.2）：價格只依雲端目前生效的菜單快照計算，不信任客人送來的任何金額。
 // 品名寫法與 POS 後端 `_line_description` 一致（選項依菜單順序；撞名才加群組名）。
-import type { MenuItemView, MenuSnapshot } from "./client/types";
+import type { MenuItemView, MenuRetailView, MenuSnapshot } from "./client/types";
 
 export const MAX_LINES = 20;
 export const MAX_LINE_QTY = 10;
 export const MAX_TOTAL_QTY = 50;
 
-export interface OrderLineInput {
+export interface MenuLineInput {
   item_id: number;
   option_ids: number[];
   qty: number;
@@ -14,8 +14,23 @@ export interface OrderLineInput {
   experience_id?: number;
 }
 
+/** 帶回家零售商品（docs/63 §13）：沒有選項。 */
+export interface RetailLineInput {
+  catalog_product_id: number;
+  qty: number;
+}
+
+export type OrderLineInput = MenuLineInput | RetailLineInput;
+
+export function isRetailLine(line: OrderLineInput): line is RetailLineInput {
+  return "catalog_product_id" in line;
+}
+
 export interface PricedLine {
-  item_id: number;
+  /** 餐飲品項；帶回家商品行沒有。 */
+  item_id?: number;
+  /** 帶回家商品；餐飲行沒有。 */
+  catalog_product_id?: number;
   name: string;
   option_ids: number[];
   unit_price: number;
@@ -37,9 +52,22 @@ function lineName(name: string, picked: { group: string; option: string }[]): st
   return labels.length === 0 ? name : `${name}（${labels.join("、")}）`;
 }
 
+function priceRetail(product: MenuRetailView, input: RetailLineInput): PricedLine {
+  // 一律要 POS 先保留（扣現量）才成立：店內櫃檯也在賣同一批貨。
+  return {
+    catalog_product_id: product.id,
+    name: product.name,
+    option_ids: [],
+    unit_price: product.unit_price,
+    qty: input.qty,
+    line_total: product.unit_price * input.qty,
+    limited: true,
+  };
+}
+
 function priceLine(
   item: MenuItemView,
-  input: OrderLineInput,
+  input: MenuLineInput,
 ): PricedLine | { reason: string } {
   const chosen = new Set(input.option_ids);
   if (chosen.size !== input.option_ids.length) return { reason: "invalid_options" };
@@ -84,10 +112,21 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
 
   const items = new Map(menu.items.map((i) => [i.id, i]));
   const experiences = new Map((menu.experiences ?? []).map((e) => [e.id, e]));
+  const retail = new Map((menu.retail ?? []).map((r) => [r.id, r]));
   const lines: PricedLine[] = [];
   const itemQty = new Map<number, number>();
   const optionQty = new Map<number, number>();
+  const retailQty = new Map<number, number>();
   for (const input of inputs) {
+    if (isRetailLine(input)) {
+      const product = retail.get(input.catalog_product_id);
+      if (product === undefined || !product.available) {
+        return { ok: false, reason: "item_not_found", item_id: input.catalog_product_id };
+      }
+      lines.push(priceRetail(product, input));
+      retailQty.set(product.id, (retailQty.get(product.id) ?? 0) + input.qty);
+      continue;
+    }
     const item = items.get(input.item_id);
     if (item === undefined || !item.available) return { ok: false, reason: "item_not_found", item_id: input.item_id };
     if (item.remaining === 0) return { ok: false, reason: "sold_out", item_id: item.id };
@@ -105,6 +144,9 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
     lines.push(line);
     itemQty.set(item.id, (itemQty.get(item.id) ?? 0) + input.qty);
     for (const id of line.option_ids) optionQty.set(id, (optionQty.get(id) ?? 0) + input.qty);
+  }
+  for (const [id, qty] of retailQty) {
+    if (qty > (retail.get(id)?.remaining ?? 0)) return { ok: false, reason: "sold_out", item_id: id };
   }
   for (const [id, qty] of itemQty) {
     const remaining = items.get(id)?.remaining ?? null;

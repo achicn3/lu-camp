@@ -14,11 +14,13 @@ export interface AvailabilityUpdate {
   revision: number;
   items: AvailabilityEntry[];
   options: AvailabilityEntry[];
+  /** 帶回家商品的現量（docs/63 §13）；舊版店內程式不送。 */
+  retail?: AvailabilityEntry[];
 }
 
-function keysAre(value: Record<string, unknown>, keys: string[]): boolean {
-  const actual = Object.keys(value);
-  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+function keysAre(value: Record<string, unknown>, keys: string[], optional: string[] = []): boolean {
+  return keys.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => keys.includes(key) || optional.includes(key));
 }
 
 function entriesAreValid(value: unknown): value is AvailabilityEntry[] {
@@ -41,10 +43,11 @@ function entriesAreValid(value: unknown): value is AvailabilityEntry[] {
 function validUpdate(value: unknown): value is AvailabilityUpdate {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  return keysAre(row, ["menu_version", "revision", "items", "options"]) &&
+  return keysAre(row, ["menu_version", "revision", "items", "options"], ["retail"]) &&
     Number.isSafeInteger(row.menu_version) && (row.menu_version as number) > 0 &&
     Number.isSafeInteger(row.revision) && (row.revision as number) > 0 &&
-    entriesAreValid(row.items) && entriesAreValid(row.options);
+    entriesAreValid(row.items) && entriesAreValid(row.options) &&
+    (row.retail === undefined || entriesAreValid(row.retail));
 }
 
 export async function publishAvailability(env: Env, storeId: number, raw: Uint8Array): Promise<Response> {
@@ -61,6 +64,9 @@ export async function publishAvailability(env: Env, storeId: number, raw: Uint8A
     revision: body.revision,
     items: body.items.map(({ id, available, remaining }) => ({ id, available, remaining })).sort((a, b) => a.id - b.id),
     options: body.options.map(({ id, available, remaining }) => ({ id, available, remaining })).sort((a, b) => a.id - b.id),
+    ...(body.retail === undefined ? {} : {
+      retail: body.retail.map(({ id, available, remaining }) => ({ id, available, remaining })).sort((a, b) => a.id - b.id),
+    }),
   };
   const payload = JSON.stringify(normalized);
   // 版本條件與 revision 比較在同一句寫入內，與菜單發佈的 stores_meta 更新原子排序。

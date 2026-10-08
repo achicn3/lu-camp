@@ -63,6 +63,21 @@ export interface MenuExperienceView {
   effect: (typeof BREW_EFFECTS)[number];
 }
 
+export const RETAIL_ROLES = ["bean", "drip"] as const;
+
+/** 帶回家零售商品（docs/63 §13）：價格是商品含稅售價、remaining 是店內現量（扣掉線上保留）。 */
+export interface MenuRetailView {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  unit_price: number;
+  photo: string | null;
+  role: (typeof RETAIL_ROLES)[number] | null;
+  available: boolean;
+  remaining: number;
+}
+
 export interface MenuSnapshot {
   version: number;
   published_at: string;
@@ -72,6 +87,8 @@ export interface MenuSnapshot {
   items: MenuItemView[];
   /** 舊快照沒有這欄（當成空的）。 */
   experiences?: MenuExperienceView[];
+  /** 帶回家零售商品；舊快照沒有這欄（當成空的）。 */
+  retail?: MenuRetailView[];
 }
 
 export interface TableView {

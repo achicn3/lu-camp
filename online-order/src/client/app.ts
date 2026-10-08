@@ -3,9 +3,13 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
 import {
   experienceView, homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText,
-  tableCodeFromPath, upsellSuggestions, visibleItems, type ExperienceView,
+  retailGroups, retailSoldOut, tableCodeFromPath, upsellSuggestions, visibleItems, type ExperienceView,
+  type UpsellPick,
 } from "./logic";
-import { UPSELL_ROLES, type MenuItemView, type MenuSnapshot, type TableView, type UpsellRole } from "./types";
+import { isRetailLine } from "../pricing";
+import {
+  UPSELL_ROLES, type MenuItemView, type MenuRetailView, type MenuSnapshot, type TableView, type UpsellRole,
+} from "./types";
 
 const POLL_MS = 5000;
 const MENU_REFRESH_MS = 15000;
@@ -16,10 +20,12 @@ const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
 const UPSELL_KEY = "lk_upsell_skip_v1";
 
 interface StoreStatus { accepting: boolean; turnstile_site_key?: string | null }
-interface OrderLine { name: string; qty: number; line_total: number }
+interface OrderLine { name: string; qty: number; line_total: number; take_home?: boolean }
 interface OrderView {
   status: string; table_label: string | null; service_mode: string;
   total: number; note: string | null; created_at: string; lines: OrderLine[];
+  /** 帶回家商品交貨（docs/63 §13）；舊版雲端沒有這欄。 */
+  fulfillment?: "NONE" | "AWAITING" | "HANDED_OVER";
 }
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
@@ -73,10 +79,12 @@ function readCart(): CartLine[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((line): line is CartLine => typeof line === "object" && line !== null &&
-      Number.isInteger(line.item_id) && Number.isInteger(line.qty) && Array.isArray(line.option_ids) &&
-      line.option_ids.every(Number.isInteger) &&
-      (line.experience_id === undefined || Number.isInteger(line.experience_id)));
+    return parsed.filter((line): line is CartLine => typeof line === "object" && line !== null && (
+      (Number.isInteger(line.catalog_product_id) && Number.isInteger(line.qty) &&
+        Object.keys(line).length === 2) ||
+      (Number.isInteger(line.item_id) && Number.isInteger(line.qty) && Array.isArray(line.option_ids) &&
+        line.option_ids.every(Number.isInteger) &&
+        (line.experience_id === undefined || Number.isInteger(line.experience_id)))));
   } catch { return []; }
 }
 function readDraft(): Draft | null {
@@ -237,6 +245,40 @@ function itemRow(item: MenuItemView, featured = false): HTMLElement {
   actions.append(price, add); row.append(actions);
   return row;
 }
+const RETAIL_LOW = 5;
+/** 帶回家商品一列：照片、名稱、介紹、價格、剩幾件（≤5 才顯示）、加入。 */
+function retailRow(product: MenuRetailView): HTMLElement {
+  const soldOut = retailSoldOut(product);
+  const row = el("article", soldOut ? "item item-soldout" : "item");
+  row.dataset.productId = String(product.id);
+  const detail = el("div", "item-detail");
+  if (product.photo) {
+    const photo = el("span", "item-photo");
+    const img = el("img"); img.src = `/photos/${product.photo}.webp`; img.alt = "";
+    img.width = 168; img.height = 168; img.loading = "lazy"; img.decoding = "async";
+    photo.append(img); detail.append(photo);
+  }
+  const copy = el("span", "item-text"); copy.append(el("span", "item-name", product.name));
+  if (product.description) copy.append(el("span", "item-desc", product.description));
+  detail.append(copy); row.append(detail);
+  const actions = el("div", "item-actions");
+  const price = el("div"); price.append(el("span", "item-price", money(product.unit_price)));
+  const badge = soldOut ? "售完" : product.remaining <= RETAIL_LOW ? `剩 ${product.remaining} 件` : null;
+  if (badge) price.append(el("span", soldOut ? "item-badge item-badge-off" : "item-badge", badge));
+  const add = button(soldOut ? "售完" : "加入", () => {
+    if (menu === null) return;
+    try {
+      cart = addLine(menu, cart, { catalog_product_id: product.id, qty: 1 });
+      saveCart(); renderFooter(); clearMessage();
+      $("cart-feedback").textContent = `已加入${product.name}`;
+      if (feedbackTimer !== null) clearTimeout(feedbackTimer);
+      feedbackTimer = window.setTimeout(() => { $("cart-feedback").textContent = ""; }, 2500);
+    } catch (reason) { showMessage(cartError(reason)); }
+  }, "item-add");
+  add.disabled = soldOut; add.setAttribute("aria-label", `${soldOut ? "售完" : "加入"}：${product.name}`);
+  actions.append(price, add); row.append(actions);
+  return row;
+}
 function selectCategory(category: number, home = false, push = true): void {
   activeCategory = category; menuHome = home;
   if (push) history.pushState({ menuCategory: category, menuHome: home }, "");
@@ -265,6 +307,13 @@ function renderMenu(snapshot: MenuSnapshot): void {
     .filter((view): view is ExperienceView => view !== null);
   $("experiences").hidden = experiences.length === 0;
   $("experience-list").replaceChildren(...(menuHome ? experiences.map((view) => experienceMini(view, (from) => openExperience(view, from))) : []));
+  const takeHome = retailGroups(snapshot);
+  $("take-home").hidden = takeHome.length === 0;
+  $("take-home-list").replaceChildren(...(menuHome ? takeHome.map((group) => {
+    const box = el("div", "take-home-group");
+    box.append(el("h3", "take-home-category", group.category), ...group.products.map(retailRow));
+    return box;
+  }) : []));
   $("recommendations").hidden = selection.recommended.length === 0;
   $("recommended-list").replaceChildren(...(menuHome ? selection.recommended.map((item) => itemRow(item, true)) : []));
   const shortcuts: HTMLElement[] = [];
@@ -279,6 +328,7 @@ function renderMenu(snapshot: MenuSnapshot): void {
     chosen.add(category.id); shortcuts.push(button(category.name, () => selectCategory(category.id), "shortcut"));
     if (chosen.size === 2) break;
   }
+  if (takeHome.length) shortcuts.push(button("帶回家", () => $("take-home").scrollIntoView({ block: "start" }), "shortcut"));
   if (!shortcuts.length) shortcuts.push(button("看看菜單", () => selectCategory(ALL), "shortcut"));
   $("shortcuts").replaceChildren(...shortcuts);
 }
@@ -306,10 +356,15 @@ function renderCart(): void {
   if (!priced.ok) {
     body.append(el("p", "field-error", cartError(new Error(priced.reason))));
     cart.forEach((line, index) => {
-      const item = menu?.items.find((entry) => entry.id === line.item_id);
       const row = el("div", "cart-line");
-      const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
-      const name = [item?.name ?? "已下架品項", ...selected].join(" · ");
+      let name: string;
+      if (isRetailLine(line)) {
+        name = menu?.retail?.find((entry) => entry.id === line.catalog_product_id)?.name ?? "已下架商品";
+      } else {
+        const item = menu?.items.find((entry) => entry.id === line.item_id);
+        const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
+        name = [item?.name ?? "已下架品項", ...selected].join(" · ");
+      }
       const info = el("div"); info.append(el("b", "", name), el("span", "", `${line.qty} 份`));
       const checked = menu ? checkCart(menu, [line]) : null;
       if (checked && !checked.ok) info.append(el("span", "field-error", cartError(new Error(checked.reason))));
@@ -341,6 +396,7 @@ function renderCart(): void {
   note.addEventListener("input", () => sessionStorage.setItem("lk_note", note.value));
   noteLabel.append(note); body.append(noteLabel);
   body.append(el("p", "payment-note", "付款方式：現金 · 到櫃台付款後才會製作。"));
+  if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
   body.append(button("送出現金訂單", () => void startCheckout(note.value)));
   showScreen("cart");
 }
@@ -356,21 +412,11 @@ function upsellBlock(): HTMLElement | null {
   if (menu === null) return null;
   const picks = upsellSuggestions(menu, cart, skippedUpsell());
   if (!picks.length) return null;
-  const roles = [...new Set(picks.map((item) => item.presentation?.role).filter((role): role is UpsellRole => !!role))];
+  const roles = [...new Set(picks.map((pick) => pick.role))];
   const box = el("section", "upsell");
   box.setAttribute("aria-label", "加購推薦");
   box.append(el("p", "upsell-title", roles.length === 1 ? UPSELL_COPY[roles[0]!] ?? "要不要再帶一個？" : "要不要再帶一個？"));
-  for (const item of picks) {
-    const row = el("div", "upsell-item");
-    const info = el("div"); info.append(el("b", "", item.name), el("span", "item-price", ` ${priceText(item)}`));
-    row.append(info, button(item.option_groups.length ? "選擇選項" : "一起帶", () => {
-      if (menu === null) return;
-      if (item.option_groups.length) { openDetail(item); return; }
-      try { cart = addLine(menu, cart, { item_id: item.id, option_ids: [], qty: 1 }); saveCart(); renderFooter(); renderCart(); }
-      catch (reason) { showMessage(cartError(reason)); }
-    }, "item-add"));
-    box.append(row);
-  }
+  for (const pick of picks) box.append(upsellRow(pick));
   box.append(button("不用了", () => {
     const skipped = skippedUpsell();
     roles.forEach((role) => skipped.add(role));
@@ -378,6 +424,23 @@ function upsellBlock(): HTMLElement | null {
     box.remove();
   }, "upsell-skip"));
   return box;
+}
+function upsellRow(pick: UpsellPick): HTMLElement {
+  const row = el("div", "upsell-item");
+  const info = el("div");
+  const options = pick.kind === "menu" && pick.option_groups.length > 0;
+  info.append(el("b", "", pick.name),
+    el("span", "item-price", ` ${pick.kind === "menu" ? priceText(pick) : money(pick.unit_price)}`));
+  row.append(info, button(options ? "選擇選項" : "一起帶", () => {
+    if (menu === null) return;
+    if (pick.kind === "menu" && options) { openDetail(pick); return; }
+    const line: CartLine = pick.kind === "menu"
+      ? { item_id: pick.id, option_ids: [], qty: 1 }
+      : { catalog_product_id: pick.id, qty: 1 };
+    try { cart = addLine(menu, cart, line); saveCart(); renderFooter(); renderCart(); }
+    catch (reason) { showMessage(cartError(reason)); }
+  }, "item-add"));
+  return row;
 }
 function openExperience(view: ExperienceView, from: HTMLElement): void {
   void drawExperience(view, from, {
@@ -443,7 +506,7 @@ async function challenge(): Promise<string> {
 }
 function newDraft(note: string): Draft {
   return { idempotency_key: crypto.randomUUID(), table_code: tableCode, payment_method: "CASH",
-    note: note.trim(), lines: cart.map((line) => ({ ...line, option_ids: [...line.option_ids] })) };
+    note: note.trim(), lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }) };
 }
 async function startCheckout(note: string): Promise<void> {
   if (menu === null || checkoutStarting || submitting) return;
@@ -495,6 +558,8 @@ async function submitDraft(draft: Draft): Promise<void> {
   } finally { submitting = false; challengeToken = ""; }
 }
 function orderState(view: OrderView): string {
+  if (view.fulfillment === "HANDED_OVER") return "已領取，謝謝你。";
+  if (view.fulfillment === "AWAITING") return "已付款。帶回家商品請到櫃檯領取。";
   switch (view.status) {
     case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項。請稍候。";
     case "HELD": return "訂單已確認。請到櫃台付現金，付款後才會製作。";
@@ -516,13 +581,20 @@ async function refreshOrder(): Promise<void> {
   body.append(el("p", "order-state", orderState(view)));
   if (view.table_label) body.append(el("p", "", `桌號 ${view.table_label}`));
   else body.append(el("p", "", "外帶"));
-  for (const line of view.lines) body.append(el("p", "order-line", `${line.name} × ${line.qty}　${money(line.line_total)}`));
+  for (const line of view.lines) {
+    body.append(el("p", "order-line", `${line.name} × ${line.qty}　${money(line.line_total)}${line.take_home ? "　（帶回家）" : ""}`));
+  }
+  if (view.lines.some((line) => line.take_home) && view.fulfillment !== "HANDED_OVER") {
+    body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
+  }
   body.append(el("p", "cart-total", `合計 ${money(view.total)}`));
   if (view.note) body.append(el("p", "", `備註：${view.note}`));
   body.append(el("p", "order-hint", "可儲存此頁網址，稍後查看付款狀態。"));
   if (view.status === "REJECTED" || view.status === "CANCELLED")
     body.append(button("返回菜單", () => { history.pushState(null, "", tableCode ? `/t/${tableCode}` : "/"); activeOrder = null; showScreen("menu"); }));
-  if (["PAID", "REJECTED", "CANCELLED", "REFUNDED"].includes(view.status) && pollTimer !== null) {
+  // 付了錢但帶回家商品還沒交：繼續更新，交貨後客人頁才會變「已領取」。
+  const done = ["PAID", "REJECTED", "CANCELLED", "REFUNDED"].includes(view.status) && view.fulfillment !== "AWAITING";
+  if (done && pollTimer !== null) {
     clearInterval(pollTimer); pollTimer = null;
   }
 }

@@ -11,11 +11,13 @@ const ORDER_ID = /^[0-9a-f]{32}$/;
 const SYNC_TARGETS = new Set(["IMPORTED", "SETTLED", "VOIDED"]);
 const HOLD_TARGETS = new Set(["HELD", "REJECTED", "NONE"]);
 const PAYMENT_TARGETS = new Set(["PAID", "CANCELLED"]);
+const FULFILLMENT_TARGETS = new Set(["AWAITING", "HANDED_OVER"]);
 
 interface OrderRow {
   id: string;
   sync_status: string;
   hold_status: string;
+  fulfillment: string;
   payment_status: string;
   row_version: number;
 }
@@ -47,14 +49,15 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
       ? []
       : (
           await env.DB.prepare(
-            `SELECT order_id, line_no, item_id, name, option_ids, unit_price, qty, line_total, limited, experience_id ` +
+            `SELECT order_id, line_no, item_id, catalog_product_id, name, option_ids, unit_price, qty, line_total, limited, experience_id ` +
               `FROM order_lines WHERE order_id IN (${ids.map(() => "?").join(",")}) ORDER BY order_id, line_no`,
           )
             .bind(...ids)
             .all<{
               order_id: string;
               line_no: number;
-              item_id: number;
+              item_id: number | null;
+              catalog_product_id: number | null;
               name: string;
               option_ids: string;
               unit_price: number;
@@ -81,7 +84,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   });
 }
 
-type Target = { sync_status?: string; hold_status?: string; payment_status?: string };
+type Target = { sync_status?: string; hold_status?: string; payment_status?: string; fulfillment?: string };
 
 function parseTarget(raw: Uint8Array): Target | null {
   let v: unknown;
@@ -91,7 +94,7 @@ function parseTarget(raw: Uint8Array): Target | null {
     return null;
   }
   if (typeof v !== "object" || v === null) return null;
-  const { sync_status, hold_status, payment_status, ...rest } = v as Record<string, unknown>;
+  const { sync_status, hold_status, payment_status, fulfillment, ...rest } = v as Record<string, unknown>;
   if (Object.keys(rest).length > 0) return null;
   const t: Target = {};
   if (sync_status !== undefined) {
@@ -105,6 +108,10 @@ function parseTarget(raw: Uint8Array): Target | null {
   if (payment_status !== undefined) {
     if (typeof payment_status !== "string" || !PAYMENT_TARGETS.has(payment_status)) return null;
     t.payment_status = payment_status;
+  }
+  if (fulfillment !== undefined) {
+    if (typeof fulfillment !== "string" || !FULFILLMENT_TARGETS.has(fulfillment)) return null;
+    t.fulfillment = fulfillment;
   }
   if (Object.keys(t).length === 0) return null;
   // 付款結果必須和同步狀態一起報：收到錢＝銷售成立（SETTLED）；取消＝作廢（VOIDED）。
@@ -133,6 +140,13 @@ function transitionError(row: OrderRow, t: Target): string | null {
   if (t.payment_status !== undefined && t.payment_status !== row.payment_status) {
     if (row.payment_status !== "UNPAID") return "invalid_transition";
   }
+  // 交貨（docs/63 §13）：成立銷售時標待交貨；店員交貨後才能到已領取，不能倒退。
+  if (t.fulfillment !== undefined && t.fulfillment !== row.fulfillment) {
+    const settled = (t.sync_status ?? row.sync_status) === "SETTLED";
+    const awaiting = t.fulfillment === "AWAITING" && row.fulfillment === "NONE" && settled;
+    const handed = t.fulfillment === "HANDED_OVER" && row.fulfillment === "AWAITING" && settled;
+    if (!awaiting && !handed) return "invalid_transition";
+  }
   return null;
 }
 
@@ -141,7 +155,8 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
   const target = parseTarget(raw);
   if (target === null) return error("invalid_status", 422);
   const row = await env.DB.prepare(
-    "SELECT id, sync_status, hold_status, payment_status, row_version FROM orders WHERE store_id = ? AND id = ?",
+    "SELECT id, sync_status, hold_status, payment_status, fulfillment, row_version FROM orders " +
+      "WHERE store_id = ? AND id = ?",
   )
     .bind(storeId, id)
     .first<OrderRow>();
@@ -153,6 +168,7 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
     sync_status: target.sync_status ?? row.sync_status,
     hold_status: target.hold_status ?? row.hold_status,
     payment_status: target.payment_status ?? row.payment_status,
+    fulfillment: target.fulfillment ?? row.fulfillment,
   };
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== row[k]);
   if (changed.length === 0) return json({ id, ...next });
@@ -160,9 +176,9 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
   const results = await env.DB.batch([
     // 樂觀鎖：拿到的版本若已被別的回報改過，這次不寫（下面回 409，POS 會重拉重報）。
     env.DB.prepare(
-      "UPDATE orders SET sync_status = ?, hold_status = ?, payment_status = ?, updated_at = ?, " +
+      "UPDATE orders SET sync_status = ?, hold_status = ?, payment_status = ?, fulfillment = ?, updated_at = ?, " +
         "row_version = row_version + 1 WHERE store_id = ? AND id = ? AND row_version = ?",
-    ).bind(next.sync_status, next.hold_status, next.payment_status, now, storeId, id, row.row_version),
+    ).bind(next.sync_status, next.hold_status, next.payment_status, next.fulfillment, now, storeId, id, row.row_version),
     ...changed.map((k) =>
       env.DB.prepare(
         "INSERT INTO order_events (store_id, order_id, kind, from_state, to_state, source, at) " +

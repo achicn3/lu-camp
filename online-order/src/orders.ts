@@ -54,7 +54,15 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {
     if (typeof l !== "object" || l === null) return null;
-    const { item_id, option_ids, qty, experience_id } = l as Record<string, unknown>;
+    const { item_id, option_ids, qty, experience_id, catalog_product_id, ...rest } = l as Record<string, unknown>;
+    if (catalog_product_id !== undefined) {
+      // 帶回家商品：只有商品與數量（docs/63 §13）。
+      if (typeof catalog_product_id !== "number" || typeof qty !== "number") return null;
+      if (item_id !== undefined || option_ids !== undefined || experience_id !== undefined) return null;
+      if (Object.keys(rest).length > 0) return null;
+      lines.push({ catalog_product_id, qty });
+      continue;
+    }
     if (typeof item_id !== "number" || typeof qty !== "number" || !Array.isArray(option_ids)) return null;
     if (!option_ids.every((id) => typeof id === "number")) return null;
     if (experience_id !== undefined && experience_id !== null && typeof experience_id !== "number") return null;
@@ -279,13 +287,14 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     ),
     ...priced.lines.map((l, i) =>
       env.DB.prepare(
-        "INSERT INTO order_lines (order_id, store_id, line_no, item_id, name, option_ids, unit_price, qty, " +
-          `line_total, limited, experience_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
+        "INSERT INTO order_lines (order_id, store_id, line_no, item_id, catalog_product_id, name, option_ids, " +
+          `unit_price, qty, line_total, limited, experience_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
       ).bind(
         orderId,
         storeId,
         i + 1,
-        l.item_id,
+        l.item_id ?? null,
+        l.catalog_product_id ?? null,
         l.name,
         JSON.stringify(l.option_ids),
         l.unit_price,
@@ -349,7 +358,7 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return error("not_found", 404);
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
-    "SELECT id, table_label, service_mode, total, payment_status, hold_status, note, created_at " +
+    "SELECT id, table_label, service_mode, total, payment_status, hold_status, fulfillment, note, created_at " +
       "FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
@@ -360,15 +369,17 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       total: number;
       payment_status: string;
       hold_status: string;
+      fulfillment: string;
       note: string | null;
       created_at: number;
     }>();
   if (row === null) return error("not_found", 404);
   const lines = await env.DB.prepare(
-    "SELECT name, qty, line_total FROM order_lines WHERE order_id = ? ORDER BY line_no",
+    "SELECT name, qty, line_total, catalog_product_id IS NOT NULL AS take_home FROM order_lines " +
+      "WHERE order_id = ? ORDER BY line_no",
   )
     .bind(row.id)
-    .all<{ name: string; qty: number; line_total: number }>();
+    .all<{ name: string; qty: number; line_total: number; take_home: number }>();
   return json(
     {
       status: customerStatus(row),
@@ -377,7 +388,9 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       total: row.total,
       note: row.note,
       created_at: new Date(row.created_at).toISOString(),
-      lines: lines.results,
+      // 帶回家商品要到櫃檯領：AWAITING＝付了錢還沒拿、HANDED_OVER＝已領取（docs/63 §13）。
+      fulfillment: row.fulfillment,
+      lines: lines.results.map(({ take_home, ...line }) => ({ ...line, take_home: take_home === 1 })),
     },
     200,
     { "Cache-Control": "no-store" },
