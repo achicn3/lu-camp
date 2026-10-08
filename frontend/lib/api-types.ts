@@ -3081,6 +3081,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-orders/{order_id}/settle-paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle Paid Online Order
+         * @description 客人在線上已用 LINE Pay 付清：開著的 POS 頁面呼叫，成立銷售（docs/44 §4.4.2）。
+         *
+         *     價格對不上時不成立，把原因記在單上（先存下來）再回 409，店員在清單上看得到。
+         */
+        post: operations["settlePaidOnlineOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/opening-check/items": {
         parameters: {
             query?: never;
@@ -9095,6 +9117,8 @@ export interface components {
         };
         /** OnlineOrderRead */
         OnlineOrderRead: {
+            /** Attention */
+            attention: string | null;
             /**
              * Created At
              * Format: date-time
@@ -9108,6 +9132,8 @@ export interface components {
             hold_status: string;
             /** Id */
             id: number;
+            /** Linepay Paid */
+            linepay_paid: boolean;
             /** Lines */
             lines: components["schemas"]["OnlineOrderLineRead"][];
             /** Note */
@@ -9156,6 +9182,14 @@ export interface components {
             orders: components["schemas"]["OnlineOrderRead"][];
             /** Paused Reason */
             paused_reason: string | null;
+        };
+        /**
+         * OnlineSettlePaidRead
+         * @description 線上 LINE Pay 已付款單成立的結果。
+         */
+        OnlineSettlePaidRead: {
+            /** Sale Id */
+            sale_id: number;
         };
         /** OnlineTableRead */
         OnlineTableRead: {
@@ -17596,6 +17630,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OnlineOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    settlePaidOnlineOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineSettlePaidRead"];
                 };
             };
             /** @description Validation Error */

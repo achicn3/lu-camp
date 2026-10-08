@@ -35,7 +35,23 @@ function money(value: string | number): string {
 
 /** 還沒處理的單：已匯入、未付款、沒被庫存拒絕。 */
 export function isOpen(order: Order): boolean {
-  return order.sync_status === "IMPORTED" && order.payment_status === "UNPAID" && order.hold_status !== "REJECTED";
+  return (
+    order.sync_status === "IMPORTED" &&
+    order.payment_status === "UNPAID" &&
+    order.hold_status !== "REJECTED" &&
+    // 客人選 LINE Pay 還沒付：店員這邊沒事可做（付好會自動成立），不算待處理。
+    !isAwaitingLinePay(order)
+  );
+}
+
+/** 客人選了線上 LINE Pay、還沒付清。 */
+export function isAwaitingLinePay(order: Order): boolean {
+  return order.payment_method === "LINE_PAY" && !order.linepay_paid && order.sync_status === "IMPORTED";
+}
+
+/** 客人已用 LINE Pay 付清、POS 還沒成立銷售（沒卡住的才自動成立）。 */
+function needsSettle(order: Order): boolean {
+  return order.linepay_paid && order.sync_status === "IMPORTED" && order.attention == null;
 }
 
 /** 這次新出現、還沒處理的單（第一次載入不算新，免得一開 POS 就響）。 */
@@ -71,6 +87,11 @@ function chime() {
 }
 
 function statusLabel(order: Order): { text: string; tone: string } {
+  if (order.attention != null && order.sync_status === "IMPORTED") return { text: "LINE Pay 已付款・需要處理", tone: "danger" };
+  if (needsSettle(order)) return { text: "LINE Pay 已付款・成立中", tone: "open" };
+  if (isAwaitingLinePay(order)) {
+    return { text: order.hold_status === "HELD" ? "等待 LINE Pay 付款・已保留份數" : "等待 LINE Pay 付款", tone: "muted" };
+  }
   if (isAwaitingHandover(order)) return { text: "已付款・待交貨", tone: "open" };
   if (order.fulfillment_status === "HANDED_OVER") return { text: "已交貨", tone: "done" };
   if (order.sync_status === "SETTLED") return { text: "已結帳", tone: "done" };
@@ -91,10 +112,13 @@ function placeLabel(order: Order): string {
 export function OnlineOrdersPanel({
   cartEmpty,
   onLoad,
+  onPaidSettled,
 }: {
   /** POS 購物車是空的才能帶入（不蓋掉正在結的單）。 */
   cartEmpty: boolean;
   onLoad: (cart: OnlineCart) => void;
+  /** 線上 LINE Pay 已付款的單成立了銷售：POS 據此出餐單、開發票（docs/44 §4.4.2）。 */
+  onPaidSettled?: (saleId: number, order: Order) => void;
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -121,6 +145,32 @@ export function OnlineOrdersPanel({
   }, [data]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ONLINE_ORDERS_KEY });
+
+  // 線上 LINE Pay 付好了：開著的 POS 自動成立銷售（每張只試一次；失敗的原因後端記在單上）。
+  const settling = useRef<Set<number>>(new Set());
+  const settle = useMutation({
+    mutationFn: async (target: Order) => {
+      const { data: result, error: apiErr } = await api.POST("/api/v1/online-orders/{order_id}/settle-paid", {
+        params: { path: { order_id: target.id } },
+      });
+      if (!result) throw new Error(detail(apiErr) ?? "線上 LINE Pay 單沒能自動成立");
+      return { saleId: result.sale_id, target };
+    },
+    onSuccess: ({ saleId, target }) => {
+      chime();
+      onPaidSettled?.(saleId, target);
+      refresh();
+    },
+    onError: () => refresh(),
+  });
+  useEffect(() => {
+    if (!onPaidSettled || !data) return;
+    for (const target of data.orders) {
+      if (!needsSettle(target) || settling.current.has(target.id)) continue;
+      settling.current.add(target.id);
+      settle.mutate(target);
+    }
+  }, [data, onPaidSettled, settle]);
 
   const load = useMutation({
     mutationFn: async (orderId: number) => {
@@ -281,6 +331,33 @@ export function OnlineOrdersPanel({
                         ))}
                       </ul>
                       {order.note && <p className="online-order-note">備註：{order.note}</p>}
+                      {order.attention != null && order.sync_status === "IMPORTED" && (
+                        <p className="form-error">{order.attention}</p>
+                      )}
+                      {isAwaitingLinePay(order) && (
+                        <div className="online-order-actions">
+                          {confirmCancel === order.id ? (
+                            <>
+                              <span>客人想改付現金？取消這張後請直接在 POS 重新點、收現金。</span>
+                              <button
+                                type="button"
+                                className="btn-danger"
+                                disabled={cancel.isPending}
+                                onClick={() => cancel.mutate(order.id)}
+                              >
+                                確定取消
+                              </button>
+                              <button type="button" className="btn-ghost" onClick={() => setConfirmCancel(null)}>
+                                不取消
+                              </button>
+                            </>
+                          ) : (
+                            <button type="button" className="btn-ghost" onClick={() => setConfirmCancel(order.id)}>
+                              取消這張
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {order.hold_status === "REJECTED" && order.reject_reason && (
                         <p className="form-error">庫存不足：{order.reject_reason}（客人那邊已顯示，請客人重新點）</p>
                       )}

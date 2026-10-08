@@ -6601,3 +6601,5 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .retail-form .menu-photo-actions { flex-direction: row; align-items: center; }
 .retail-form .menu-photo-actions .btn-ghost { width: auto; padding: 0 var(--sp-4); display: inline-flex; align-items: center; }
 .online-order-handover { margin: var(--sp-1) 0 0; font-weight: 600; color: var(--accent); }
+/* 線上 LINE Pay 已付款自動成立的提示（docs/44 §4.4.2） */
+.pos-online-paid { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--accent); border-radius: var(--radius); background: #f0f5ef; font-weight: 600; }

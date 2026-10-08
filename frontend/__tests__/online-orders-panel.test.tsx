@@ -59,6 +59,8 @@ function order(id: number, extra: Partial<Order> = {}): Order {
     sale_id: null,
     fulfillment_status: "NONE",
     handover_items: null,
+    linepay_paid: false,
+    attention: null,
     ...extra,
   };
 }
@@ -226,6 +228,44 @@ describe("POS 線上訂單", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url.endsWith("/online-orders/7/hand-over") && c.method === "POST")).toBe(true),
     );
+  });
+
+  it("客人選 LINE Pay、還沒付：等客人付款，不能帶入收現金（否則兩邊都收到錢），可以取消", async () => {
+    stubFetch(() => json(overview([order(8, { payment_method: "LINE_PAY" })])));
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    const row = screen.getByRole("listitem", { name: /桌號 A1/ });
+    expect(row.textContent).toContain("等待 LINE Pay 付款");
+    expect(screen.queryByRole("button", { name: "帶入結帳" })).toBeNull();
+    expect(screen.getByRole("button", { name: "取消這張" })).toBeTruthy();
+  });
+
+  it("LINE Pay 付好了：自動成立銷售一次，交給 POS 出單（docs/44 §4.4.2）", async () => {
+    const paid = order(9, { payment_method: "LINE_PAY", linepay_paid: true });
+    const calls = stubFetch((url, method) =>
+      url.endsWith("/online-orders/9/settle-paid") && method === "POST"
+        ? json({ sale_id: 321 })
+        : json(overview([paid])),
+    );
+    const settled = vi.fn();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} onPaidSettled={settled} />);
+    await waitFor(() => expect(settled).toHaveBeenCalledWith(321, expect.objectContaining({ id: 9 })));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter((c) => c.url.endsWith("/settle-paid")).length).toBe(1);
+  });
+
+  it("沒辦法自動成立：寫出原因、不再自動重試", async () => {
+    const stuck = order(10, {
+      payment_method: "LINE_PAY", linepay_paid: true,
+      attention: "客人用 LINE Pay 付了 140 元，POS 現在算 150 元",
+    });
+    const calls = stubFetch(() => json(overview([stuck])));
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} onPaidSettled={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    expect(screen.getByRole("listitem", { name: /桌號 A1/ }).textContent).toContain("POS 現在算 150 元");
+    expect(calls.some((c) => c.url.endsWith("/settle-paid"))).toBe(false);
   });
 
   it("暫停接單送到雲端", async () => {

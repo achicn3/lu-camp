@@ -12799,6 +12799,17 @@
       },
       "OnlineOrderRead": {
         "properties": {
+          "attention": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -12829,6 +12840,10 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "linepay_paid": {
+            "title": "Linepay Paid",
+            "type": "boolean"
           },
           "lines": {
             "items": {
@@ -12922,7 +12937,9 @@
           "reject_reason",
           "sale_id",
           "fulfillment_status",
-          "handover_items"
+          "handover_items",
+          "linepay_paid",
+          "attention"
         ],
         "title": "OnlineOrderRead",
         "type": "object"
@@ -13041,6 +13058,20 @@
           "orders"
         ],
         "title": "OnlineOrdersRead",
+        "type": "object"
+      },
+      "OnlineSettlePaidRead": {
+        "description": "線上 LINE Pay 已付款單成立的結果。",
+        "properties": {
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sale_id"
+        ],
+        "title": "OnlineSettlePaidRead",
         "type": "object"
       },
       "OnlineTableRead": {
@@ -29821,6 +29852,54 @@
           }
         ],
         "summary": "Hand Over Online Order",
+        "tags": [
+          "online-orders"
+        ]
+      }
+    },
+    "/api/v1/online-orders/{order_id}/settle-paid": {
+      "post": {
+        "description": "客人在線上已用 LINE Pay 付清：開著的 POS 頁面呼叫，成立銷售（docs/44 §4.4.2）。\n\n價格對不上時不成立，把原因記在單上（先存下來）再回 409，店員在清單上看得到。",
+        "operationId": "settlePaidOnlineOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineSettlePaidRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Settle Paid Online Order",
         "tags": [
           "online-orders"
         ]

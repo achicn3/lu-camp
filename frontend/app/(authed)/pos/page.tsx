@@ -1733,6 +1733,71 @@ export default function PosPage() {
       ),
   });
 
+  // 線上 LINE Pay 已付款的單（docs/44 §4.4.2）：面板自動成立銷售後，在這裡出餐單、開發票、
+  // 沒載具就印證明聯。不碰目前完成頁的狀態（店員可能正在結別筆），結果另外列在上方提示。
+  const [onlinePaidNotices, setOnlinePaidNotices] = useState<
+    { saleId: number; message: string; failed: boolean }[]
+  >([]);
+  const handleOnlinePaid = useCallback(
+    async (saleId: number, order: components["schemas"]["OnlineOrderRead"]) => {
+      const where = order.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${order.table_label ?? ""}`;
+      const minutes = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 60000);
+      const late = minutes >= 3 ? `（這是 ${minutes} 分鐘前下的單）` : "";
+      const done: string[] = [];
+      const problems: string[] = [];
+      const { data: sale } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: saleId } },
+      });
+      if (sale && printKitchenEnabled && sale.service_mode != null) {
+        try {
+          await printKitchenTicket(sale, sale.service_mode, sale.table_no ?? null);
+          done.push("出餐單已送出");
+        } catch (err) {
+          problems.push(`出餐單沒印出來：${(err as Error).message}（請到交易紀錄重印）`);
+        }
+      }
+      if (sale && einvoiceEnabled) {
+        const { data: invoice, error } = await api.POST("/api/v1/einvoice/sales/{sale_id}/issue", {
+          params: { path: { sale_id: saleId } },
+        });
+        if (!invoice) {
+          problems.push(`發票還沒開出來：${extractDetail(error) ?? "稍後會自動補開"}`);
+        } else if (invoiceProofPrintable(invoice)) {
+          try {
+            let header = storeHeader.data;
+            if (header == null) header = (await storeHeader.refetch()).data ?? undefined;
+            if (header?.tax_id == null) throw new Error("讀不到店家統編抬頭");
+            await printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name });
+            const recorded = await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
+              params: { path: { sale_id: saleId } },
+            });
+            done.push(
+              recorded.error
+                ? "證明聯已印（系統沒記錄到，請勿重印）"
+                : "證明聯已印，請客人到櫃檯拿",
+            );
+          } catch (err) {
+            problems.push(`證明聯沒印出來：${(err as Error).message}（請到交易紀錄補印）`);
+          }
+        } else if (invoice.carrier_type != null) {
+          done.push("發票已存入客人的載具");
+        }
+      }
+      if (!sale) problems.push("讀不到這筆銷售，請到交易紀錄確認並補印出餐單");
+      setOnlinePaidNotices((prev) => [
+        ...prev.filter((item) => item.saleId !== saleId),
+        {
+          saleId,
+          failed: problems.length > 0,
+          message:
+            `線上 LINE Pay 已付款：${where} $${formatNtd(parseNtd(order.total) ?? 0)}${late}` +
+            [...done, ...problems].map((text) => `・${text}`).join(""),
+        },
+      ]);
+    },
+    [einvoiceEnabled, printKitchenEnabled, storeHeader],
+  );
+
   // 結帳後開立（docs/24）：失敗不擋交易（銷售已成立），留待補開清單重試。
   const issueInvoice = useMutation({
     mutationFn: async (sale: SaleRead): Promise<{ invoice: InvoiceRead; sale: SaleRead }> => {
@@ -2700,7 +2765,11 @@ export default function PosPage() {
     <section>
       <div className="pos-title-row">
         <h1 className="page-title">POS 結帳</h1>
-        <OnlineOrdersPanel cartEmpty={lines.length === 0} onLoad={loadOnlineOrder} />
+        <OnlineOrdersPanel
+          cartEmpty={lines.length === 0}
+          onLoad={loadOnlineOrder}
+          onPaidSettled={(saleId, order) => void handleOnlinePaid(saleId, order)}
+        />
       </div>
       {onlineOrder && (
         <p className="pos-online-banner" role="status">
@@ -2736,6 +2805,24 @@ export default function PosPage() {
             className="btn-ghost"
             onClick={() =>
               setStaleKitchen((prev) => prev.filter((x) => x.saleId !== item.saleId))
+            }
+          >
+            知道了
+          </button>
+        </p>
+      ))}
+      {onlinePaidNotices.map((item) => (
+        <p
+          key={`online-${item.saleId}`}
+          role={item.failed ? "alert" : "status"}
+          className={`pos-online-paid${item.failed ? " form-error" : ""}`}
+        >
+          {item.message}
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() =>
+              setOnlinePaidNotices((prev) => prev.filter((x) => x.saleId !== item.saleId))
             }
           >
             知道了
