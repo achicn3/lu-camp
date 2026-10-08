@@ -205,6 +205,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(row_to_json(p)::text, ',' ORDER BY store_id, menu_item_id)), '-') "
         "FROM online_menu_presentations p",
     ),
+    # 帶回家商品（docs/63 §13）：哪些商品上線、介紹與照片，弄丟線上就沒得賣。
+    (
+        "線上點餐-帶回家商品（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(row_to_json(r)::text, ',' ORDER BY id)), '-') "
+        "FROM online_retail_listings r",
+    ),
     # 手沖體驗卡（docs/63 §4）：店主手寫的卡面文字與搭配，弄丟要整批重打。
     (
         "線上點餐-體驗卡（筆數／內容指紋）",
@@ -223,7 +230,8 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     (
         "線上點餐-訂單（筆數／狀態指紋）",
         "SELECT count(*)::text || '/' || COALESCE(md5(string_agg(remote_id || sync_status || "
-        "payment_status || COALESCE(sale_id::text, ''), ',' ORDER BY remote_id)), '-') "
+        "payment_status || COALESCE(sale_id::text, '') || fulfillment_status, ',' "
+        "ORDER BY remote_id)), '-') "
         "FROM online_orders",
     ),
     # 份數保留：還扣著的份數要能加回，弄丟就會永遠少那幾份。
