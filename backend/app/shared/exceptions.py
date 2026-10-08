@@ -256,6 +256,14 @@ class PurchaseOrderNotCancellable(DomainError):
     """採購單目前不可取消（僅草稿/已下單且尚未收任何貨可取消）。"""
 
 
+class PurchaseOrderNotEditable(DomainError):
+    """採購單目前不可修改（已取消）。"""
+
+
+class PurchaseOrderEditForbidden(DomainError):
+    """已下單／已收貨的採購單只有管理者能改（docs/70 §2）。"""
+
+
 class DuplicateSupplier(DomainError):
     """同店供應商名稱重複。"""
 

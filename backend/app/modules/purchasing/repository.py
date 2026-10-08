@@ -1,6 +1,7 @@
 """purchasing 資料存取層。"""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
@@ -96,6 +97,33 @@ class PurchasingRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def latest_received_purchase(
+        self, store_id: int, catalog_product_id: int
+    ) -> tuple[int, Decimal] | None:
+        """某商品「最近一次進貨」的（採購單 id, 進價）；沒有收過貨回 None（docs/70 §4.5）。
+
+        最近＝採購單最後一批收貨時間，再以單號；只算已收數量 > 0 的明細。
+        """
+        last_receipt = (
+            select(func.max(GoodsReceipt.received_at))
+            .where(GoodsReceipt.purchase_order_id == PurchaseOrder.id)
+            .correlate(PurchaseOrder)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(PurchaseOrder.id, PurchaseOrderLine.unit_cost)
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLine.purchase_order_id)
+            .where(
+                PurchaseOrderLine.store_id == store_id,
+                PurchaseOrderLine.catalog_product_id == catalog_product_id,
+                PurchaseOrderLine.received_qty > 0,
+            )
+            .order_by(last_receipt.desc().nulls_last(), PurchaseOrder.id.desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).first()
+        return None if row is None else (row[0], row[1])
 
     async def get_purchase_order(
         self, store_id: int, purchase_order_id: int

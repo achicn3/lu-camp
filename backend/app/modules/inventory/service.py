@@ -64,6 +64,8 @@ _MOVEMENT_LABELS: dict[tuple[StockDirection, StockReason], str] = {
     (StockDirection.OUT, StockReason.WRITE_OFF): "作廢出庫",
     (StockDirection.OUT, StockReason.ONLINE_HOLD): "線上訂單保留",
     (StockDirection.IN, StockReason.ONLINE_RELEASE): "線上訂單保留加回",
+    (StockDirection.IN, StockReason.PURCHASE_CORRECTION): "進貨更正（加回）",
+    (StockDirection.OUT, StockReason.PURCHASE_CORRECTION): "進貨更正（扣除）",
 }
 
 
@@ -2196,6 +2198,44 @@ class InventoryService:
             ref_id=ref_id,
             catalog_product_id=catalog_id,
         )
+
+    async def correct_purchased_stock(
+        self, store_id: int, catalog_id: int, delta: int, *, ref_type: str, ref_id: int
+    ) -> None:
+        """採購單事後修改的庫存更正（docs/70 §4.4）：已收差額加減現量、寫 PURCHASE_CORRECTION 帳。
+
+        扣不夠（多半是已經賣掉）整筆擋下並說明現在剩幾件——不能讓現量變負數。
+        """
+        if delta == 0:
+            return
+        product = await self._repo.get_catalog_for_update(store_id, catalog_id)
+        if product is None:
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
+        if delta < 0 and product.quantity_on_hand < -delta:
+            raise InsufficientStock(
+                f"「{product.name}」現在只剩 {product.quantity_on_hand} 件，"
+                f"收貨數不能少 {-delta} 件（可能已經賣出）"
+            )
+        product.quantity_on_hand += delta
+        await self._repo.add_stock_movement(
+            StockMovement(
+                store_id=store_id,
+                item_kind=ItemKind.CATALOG,
+                direction=StockDirection.IN if delta > 0 else StockDirection.OUT,
+                qty=abs(delta),
+                reason=StockReason.PURCHASE_CORRECTION,
+                ref_type=ref_type,
+                ref_id=ref_id,
+                catalog_product_id=catalog_id,
+            )
+        )
+
+    async def set_catalog_cost(self, store_id: int, catalog_id: int, unit_cost: Decimal) -> None:
+        """把一般商品成本設為指定進價（採購單更正後重算最近一次進貨用）；已成交的成本快照不受影響。"""
+        product = await self._repo.get_catalog_for_update(store_id, catalog_id)
+        if product is None:
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
+        product.unit_cost = unit_cost
 
     async def return_catalog_items(
         self,

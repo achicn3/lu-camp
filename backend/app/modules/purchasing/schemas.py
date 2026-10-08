@@ -68,6 +68,29 @@ class PurchaseOrderCreate(BaseModel):
     submit: bool = False
 
 
+class PurchaseOrderLineUpdate(PurchaseOrderLineCreate):
+    """修改採購單的一列（docs/70 §4.2）：有 id＝改既有明細、沒有＝新增。
+
+    received_qty：部分到貨／已收貨的單才可大於 0，差額由 service 自動加減庫存。
+    """
+
+    id: int | None = None
+    received_qty: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _received_within_qty(self) -> "PurchaseOrderLineUpdate":
+        if self.received_qty > self.qty:
+            raise ValueError("已收數量不可超過訂購數量")
+        return self
+
+
+class PurchaseOrderUpdate(BaseModel):
+    """整張覆寫：原有明細沒帶到的就刪除。"""
+
+    supplier_id: int
+    lines: list[PurchaseOrderLineUpdate] = Field(min_length=1)
+
+
 class PurchaseOrderLineRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

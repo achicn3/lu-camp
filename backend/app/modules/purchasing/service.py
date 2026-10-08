@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -21,6 +22,7 @@ from app.modules.purchasing.repository import PurchasingRepository
 from app.modules.purchasing.schemas import (
     InputInvoiceIn,
     PurchaseOrderCreate,
+    PurchaseOrderUpdate,
     ReceiveLineIn,
     SupplierCreate,
     SupplierUpdate,
@@ -31,7 +33,9 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
+    PurchaseOrderEditForbidden,
     PurchaseOrderNotCancellable,
+    PurchaseOrderNotEditable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
@@ -39,6 +43,8 @@ from app.shared.exceptions import (
     SupplierInactive,
     SupplierNotFound,
 )
+
+_NONE_RECEIVED: tuple[int, Decimal] = (0, Decimal(0))
 
 
 class PurchasingService:
@@ -237,6 +243,199 @@ class PurchasingService:
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
         return refreshed
+
+    async def update_purchase_order(
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        payload: PurchaseOrderUpdate,
+        *,
+        actor_user_id: int,
+        actor_is_manager: bool,
+    ) -> PurchaseOrder:
+        """整張覆寫採購單（docs/70 §4）：供應商、明細（改／加／刪）、已收數量。
+
+        草稿全員可改；已下單／部分到貨／已收貨只有管理者。已收數量的差額逐商品加減庫存
+        （扣不夠整筆擋下）；最近一次進貨是這張單的商品同步成本；前後值寫稽核。
+        """
+        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
+        if purchase_order is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        if purchase_order.status == PurchaseOrderStatus.CANCELLED:
+            raise PurchaseOrderNotEditable(f"採購單 {purchase_order_id} 已取消，不能修改")
+        if purchase_order.status != PurchaseOrderStatus.DRAFT and not actor_is_manager:
+            raise PurchaseOrderEditForbidden("已下單或已收貨的採購單只有管理者能修改")
+        has_receipts = purchase_order.status in (
+            PurchaseOrderStatus.PARTIAL,
+            PurchaseOrderStatus.RECEIVED,
+        )
+        existing = {line.id: line for line in purchase_order.lines}
+        await self._validate_edit(store_id, payload, existing, has_receipts=has_receipts)
+        if payload.supplier_id != purchase_order.supplier_id:
+            await self._change_supplier(store_id, purchase_order, payload.supplier_id)
+
+        before = self._edit_snapshot(purchase_order)
+        old = self._received_by_product(
+            (line.catalog_product_id, line.received_qty, line.unit_cost)
+            for line in purchase_order.lines
+        )
+        new = self._received_by_product(
+            (line.catalog_product_id, line.received_qty, Decimal(line.unit_cost))
+            for line in payload.lines
+        )
+        affected = sorted(p for p in old.keys() | new.keys() if old.get(p) != new.get(p))
+        # 「改前最近一次進貨」要在明細寫進去之前讀。
+        latest_before = {
+            p: await self._repo.latest_received_purchase(store_id, p) for p in affected
+        }
+        self._apply_lines(store_id, purchase_order, payload, existing)
+        await self._session.flush()
+
+        for product_id in affected:
+            delta = new.get(product_id, _NONE_RECEIVED)[0] - old.get(product_id, _NONE_RECEIVED)[0]
+            await self._inventory.correct_purchased_stock(
+                store_id, product_id, delta, ref_type="purchase_order", ref_id=purchase_order.id
+            )
+        if has_receipts:
+            self._restate_status(purchase_order, actor_user_id)
+        await self._session.flush()
+        await self._resync_costs(store_id, purchase_order.id, latest_before)
+
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_PURCHASE_ORDER",
+            entity_type="purchase_order",
+            entity_id=str(purchase_order.id),
+            before=before,
+            after=self._edit_snapshot(purchase_order),
+        )
+        refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
+        assert refreshed is not None
+        return refreshed
+
+    async def _validate_edit(
+        self,
+        store_id: int,
+        payload: PurchaseOrderUpdate,
+        existing: dict[int, PurchaseOrderLine],
+        *,
+        has_receipts: bool,
+    ) -> None:
+        seen_products: set[int] = set()
+        seen_lines: set[int] = set()
+        for line in payload.lines:
+            unit_cost = Decimal(line.unit_cost)
+            if line.qty <= 0 or unit_cost <= 0 or unit_cost != unit_cost.to_integral_value():
+                raise InvalidPurchaseOrder("採購數量與單價必須為正整數")
+            if unit_cost > MAX_NTD:
+                raise InvalidPurchaseOrder(f"採購單價不可超過資料庫金額上限 {MAX_NTD}")
+            if not 0 <= line.received_qty <= line.qty:
+                raise InvalidPurchaseOrder("已收數量必須介於 0 與訂購數量之間")
+            if line.received_qty and not has_receipts:
+                raise InvalidPurchaseOrder("還沒收過貨的採購單不能填已收數量，請用「收貨入庫」")
+            if line.catalog_product_id in seen_products:
+                raise InvalidPurchaseOrder("同一採購單不可重複同一商品")
+            seen_products.add(line.catalog_product_id)
+            if line.id is not None:
+                if line.id not in existing or line.id in seen_lines:
+                    raise InvalidPurchaseOrder(f"明細 {line.id} 不屬於這張採購單")
+                seen_lines.add(line.id)
+            if await self._inventory.get_catalog(store_id, line.catalog_product_id) is None:
+                raise CrossStoreReference(
+                    f"一般商品 {line.catalog_product_id} 不屬於 store {store_id}"
+                )
+
+    async def _change_supplier(
+        self, store_id: int, purchase_order: PurchaseOrder, supplier_id: int
+    ) -> None:
+        supplier = await self._repo.get_supplier_for_update(store_id, supplier_id)
+        if supplier is None:
+            raise CrossStoreReference(f"供應商 {supplier_id} 不屬於 store {store_id}")
+        if not supplier.is_active:
+            raise SupplierInactive(f"供應商「{supplier.name}」已停用，不能改成它")
+        purchase_order.supplier_id = supplier.id
+        purchase_order.supplier_name = supplier.name
+
+    @staticmethod
+    def _apply_lines(
+        store_id: int,
+        purchase_order: PurchaseOrder,
+        payload: PurchaseOrderUpdate,
+        existing: dict[int, PurchaseOrderLine],
+    ) -> None:
+        kept = {line.id for line in payload.lines if line.id is not None}
+        for line in [ln for ln in purchase_order.lines if ln.id not in kept]:
+            purchase_order.lines.remove(line)  # delete-orphan 會刪掉這列
+        for item in payload.lines:
+            if item.id is not None:
+                target = existing[item.id]
+                target.catalog_product_id = item.catalog_product_id
+                target.qty = item.qty
+                target.received_qty = item.received_qty
+                target.unit_cost = Decimal(item.unit_cost)
+            else:
+                purchase_order.lines.append(
+                    PurchaseOrderLine(
+                        store_id=store_id,
+                        catalog_product_id=item.catalog_product_id,
+                        qty=item.qty,
+                        received_qty=item.received_qty,
+                        unit_cost=Decimal(item.unit_cost),
+                    )
+                )
+
+    @staticmethod
+    def _received_by_product(
+        lines: Iterable[tuple[int, int, Decimal]],
+    ) -> dict[int, tuple[int, Decimal]]:
+        """（商品, 已收, 進價）→ {商品: (已收, 進價)}；只列已收 > 0 的。"""
+        return {product: (received, cost) for product, received, cost in lines if received > 0}
+
+    @staticmethod
+    def _restate_status(purchase_order: PurchaseOrder, actor_user_id: int) -> None:
+        fully = all(line.received_qty >= line.qty for line in purchase_order.lines)
+        purchase_order.status = (
+            PurchaseOrderStatus.RECEIVED if fully else PurchaseOrderStatus.PARTIAL
+        )
+        if not fully:
+            purchase_order.received_at = None
+            purchase_order.received_by = None
+        elif purchase_order.received_at is None:
+            purchase_order.received_at = datetime.now(UTC)
+            purchase_order.received_by = actor_user_id
+
+    async def _resync_costs(
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        latest_before: dict[int, tuple[int, Decimal] | None],
+    ) -> None:
+        """改前或改後最近一次進貨是這張單，商品成本就設為改後最近一次進貨的進價（docs/70 §4.5）。"""
+        for product_id, before in latest_before.items():
+            after = await self._repo.latest_received_purchase(store_id, product_id)
+            touched = (before is not None and before[0] == purchase_order_id) or (
+                after is not None and after[0] == purchase_order_id
+            )
+            if touched and after is not None:
+                await self._inventory.set_catalog_cost(store_id, product_id, after[1])
+
+    @staticmethod
+    def _edit_snapshot(purchase_order: PurchaseOrder) -> dict[str, Any]:
+        return {
+            "status": purchase_order.status.value,
+            "supplier_id": purchase_order.supplier_id,
+            "lines": [
+                {
+                    "catalog_product_id": line.catalog_product_id,
+                    "qty": line.qty,
+                    "received_qty": line.received_qty,
+                    "unit_cost": str(line.unit_cost),
+                }
+                for line in purchase_order.lines
+            ],
+        }
 
     async def cancel_purchase_order(
         self, store_id: int, purchase_order_id: int, *, actor_user_id: int

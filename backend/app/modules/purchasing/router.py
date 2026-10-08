@@ -13,6 +13,7 @@ from app.modules.purchasing.schemas import (
     InputInvoiceRead,
     PurchaseOrderCreate,
     PurchaseOrderRead,
+    PurchaseOrderUpdate,
     ReceivePurchaseOrderRequest,
     ReceivePurchaseOrderResult,
     SupplierCreate,
@@ -20,14 +21,17 @@ from app.modules.purchasing.schemas import (
     SupplierUpdate,
 )
 from app.modules.purchasing.service import PurchasingService
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderStatus, UserRole
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
     IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
+    InsufficientStock,
     InvalidPurchaseOrder,
+    PurchaseOrderEditForbidden,
     PurchaseOrderNotCancellable,
+    PurchaseOrderNotEditable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
@@ -55,6 +59,9 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InputInvoiceAlreadySet: status.HTTP_409_CONFLICT,
     PurchaseOrderNotReceived: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
+    PurchaseOrderNotEditable: status.HTTP_409_CONFLICT,
+    InsufficientStock: status.HTTP_409_CONFLICT,
+    PurchaseOrderEditForbidden: status.HTTP_403_FORBIDDEN,
 }
 
 _ERROR_CODE_BY_EXC: dict[type[DomainError], str] = {
@@ -232,6 +239,31 @@ async def submit_purchase_order(
     try:
         purchase_order = await svc.submit_purchase_order(
             user.store_id, purchase_order_id, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return PurchaseOrderRead.from_model(purchase_order)
+
+
+@router.put(
+    "/purchase-orders/{purchase_order_id}",
+    response_model=PurchaseOrderRead,
+    operation_id="updatePurchaseOrder",
+)
+async def update_purchase_order(
+    purchase_order_id: int, payload: PurchaseOrderUpdate, session: SessionDep, user: CurrentUserDep
+) -> PurchaseOrderRead:
+    """修改採購單（整張覆寫）：草稿全員可改，已下單／已收貨限管理者；已收差額自動調庫存。"""
+    svc = PurchasingService(session)
+    try:
+        purchase_order = await svc.update_purchase_order(
+            user.store_id,
+            purchase_order_id,
+            payload,
+            actor_user_id=user.id,
+            actor_is_manager=user.role == UserRole.MANAGER,
         )
     except DomainError as exc:
         await session.rollback()

@@ -159,6 +159,8 @@ class StockReason(StrEnum):
     # 線上單保留帶回家商品（docs/63 §13）：拉單時先扣、取消／到期／結帳前加回，淨額為零。
     ONLINE_HOLD = "ONLINE_HOLD"
     ONLINE_RELEASE = "ONLINE_RELEASE"
+    # 採購單事後修改（docs/70 §4.4）：已收數量／商品改了，差額加減庫存（IN 或 OUT）。
+    PURCHASE_CORRECTION = "PURCHASE_CORRECTION"
 
 
 class PurchaseOrderStatus(StrEnum):
