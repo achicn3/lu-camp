@@ -50,6 +50,7 @@ from app.modules.onlineorder.presentation_schemas import MenuExperienceWriteRequ
 from app.modules.onlineorder.router import get_online_order_client
 from app.modules.onlineorder.scheduler import tick_once
 from app.modules.onlineorder.signing import canonical_string
+from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
 from app.modules.sales.models import LinePayTransaction
@@ -1376,3 +1377,85 @@ async def test_linepay_reservation_released_only_after_hearing_from_cloud_past_e
     await db_session.flush()
     assert await svc.expire_reservations(ctx.store_id, now=later) == 1
     assert await _cake_left(db_session, ctx) == 3
+
+
+# ── 作廢／退貨回報雲端已退款（docs/44 §4.5 C6；O5 收尾）──
+
+
+async def _retail_sale(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx, n: int, qty: int = 2
+) -> tuple[OnlineOrder, dict[str, Any]]:
+    bean = await _bean(db_session, ctx, qty=qty)
+    row = await _pulled(
+        db_session, ctx, _rid(n), [_retail_line(1, bean.id, qty=qty)], "HOLD_REQUESTED"
+    )
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": bean.id, "qty": qty}],
+            "online_order_id": row.id,
+        },
+        headers=_h(ctx.clerk, f"online-refund-{n}"),
+    )
+    assert sale.status_code == 201, sale.text
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    ctx.worker.reports.clear()
+    return row, sale.json()
+
+
+async def test_voiding_an_online_sale_reports_refunded(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """POS 作廢線上單的銷售：雲端那張單改成已退款，客人頁不再顯示已付款。"""
+    _row, sale = await _retail_sale(client, db_session, ctx, 81)
+    stored = await SalesService(db_session).get_sale(ctx.store_id, sale["id"])
+    assert stored is not None
+    await SalesService(db_session).void_sale(stored, ctx.clerk_id)
+
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [
+        (_rid(81), {"payment_status": "REFUNDED", "refunded_amount": 900})
+    ]
+
+
+async def test_returns_report_partial_then_full_refund(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """先退一件＝部分退款（累計金額），再退完＝已退款。"""
+    _row, sale = await _retail_sale(client, db_session, ctx, 82)
+    line_id = sale["lines"][0]["id"]
+    returns = ReturnsService(db_session)
+    for n in (1, 2):
+        await returns.create_return(
+            ctx.store_id,
+            sale_id=sale["id"],
+            lines=[ReturnLineInput(sale_line_id=line_id, qty=1)],
+            reason="客人退貨",
+            actor_user_id=ctx.clerk_id,
+            idempotency_key=f"online-return-82-{n}",
+        )
+        await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+
+    assert ctx.worker.reports == [
+        (_rid(82), {"payment_status": "PARTIALLY_REFUNDED", "refunded_amount": 450}),
+        (_rid(82), {"payment_status": "REFUNDED", "refunded_amount": 900}),
+    ]
+
+
+async def test_refunds_of_ordinary_sales_report_nothing(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": ctx.latte, "qty": 1}],
+            "service_mode": "TAKEOUT",
+        },
+        headers=_h(ctx.clerk, "plain-sale-83"),
+    )
+    assert sale.status_code == 201, sale.text
+    stored = await SalesService(db_session).get_sale(ctx.store_id, sale.json()["id"])
+    assert stored is not None
+    await SalesService(db_session).void_sale(stored, ctx.clerk_id)
+    await _svc(db_session, ctx).flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == []

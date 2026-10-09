@@ -19,6 +19,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.service import MenuService
+from app.modules.onlineorder.orders_service import OnlineOrdersService
 from app.modules.returns.bundle_policy import BundleGroupMembers, bundles_to_return
 from app.modules.returns.invoice_policy import (
     InvoiceFacts,
@@ -1098,6 +1099,13 @@ class ReturnsService:
             },
         )
         await self._session.flush()
+        # 線上單的銷售：回報雲端累計退了多少，客人頁才不會一直顯示已付款（docs/44 §4.5 C6）。
+        await OnlineOrdersService(self._session, None).sale_refunded(
+            store_id,
+            sale.id,
+            refunded_amount=await self._repo.refunded_total_for_sale(store_id, sale.id),
+            fully=is_full_return,
+        )
         refreshed = await self._repo.get_return(store_id, customer_return.id)
         if refreshed is None:
             raise ReturnNotFound(f"找不到退貨單 {customer_return.id}")

@@ -12,7 +12,7 @@
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -48,6 +48,7 @@ from app.shared.enums import (
     OnlineOrderPayment,
     OnlineOrderSync,
     OnlineOutboxStatus,
+    OnlineRefundStatus,
     SaleLineType,
     ServiceMode,
     StockReservationStatus,
@@ -326,13 +327,13 @@ class OnlineOrdersService:
 
     # ── 回報佇列 ──
 
-    def _enqueue(self, order: OnlineOrder, payload: dict[str, str]) -> None:
+    def _enqueue(self, order: OnlineOrder, payload: Mapping[str, str | int]) -> None:
         self._repo.add(
             OnlineOrderOutbox(
                 store_id=order.store_id,
                 online_order_id=order.id,
                 remote_id=order.remote_id,
-                payload=payload,
+                payload=dict(payload),
                 status=OnlineOutboxStatus.PENDING,
                 attempts=0,
                 next_attempt_at=utc_now(),
@@ -595,14 +596,31 @@ class OnlineOrdersService:
         product = await self._inventory.get_catalog(store_id, product_id)
         return product.name if product is not None else f"商品 {product_id}"
 
-    async def sale_voided(self, store_id: int, sale_id: int) -> None:
-        """銷售作廢（同一交易）：掛著它的線上單不再待交貨，也不能再按已交貨（Codex M1d 第一輪）。"""
+    async def sale_voided(self, store_id: int, sale_id: int, *, refunded_amount: Decimal) -> None:
+        """銷售作廢（同一交易）：掛著它的線上單回報雲端已退款；還沒交的帶回家商品也不能再交
+        （Codex M1d 第一輪）。"""
         order = await self._repo.by_sale(store_id, sale_id)
-        if order is None or order.fulfillment_status != OnlineOrderFulfillment.AWAITING:
+        if order is None:
             return
-        order.fulfillment_status = OnlineOrderFulfillment.NONE
-        order.handover_items = None
+        if order.fulfillment_status == OnlineOrderFulfillment.AWAITING:
+            order.fulfillment_status = OnlineOrderFulfillment.NONE
+            order.handover_items = None
+        self._report_refund(order, refunded_amount, fully=True)
         await self._repo.flush()
+
+    async def sale_refunded(
+        self, store_id: int, sale_id: int, *, refunded_amount: Decimal, fully: bool
+    ) -> None:
+        """退貨成立（同一交易）：回報雲端累計退了多少，全退完＝已退款，否則部分退款。"""
+        order = await self._repo.by_sale(store_id, sale_id)
+        if order is None:
+            return
+        self._report_refund(order, refunded_amount, fully=fully)
+        await self._repo.flush()
+
+    def _report_refund(self, order: OnlineOrder, refunded_amount: Decimal, *, fully: bool) -> None:
+        status = OnlineRefundStatus.REFUNDED if fully else OnlineRefundStatus.PARTIALLY_REFUNDED
+        self._enqueue(order, {"payment_status": status, "refunded_amount": int(refunded_amount)})
 
     async def settle_paid(
         self, store_id: int, order_id: int, *, actor_user_id: int

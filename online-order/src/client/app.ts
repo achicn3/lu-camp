@@ -34,6 +34,8 @@ interface OrderView {
   payment_method?: PayMethod;
   /** LINE Pay 上一次沒付成的原因。 */
   linepay_result?: "CANCELLED" | "FAILED" | "EXPIRED" | null;
+  /** 店內作廢／退貨後累計退了多少（舊版雲端沒有這欄）。 */
+  refunded_amount?: number;
 }
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
@@ -670,6 +672,10 @@ function linePayState(view: OrderView): string | null {
   }
 }
 function orderState(view: OrderView): string {
+  // 店內退了款就以退款為準（作廢後帶回家商品也不會再交）。
+  const amount = view.refunded_amount ? ` ${money(view.refunded_amount)}` : "";
+  if (view.status === "REFUNDED") return `這張訂單已退款${amount}。`;
+  if (view.status === "PARTIALLY_REFUNDED") return `這張訂單已部分退款${amount}。`;
   if (view.fulfillment === "HANDED_OVER") return "已領取，謝謝你。";
   if (view.fulfillment === "AWAITING") return "已付款。帶回家商品請到櫃檯領取。";
   const linePay = linePayState(view);
@@ -681,8 +687,6 @@ function orderState(view: OrderView): string {
     case "PAID": return "已付款，謝謝你。";
     case "REJECTED": return "份數不足，這張訂單未成立。請回菜單重新選。";
     case "CANCELLED": return "這張訂單已取消。";
-    case "REFUNDED": return "這張訂單已退款。";
-    case "PARTIALLY_REFUNDED": return "這張訂單已部分退款。";
     default: return "正在確認訂單狀態。";
   }
 }
@@ -698,7 +702,7 @@ async function refreshOrder(): Promise<void> {
   for (const line of view.lines) {
     body.append(el("p", "order-line", `${line.name} × ${line.qty}　${money(line.line_total)}${line.take_home ? "　（帶回家）" : ""}`));
   }
-  if (view.lines.some((line) => line.take_home) && view.fulfillment !== "HANDED_OVER") {
+  if (view.lines.some((line) => line.take_home) && view.fulfillment !== "HANDED_OVER" && view.status !== "REFUNDED") {
     body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
   }
   body.append(el("p", "cart-total", `合計 ${money(view.total)}`));
@@ -713,7 +717,8 @@ async function refreshOrder(): Promise<void> {
   if (view.status === "REJECTED" || view.status === "CANCELLED")
     body.append(button("返回菜單", () => { history.pushState(null, "", tableCode ? `/t/${tableCode}` : "/"); activeOrder = null; showScreen("menu"); }));
   // 付了錢但帶回家商品還沒交：繼續更新，交貨後客人頁才會變「已領取」。LINE Pay 付款中也繼續更新。
-  const done = ["PAID", "REJECTED", "CANCELLED", "REFUNDED"].includes(view.status) && view.fulfillment !== "AWAITING";
+  const done = view.status === "REFUNDED" ||
+    (["PAID", "REJECTED", "CANCELLED", "PARTIALLY_REFUNDED"].includes(view.status) && view.fulfillment !== "AWAITING");
   if (done && pollTimer !== null) {
     clearInterval(pollTimer); pollTimer = null;
   }

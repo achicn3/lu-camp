@@ -63,6 +63,7 @@
 - [MacBook 正式機：升級到 2026-10-08 版（線上點餐 LINE Pay 付款）](./69-macbook-upgrade-online-linepay.md)
 - [採購單事後修改＋進項發票獨立登錄（設計）](./70-purchasing-edit-and-input-invoices.md)
 - [MacBook 正式機：升級到 2026-10-08 版（採購單可修改＋進項發票）](./71-macbook-upgrade-purchasing-edit.md)
+- [MacBook 正式機：升級到 2026-10-09 版（線上單作廢／退貨回報雲端已退款）](./72-macbook-upgrade-online-refund-report.md)
 
 ## 評估與後續實作
 

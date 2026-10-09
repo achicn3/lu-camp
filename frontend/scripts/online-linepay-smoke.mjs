@@ -158,6 +158,14 @@ try {
   const voided = await api("POST", `/sales/${paid.sale_id}/void`, {});
   ok("作廢成功", voided.status === 200, `${voided.status} ${JSON.stringify(voided.body)}`);
   ok("作廢走線上退款（交易號）", refunds.length === 1 && /^\/v4\/payments\/\d{19}\/refund$/.test(refunds[0]), JSON.stringify(refunds));
+  // 店內作廢後回報雲端：客人重新打開訂單頁看到已退款（O5 收尾，docs/44 §4.5 C6）
+  const refundedText = await waitFor(async () => {
+    await guest.reload({ waitUntil: "networkidle" });
+    const text = await guest.locator(".order-state").innerText();
+    return text.includes("已退款") ? text : null;
+  }, "客人頁顯示已退款", 45000);
+  ok("作廢後客人頁顯示已退款與金額", refundedText.includes("150"), refundedText);
+  await guest.screenshot({ path: join(SHOTS, "02b-guest-refunded.png"), fullPage: true });
 
   // ② 取消付款
   const note2 = `LINE取消-${run}`;

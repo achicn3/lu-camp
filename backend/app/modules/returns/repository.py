@@ -82,6 +82,15 @@ class ReturnsRepository:
             for tender_type, amount in (await self._session.execute(tender_stmt)).all()
         ]
 
+    async def refunded_total_for_sale(self, store_id: int, sale_id: int) -> Decimal:
+        """某筆銷售累計退了多少（含稅；所有退貨單加總）。"""
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(CustomerReturn.refund_amount), 0)).where(
+                CustomerReturn.store_id == store_id, CustomerReturn.sale_id == sale_id
+            )
+        )
+        return Decimal(total or 0)
+
     async def period_refunds_by_sale(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> dict[int, tuple[Decimal, int]]:

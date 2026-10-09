@@ -764,6 +764,16 @@ class OnlineOrderPayment(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class OnlineRefundStatus(StrEnum):
+    """回報雲端的退款狀態（docs/44 §4.5 C6）：店內作廢／退貨後，客人頁改顯示已退款。
+
+    只回報給雲端、不寫進本地線上單（本地的帳在銷售與退貨單上）。
+    """
+
+    REFUNDED = "REFUNDED"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
+
+
 class StockReservationStatus(StrEnum):
     """線上單的份數保留（docs/44 §3.7 O4 定案）：拉單時直接扣每日限量份數。
 

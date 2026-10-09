@@ -12,7 +12,10 @@ const ORDER_ID = /^[0-9a-f]{32}$/;
 
 const SYNC_TARGETS = new Set(["IMPORTED", "SETTLED", "VOIDED"]);
 const HOLD_TARGETS = new Set(["HELD", "REJECTED", "NONE"]);
-const PAYMENT_TARGETS = new Set(["PAID", "CANCELLED"]);
+const PAYMENT_TARGETS = new Set(["PAID", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED"]);
+// 店內作廢／退貨後回報（docs/44 §4.5 C6）：只有已成立銷售的單能退，金額只增不減，全退後不能倒回部分。
+const REFUND_TARGETS = new Set(["PARTIALLY_REFUNDED", "REFUNDED"]);
+const REFUNDABLE_FROM = new Set(["PAID", "PARTIALLY_REFUNDED", "REFUNDED"]);
 const FULFILLMENT_TARGETS = new Set(["AWAITING", "HANDED_OVER"]);
 
 interface OrderRow {
@@ -22,6 +25,7 @@ interface OrderRow {
   fulfillment: string;
   payment_status: string;
   hold_expires_at: number | null;
+  refunded_amount: number;
   row_version: number;
 }
 
@@ -130,6 +134,8 @@ type Target = {
   fulfillment?: string;
   /** 保留到期時間（epoch ms）；只跟著 HELD 一起報。 */
   hold_expires_at?: number;
+  /** 店內累計退了多少（整數元）；只跟著退款狀態一起報。 */
+  refunded_amount?: number;
 };
 
 function parseTarget(raw: Uint8Array): Target | null {
@@ -140,7 +146,8 @@ function parseTarget(raw: Uint8Array): Target | null {
     return null;
   }
   if (typeof v !== "object" || v === null) return null;
-  const { sync_status, hold_status, payment_status, fulfillment, hold_expires_at, ...rest } = v as Record<string, unknown>;
+  const { sync_status, hold_status, payment_status, fulfillment, hold_expires_at, refunded_amount, ...rest } =
+    v as Record<string, unknown>;
   if (Object.keys(rest).length > 0) return null;
   const t: Target = {};
   if (sync_status !== undefined) {
@@ -163,6 +170,15 @@ function parseTarget(raw: Uint8Array): Target | null {
   if (fulfillment !== undefined) {
     if (typeof fulfillment !== "string" || !FULFILLMENT_TARGETS.has(fulfillment)) return null;
     t.fulfillment = fulfillment;
+  }
+  const refunding = t.payment_status !== undefined && REFUND_TARGETS.has(t.payment_status);
+  if (refunded_amount !== undefined || refunding) {
+    if (!refunding || typeof refunded_amount !== "number" || !Number.isInteger(refunded_amount) || refunded_amount < 1) {
+      return null;
+    }
+    // 退款只改付款，不帶別的狀態（同步仍是 SETTLED）。
+    if (Object.keys(t).length !== 1) return null;
+    t.refunded_amount = refunded_amount;
   }
   if (Object.keys(t).length === 0) return null;
   // 付款結果必須和同步狀態一起報：收到錢＝銷售成立（SETTLED）；取消＝作廢（VOIDED）。
@@ -190,6 +206,12 @@ function transitionError(row: OrderRow, t: Target): string | null {
       (row.payment_status === "UNPAID" || row.payment_status === "PENDING");
     if (!reserving && !expiring) return "invalid_transition";
   }
+  if (t.refunded_amount !== undefined && t.payment_status !== undefined) {
+    if (row.sync_status !== "SETTLED" || !REFUNDABLE_FROM.has(row.payment_status)) return "invalid_transition";
+    if (t.refunded_amount < row.refunded_amount) return "invalid_transition";
+    if (row.payment_status === "REFUNDED" && t.payment_status !== "REFUNDED") return "invalid_transition";
+    return null;
+  }
   if (t.payment_status !== undefined && t.payment_status !== row.payment_status) {
     // 現金待付、或 LINE Pay 已發起但客人還沒授權（POS 取消後就不會再請款）。
     if (row.payment_status !== "UNPAID" && !(row.payment_status === "PENDING" && t.payment_status === "CANCELLED")) {
@@ -211,7 +233,8 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
   const target = parseTarget(raw);
   if (target === null) return error("invalid_status", 422);
   const row = await env.DB.prepare(
-    "SELECT id, sync_status, hold_status, payment_status, fulfillment, hold_expires_at, row_version FROM orders " +
+    "SELECT id, sync_status, hold_status, payment_status, fulfillment, hold_expires_at, refunded_amount, row_version " +
+      "FROM orders " +
       "WHERE store_id = ? AND id = ?",
   )
     .bind(storeId, id)
@@ -226,7 +249,9 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
     payment_status: target.payment_status ?? row.payment_status,
     fulfillment: target.fulfillment ?? row.fulfillment,
   };
+  const refunded = target.refunded_amount ?? row.refunded_amount;
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== row[k]);
+  if (changed.length === 0 && refunded !== row.refunded_amount) changed.push("payment_status");
   // 保留到期時間：跟著 HELD 報；不再是 HELD 就清掉。
   const expires = target.hold_expires_at ?? (next.hold_status === "HELD" ? row.hold_expires_at : null);
   if (changed.length === 0) {
@@ -240,8 +265,19 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
     // 樂觀鎖：拿到的版本若已被別的回報改過，這次不寫（下面回 409，POS 會重拉重報）。
     env.DB.prepare(
       "UPDATE orders SET sync_status = ?, hold_status = ?, payment_status = ?, fulfillment = ?, hold_expires_at = ?, " +
-        "updated_at = ?, row_version = row_version + 1 WHERE store_id = ? AND id = ? AND row_version = ?",
-    ).bind(next.sync_status, next.hold_status, next.payment_status, next.fulfillment, expires, now, storeId, id, row.row_version),
+        "refunded_amount = ?, updated_at = ?, row_version = row_version + 1 WHERE store_id = ? AND id = ? AND row_version = ?",
+    ).bind(
+      next.sync_status,
+      next.hold_status,
+      next.payment_status,
+      next.fulfillment,
+      expires,
+      refunded,
+      now,
+      storeId,
+      id,
+      row.row_version,
+    ),
     ...changed.map((k) =>
       env.DB.prepare(
         "INSERT INTO order_events (store_id, order_id, kind, from_state, to_state, source, at) " +
@@ -250,7 +286,7 @@ export async function reportOrder(env: Env, storeId: number, id: string, raw: Ui
     ),
   ]);
   if (results[0]?.meta.changes !== 1) return error("conflict_retry", 409);
-  return json({ id, ...next });
+  return json({ id, ...next, refunded_amount: refunded });
 }
 
 export async function setStoreStatus(env: Env, storeId: number, raw: Uint8Array): Promise<Response> {

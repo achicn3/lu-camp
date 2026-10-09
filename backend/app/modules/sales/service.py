@@ -2764,8 +2764,10 @@ class SalesService:
         before = sale.status.value
         sale.status = SaleStatus.VOIDED
         await self._session.flush()
-        # 線上單的帶回家商品還沒交：作廢後不能再交（docs/63 §13；Codex M1d 第一輪）。
-        await OnlineOrdersService(self._session, None).sale_voided(sale.store_id, sale.id)
+        # 線上單：回報雲端已退款；還沒交的帶回家商品不能再交（docs/63 §13；Codex M1d 第一輪）。
+        await OnlineOrdersService(self._session, None).sale_voided(
+            sale.store_id, sale.id, refunded_amount=sale.total
+        )
         await write_audit_log(
             self._session,
             store_id=sale.store_id,

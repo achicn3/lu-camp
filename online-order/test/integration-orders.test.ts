@@ -174,6 +174,42 @@ describe("回報狀態", () => {
     expect((await report(o!.id, body)).status).toBe(422);
   });
 
+  it("店內作廢／退貨：已成立的單回報部分退款、再到全部退款；客人頁看得到退了多少（O5 收尾）", async () => {
+    const t = await place();
+    const [o] = (await pull()).orders;
+    await report(o!.id, { sync_status: "SETTLED", payment_status: "PAID" });
+
+    const partial = { payment_status: "PARTIALLY_REFUNDED", refunded_amount: 50 };
+    expect((await report(o!.id, partial)).status).toBe(200);
+    expect((await report(o!.id, partial)).status).toBe(200); // 重送冪等
+    let view = (await customerView(t)) as { status: string; refunded_amount: number };
+    expect([view.status, view.refunded_amount]).toEqual(["PARTIALLY_REFUNDED", 50]);
+
+    // 金額只能往上加；退完之後不能倒回部分退款
+    expect((await report(o!.id, { payment_status: "PARTIALLY_REFUNDED", refunded_amount: 40 })).status).toBe(409);
+    expect((await report(o!.id, { payment_status: "REFUNDED", refunded_amount: 150 })).status).toBe(200);
+    expect((await report(o!.id, { payment_status: "PARTIALLY_REFUNDED", refunded_amount: 150 })).status).toBe(409);
+    view = (await customerView(t)) as { status: string; refunded_amount: number };
+    expect([view.status, view.refunded_amount]).toEqual(["REFUNDED", 150]);
+  });
+
+  it("還沒成立銷售的單不能回報退款", async () => {
+    await place();
+    const [o] = (await pull()).orders;
+    expect((await report(o!.id, { payment_status: "REFUNDED", refunded_amount: 150 })).status).toBe(409);
+  });
+
+  it.each([
+    [{ payment_status: "REFUNDED", refunded_amount: 0 }],
+    [{ payment_status: "REFUNDED", refunded_amount: 1.5 }],
+    [{ payment_status: "PAID", refunded_amount: 10 }],
+    [{ payment_status: "REFUNDED", refunded_amount: 10, sync_status: "SETTLED" }],
+  ])("退款回報格式不對：422 %#", async (body) => {
+    await place();
+    const [o] = (await pull()).orders;
+    expect((await report(o!.id, body)).status).toBe(422);
+  });
+
   it("沒有這張單：404", async () => {
     expect((await report("0".repeat(32), { sync_status: "IMPORTED" })).status).toBe(404);
   });
