@@ -112,7 +112,10 @@ async def test_references_must_be_this_stores_live_items(
 
 async def test_shape_limits(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _, manager = await seed(db_session)
-    question = {"prompt": "想喝什麼？", "options": [{"label": "咖啡", "items": []}] * 2}
+    question: dict[str, Any] = {
+        "prompt": "想喝什麼？",
+        "options": [{"label": "咖啡", "items": []}] * 2,
+    }
     bad: list[dict[str, Any]] = [
         {"is_active": True, "questions": []},
         {"is_active": True, "questions": [question] * 4},
