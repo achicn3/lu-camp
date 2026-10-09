@@ -266,35 +266,45 @@ export function CreatePurchaseOrderForm({
   }
 
   // 修改既有採購單：取回各列商品後一次帶入（之後店員的增刪不會被覆蓋）。
+  // 快取只放商品資料；數量、已收、進價一律取自傳進來的這份採購單（頁面保證是剛從伺服器拿的），
+  // 不可連明細一起快取——存過再打開會帶出舊數量（Codex 第一輪）。
   const editSeeded = useRef(false);
+  const editProductIds = [...new Set((editing?.lines ?? []).map((l) => l.catalog_product_id))];
   const editProducts = useQuery({
-    queryKey: ["catalog-products", "po-edit", editing?.id ?? 0],
+    queryKey: ["catalog-products", "po-edit", editProductIds.join(",")],
     enabled: editing !== undefined,
     queryFn: async () =>
       Promise.all(
-        (editing?.lines ?? []).map(async (line) => {
+        editProductIds.map(async (id) => {
           const { data, error } = await api.GET("/api/v1/catalog-products/{product_id}", {
-            params: { path: { product_id: line.catalog_product_id } },
+            params: { path: { product_id: id } },
           });
           if (!data) throw new Error(extractDetail(error) ?? "讀取商品失敗");
-          return { line, product: data };
+          return data;
         }),
       ),
   });
   useEffect(() => {
-    if (editSeeded.current || !editProducts.data) return;
+    if (editSeeded.current || !editProducts.data || editing === undefined) return;
     editSeeded.current = true;
+    const byId = new Map(editProducts.data.map((p) => [p.id, p]));
     setLines(
-      editProducts.data.map(({ line, product }) => ({
-        key: nextDraftKey(),
-        product,
-        qty: line.qty,
-        unitCost: String(parseNtd(line.unit_cost) ?? ""),
-        lineId: line.id,
-        ...(showReceived ? { receivedQty: line.received_qty } : {}),
-      })),
+      editing.lines.flatMap((line) => {
+        const product = byId.get(line.catalog_product_id);
+        if (product === undefined) return [];
+        return [
+          {
+            key: nextDraftKey(),
+            product,
+            qty: line.qty,
+            unitCost: String(parseNtd(line.unit_cost) ?? ""),
+            lineId: line.id,
+            ...(showReceived ? { receivedQty: line.received_qty } : {}),
+          },
+        ];
+      }),
     );
-  }, [editProducts.data, showReceived]);
+  }, [editProducts.data, editing, showReceived]);
 
   // 低庫存帶入：只在第一次拿到商品時放進明細（之後店員移除的不會被加回來）。
   const seeded = useRef(false);

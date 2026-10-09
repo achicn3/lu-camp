@@ -22,10 +22,14 @@ function EditPurchaseOrder({ poId }: { poId: number }) {
       if (!data) throw new Error(extractDetail(error) ?? "讀取採購單失敗");
       return data;
     },
-    // 開著修改時別被背景重抓蓋掉（表單只在第一次拿到資料時帶入）。
-    staleTime: Number.POSITIVE_INFINITY,
+    // 一定要拿伺服器上最新的一份才帶入表單：沿用快取（例如剛存過再打開）會帶出改之前的數量，
+    // 再存一次就把庫存改回去（Codex 第一輪）。表單只在第一次拿到資料時帶入，之後不會被重抓蓋掉。
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
   });
-  if (order.isPending) return <p>載入中…</p>;
+  if (order.isPending || (!order.isFetchedAfterMount && order.isFetching)) {
+    return <p>載入中…</p>;
+  }
   if (order.isError) {
     return (
       <p role="alert" className="form-error">

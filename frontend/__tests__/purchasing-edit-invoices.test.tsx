@@ -242,6 +242,43 @@ describe("/purchasing/[id]/edit 修改採購單", () => {
     });
   });
 
+  it("存好再打開修改：帶入的是存過之後的內容，不是舊的快取（Codex 第一輪）", async () => {
+    loginAs("MANAGER");
+    let current: object = RECEIVED_PO;
+    const saved = { ...RECEIVED_PO, lines: [{ ...RECEIVED_PO.lines[0], qty: 2, received_qty: 2 }] };
+    stubFetch(
+      baseRoutes(RECEIVED_PO, (method, path) => {
+        if (!path.endsWith("/purchase-orders/7")) return null;
+        if (method === "PUT") {
+          current = saved;
+          return json(saved);
+        }
+        return method === "GET" ? json(current) : null;
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    const page = (
+      <QueryClientProvider client={queryClient}>
+        <EditPurchaseOrderPage />
+      </QueryClientProvider>
+    );
+    const first = render(page);
+    const received = await screen.findByLabelText("已收 瓦斯灌");
+    await user.clear(screen.getByLabelText("數量 瓦斯灌"));
+    await user.type(screen.getByLabelText("數量 瓦斯灌"), "2");
+    await user.clear(received);
+    await user.type(received, "2");
+    await user.click(screen.getByRole("button", { name: "儲存修改" }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/purchasing/7"));
+    first.unmount();
+
+    render(page);
+    const reopened = await screen.findByLabelText("已收 瓦斯灌");
+    expect((reopened as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("數量 瓦斯灌") as HTMLInputElement).value).toBe("2");
+  });
+
   it("已收大於訂購就不能送出", async () => {
     loginAs("MANAGER");
     stubFetch(baseRoutes(RECEIVED_PO));
