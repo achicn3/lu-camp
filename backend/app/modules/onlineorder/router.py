@@ -11,6 +11,7 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
+from app.modules.onlineorder.popularity_service import PopularityService
 from app.modules.onlineorder.presentation_schemas import (
     MenuExperienceRead,
     MenuExperienceWriteRequest,
@@ -18,6 +19,8 @@ from app.modules.onlineorder.presentation_schemas import (
     MenuPresentationUpdateRequest,
     MenuQuizRead,
     MenuQuizWriteRequest,
+    PopularityRead,
+    PopularityWriteRequest,
 )
 from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.quiz_service import MenuQuizService
@@ -156,6 +159,25 @@ async def update_menu_presentation(
     except MenuItemNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return result
+
+
+# ── 人氣標籤（docs/63 §7 M2b）──
+
+
+@router.get("/popularity", response_model=PopularityRead, operation_id="getMenuPopularity")
+async def get_menu_popularity(session: SessionDep, user: AuthDep) -> PopularityRead:
+    """人氣標籤設定＋依設定算出的榜（預覽）；人氣只用 POS 真實成交算。"""
+    return await PopularityService(session).read(user.store_id)
+
+
+@router.put("/popularity", response_model=PopularityRead, operation_id="updateMenuPopularity")
+async def update_menu_popularity(
+    body: PopularityWriteRequest, session: SessionDep, user: ManagerDep
+) -> PopularityRead:
+    """開關、算幾天、至少賣幾份才上榜；跟著可售狀態同步到客人頁，不必重新發佈。"""
+    result = await PopularityService(session).save(user.store_id, body, actor_user_id=user.id)
     await session.commit()
     return result
 

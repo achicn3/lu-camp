@@ -2273,6 +2273,10 @@ class SalesService:
         return existing
 
     # ── 查詢 ──
+    async def menu_qty_by_item_since(self, store_id: int, since: datetime) -> dict[int, int]:
+        """{餐飲品項: 成交份數}（沒作廢、不含贈品；退貨另扣）——線上點餐人氣標籤用（docs/63 §7）。"""
+        return await self._repo.menu_qty_by_item_since(store_id, since)
+
     async def get_sale(self, store_id: int, sale_id: int) -> Sale | None:
         return await self._repo.get_sale(store_id, sale_id)
 

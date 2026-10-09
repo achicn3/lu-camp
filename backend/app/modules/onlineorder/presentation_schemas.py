@@ -88,3 +88,24 @@ class MenuQuizWriteRequest(BaseModel):
 class MenuQuizRead(MenuQuizWriteRequest):
     # 還沒存過：回的是預設題目（沒勾品項、不啟用）。
     is_default: bool
+
+
+class PopularityWriteRequest(BaseModel):
+    """人氣標籤設定（docs/63 §7 M2b）：開關、算幾天、至少賣幾份才上榜。"""
+
+    is_active: StrictBool
+    window_days: Literal[7, 14, 30, 60, 90]
+    min_qty: StrictInt = Field(ge=1, le=999)
+
+
+class PopularityRankRead(BaseModel):
+    category: str
+    item_id: int
+    name: str
+    rank: int
+    qty: int
+
+
+class PopularityRead(PopularityWriteRequest):
+    # 依目前設定算出的榜（不論開關，給店主預覽）；分類照菜單排序，各分類前三。
+    ranking: list[PopularityRankRead]

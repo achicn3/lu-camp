@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.menu.service import MenuService, remaining_today, today
 from app.modules.onlineorder.availability_repository import AvailabilityRepository
+from app.modules.onlineorder.popularity_service import PopularityService
 from app.modules.onlineorder.retail_service import RetailListingService
 
 AvailabilityPayload = dict[str, Any]
@@ -52,6 +53,13 @@ class AvailabilityService:
             ],
             # 帶回家商品（docs/63 §13）：現量與停售；櫃檯賣掉、線上保留都會反映。
             "retail": await RetailListingService(self._session).availability(store_id),
+            # 人氣標籤（docs/63 §7 M2b）：照成交即時更新，不必重新發佈；關掉就是空的。
+            "popular": [
+                {"id": item_id, "rank": rank}
+                for item_id, rank in sorted(
+                    (await PopularityService(self._session).ranks(store_id)).items()
+                )
+            ],
         }
         if state.menu_version == publication.version and state.payload == current:
             if state.delivery_state == "DELIVERED":

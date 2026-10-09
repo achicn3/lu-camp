@@ -82,6 +82,26 @@ class ReturnsRepository:
             for tender_type, amount in (await self._session.execute(tender_stmt)).all()
         ]
 
+    async def returned_menu_qty_by_item_since(
+        self, store_id: int, since: datetime
+    ) -> dict[int, int]:
+        """{餐飲品項: 退了幾份}——since 之後成立、沒作廢的一般銷售被退的份數（人氣淨銷量用）。"""
+        stmt = (
+            select(SaleLine.menu_item_id, func.sum(ReturnLine.qty))
+            .join(SaleLine, SaleLine.id == ReturnLine.sale_line_id)
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                ReturnLine.store_id == store_id,
+                Sale.created_at >= since,
+                Sale.status != SaleStatus.VOIDED,
+                SaleLine.line_type == SaleLineType.MENU,
+                SaleLine.line_kind == SaleLineKind.NORMAL,
+                SaleLine.menu_item_id.is_not(None),
+            )
+            .group_by(SaleLine.menu_item_id)
+        )
+        return {int(r[0]): int(r[1]) for r in (await self._session.execute(stmt)).all()}
+
     async def refunded_total_for_sale(self, store_id: int, sale_id: int) -> Decimal:
         """某筆銷售累計退了多少（含稅；所有退貨單加總）。"""
         total = await self._session.scalar(

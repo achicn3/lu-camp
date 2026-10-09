@@ -227,6 +227,10 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(row_to_json(q)::text, ',' ORDER BY store_id)), '-') "
         "FROM online_menu_quizzes q",
     ),
+    ("線上點餐-人氣標籤設定（筆數／內容指紋）",
+     "SELECT count(*)::text || '/' || "
+     "COALESCE(md5(string_agg(row_to_json(p)::text, ',' ORDER BY store_id)), '-') "
+     "FROM online_menu_popularity p"),
     (
         "線上點餐-可售狀態（版本／修訂／交付）",
         "SELECT count(*)::text || '/' || "

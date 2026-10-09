@@ -112,6 +112,27 @@ class OnlineMenuQuiz(Base, TimestampMixin):
     questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
 
 
+class OnlineMenuPopularity(Base, TimestampMixin):
+    """人氣標籤設定（docs/63 §7 M2b）：每店一列；沒有列＝預設（開、30 天、10 份）。
+
+    人氣只用 POS 真實成交算（餐飲品項淨銷量），不收集客人瀏覽或點擊。
+    """
+
+    __tablename__ = "online_menu_popularity"
+    __table_args__ = (
+        CheckConstraint(
+            "window_days IN (7, 14, 30, 60, 90)", name="ck_online_menu_popularity_window"
+        ),
+        CheckConstraint("min_qty BETWEEN 1 AND 999", name="ck_online_menu_popularity_min_qty"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), unique=True)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    window_days: Mapped[int] = mapped_column(default=30, server_default=text("30"))
+    min_qty: Mapped[int] = mapped_column(default=10, server_default=text("10"))
+
+
 class OnlineRetailListing(Base, TimestampMixin):
     """線上「帶回家」的零售商品（docs/63 §13、M1d）：引用既有一般商品的呈現設定。
 

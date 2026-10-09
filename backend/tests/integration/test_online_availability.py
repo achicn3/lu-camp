@@ -74,6 +74,7 @@ async def test_capture_requires_publication_and_retries_same_revision(
         "items": [{"id": item_id, "available": True, "remaining": 4}],
         "options": [],
         "retail": [],
+        "popular": [],
     }
     assert await service.capture(store_id) == first  # Lost ACK: exact payload and revision.
     assert await service.mark_delivered(store_id, 100, 1)

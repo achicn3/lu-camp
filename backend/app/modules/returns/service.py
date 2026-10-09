@@ -198,6 +198,12 @@ class ReturnsService:
         self._einvoice = EInvoiceService(session)
         self._settings = StoreSettingsService(session)
 
+    async def returned_menu_qty_by_item_since(
+        self, store_id: int, since: datetime
+    ) -> dict[int, int]:
+        """{餐飲品項: 退了幾份}（since 之後成立的銷售）；線上點餐人氣淨銷量用。"""
+        return await self._repo.returned_menu_qty_by_item_since(store_id, since)
+
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
 

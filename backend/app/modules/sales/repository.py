@@ -118,6 +118,23 @@ class SalesRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def menu_qty_by_item_since(self, store_id: int, since: datetime) -> dict[int, int]:
+        """{餐飲品項: 份數}——since 之後成立、沒作廢的一般銷售（不含贈品）；人氣標籤用。"""
+        stmt = (
+            select(SaleLine.menu_item_id, func.sum(SaleLine.qty))
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.created_at >= since,
+                Sale.status != SaleStatus.VOIDED,
+                SaleLine.line_type == SaleLineType.MENU,
+                SaleLine.line_kind == SaleLineKind.NORMAL,
+                SaleLine.menu_item_id.is_not(None),
+            )
+            .group_by(SaleLine.menu_item_id)
+        )
+        return {int(r[0]): int(r[1]) for r in (await self._session.execute(stmt)).all()}
+
     async def add_sale(self, sale: Sale) -> Sale:
         self._session.add(sale)
         await self._session.flush()
