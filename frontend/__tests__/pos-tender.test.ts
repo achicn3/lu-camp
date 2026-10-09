@@ -231,35 +231,11 @@ describe("tender 純邏輯", () => {
     expect(v.error).toMatch(/確認已於台灣Pay收到 680 元/);
   });
 
-  it("storeCreditMax：內用餐飲不可用購物金折抵（購物金 > 上限 → 擋）", () => {
-    // total=380、餐飲=180 → store_credit_max=200。購物金 300 > 200 → 擋。
-    const over = resolvePlan("MIXED", 380, 300);
-    const v = validatePlan(over, 380, {
-      hasMember: true,
-      memberBalance: 1000,
-      storeCreditMax: 200,
-      ...OPEN,
-    });
-    expect(v.ok).toBe(false);
-    expect(v.error).toMatch(/內用餐飲不可用購物金折抵/);
-    // 購物金 200（=上限）OK。
-    const okPlan = resolvePlan("MIXED", 380, 200);
-    expect(
-      validatePlan(okPlan, 380, {
-        hasMember: true,
-        memberBalance: 1000,
-        storeCreditMax: 200,
-        ...OPEN,
-      }).ok,
-    ).toBe(true);
-  });
-
-  it("storeCreditMinSpend：非餐飲消費未達低消門檻 → 完全不可用購物金", () => {
-    // total=300（皆非餐飲）、store_credit_max=300，但低消門檻 500 → 不可用購物金。
+  it("storeCreditMinSpend：整筆消費未達低消門檻 → 完全不可用購物金", () => {
+    // total=300，低消門檻 500 → 不可用購物金。
     const v = validatePlan(resolvePlan("STORE_CREDIT", 300, 0), 300, {
       hasMember: true,
       memberBalance: 1000,
-      storeCreditMax: 300,
       storeCreditMinSpend: 500,
       ...OPEN,
     });
@@ -270,17 +246,15 @@ describe("tender 純邏輯", () => {
       validatePlan(resolvePlan("STORE_CREDIT", 300, 0), 300, {
         hasMember: true,
         memberBalance: 1000,
-        storeCreditMax: 300,
         storeCreditMinSpend: 0,
         ...OPEN,
       }).ok,
     ).toBe(true);
-    // 達門檻（非餐飲 500 = 門檻 500）→ 可用。
+    // 達門檻（消費 500 = 門檻 500，含餐飲也算）→ 可用。
     expect(
       validatePlan(resolvePlan("STORE_CREDIT", 500, 0), 500, {
         hasMember: true,
         memberBalance: 1000,
-        storeCreditMax: 500,
         storeCreditMinSpend: 500,
         ...OPEN,
       }).ok,

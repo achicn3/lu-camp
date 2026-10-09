@@ -456,10 +456,10 @@ class SaleQuoteResponse(BaseModel):
     # 這一筆被按「不套用」、而且目前確實在進行的活動（POS 顯示「恢復套用」）。
     disabled_campaigns: list[SaleDisabledCampaignRead] = []
     lines: list[SaleQuoteLineRead]
-    # 餐飲（內用）小計與購物金可折抵上限（=total−food_subtotal）；POS 據此卡住購物金輸入。
+    # 餐飲（內用＋外帶）小計與購物金可折抵上限（=total，餐飲也能用購物金）；POS 據此卡住購物金輸入。
     food_subtotal: NTDAmount
     store_credit_max: NTDAmount
-    # 購物金低消門檻（整數元，0＝不限）：非餐飲消費未達此值則完全不可用購物金。
+    # 購物金低消門檻（整數元，0＝不限）：整筆消費未達此值則完全不可用購物金。
     store_credit_min_spend: NTDAmount
     # 金額摘要：贈品價值**僅供顯示**，不加進應付也不算折扣（活動報表直接 SUM 折扣欄位）。
     gift_retail_value: NTDAmount

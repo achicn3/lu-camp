@@ -3,7 +3,9 @@
 混合單：二手 1000 ＋ 拿鐵 150 × 2，付款 購物金 400 ＋ 現金 900（總額 1300），會員點數 10
 （只發非餐飲部分 floor(1000/100)）。
 
-- 餐點不能用購物金付 → 退餐點**只退外部付款**（現金），永不退成購物金。
+- 購物金先算在二手上（店主 2026-10-09 起餐點也能用購物金）：購物金沒超過二手小計時，
+  餐點等於全用外部付款 → 退餐點**只退外部付款**（現金），不會把現金退成購物金。
+- 購物金超過二手小計的那部分是付在餐點上，退餐點時才退回購物金。
 - 二手照舊購物金優先；兩邊累計加總恆等於原付款。
 - 點數只按二手退款沖回，退餐點不沖。
 - 「這份還能賣」→ 份數依同一營業日、同一版本加回；不勾不動。
@@ -425,6 +427,7 @@ def test_refund_allocation_any_order_adds_up_exactly() -> None:
                 tenders,
                 previous_food=food,
                 previous_other=other,
+                other_total=Decimal(1000),
                 refund_food=amount if kind == "food" else Decimal(0),
                 refund_other=amount if kind == "other" else Decimal(0),
             )
@@ -438,3 +441,106 @@ def test_refund_allocation_any_order_adds_up_exactly() -> None:
             else:
                 other += amount
         assert paid == {TenderType.STORE_CREDIT: Decimal(400), TenderType.CASH: Decimal(900)}
+
+
+def test_refund_allocation_food_paid_with_store_credit_adds_up_exactly() -> None:
+    """餐點也用購物金付（店主 2026-10-09）：二手 100、餐點 300，付 購物金 350＋現金 50。
+    購物金先算在二手（100），其餘 250 付在餐點上。任意交錯分次退：不超退任何渠道、
+    二手退款只動到二手那份購物金、退完恰好等於原付款。"""
+    import itertools
+
+    from app.modules.sales.models import SaleTender
+    from app.shared.enums import PaymentMethod
+
+    tenders = [
+        SaleTender(tender_type=TenderType.STORE_CREDIT, amount=Decimal(350)),
+        SaleTender(tender_type=TenderType.CASH, amount=Decimal(50)),
+    ]
+    steps = [
+        ("food", Decimal(120)),
+        ("food", Decimal(180)),
+        ("other", Decimal(40)),
+        ("other", Decimal(60)),
+    ]
+    for order in itertools.permutations(steps):
+        food = other = Decimal(0)
+        paid: dict[TenderType, Decimal] = {
+            TenderType.STORE_CREDIT: Decimal(0),
+            TenderType.CASH: Decimal(0),
+        }
+        for kind, amount in order:
+            legs = ReturnsService._refund_allocations(
+                PaymentMethod.MIXED,
+                tenders,
+                previous_food=food,
+                previous_other=other,
+                other_total=Decimal(100),
+                refund_food=amount if kind == "food" else Decimal(0),
+                refund_other=amount if kind == "other" else Decimal(0),
+            )
+            assert sum((v for _, v in legs), Decimal(0)) == amount
+            for tender, value in legs:
+                paid[tender] += value
+            assert paid[TenderType.STORE_CREDIT] <= 350 and paid[TenderType.CASH] <= 50
+            if kind == "food":
+                food += amount
+            else:
+                other += amount
+                assert all(t is TenderType.STORE_CREDIT for t, _ in legs)  # 二手全由購物金付
+        assert paid == {TenderType.STORE_CREDIT: Decimal(350), TenderType.CASH: Decimal(50)}
+
+
+async def test_food_only_sale_paid_by_store_credit_refunds_to_store_credit(
+    db_session: AsyncSession,
+) -> None:
+    """純餐點、全額購物金付：退貨退回購物金（以前會因「沒有可退回餐點款項的付款渠道」被擋）。"""
+    store_id, clerk_id, member_id = await _seed(db_session)
+    latte = await MenuService(db_session).create_menu_item(
+        store_id, name="拿鐵", unit_price=Decimal(150), actor_user_id=clerk_id
+    )
+    credit = StoreCreditService(db_session)
+    await credit.adjust(
+        store_id,
+        member_id,
+        amount=Decimal("300"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key=f"fo-seed-{store_id}",
+    )
+    signed = await prepare_signed_store_credit_cart(
+        db_session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload={
+            "buyer_contact_id": member_id,
+            "lines": [{"line_type": "MENU", "menu_item_id": latte.id, "qty": 2}],
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "300"}],
+            "service_mode": "TAKEOUT",
+        },
+    )
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=latte.id, qty=2)],
+        buyer_contact_id=member_id,
+        tenders=[TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal("300"))],
+        idempotency_key=f"fo-sale-{store_id}",
+        service_mode=ServiceMode.TAKEOUT,
+        signature_task_id=signed.signature_task_id,
+        cart_session_id=signed.cart_session_id,
+        cart_revision=signed.cart_revision,
+    )
+    assert await credit.get_balance(store_id, member_id) == Decimal("0")
+    [line] = await SalesService(db_session).get_lines(sale.id)
+
+    ret = await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(line.id, 1)],
+        reason="客人不滿意",
+        actor_user_id=clerk_id,
+        idempotency_key=f"fo-ret-{store_id}",
+    )
+
+    assert _tenders(ret) == [(TenderType.STORE_CREDIT, Decimal("150"))]
+    assert await credit.get_balance(store_id, member_id) == Decimal("150")

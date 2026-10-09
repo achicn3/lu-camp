@@ -5,7 +5,7 @@
 //   4) 買斷#1（品牌/型號/分類「查無即建」autocomplete 截圖 → 現金收購 → 標籤列印）→
 //   5) 買斷#2（品牌 autocomplete「查既有」截圖 → 以購物金撥款，讓會員取得購物金）→
 //   6) 寄售一件（抽成 50%）→ 7) 餐飲菜單管理（新增手沖咖啡）→
-//   8) 庫存頁逐列補印標籤 → 9) POS：二手＋餐飲同車＋會員＋購物金（示範「內用不可折抵購物金」上限）→
+//   8) 庫存頁逐列補印標籤 → 9) POS：二手＋餐飲同車＋會員＋購物金（2026-10-09 起餐飲也能用購物金）→
 //   10) POS：賣出寄售品（產生待付款結算）→ 11) 寄售付款（付給林大山）→
 //   12) 報表：今日營運/趨勢(餐飲二手分列)/現金對帳/銷售毛利/庫存價值/寄售應付 →
 //   13) 關帳（實點現金、差異）。
@@ -323,7 +323,7 @@ try {
   await setMinSpend(0);
   ok("8b) 還原購物金低消門檻 = 0（不限）", true);
 
-  // 9) POS：二手＋餐飲同車＋會員＋購物金（示範內用不可折抵購物金上限）
+  // 9) POS：二手＋餐飲同車＋會員＋購物金（餐飲也能用購物金，ADR-031）
   await nav("POS 結帳", "/pos");
   await page.waitForSelector(".pos-menu-tiles");
   // 二手：掃序號
@@ -346,13 +346,13 @@ try {
   await page.locator(".pos-member-results button").filter({ hasText: MEMBER_NAME }).first().click();
   await page.waitForSelector(".pos-member-selected .money", { timeout: 8000 });
   ok("9) POS 會員歸戶（購物金餘額載入）", true);
-  // 選「購物金」→ 應出現上限阻擋（內用不可折抵）
+  // 選「購物金」→ 整筆（含餐飲）都能用購物金，不再出現餐飲上限阻擋
   await page.locator(".pos-tender-mode", { hasText: "購物金" }).click();
-  const capErr = page.locator('[role="alert"].form-error').filter({ hasText: /餐飲不可用購物金折抵/ });
-  await capErr.waitFor({ state: "visible", timeout: 8000 });
-  ok("9) ★內用不可折抵購物金（上限阻擋）", true, (await capErr.textContent()) ?? "");
-  await shot(page, "pos-storecredit-cap");
-  // 改「混合」：現金部分 = 餐飲小計 120，其餘以購物金 → 可結帳
+  await page.locator("text=購物金扣抵").first().waitFor({ state: "visible", timeout: 8000 });
+  const capErr = page.locator('[role="alert"].form-error').filter({ hasText: /不可用購物金/ });
+  ok("9) ★餐飲也能用購物金（沒有上限阻擋）", (await capErr.count()) === 0);
+  await shot(page, "pos-storecredit-food");
+  // 改「混合」：現金 120，其餘以購物金 → 可結帳
   await page.locator(".pos-tender-mode", { hasText: "混合" }).click();
   await page.locator('label:has-text("現金部分") input').fill("120");
   await page.waitForTimeout(400);

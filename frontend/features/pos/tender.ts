@@ -68,9 +68,7 @@ export function validatePlan(
     memberBalance: number | null;
     /** 是否開帳中（含現金收款必須開帳，§7.8）；null = 讀取中/未知。 */
     drawerOpen: boolean | null;
-    /** 購物金可折抵上限（=total−餐飲小計，內用不得以購物金折抵；來自 /sales/quote）。 */
-    storeCreditMax?: number;
-    /** 購物金低消門檻（非餐飲消費未達則完全不可用購物金；0＝不限；來自 /sales/quote）。 */
+    /** 購物金低消門檻（整筆消費未達則完全不可用購物金；0＝不限；來自 /sales/quote）。 */
     storeCreditMinSpend?: number;
     /** 購物車是否有品項：區分「空車初始狀態」與「非空但折後總額為 0」（Codex 波次三 P2）。 */
     cartHasItems?: boolean;
@@ -159,30 +157,17 @@ export function validatePlan(
   ) {
     return { ok: false, error: "購物金餘額不足", needsMember, needsDrawer };
   }
-  // 購物金低消門檻（彈性設定，0＝不限）：非餐飲消費（=storeCreditMax）未達門檻則完全不可用購物金。
+  // 購物金低消門檻（彈性設定，0＝不限）：整筆消費（餐飲也算）未達門檻則完全不可用購物金。
+  // 餐飲（內用／外帶）也能用購物金（店主 2026-10-09），不再另設折抵上限。
   if (
     needsMember &&
     opts.storeCreditMinSpend !== undefined &&
     opts.storeCreditMinSpend > 0 &&
-    opts.storeCreditMax !== undefined &&
-    opts.storeCreditMax < opts.storeCreditMinSpend
+    total < opts.storeCreditMinSpend
   ) {
     return {
       ok: false,
-      error: `未達購物金低消：非餐飲消費需滿 ${opts.storeCreditMinSpend} 元才能折抵購物金`,
-      needsMember,
-      needsDrawer,
-    };
-  }
-  // 內用餐飲不得以購物金折抵（與後端 M1 不變量一致）：購物金 ≤ total−餐飲小計。
-  if (
-    needsMember &&
-    opts.storeCreditMax !== undefined &&
-    plan.storeCredit > opts.storeCreditMax
-  ) {
-    return {
-      ok: false,
-      error: `內用餐飲不可用購物金折抵（購物金最多 ${opts.storeCreditMax} 元）`,
+      error: `未達購物金低消：消費需滿 ${opts.storeCreditMinSpend} 元才能折抵購物金`,
       needsMember,
       needsDrawer,
     };

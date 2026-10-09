@@ -2,14 +2,14 @@
 
 - 餐飲行成交（不扣庫存、原價、line_type=MENU）。
 - 二手＋餐飲同一購物車。
-- 購物金不得折抵內用：store_credit tender ≤ total − 餐飲小計（超出 422）。
+- 餐飲（內用／外帶）可用購物金折抵（店主 2026-10-09 拿掉原本的限制）；低消門檻看整筆總額。
 - 會員點數只認非餐飲小計。
 - 門市活動折扣不套用餐飲。
-- quote 回 food_subtotal 與 store_credit_max。
+- quote 回 food_subtotal 與 store_credit_max（＝total，不再扣餐飲）。
 
 含餐飲的結帳一律要宣告內用/外帶（docs/35）；本檔關心的是金流不變量，故統一用 `TAKEOUT`
 （免桌號）。餐飲的三條限制綁的是 `line_type == MENU`，與內用/外帶無關——外帶餐飲同樣
-不累點、不套活動、不可用購物金折抵，所以這裡改用 TAKEOUT 不會改變任何被驗的行為。
+不累點、不套活動，所以這裡改用 TAKEOUT 不會改變任何被驗的行為。
 內用/外帶與桌號本身的不變量另見 `test_sales_dine_in.py`。
 """
 
@@ -243,14 +243,14 @@ async def test_mixed_secondhand_and_menu(
     assert types == {"CATALOG", "MENU"}
 
 
-async def test_store_credit_cannot_cover_menu(
+async def test_store_credit_can_cover_menu(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     token, store_id, clerk_id = await _seed(db_session)
     member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
     coffee = await _menu_item(db_session, store_id, name="手沖", price="180")
     cat = await _catalog(db_session, store_id, price="200", qty=5)
-    # total=380、餐飲=180 → 購物金最多 200。試圖用 300 購物金 → 422。
+    # total=380、餐飲=180：購物金 300 蓋到餐飲也可以（店主 2026-10-09 拿掉限制）。
     resp = await client.post(
         "/api/v1/sales",
         json={
@@ -267,8 +267,28 @@ async def test_store_credit_cannot_cover_menu(
         },
         headers=_auth(token, "sc-over"),
     )
-    assert resp.status_code == 422
-    assert "購物金" in resp.json()["detail"]
+    assert resp.status_code == 201, resp.text
+    assert await StoreCreditService(db_session).get_balance(store_id, member) == Decimal(700)
+
+
+async def test_menu_only_sale_fully_paid_by_store_credit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, clerk_id = await _seed(db_session)
+    member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
+    coffee = await _menu_item(db_session, store_id, name="手沖", price="180")
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_menu_line(coffee, 1)],
+            "service_mode": "TAKEOUT",
+            "buyer_contact_id": member,
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "180"}],
+        },
+        headers=_auth(token, "sc-food-only"),
+    )
+    assert resp.status_code == 201, resp.text
+    assert await StoreCreditService(db_session).get_balance(store_id, member) == Decimal(820)
 
 
 async def test_store_credit_up_to_nonfood_ok(
@@ -381,7 +401,7 @@ async def test_quote_returns_food_subtotal_and_credit_max(
     body = resp.json()
     assert body["total"] == "380"
     assert body["food_subtotal"] == "180"
-    assert body["store_credit_max"] == "200"
+    assert body["store_credit_max"] == "380"
     # 預設低消門檻 0（不限制）。
     assert body["store_credit_min_spend"] == "0"
 
@@ -389,12 +409,12 @@ async def test_quote_returns_food_subtotal_and_credit_max(
 async def test_store_credit_blocked_below_min_spend(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """購物金低消門檻：非餐飲消費未達門檻則完全不可用購物金（即使在折抵上限內）。"""
+    """購物金低消門檻：整筆消費未達門檻則完全不可用購物金（即使在折抵上限內）。"""
     token, store_id, clerk_id = await _seed(db_session)
     await _set_min_spend(db_session, store_id, 500)
     member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
     cat = await _catalog(db_session, store_id, price="200", qty=5)
-    # 非餐飲消費 200 < 門檻 500 → 用任何購物金都該被擋（422）。
+    # 消費 200 < 門檻 500 → 用任何購物金都該被擋（422）。
     resp = await client.post(
         "/api/v1/sales",
         json={
@@ -411,13 +431,13 @@ async def test_store_credit_blocked_below_min_spend(
 async def test_store_credit_ok_at_min_spend(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """達門檻即可用購物金；門檻只看非餐飲消費（餐飲不計入）。"""
+    """達門檻即可用購物金；門檻看整筆總額（餐飲也算）。"""
     token, store_id, clerk_id = await _seed(db_session)
-    await _set_min_spend(db_session, store_id, 200)
+    await _set_min_spend(db_session, store_id, 380)
     member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
     coffee = await _menu_item(db_session, store_id, name="手沖", price="180")
     cat = await _catalog(db_session, store_id, price="200", qty=5)
-    # 非餐飲 200 = 門檻 200 → 購物金 200 OK、餐飲 180 現金。
+    # 二手 200＋餐飲 180＝380＝門檻 380 → 可用購物金（以前餐飲不計入，只有 200 會被擋）。
     resp = await client.post(
         "/api/v1/sales",
         json={

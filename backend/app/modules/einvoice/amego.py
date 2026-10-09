@@ -144,8 +144,9 @@ def _invoice_line_amounts(
     """各品項開在發票上的金額（與 billable 同序），合計必等於發票總額。
 
     品項金額認**實付**（net_amount）；line_total 只是活動折後的牌價小計，臨時折扣不在其中。
-    混合付款的發票不含購物金（店主 2026-10-08）：差額＝這筆的購物金，依金額比例攤到
-    **非餐點**品項（餐點不能用購物金付，docs/47 §2）。差額為 0＝沒用購物金，或升級前就
+    混合付款的發票不含購物金（店主 2026-10-08）：差額＝這筆的購物金，先依金額比例攤到
+    **非餐點**品項，超出它們小計的部分才依比例攤到餐點（店主 2026-10-09 起餐點也能用購物金；
+    與退款「購物金先算在二手上」同一口徑，docs/47 §2）。差額為 0＝沒用購物金，或升級前就
     建立、照整筆金額開的待開發票——照原樣送。差額是其他數字＝對不上，拒送。
     """
     amounts = [Decimal(line.net_amount) for line in billable]
@@ -156,10 +157,13 @@ def _invoice_line_amounts(
         raise ValueError(
             f"品項小計合計與發票總額 {total} 差 {gap}，不等於本筆購物金 {store_credit}，拒送開立"
         )
-    eligible = [i for i, line in enumerate(billable) if line.line_type is not SaleLineType.MENU]
-    shares = allocate_deduction([amounts[i] for i in eligible], store_credit)
-    for i, share in zip(eligible, shares, strict=True):
-        amounts[i] -= share
+    goods = [i for i, line in enumerate(billable) if line.line_type is not SaleLineType.MENU]
+    food = [i for i, line in enumerate(billable) if line.line_type is SaleLineType.MENU]
+    on_goods = min(store_credit, sum((amounts[i] for i in goods), Decimal(0)))
+    for indexes, deduction in ((goods, on_goods), (food, store_credit - on_goods)):
+        shares = allocate_deduction([amounts[i] for i in indexes], deduction)
+        for i, share in zip(indexes, shares, strict=True):
+            amounts[i] -= share
     return amounts
 
 

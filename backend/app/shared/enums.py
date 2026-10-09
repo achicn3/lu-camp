@@ -206,15 +206,15 @@ class SaleLineType(StrEnum):
     SERIALIZED = "SERIALIZED"
     CATALOG = "CATALOG"
     BULK_LOT = "BULK_LOT"
-    MENU = "MENU"  # 餐飲/內用菜單品項（現做、不扣庫存、不折活動、不可購物金折抵）
+    MENU = "MENU"  # 餐飲/內用菜單品項（現做、不扣庫存、不折活動；可用購物金，店主 2026-10-09）
 
 
 class ServiceMode(StrEnum):
     """餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。
 
     只有含餐飲（`SaleLineType.MENU`）明細的銷售才有值；純二手/一般商品的銷售為 NULL。
-    **與折扣/點數/購物金無關**——餐飲的那三條限制綁的是 `line_type == MENU`，
-    外帶餐飲同樣不累點、不套活動、不可用購物金折抵。
+    **與折扣/點數無關**——餐飲的限制綁的是 `line_type == MENU`，
+    外帶餐飲同樣不累點、不套活動（購物金內用外帶都可以用，店主 2026-10-09）。
     """
 
     DINE_IN = "DINE_IN"

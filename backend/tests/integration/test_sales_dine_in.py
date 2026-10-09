@@ -340,8 +340,8 @@ async def _mixed_cart_for_signing(
 ) -> tuple[int, int, int, CartSession]:
     """建「二手＋餐飲＋購物金混合付款」的權威購物車（報告描述的真實情境）。
 
-    **不能用純餐飲**：結帳端規定餐飲不可用購物金折抵，純餐飲單的可折抵上限是 0，
-    那種購物車本來就送不出簽，拿它當對照組等於什麼都沒驗（Codex 審查）。
+    （2026-10-09 前純餐飲不能用購物金、送不出簽，所以這裡一直用混合單；現在純餐飲也能送簽，
+    但混合單仍是報告描述的真實情境，照舊用它。）
     """
     from app.modules.customerdisplay.service import CustomerDisplayService
     from app.modules.storecredit.service import StoreCreditService

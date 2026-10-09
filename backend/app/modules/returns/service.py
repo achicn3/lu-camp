@@ -1200,7 +1200,7 @@ class ReturnsService:
     ) -> list[tuple[TenderType, Decimal]]:
         """本次退款要退回哪些付款方式、各多少（預覽與實際送出共用，畫面不自己算）。
 
-        餐點與二手分開累計（docs/47 §2）：餐點不能用購物金付，退款也只能回外部付款。
+        餐點與二手分開累計（docs/47 §2）：購物金先算在二手上，餐點只有超出的那部分才算購物金付的。
         純贈品退貨（實付 0）沒有錢可退：不產生任何退款渠道明細。
         """
 
@@ -1226,6 +1226,10 @@ class ReturnsService:
             sale_tenders,
             previous_food=previously(True),
             previous_other=previously(False),
+            other_total=sum(
+                (line.net_amount for line in sale_lines if line.line_type is not SaleLineType.MENU),
+                Decimal(0),
+            ),
             refund_food=refund_food,
             refund_other=refund_other,
         )
@@ -1237,14 +1241,18 @@ class ReturnsService:
         *,
         previous_food: Decimal,
         previous_other: Decimal,
+        other_total: Decimal,
         refund_food: Decimal,
         refund_other: Decimal,
     ) -> list[tuple[TenderType, Decimal]]:
         """按累計退款做差額拆帳。
 
-        - 二手（非餐點）：購物金優先，其餘退外部付款（既有規則）。
-        - 餐點：**只退外部付款**——餐點本來就不能用購物金付（M1 不變量），
-          退成購物金等於把現金變成購物金給客人（docs/47 §2）。
+        購物金先算在二手（非餐點）上，最多到二手小計 `other_total`；超出的部分才是付在餐點上
+        （店主 2026-10-09 起餐點也能用購物金）。
+        - 二手：在它那份購物金內購物金優先，其餘退外部付款（既有規則）。
+        - 餐點：在它那份購物金內購物金優先，其餘退外部付款。2026-10-09 以前餐點不能用購物金，
+          那時的單購物金必定 ≤ 二手小計 → 餐點那份是 0，照舊**只退外部付款**——不會把當初付的
+          現金退成購物金（docs/47 §2）。
         外部付款僅支援單一渠道（現金／LINE Pay／台灣Pay），可搭配購物金。
         """
         refund_amount = refund_food + refund_other
@@ -1274,16 +1282,18 @@ class ReturnsService:
             raise ReturnConflict("累計退款金額超過原付款渠道金額")
 
         credit = amounts.get(TenderType.STORE_CREDIT, Decimal(0))
+        credit_on_other = min(credit, other_total)
+        credit_on_food = credit - credit_on_other
 
-        def credit_refunded(other: Decimal) -> Decimal:
-            return min(credit, other)
+        def credit_refunded(food: Decimal, other: Decimal) -> Decimal:
+            return min(credit_on_other, other) + min(credit_on_food, food)
 
         def external_refunded(food: Decimal, other: Decimal) -> Decimal:
-            return food + other - credit_refunded(other)
+            return food + other - credit_refunded(food, other)
 
-        credit_delta = credit_refunded(previous_other + refund_other) - credit_refunded(
-            previous_other
-        )
+        credit_delta = credit_refunded(
+            previous_food + refund_food, previous_other + refund_other
+        ) - credit_refunded(previous_food, previous_other)
         external_delta = external_refunded(
             previous_food + refund_food, previous_other + refund_other
         ) - external_refunded(previous_food, previous_other)
@@ -1295,8 +1305,8 @@ class ReturnsService:
             ):
                 raise ReturnConflict("累計退款金額超過原付款渠道金額")
         elif external_delta > 0:
-            # 只用購物金付的單不會有餐點（餐點不可用購物金），走到這裡代表資料不一致。
-            raise ReturnConflict("原銷售沒有可退回餐點款項的付款渠道")
+            # 只用購物金付的單，購物金必定蓋滿每一行；走到這裡代表資料不一致。
+            raise ReturnConflict("原銷售沒有可退回的外部付款渠道")
 
         allocations: list[tuple[TenderType, Decimal]] = []
         if credit_delta > 0:

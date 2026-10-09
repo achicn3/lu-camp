@@ -654,8 +654,7 @@ async def test_checkout_cannot_change_table_after_the_cart_was_signed(
     """凍結/簽署的是 A1 桌，卻以 A2 桌送出結帳 → 拒絕（docs/35）。
 
     桌號不在客顯快照裡（客人螢幕不顯示桌號），若只比明細與收款，客戶端就能繞過畫面上的鎖
-    把出餐單送到別桌。純餐飲單不會走到這條路（餐飲不可用購物金→不需簽署），
-    但「二手＋餐飲」的混合單會。
+    把出餐單送到別桌。用購物金付的餐飲單（純餐飲或混二手）都會走到這條路。
     """
     token, store_id, clerk_id, member_id, product_id = await _seed(db_session)
     menu_item = MenuItem(store_id=store_id, name="美式咖啡", unit_price=Decimal("100"))

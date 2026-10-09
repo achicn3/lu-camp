@@ -2073,8 +2073,8 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect("disabled_campaigns" in (quoteBodies.at(-1) ?? {})).toBe(false));
   });
 
-  it("二手＋餐飲＋會員選購物金：顯示「內用餐飲不可用購物金折抵」上限訊息並停用結帳（回歸）", async () => {
-    // 回歸：TenderPanel 過去自算 validatePlan 卻漏傳 storeCreditMax，導致按鈕被停用卻不顯示原因。
+  it("二手＋餐飲＋會員選購物金：餐飲也能用購物金，整筆都能折抵（店主 2026-10-09）", async () => {
+    // 以前餐飲不可用購物金、上限只到二手 1800；拿掉限制後購物金可蓋到整筆 1920。
     const MEMBER = {
       id: 7,
       store_id: 1,
@@ -2094,14 +2094,14 @@ describe("/pos 結帳頁", () => {
       if (url.includes("/api/v1/contacts") && method === "GET")
         return json([MEMBER]);
       if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
-        // total=1920（二手1800+餐飲120）、餐飲小計120 → 購物金上限=1800。
+        // total=1920（二手1800+餐飲120）；餐飲也能用購物金 → 上限＝整筆 1920。
         return json({
           total: "1920",
           campaign_id: null,
           campaign_name: null,
           lines: [],
           food_subtotal: "120",
-          store_credit_max: "1800",
+          store_credit_max: "1920",
         });
       }
       return null;
@@ -2116,15 +2116,18 @@ describe("/pos 結帳頁", () => {
     await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await waitFor(() => expect(screen.getByText(/購物金餘額/)).toBeTruthy());
-    // 選購物金 → 出現上限訊息、結帳停用
+    // 選購物金 → 整筆 1920 都用購物金，不再出現餐飲上限訊息
     await user.click(screen.getByText("購物金"));
     await waitFor(() =>
-      expect(screen.getByText(/內用餐飲不可用購物金折抵（購物金最多 1800 元）/)).toBeTruthy(),
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.tagName === "P" &&
+            (el.textContent ?? "").startsWith("購物金扣抵 $1,920"),
+        ),
+      ).toBeTruthy(),
     );
-    expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(screen.queryByText(/不可用購物金/)).toBeNull();
   });
 
   it("二手＋餐飲未選內用/外帶：送簽按鈕停用，選了外帶才能按（QA BUG-004）", async () => {
@@ -2217,14 +2220,14 @@ describe("/pos 結帳頁", () => {
         });
       }
       if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
-        // 二手 1800 ＋ 餐飲 180；餐飲不可用購物金 → 上限 1800
+        // 二手 1800 ＋ 餐飲 180；餐飲也能用購物金 → 上限＝整筆 1980
         return json({
           total: "1980",
           campaign_id: null,
           campaign_name: null,
           lines: [],
           food_subtotal: "180",
-          store_credit_max: "1800",
+          store_credit_max: "1980",
         });
       }
       return null;

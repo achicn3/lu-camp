@@ -952,7 +952,7 @@ def test_parse_invoice_print_returns_the_escpos_payload() -> None:
     assert parse_invoice_print({"code": 0, "data": {"base64_data": "G0A="}}) == "G0A="
 
 
-# ── 混合付款：發票金額不含購物金，購物金依金額比例攤到非餐點品項（店主 2026-10-08）──
+# ── 混合付款：發票不含購物金；購物金先攤到非餐點品項、超出的才攤到餐點（2026-10-08／10-09）──
 
 
 def _menu_line(description: str, qty: int, amount: str) -> SaleLine:
@@ -986,8 +986,8 @@ def test_f0401_deducts_store_credit_proportionally_from_items() -> None:
     assert data["TotalAmount"] == 700
 
 
-def test_f0401_store_credit_never_lands_on_menu_lines() -> None:
-    """餐點不能用購物金付：購物金只攤到二手／一般商品，餐點照原價。"""
+def test_f0401_store_credit_lands_on_non_menu_lines_first() -> None:
+    """購物金沒超過二手／一般商品小計：只攤到它們，餐點照原價（與退款口徑一致）。"""
     inv = _invoice(net=Decimal(352), tax=Decimal(18), total=Decimal(370))
     data = build_f0401_data(
         inv,
@@ -1035,3 +1035,31 @@ def test_f0401_rejects_a_gap_that_is_not_the_store_credit() -> None:
             order_id="S1-7",
             store_credit=Decimal(200),
         )
+
+
+def test_f0401_store_credit_beyond_goods_lands_on_menu_lines() -> None:
+    """店主 2026-10-09 起餐點也能用購物金：帳篷 $100＋拿鐵 $300，購物金 $250 →
+    先扣光帳篷（0 元不列），剩 $150 扣在拿鐵，發票 $150。"""
+    inv = _invoice(net=Decimal(143), tax=Decimal(7), total=Decimal(150))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 1, "100", "100"), _menu_line("拿鐵", 1, "300")],
+        order_id="S1-7",
+        store_credit=Decimal(250),
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [(i["Description"], i["Amount"]) for i in items] == [("拿鐵", "150")]
+    assert data["TotalAmount"] == 150
+
+
+def test_f0401_food_only_mixed_payment_deducts_from_menu_lines() -> None:
+    """純餐點、購物金 $100＋現金 $140：購物金依比例攤到兩樣餐點，發票 $140。"""
+    inv = _invoice(net=Decimal(133), tax=Decimal(7), total=Decimal(140))
+    data = build_f0401_data(
+        inv,
+        [_menu_line("拿鐵", 1, "120"), _menu_line("鬆餅", 1, "120")],
+        order_id="S1-7",
+        store_credit=Decimal(100),
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [(i["Description"], i["Amount"]) for i in items] == [("拿鐵", "70"), ("鬆餅", "70")]

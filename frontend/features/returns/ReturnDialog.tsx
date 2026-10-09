@@ -117,7 +117,9 @@ export function ReturnDialog({
   const tenderTypes = new Set(tenders.map((tender) => tender.tender_type));
   const refundPolicy =
     scope === "food"
-      ? "餐點退款退回原本的現金、LINE Pay 或台灣Pay（餐點不能用購物金付，也不會退成購物金）。"
+      ? tenderTypes.has("STORE_CREDIT")
+        ? "餐點用購物金付的部分會先退回購物金，其餘退回原本的現金、LINE Pay 或台灣Pay（實際去向見下方預估）。"
+        : "餐點退款退回原本的現金、LINE Pay 或台灣Pay。"
       : tenderTypes.has("STORE_CREDIT")
         ? "退款會先回補購物金，再退回原本的現金、LINE Pay 或台灣Pay；"
         : "退款會退回原付款方式；";

@@ -22,8 +22,8 @@ DEFAULT_PREMIUM_RATE = Decimal("0.1000")  # 購物金溢價率（docs/16 §1.5 �
 DEFAULT_PREMIUM_RATE_MIN = Decimal("0.0000")  # 溢價率下限（docs/16 §6.1，預設 0%）
 DEFAULT_PREMIUM_RATE_MAX = Decimal("0.2000")  # 溢價率上限（docs/16 §6.1，預設 20%）
 DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW = 0  # 月固定現金支出（整數元；負債健康比分母，手動維護）
-# 購物金低消門檻（整數元）：非餐飲消費（total − 餐飲）未達此值則不可用購物金折抵。
-# 預設 0＝不限制，僅作為彈性設定（內用餐飲一律不看，與 store_credit_max 口徑一致）。
+# 購物金低消門檻（整數元）：整筆消費（餐飲也算，店主 2026-10-09）未達此值則不可用購物金折抵。
+# 預設 0＝不限制，僅作為彈性設定。
 DEFAULT_STORE_CREDIT_MIN_SPEND = 0
 # 建議值引擎可調參數（docs/16 §1.5/§6；SC-5b 引擎使用，本期先落地預設供未來讀取）。
 DEFAULT_STORE_CREDIT_ENGINE_PARAMS: dict[str, object] = {

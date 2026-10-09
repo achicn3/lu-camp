@@ -3506,8 +3506,8 @@ export interface paths {
          *     半開區間 [from, to)；to<=from → 422。
          *
          *     **口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；
-         *     客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
-         *     不可用購物金（docs/35），計價條件本就不同。
+         *     客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣
+         *     （docs/35），計價條件本就不同。
          */
         get: operations["dineInReport"];
         put?: never;
@@ -10900,8 +10900,8 @@ export interface components {
          * @description 餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。
          *
          *     只有含餐飲（`SaleLineType.MENU`）明細的銷售才有值；純二手/一般商品的銷售為 NULL。
-         *     **與折扣/點數/購物金無關**——餐飲的那三條限制綁的是 `line_type == MENU`，
-         *     外帶餐飲同樣不累點、不套活動、不可用購物金折抵。
+         *     **與折扣/點數無關**——餐飲的限制綁的是 `line_type == MENU`，
+         *     外帶餐飲同樣不累點、不套活動（購物金內用外帶都可以用，店主 2026-10-09）。
          * @enum {string}
          */
         ServiceMode: "DINE_IN" | "TAKEOUT";

@@ -401,10 +401,10 @@ class SaleQuote:
 
     供 POS 顯示折後價並送出對齊折後總額的收款（前端不自算金額）。
 
-    food_subtotal：餐飲（內用）折後小計；store_credit_max：購物金最多可折抵額
-    （＝total − food_subtotal，內用不得以購物金折抵）。POS 據此把購物金輸入卡在上限內。
-    store_credit_min_spend：購物金低消門檻（整數元，0＝不限）；非餐飲消費（store_credit_max）
-    未達此值則完全不可用購物金，POS 據此提示。
+    food_subtotal：餐飲（內用＋外帶）折後小計；store_credit_max：購物金最多可折抵額
+    （＝total；餐飲也能用購物金，店主 2026-10-09）。POS 據此把購物金輸入卡在上限內。
+    store_credit_min_spend：購物金低消門檻（整數元，0＝不限）；整筆消費未達此值則完全不可用購物金，
+    POS 據此提示。
     """
 
     total: Decimal
@@ -833,8 +833,7 @@ class SalesService:
             raise SignatureContentMismatch("實際付款拆分與客顯購物車不一致")
         # 內用/外帶與桌號同樣要比（docs/35）：它們不在客顯快照裡（客人螢幕不顯示桌號），
         # 只比明細與收款的話，客戶端可以凍結/簽署 A1 桌卻送出 A2 桌結帳——繞過畫面上的鎖，
-        # 把出餐單送到別桌。純餐飲單不會走到這裡（餐飲不可用購物金→不需簽署），
-        # 但「二手＋餐飲」的混合單會。
+        # 把出餐單送到別桌。用購物金付的餐飲單（純餐飲或混二手）都會走到這裡。
         if _dining_identity_of_cart(cart) != (
             None if sale.service_mode is None else sale.service_mode.value,
             sale.table_no,
@@ -1263,7 +1262,7 @@ class SalesService:
         priced_lines = await self._price_cart(store_id, lines, promos)
         await self._record_free_item_choices(store_id, sale.id, clerk_user_id, lines, priced_lines)
 
-        # 餐飲小計（**含外帶**）：購物金折抵上限與會員點數都要扣掉它。
+        # 餐飲小計（**含外帶**）：會員點數要扣掉它。
         # 判斷依 line_type == MENU，與內用/外帶無關——寫成「內用」會誤導。
         food_subtotal = Decimal(0)
         discountable_flags: list[bool] = []
@@ -1308,23 +1307,17 @@ class SalesService:
                 plan=plan,
             )
 
-        # 餐飲不得以購物金折抵（裁示）：購物金 tender ≤ 應付總額 − 餐飲小計。
-        # **外帶也一樣**——限制綁 line_type == MENU，不是綁內用。
+        # 餐飲（內用／外帶）也可以用購物金折抵（店主 2026-10-09 拿掉原本的限制）。
         store_credit_amount = sum(
             (t.amount for t in plan if t.tender_type == TenderType.STORE_CREDIT), Decimal(0)
         )
-        redeemable_max = total - food_subtotal
-        if store_credit_amount > redeemable_max:
-            raise InvalidSaleTender(
-                f"購物金最多折抵 {redeemable_max} 元（內用 {food_subtotal} 元不得以購物金折抵）"
-            )
 
-        # 購物金低消門檻（彈性設定，預設 0＝不限）：非餐飲消費未達門檻則完全不可用購物金。
+        # 購物金低消門檻（彈性設定，預設 0＝不限）：整筆消費（餐飲也算）未達門檻則完全不可用購物金。
         # settings 已於動庫存前讀取、沿用同一份（見上）。
-        if store_credit_amount > 0 and redeemable_max < settings.store_credit_min_spend:
+        if store_credit_amount > 0 and total < settings.store_credit_min_spend:
             raise InvalidSaleTender(
-                f"未達購物金低消門檻：非餐飲消費需滿 {settings.store_credit_min_spend} 元"
-                f"才能折抵購物金（目前 {redeemable_max} 元）"
+                f"未達購物金低消門檻：消費需滿 {settings.store_credit_min_spend} 元"
+                f"才能折抵購物金（目前 {total} 元）"
             )
 
         # 購物金扣抵手持簽署綁定（docs/23 K5，D3）：以購物金付款時，若帶 signature_task_id 則驗證
@@ -3334,7 +3327,7 @@ class SalesService:
             ],
             lines=quoted,
             food_subtotal=food_subtotal,
-            store_credit_max=total - food_subtotal,
+            store_credit_max=total,
             store_credit_min_spend=min_spend,
         )
 

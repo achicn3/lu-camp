@@ -389,7 +389,6 @@ function TenderPanel({
   hasMember,
   memberBalance,
   drawerOpen,
-  storeCreditMax,
   storeCreditMinSpend,
   cartHasItems,
   taiwanpayFeePct,
@@ -413,7 +412,6 @@ function TenderPanel({
   hasMember: boolean;
   memberBalance: number | null;
   drawerOpen: boolean | null;
-  storeCreditMax: number;
   storeCreditMinSpend: number;
   cartHasItems: boolean;
   /** 台灣Pay 手續費率（小數，如 0.02=2%；docs/30）。僅供顯示店家負擔，不向客人收取。 */
@@ -447,7 +445,6 @@ function TenderPanel({
     hasMember,
     memberBalance,
     drawerOpen,
-    storeCreditMax,
     storeCreditMinSpend,
     cartHasItems,
     linePayKey,
@@ -459,7 +456,7 @@ function TenderPanel({
   const linePayFee = roundNtdByRate(plan.linePay, linepayFeePct);
   const maxStoreCredit = Math.max(
     0,
-    Math.min(total - 1, storeCreditMax, memberBalance ?? 0),
+    Math.min(total - 1, memberBalance ?? 0),
   );
   return (
     <div className="pos-tender">
@@ -1920,11 +1917,7 @@ export default function PosPage() {
   // drawerOpen：讀取中/失敗 → null（未知，含現金收款先擋）；否則為是否有開帳中 session。
   const drawerOpen =
     cashSession.isSuccess === true ? cashSession.data !== null : null;
-  // 購物金可折抵上限（內用不得以購物金折抵）：試算回 store_credit_max；無餐飲時=total。
-  const storeCreditMax = quote.data
-    ? (parseNtd(quote.data.store_credit_max) ?? total)
-    : total;
-  // 購物金低消門檻（非餐飲消費未達則完全不可用購物金；0＝不限）：試算回 store_credit_min_spend。
+  // 購物金低消門檻（整筆消費未達則完全不可用購物金；0＝不限）：試算回 store_credit_min_spend。
   // 欄位缺漏（舊回應）一律視為 0＝不限，避免誤擋。
   const storeCreditMinSpend =
     quote.data?.store_credit_min_spend != null
@@ -1961,7 +1954,6 @@ export default function PosPage() {
     hasMember: member !== null,
     memberBalance,
     drawerOpen,
-    storeCreditMax,
     storeCreditMinSpend,
     cartHasItems: lines.length > 0,
     linePayKey,
@@ -3305,7 +3297,6 @@ export default function PosPage() {
             hasMember={member !== null}
             memberBalance={memberBalance}
             drawerOpen={drawerOpen}
-            storeCreditMax={storeCreditMax}
             storeCreditMinSpend={storeCreditMinSpend}
             taiwanpayFeePct={settings.data?.taiwanpay_fee_pct ?? "0"}
             linepayEnabled={settings.data?.linepay_enabled === true}

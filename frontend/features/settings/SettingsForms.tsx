@@ -392,7 +392,7 @@ export function StoreCreditBasicsForm({
           value={minSpend}
           onChange={setMinSpend}
           suffix="元"
-          hint="非餐飲消費沒到這個金額就不能用購物金折抵；0＝不限制。"
+          hint="整筆消費（餐飲也算）沒到這個金額就不能用購物金折抵；0＝不限制。"
         />
         <NumberField
           name="monthly_fixed_cash_outflow"

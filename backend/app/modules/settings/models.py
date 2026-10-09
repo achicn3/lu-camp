@@ -98,7 +98,7 @@ class StoreSettings(Base, TimestampMixin):
     monthly_fixed_cash_outflow: Mapped[Decimal] = mapped_column(
         Numeric(12, 0), server_default=text("0"), nullable=False
     )
-    # 購物金低消門檻（整數元）：非餐飲消費（total − 餐飲）未達此值則不可折抵購物金。預設 0＝不限制。
+    # 購物金低消門檻（整數元）：整筆消費（餐飲也算）未達此值則不可折抵購物金。預設 0＝不限制。
     store_credit_min_spend: Mapped[Decimal] = mapped_column(
         Numeric(12, 0), server_default=text("0"), nullable=False
     )

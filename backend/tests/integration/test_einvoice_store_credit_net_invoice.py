@@ -5,6 +5,8 @@
 - 退貨時購物金優先退回；購物金那部分本來就不在發票上，所以折讓只算非購物金的退款，
   只退了購物金的那次不用折讓、也不用客人簽名。
 - 同月整筆退照舊作廢發票（ADR-014）。
+- 餐點也能用購物金（店主 2026-10-09）：純餐點的混合付款同樣扣掉購物金後開，
+  退貨購物金優先、折讓只算現金那部分，累計折讓剛好等於發票金額。
 """
 
 import json
@@ -20,6 +22,7 @@ from app.modules.contacts.models import Contact
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.models import CatalogProduct
+from app.modules.menu.service import MenuService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
@@ -29,6 +32,7 @@ from app.shared.enums import (
     InvoiceStatus,
     SaleInvoiceStatus,
     SaleLineType,
+    ServiceMode,
     StoreCreditInvoiceMode,
     TenderType,
     UploadStatus,
@@ -294,3 +298,78 @@ async def test_cash_only_sale_has_no_store_credit_mode(db_session: AsyncSession)
     invoice = await _invoice(db_session, sale.id)
     assert invoice.total == sale.total
     assert invoice.store_credit_mode is None
+
+
+# ── 純餐點用購物金（店主 2026-10-09）────────────────────────────────────
+
+
+async def _food_mixed_sale(session: AsyncSession) -> tuple[int, int, int]:
+    """拿鐵 2 杯 × $150＝$300，購物金 $100＋現金 $200；回傳 (store_id, clerk_id, sale_id)。"""
+    store_id, clerk_id, _code = await _seed(session)
+    n = next(_seq)
+    member = Contact(store_id=store_id, name=f"餐點會員{n}", roles=["MEMBER"])
+    session.add(member)
+    await session.flush()
+    latte = await MenuService(session).create_menu_item(
+        store_id, name=f"拿鐵{n}", unit_price=Decimal(150), actor_user_id=clerk_id
+    )
+    await StoreCreditService(session).adjust(
+        store_id,
+        member.id,
+        amount=Decimal(100),
+        reason="餐點購物金發票測試",
+        created_by=clerk_id,
+        idempotency_key=f"sc-food-credit-{n}",
+    )
+    signed = await prepare_signed_store_credit_cart(
+        session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload={
+            "buyer_contact_id": member.id,
+            "lines": [{"line_type": "MENU", "menu_item_id": latte.id, "qty": 2}],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "100"},
+                {"tender_type": "CASH", "amount": "200"},
+            ],
+            "service_mode": "TAKEOUT",
+        },
+    )
+    sale = await SalesService(session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=latte.id, qty=2)],
+        buyer_contact_id=member.id,
+        tenders=[
+            TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal(100)),
+            TenderInput(tender_type=TenderType.CASH, amount=Decimal(200)),
+        ],
+        idempotency_key=f"sc-food-sale-{n}",
+        service_mode=ServiceMode.TAKEOUT,
+        signature_task_id=signed.signature_task_id,
+        cart_session_id=signed.cart_session_id,
+        cart_revision=signed.cart_revision,
+    )
+    return store_id, clerk_id, sale.id
+
+
+async def test_food_only_store_credit_sale_invoices_net_and_allowances_add_up(
+    db_session: AsyncSession,
+) -> None:
+    store_id, clerk_id, sale_id = await _food_mixed_sale(db_session)
+    invoice = await _invoice(db_session, sale_id)
+    assert invoice.total == Decimal(200)
+
+    calls = await _issue(db_session, store_id)
+    f0401 = json.loads(calls[1][1]["data"])
+    assert [(i["Quantity"], i["UnitPrice"], i["Amount"]) for i in f0401["ProductItem"]] == [
+        (2, "100", "200")
+    ]
+    assert f0401["TotalAmount"] == 200
+
+    # 退 1 杯 $150：購物金 $100 先退、現金 $50 → 折讓 $50
+    await _return(db_session, store_id, clerk_id, sale_id, 1, "food-ret-1")
+    assert await _allowance_totals(db_session, sale_id) == [Decimal(50)]
+    # 再退 1 杯：全是現金 $150 → 折讓 $150；累計剛好等於發票金額 $200
+    await _return(db_session, store_id, clerk_id, sale_id, 1, "food-ret-2")
+    assert await _allowance_totals(db_session, sale_id) == [Decimal(50), Decimal(150)]

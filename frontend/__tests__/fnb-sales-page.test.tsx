@@ -168,6 +168,9 @@ describe("/fnb-sales 餐飲交易紀錄", () => {
     await user.click(await screen.findByRole("button", { name: "餐點退款 12" }));
     const dialog = await screen.findByRole("dialog", { name: "餐點退款" });
     expect(within(dialog).queryByLabelText("營燈 退貨數量")).toBeNull(); // 二手不在這裡退
+    // 2026-10-09 起餐點也能用購物金：說明不再寫「餐點不能用購物金付」（ADR-031）
+    expect(dialog.textContent).not.toMatch(/不能用購物金/);
+    expect(dialog.textContent).toMatch(/餐點退款退回原本的現金、LINE Pay 或台灣Pay/);
     const qty = within(dialog).getByLabelText("拿鐵（冰） 退貨數量");
     await user.clear(qty);
     await user.type(qty, "1");
@@ -180,6 +183,29 @@ describe("/fnb-sales 餐飲交易紀錄", () => {
     expect((posted as { lines: unknown }).lines).toEqual([
       { sale_line_id: 1, qty: 1, resellable: true },
     ]);
+  });
+
+  it("用購物金付的餐點：說明購物金那部分先退回購物金（ADR-031）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/api/v1/sales/fnb")) return json([ROW]);
+      if (url.endsWith("/api/v1/sales/12") && method === "GET") {
+        return json({
+          ...DETAIL,
+          payment_method: "MIXED",
+          tenders: [
+            { id: 9, tender_type: "STORE_CREDIT", amount: "600", fee_amount: "0" },
+            { id: 10, tender_type: "CASH", amount: "290", fee_amount: "0" },
+          ],
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "餐點退款 12" }));
+    const dialog = await screen.findByRole("dialog", { name: "餐點退款" });
+    await waitFor(() => expect(dialog.textContent).toMatch(/購物金付的部分會先退回購物金/));
+    expect(dialog.textContent).not.toMatch(/不能用購物金/);
   });
 
   it("餐點都退完的交易不能再按退款", async () => {
