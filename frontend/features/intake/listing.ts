@@ -18,6 +18,8 @@ export interface Draft {
   categoryId: number | null;
   categoryName: string | null;
   price: string;
+  /** 原價（估價時填的；可更正，清空＝沒有原價）。 */
+  retailPrice: string;
   note: string;
 }
 
@@ -32,6 +34,7 @@ export function draftFrom(item: Item): Draft {
     categoryId: item.category_id ?? null,
     categoryName: item.category_name ?? null,
     price: item.listed_price,
+    retailPrice: item.retail_price ?? "",
     note: item.note ?? "",
   };
 }
@@ -52,6 +55,14 @@ export function editFor(item: Item, draft: Draft): Edit | null {
   }
   const price = draft.price.trim();
   if (price !== "" && parseNtd(price) !== parseNtd(item.listed_price)) set("listed_price", price);
+  const retail = draft.retailPrice.trim();
+  const retailNow = item.retail_price == null ? null : parseNtd(item.retail_price);
+  if (retail === "") {
+    if (retailNow !== null) set("retail_price", null);
+  } else {
+    const parsed = retailPriceOf(retail);
+    if (parsed !== null && parsed !== retailNow) set("retail_price", String(parsed));
+  }
   const note = draft.note.trim();
   if (note !== (item.note ?? "")) set("note", note === "" ? null : note);
   if (edit.kind === "SERIALIZED") {
@@ -59,6 +70,12 @@ export function editFor(item: Item, draft: Draft): Edit | null {
     if (draft.modelId !== (item.product_model_id ?? null)) set("product_model_id", draft.modelId);
   }
   return changed ? edit : null;
+}
+
+/** 原價輸入看得懂就回整數元（可有千分位、可為 0）；空白或看不懂回 null。 */
+export function retailPriceOf(input: string): number | null {
+  const value = parseNtd(input);
+  return value !== null && value >= 0 ? value : null;
 }
 
 /** 上架前還缺什麼（分類必填；品牌建議填，標籤會印）。 */

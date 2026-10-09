@@ -1136,7 +1136,8 @@ class InventoryService:
     ) -> tuple[SerializedItem, bool] | None:
         """補待整理序號品的資料（可同時上架）。回 (item, 這次有沒有上架)；找不到→None。
 
-        `changes` 只收 name／grade／brand_id／product_model_id／category_id／listed_price／note。
+        `changes` 只收 name／grade／brand_id／product_model_id／category_id／listed_price／
+        retail_price／note。
         已經上架（在庫）的不再動、回 False——重按上架不會改價也不會重印；已作廢等其他狀態拒絕。
         """
         item = await self._repo.get_serialized_for_update(store_id, item_id)

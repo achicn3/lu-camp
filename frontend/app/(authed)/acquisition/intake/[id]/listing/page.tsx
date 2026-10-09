@@ -15,6 +15,7 @@ import {
   editFor,
   missingOf,
   printListedLabels,
+  retailPriceOf,
 } from "@/features/intake/listing";
 import { DiscrepancyAction } from "@/features/intake/DiscrepancyAction";
 import { useIntakeReceiptPrint } from "@/features/intake/receipt";
@@ -58,7 +59,7 @@ function createBrand(name: string): Promise<ComboOption> {
   });
 }
 
-/** 同一列估價的件＝同款：品牌／型號／分類／品名填一次套用全部，成色與售價逐件（可能不同價）。 */
+/** 同一列估價的件＝同款：品牌／型號／分類／原價／品名填一次套用全部，成色與售價逐件（可能不同價）。 */
 function GroupCard({
   items,
   draftOf,
@@ -95,6 +96,7 @@ function GroupCard({
   const allChecked = items.every(checked);
   const missing = missingOf(shared);
   const code = multi ? `第 ${first.line_no ?? "?"} 列` : first.code;
+  const retailInvalid = shared.retailPrice.trim() !== "" && retailPriceOf(shared.retailPrice) === null;
 
   const gradeField = (item: Item) => (
     <GradeSelect
@@ -240,6 +242,19 @@ function GroupCard({
           selectedName={shared.categoryName}
           onChange={(o) => onChangeAll({ categoryId: o?.id ?? null, categoryName: o?.name ?? null })}
         />
+        {/* 原價：估價時填的，填錯可改（店主 2026-10-09）；同一列的件一起改。 */}
+        <label className="field">
+          <span className="field-label">{serialized ? "原價" : "原價／件"}</span>
+          <input
+            aria-label={`${code} 原價`}
+            inputMode="numeric"
+            placeholder="沒有原價"
+            value={shared.retailPrice}
+            aria-invalid={retailInvalid}
+            onChange={(e) => onChangeAll({ retailPrice: e.target.value })}
+          />
+          {retailInvalid && <span className="form-error">原價請填 0 以上的整數，或清空</span>}
+        </label>
         {!multi && serialized && gradeField(first)}
         {!multi && priceField(first)}
         {serialized && (

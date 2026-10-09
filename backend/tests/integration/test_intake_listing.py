@@ -388,3 +388,46 @@ async def test_rest_of_partly_listed_batch_can_be_voided_after_voiding_one_piece
 
     assert rest.status_code == 200, rest.text
     assert rest.json()["fully_voided"] is True
+
+
+async def test_retail_price_shows_and_can_be_corrected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """原價（估價時填的，店主 2026-10-09）：待整理清單帶出，填錯可改、可清掉，不可負數。"""
+    ctx = await _ctx(db_session, client)
+    batch = await _paid_batch(client, ctx)
+    chair, _, pegs = await _items(client, ctx, batch["id"])
+    assert chair["retail_price"] == "1000"
+
+    resp = await _listing(
+        client,
+        ctx,
+        batch["id"],
+        [
+            {"kind": "SERIALIZED", "id": chair["id"], "retail_price": "1280"},
+            {"kind": "BULK_LOT", "id": pegs["id"], "retail_price": "30"},
+        ],
+        publish=False,
+    )
+    assert resp.status_code == 200, resp.text
+    chair, _, pegs = await _items(client, ctx, batch["id"])
+    assert (chair["retail_price"], pegs["retail_price"]) == ("1280", "30")
+
+    cleared = await _listing(
+        client,
+        ctx,
+        batch["id"],
+        [{"kind": "SERIALIZED", "id": chair["id"], "retail_price": None}],
+        False,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert (await _items(client, ctx, batch["id"]))[0]["retail_price"] is None
+
+    negative = await _listing(
+        client,
+        ctx,
+        batch["id"],
+        [{"kind": "SERIALIZED", "id": chair["id"], "retail_price": "-1"}],
+        False,
+    )
+    assert negative.status_code == 422, negative.text

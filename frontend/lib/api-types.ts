@@ -7779,6 +7779,8 @@ export interface components {
             note?: string | null;
             /** Product Model Id */
             product_model_id?: number | null;
+            /** Retail Price */
+            retail_price?: number | string | null;
         };
         /**
          * IntakeItemRead

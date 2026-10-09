@@ -68,6 +68,27 @@ describe("待整理上架的草稿", () => {
     });
   });
 
+  it("原價：帶出估價時填的；改了才送，清空＝送 null（店主 2026-10-09）", () => {
+    expect(draftFrom(chair).retailPrice).toBe("1000");
+    expect(editFor(chair, { ...draftFrom(chair), retailPrice: "1,280" })).toEqual({
+      kind: "SERIALIZED",
+      id: 7,
+      retail_price: "1280",
+    });
+    expect(editFor(chair, { ...draftFrom(chair), retailPrice: " " })).toEqual({
+      kind: "SERIALIZED",
+      id: 7,
+      retail_price: null,
+    });
+    const noRetail = { ...chair, retail_price: null };
+    expect(draftFrom(noRetail).retailPrice).toBe("");
+    expect(editFor(noRetail, draftFrom(noRetail))).toBeNull();
+  });
+
+  it("原價打不是數字：不送（畫面另外提示）", () => {
+    expect(editFor(chair, { ...draftFrom(chair), retailPrice: "abc" })).toBeNull();
+  });
+
   it("缺什麼依草稿即時算", () => {
     expect(missingOf(draftFrom(chair))).toEqual(["分類", "品牌"]);
     expect(missingOf({ ...draftFrom(chair), categoryId: 1, brandId: 2 })).toEqual([]);

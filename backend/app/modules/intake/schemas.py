@@ -179,6 +179,8 @@ class IntakeItemEdit(BaseModel):
     product_model_id: int | None = None
     category_id: int | None = None
     listed_price: Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=0)] | None = None
+    retail_price: Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=0)] | None = None
+    """原價（估價時填的；店主 2026-10-09 可在待整理更正）。帶 null＝清掉。"""
     note: Note | None = None
 
 

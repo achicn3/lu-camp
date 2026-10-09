@@ -1084,8 +1084,8 @@ class IntakeService:
 
     @staticmethod
     def _changes(edit: IntakeItemEdit) -> dict[str, object]:
-        """只取有帶的欄位；必填欄位帶 null 視為沒改，品牌／型號／備註帶 null＝清掉。"""
-        clearable = {"brand_id", "product_model_id", "note"}
+        """只取有帶的欄位；必填欄位帶 null 視為沒改，品牌／型號／原價／備註帶 null＝清掉。"""
+        clearable = {"brand_id", "product_model_id", "note", "retail_price"}
         changes: dict[str, object] = {}
         for name in edit.model_fields_set - {"kind", "id"}:
             value = getattr(edit, name)

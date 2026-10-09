@@ -8465,6 +8465,22 @@
               }
             ],
             "title": "Product Model Id"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,13}0*$)\\d{0,12}\\.\\d{0,0}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
           }
         },
         "required": [

@@ -2,7 +2,8 @@
 // 付款後的一批（冰桶 ×3，買斷每件 $450，快速估價沒選成色）→ 整理上架頁：
 // 1) 成色下拉顯示「請選成色」，選「全新」真的選得到；
 // 2) 第 3 件按「客人不賣了（退回）」→ 提示收回 $450、那件從清單消失，後端記作廢、現金進抽屜；
-// 3) 其餘 2 件選好成色上架成功（以前會被「上架前要選成色」擋下）。
+// 3) 原價帶出估價時填的 $3,150，改成 $3,280 存起來（店主 2026-10-09：原價不見了、要能改）；
+// 4) 其餘 2 件選好成色上架成功（以前會被「上架前要選成色」擋下）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/intake-return-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -78,6 +79,7 @@ try {
     short_name: "15.1L 冒險系列 冰桶",
     qty: 3,
     acquisition_type: "BUYOUT",
+    reference_price: "3150",
     expected_listed_price: "949",
     deal_cost: "450",
   });
@@ -142,7 +144,17 @@ try {
     JSON.stringify(voided),
   );
 
-  // 3) 其餘兩件：選好成色、分類 → 上架成功
+  // 3) 原價：帶出估價時的 3150，改成 3280 存起來
+  const retail = page.getByLabel("第 1 列 原價");
+  ok("原價帶出估價時填的 3150", (await retail.inputValue()) === "3150", await retail.inputValue());
+  await retail.fill("3280");
+  await page.getByRole("button", { name: "儲存（先不上架）" }).click();
+  await page.getByRole("status").filter({ hasText: "已儲存" }).waitFor();
+  const saved = (await api(mgr, "GET", `/api/v1/intake-batches/${batch.id}/items`)).json;
+  ok("原價改成 3280 存起來（兩件一起）", saved.every((i) => i.retail_price === "3280"), JSON.stringify(saved.map((i) => i.retail_price)));
+  await page.screenshot({ path: join(SHOTS, "03b-retail-price.png"), fullPage: true });
+
+  // 4) 其餘兩件：選好成色、分類 → 上架成功
   await page.getByLabel(`${second.code} 成色`).selectOption("A");
   const categoryInput = page.getByLabel("分類", { exact: true }).last();
   await categoryInput.fill(CATEGORY);
