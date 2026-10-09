@@ -329,4 +329,6 @@ D1 `order_lines` 加 `catalog_product_id`（migration 0006），`orders` 加 `fu
 - **到客人頁**：名次跟著可售狀態同步（`popular: [{id, rank}]`）每幾秒推上雲端，**賣出就更新、不必重新發佈**；
   雲端把名次套到品項（`popularity`），品項卡在人工標籤前面顯示。關掉就送空的、標籤消失。
 - **部署順序：雲端 Worker 先上，再升店內**——舊 Worker 不認得 `popular`，會把整份可售狀態拒收（售完同步也會停）。
-- **驗證**：後端人氣測試 6 支、Worker 233、POS 4 支、`online-popularity-smoke.mjs` 6/6。升級 docs/77。
+- **Codex 第一輪（店主裁示）**：下架的品項不再佔名次、沒設分類的品項自成「未分類」一組取前三 → 已修。
+  **已知風險（不修）**：改了品項分類卻沒重新發佈時，雲端照舊分類顯示，同一分類可能看到兩個 No.1，重新發佈即恢復。
+- **驗證**：後端人氣測試 8 支、Worker 233、POS 4 支、`online-popularity-smoke.mjs` 6/6。升級 docs/77。

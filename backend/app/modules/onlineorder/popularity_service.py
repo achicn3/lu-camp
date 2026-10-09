@@ -24,6 +24,7 @@ from app.modules.sales.service import SalesService
 
 _DEFAULT = PopularityWriteRequest(is_active=True, window_days=30, min_qty=10)
 _TOP = 3
+_UNCATEGORIZED = "未分類"
 
 
 class PopularityService:
@@ -95,27 +96,34 @@ class PopularityService:
         returned = await ReturnsService(self._session).returned_menu_qty_by_item_since(
             store_id, since
         )
+        # 只排上架中的品項（下架的客人看不到，不能佔名次；Codex 第一輪）。
         items = [
             item
-            for item in await self._menu.list_items(store_id, include_unavailable=True)
+            for item in await self._menu.list_items(store_id, include_unavailable=False)
             if item.archived_at is None
         ]
+        groups: list[tuple[int | None, str]] = [
+            (c.id, c.name)
+            for c in sorted(
+                await self._menu.list_categories(store_id), key=lambda c: (c.sort_order, c.id)
+            )
+        ]
+        # 沒設分類的自成一組（排最後）。
+        groups.append((None, _UNCATEGORIZED))
         result: list[PopularityRankRead] = []
-        for category in sorted(
-            await self._menu.list_categories(store_id), key=lambda c: (c.sort_order, c.id)
-        ):
+        for category_id, category_name in groups:
             ranked = sorted(
                 (
                     (sold.get(item.id, 0) - returned.get(item.id, 0), item)
                     for item in items
-                    if item.category_id == category.id
+                    if item.category_id == category_id
                 ),
                 key=lambda pair: (-pair[0], pair[1].sort_order, pair[1].id),
             )
             qualified = [(qty, item) for qty, item in ranked if qty >= settings.min_qty][:_TOP]
             result += [
                 PopularityRankRead(
-                    category=category.name, item_id=item.id, name=item.name, rank=rank, qty=qty
+                    category=category_name, item_id=item.id, name=item.name, rank=rank, qty=qty
                 )
                 for rank, (qty, item) in enumerate(qualified, start=1)
             ]

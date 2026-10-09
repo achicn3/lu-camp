@@ -213,3 +213,31 @@ async def test_labels_ride_along_with_the_availability_sync(db_session: AsyncSes
     second = await service.capture(ctx.store_id)
     assert second is not None and second["revision"] == first["revision"] + 1
     assert second["popular"] == [{"id": ctx.items["拿鐵"], "rank": 1}]
+
+
+async def test_items_taken_off_the_menu_do_not_take_a_rank(db_session: AsyncSession) -> None:
+    """下架的品項客人看不到，不能佔掉名次（Codex 第一輪）。"""
+    ctx = await _seed(db_session)
+    await _sell(db_session, ctx, "拿鐵", 30)
+    await _sell(db_session, ctx, "美式", 12)
+    latte = await db_session.get(MenuItem, ctx.items["拿鐵"])
+    assert latte is not None
+    latte.is_available = False
+    await db_session.flush()
+
+    assert await PopularityService(db_session).ranks(ctx.store_id) == {ctx.items["美式"]: 1}
+
+
+async def test_uncategorized_items_rank_as_their_own_group(db_session: AsyncSession) -> None:
+    """沒設分類的品項自成一組，一樣取前三（Codex 第一輪）。"""
+    ctx = await _seed(db_session)
+    loose = MenuItem(store_id=ctx.store_id, name="沒分類的", unit_price=Decimal("100"))
+    db_session.add(loose)
+    await db_session.flush()
+    ctx.items["沒分類的"] = loose.id
+    await _sell(db_session, ctx, "沒分類的", 10)
+
+    service = PopularityService(db_session)
+    assert await service.ranks(ctx.store_id) == {loose.id: 1}
+    [row] = (await service.read(ctx.store_id)).ranking
+    assert (row.category, row.name) == ("未分類", "沒分類的")
