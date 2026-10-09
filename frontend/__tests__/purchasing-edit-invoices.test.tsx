@@ -428,6 +428,46 @@ describe("進項發票", () => {
     expect(put.receipt_ids).toEqual([31, 32]);
   });
 
+  it("快取裡是舊的發票：等拿到最新的才給改，不會把新掛上的那批拿掉（Codex 第三輪）", async () => {
+    loginAs("MANAGER");
+    nav.id = "90";
+    const fresh = {
+      ...INVOICE,
+      receipts: [...INVOICE.receipts, { ...UNINVOICED[1] }],
+    };
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (url.pathname.endsWith("/purchase-input-invoices/90") && method === "GET") {
+          await gate;
+          return json(fresh);
+        }
+        const resp = invoiceRoutes()(method, url.pathname, null);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${method} ${url.pathname}`);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["input-invoices", "detail", 90], INVOICE);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InputInvoicePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("載入中…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "儲存修改" })).toBeNull();
+    release();
+    const second = await screen.findByLabelText(/採購單 #8 .* 收貨/);
+    expect((second as HTMLInputElement).checked).toBe(true);
+  });
+
   it("管理者刪除要按兩次確認；刪完回清單", async () => {
     loginAs("MANAGER");
     nav.id = "90";

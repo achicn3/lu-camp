@@ -134,6 +134,8 @@ export function ReceiveDialog({
       setReceiveError(null);
       void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+      // 隨貨發票可能掛上既有那張（整月合併開），發票畫面也要刷新。
+      void queryClient.invalidateQueries({ queryKey: ["input-invoices"] });
       onReceived(
         result.reconciled
           ? "偵測到上一次收貨尚未確認、已為您同步；請確認待收數量後再收剩餘。"
