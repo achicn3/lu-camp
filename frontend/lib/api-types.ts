@@ -2276,6 +2276,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/{batch_id}/return-to-customer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return Intake Item To Customer
+         * @description 待整理時客人不賣了、拿回去（限 MANAGER）：那件作廢退場，付的現金收回進抽屜、購物金沖回。
+         *
+         *     只限買斷的二手商品；散裝 → 422（請到收購紀錄整張作廢）；已上架／不是這一批 → 409；
+         *     付現但沒開帳 → 409。
+         */
+        post: operations["returnIntakeItemToCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}/signature": {
         parameters: {
             query?: never;
@@ -7994,6 +8017,33 @@ export interface components {
             store_id: number;
             /** Total */
             total: string;
+        };
+        /**
+         * IntakeReturnRequest
+         * @description 待整理時客人不賣了、拿回去（店主 2026-10-09）：只限買斷的二手商品，散裝請到收購紀錄作廢。
+         */
+        IntakeReturnRequest: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "SERIALIZED" | "BULK_LOT";
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * IntakeReturnResult
+         * @description 退回客人後收回的款項：現金進抽屜、購物金從客人帳戶沖回。
+         */
+        IntakeReturnResult: {
+            /** Item Id */
+            item_id: number;
+            /** Reversed Cash */
+            reversed_cash: string;
+            /** Reversed Credit */
+            reversed_credit: string;
         };
         /** IntakeSignatureRead */
         IntakeSignatureRead: {
@@ -15969,6 +16019,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    returnIntakeItemToCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeReturnRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeReturnResult"];
                 };
             };
             /** @description Validation Error */

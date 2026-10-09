@@ -65,6 +65,7 @@
 - [MacBook 正式機：升級到 2026-10-08 版（採購單可修改＋進項發票）](./71-macbook-upgrade-purchasing-edit.md)
 - [MacBook 正式機：升級到 2026-10-09 版（線上單作廢／退貨回報雲端已退款）](./72-macbook-upgrade-online-refund-report.md)
 - [MacBook 正式機：升級到 2026-10-09 版（餐飲可用購物金折抵）](./73-macbook-upgrade-store-credit-for-food.md)
+- [MacBook 正式機：升級到 2026-10-09 版（待整理：客人不賣了可退回、成色選得到）](./74-macbook-upgrade-intake-return.md)
 
 ## 評估與後續實作
 

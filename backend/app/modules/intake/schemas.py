@@ -208,6 +208,22 @@ class IntakeDiscrepancyRead(BaseModel):
     created_at: datetime
 
 
+class IntakeReturnRequest(BaseModel):
+    """待整理時客人不賣了、拿回去（店主 2026-10-09）：只限買斷的二手商品，散裝請到收購紀錄作廢。"""
+
+    kind: Literal[ItemKind.SERIALIZED, ItemKind.BULK_LOT]
+    id: Annotated[int, Field(gt=0)]
+    reason: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class IntakeReturnResult(BaseModel):
+    """退回客人後收回的款項：現金進抽屜、購物金從客人帳戶沖回。"""
+
+    item_id: int
+    reversed_cash: NTDOut
+    reversed_credit: NTDOut
+
+
 class IntakeListingResult(BaseModel):
     batch_status: IntakeBatchStatus
     listed: list[IntakeItemRead]

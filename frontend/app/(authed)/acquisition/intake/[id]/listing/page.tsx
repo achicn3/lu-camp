@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { type ComboOption, CreatableCombobox } from "@/features/acquisition/CreatableCombobox";
 import { GRADE_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
+import { GradeSelect } from "@/features/intake/GradeSelect";
 import {
   type Draft,
   draftFrom,
@@ -17,11 +18,13 @@ import {
 } from "@/features/intake/listing";
 import { DiscrepancyAction } from "@/features/intake/DiscrepancyAction";
 import { useIntakeReceiptPrint } from "@/features/intake/receipt";
+import { ReturnToCustomerAction } from "@/features/intake/ReturnToCustomerAction";
 import { StatusBadge } from "@/features/intake/StatusBadge";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { useCurrentRole } from "@/lib/useCurrentRole";
 
 type Item = components["schemas"]["IntakeItemRead"];
 type Edit = components["schemas"]["IntakeItemEdit"];
@@ -66,10 +69,16 @@ function GroupCard({
   onChangeOne,
   onCategoryCreated,
   onDiscrepancy,
+  onReturned,
+  canReturn,
   batchId,
 }: {
   batchId: number;
   onDiscrepancy: () => void;
+  /** 客人不賣了、已退回（訊息告訴店員收回多少錢）。 */
+  onReturned: (message: string) => void;
+  /** 管理者才能退回（走收購作廢）。 */
+  canReturn: boolean;
   items: Item[];
   draftOf: (item: Item) => Draft;
   checked: (item: Item) => boolean;
@@ -88,20 +97,20 @@ function GroupCard({
   const code = multi ? `第 ${first.line_no ?? "?"} 列` : first.code;
 
   const gradeField = (item: Item) => (
-    <label className="field">
-      <span className="field-label">成色</span>
-      <select
-        aria-label={`${item.code} 成色`}
-        value={draftOf(item).grade}
-        onChange={(e) => onChangeOne(item, { grade: e.target.value as Grade })}
-      >
-        {SERIALIZED_GRADES.map((g) => (
-          <option key={g} value={g}>
-            {GRADE_LABEL[g]}
-          </option>
-        ))}
-      </select>
-    </label>
+    <GradeSelect
+      label={`${item.code} 成色`}
+      value={draftOf(item).grade}
+      onChange={(grade) => onChangeOne(item, { grade })}
+    />
+  );
+  // 客人不賣了：只有買斷的二手商品能在這裡退回（散裝請到收購紀錄整張作廢）。
+  const itemActions = (item: Item) => (
+    <>
+      <DiscrepancyAction batchId={batchId} item={item} onDone={onDiscrepancy} />
+      {canReturn && item.kind === "SERIALIZED" && !item.consignment && (
+        <ReturnToCustomerAction batchId={batchId} item={item} onDone={onReturned} />
+      )}
+    </>
   );
   const priceField = (item: Item) => (
     <label className="field">
@@ -153,7 +162,7 @@ function GroupCard({
         ) : (
           <span className="form-success">資料齊了</span>
         )}
-        {!multi && <DiscrepancyAction batchId={batchId} item={first} onDone={onDiscrepancy} />}
+        {!multi && itemActions(first)}
       </div>
       {multi && (
         <p className="hint">品牌、型號、分類、品名填一次，這 {items.length} 件都會套用；成色與售價可以每件不同。</p>
@@ -262,9 +271,7 @@ function GroupCard({
               {gradeField(item)}
               {priceField(item)}
               {noteField(item, "intake-list-unit-note")}
-              <div className="intake-list-unit-action">
-                <DiscrepancyAction batchId={batchId} item={item} onDone={onDiscrepancy} />
-              </div>
+              <div className="intake-list-unit-action">{itemActions(item)}</div>
             </div>
           ))}
         </div>
@@ -286,6 +293,7 @@ export default function IntakeListingPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [lastListed, setLastListed] = useState<Item[]>([]);
   const { print: printReceipt, note: receiptNote } = useIntakeReceiptPrint(batchId);
+  const { isManager } = useCurrentRole();
 
   const batch = useQuery({
     queryKey: ["intake-batch", batchId],
@@ -579,6 +587,12 @@ export default function IntakeListingPage() {
               onCategoryCreated={() => void categoriesQuery.refetch()}
               batchId={batchId}
               onDiscrepancy={refresh}
+              canReturn={isManager}
+              onReturned={(message) => {
+                setError(null);
+                setNotice(message);
+                refresh();
+              }}
             />
           ))}
         </>

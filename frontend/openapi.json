@@ -9409,6 +9409,61 @@
         "title": "IntakeReceiptRead",
         "type": "object"
       },
+      "IntakeReturnRequest": {
+        "description": "待整理時客人不賣了、拿回去（店主 2026-10-09）：只限買斷的二手商品，散裝請到收購紀錄作廢。",
+        "properties": {
+          "id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "SERIALIZED",
+              "BULK_LOT"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "reason"
+        ],
+        "title": "IntakeReturnRequest",
+        "type": "object"
+      },
+      "IntakeReturnResult": {
+        "description": "退回客人後收回的款項：現金進抽屜、購物金從客人帳戶沖回。",
+        "properties": {
+          "item_id": {
+            "title": "Item Id",
+            "type": "integer"
+          },
+          "reversed_cash": {
+            "title": "Reversed Cash",
+            "type": "string"
+          },
+          "reversed_credit": {
+            "title": "Reversed Credit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "reversed_cash",
+          "reversed_credit"
+        ],
+        "title": "IntakeReturnResult",
+        "type": "object"
+      },
       "IntakeSignatureRead": {
         "properties": {
           "signature_task_id": {
@@ -27180,6 +27235,64 @@
           }
         ],
         "summary": "Get Intake Receipt",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/{batch_id}/return-to-customer": {
+      "post": {
+        "description": "待整理時客人不賣了、拿回去（限 MANAGER）：那件作廢退場，付的現金收回進抽屜、購物金沖回。\n\n只限買斷的二手商品；散裝 → 422（請到收購紀錄整張作廢）；已上架／不是這一批 → 409；\n付現但沒開帳 → 409。",
+        "operationId": "returnIntakeItemToCustomer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeReturnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeReturnResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Return Intake Item To Customer",
         "tags": [
           "intake"
         ]

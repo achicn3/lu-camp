@@ -5219,6 +5219,11 @@ a.btn-ghost {
 .intake-list-unit-action:has(.intake-discrepancy) {
   grid-column: 1 / -1;
 }
+/* 一次只開一個表單（少了／壞了、客人不賣了）：開著時另一顆按鈕先收起來，不擠成窄欄。 */
+.intake-list-unit-action:has(.intake-discrepancy) > .intake-discrepancy-btn,
+.intake-list-item-head:has(.intake-discrepancy) > .intake-discrepancy-btn {
+  display: none;
+}
 .intake-discrepancy-list {
   margin: 0;
   padding-left: var(--sp-4);
@@ -5234,7 +5239,8 @@ a.btn-ghost {
 .intake-discrepancy input[aria-label="少了幾件"] {
   width: 5rem;
 }
-.intake-discrepancy input[aria-label="差異原因"] {
+.intake-discrepancy input[aria-label="差異原因"],
+.intake-discrepancy input[aria-label="退回原因"] {
   flex: 1 1 12rem;
 }
 .acq-records-pending {

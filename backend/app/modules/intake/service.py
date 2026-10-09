@@ -38,6 +38,8 @@ from app.modules.intake.schemas import (
     IntakeReceiptConsignment,
     IntakeReceiptItem,
     IntakeReceiptRead,
+    IntakeReturnRequest,
+    IntakeReturnResult,
 )
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.inventory.service import InventoryService
@@ -938,6 +940,49 @@ class IntakeService:
             )
         await self._refresh_listing_status(store_id, batch)
         return row
+
+    async def return_to_customer(
+        self,
+        store_id: int,
+        batch_id: int,
+        request: IntakeReturnRequest,
+        *,
+        actor_user_id: int,
+    ) -> IntakeReturnResult:
+        """待整理時客人不賣了、拿回去（店主 2026-10-09）：那件走收購「選品作廢」——
+        付的現金收回進抽屜、購物金沖回、那件退場並寫稽核。
+        不是報廢：報廢會把客人拿回去的東西算成損失。
+
+        只限還在待整理的買斷二手商品；散裝的部分退回沒有規則，請到收購紀錄整張作廢。
+        """
+        batch = await self._batch(store_id, batch_id, for_update=True)
+        owned = {
+            (self._kind(item), item.id): item for item in await self._batch_items(store_id, batch)
+        }
+        item = owned.get((request.kind, request.id))
+        if item is None:
+            raise IntakeConflict(f"商品 {request.id} 不是這一批的")
+        if (
+            not isinstance(item, SerializedItem)
+            or item.ownership_type is not OwnershipType.OWNED
+            or item.acquisition_id is None
+        ):
+            raise InvalidIntakeLine("只有買斷的二手商品可以在這裡退回；散裝請到收購紀錄整張作廢")
+        if not self._is_pending(item):
+            raise IntakeConflict(f"「{item.name}」已經上架，要退回請到收購紀錄作廢")
+        result = await AcquisitionService(self._session).void_acquisition(
+            store_id,
+            item.acquisition_id,
+            actor_user_id=actor_user_id,
+            reason=request.reason.strip(),
+            item_ids=[item.id],
+        )
+        await self._refresh_listing_status(store_id, batch)
+        return IntakeReturnResult(
+            item_id=item.id,
+            reversed_cash=result.reversed_cash,
+            reversed_credit=result.reversed_credit,
+        )
 
     async def discrepancies(self, store_id: int, batch_id: int) -> list[IntakeDiscrepancyRead]:
         batch = await self._batch(store_id, batch_id)

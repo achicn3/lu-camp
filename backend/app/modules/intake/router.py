@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.intake.schemas import (
     IntakeAwaitingListingRead,
     IntakeBatchCreateRequest,
@@ -30,14 +30,21 @@ from app.modules.intake.schemas import (
     IntakeListingResult,
     IntakePayRequest,
     IntakeReceiptRead,
+    IntakeReturnRequest,
+    IntakeReturnResult,
     IntakeSignatureRead,
     IntakeSignatureRequest,
 )
 from app.modules.intake.service import IntakeService
 from app.modules.signing.schemas import KioskTaskRead
 from app.modules.signing.service import SigningService
+from app.shared.enums import UserRole
 from app.shared.exceptions import (
+    AcquisitionAlreadyVoid,
+    AcquisitionCreditSpent,
+    AcquisitionHasSoldItems,
     AcquisitionRequiresNationalId,
+    AcquisitionVoidUnsupported,
     ContactNotFound,
     CrossStoreReference,
     DomainError,
@@ -64,6 +71,7 @@ router = APIRouter(prefix="/intake-batches", tags=["intake"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 AuthDep = Annotated[CurrentUser, Depends(get_current_user)]
+ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value))]
 
 _STATUS: dict[type[DomainError], int] = {
     IntakeBatchNotFound: status.HTTP_404_NOT_FOUND,
@@ -88,6 +96,11 @@ _STATUS: dict[type[DomainError], int] = {
     MissingItemGrade: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InsufficientStock: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 客人不賣了（走收購選品作廢）：已作廢／已賣／購物金已花 → 409；不支援的種類 → 422
+    AcquisitionAlreadyVoid: status.HTTP_409_CONFLICT,
+    AcquisitionHasSoldItems: status.HTTP_409_CONFLICT,
+    AcquisitionCreditSpent: status.HTTP_409_CONFLICT,
+    AcquisitionVoidUnsupported: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -407,6 +420,26 @@ async def report_intake_discrepancy(
         row_id = row.id
     records = await service.discrepancies(user.store_id, batch_id)
     return next(record for record in records if record.id == row_id)
+
+
+@router.post(
+    "/{batch_id}/return-to-customer",
+    response_model=IntakeReturnResult,
+    operation_id="returnIntakeItemToCustomer",
+)
+async def return_intake_item_to_customer(
+    batch_id: int, payload: IntakeReturnRequest, session: SessionDep, user: ManagerDep
+) -> IntakeReturnResult:
+    """待整理時客人不賣了、拿回去（限 MANAGER）：那件作廢退場，付的現金收回進抽屜、購物金沖回。
+
+    只限買斷的二手商品；散裝 → 422（請到收購紀錄整張作廢）；已上架／不是這一批 → 409；
+    付現但沒開帳 → 409。
+    """
+    async with _write(session):
+        result = await IntakeService(session).return_to_customer(
+            user.store_id, batch_id, payload, actor_user_id=user.id
+        )
+    return result
 
 
 @router.get(
