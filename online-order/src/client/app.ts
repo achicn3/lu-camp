@@ -2,7 +2,7 @@
 import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
 import {
-  experienceView, homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText,
+  experienceView, homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
   retailGroups, retailSoldOut, tableCodeFromPath, upsellSuggestions, visibleItems, type ExperienceView,
   type UpsellPick,
 } from "./logic";
@@ -60,6 +60,8 @@ let feedbackTimer: number | null = null;
 let restoringHistory = false;
 let renderedMenuKey = "";
 let activeDetail: number | null = null;
+/** 引導推薦：null＝還沒開始；否則是已回答的答案序號（答完＝題數一樣多）。 */
+let quizAnswers: number[] | null = null;
 let pollTimer: number | null = null;
 let widgetId: string | null = null;
 let challengeToken = "";
@@ -326,7 +328,9 @@ function renderMenu(snapshot: MenuSnapshot): void {
   }) : []));
   $("recommendations").hidden = selection.recommended.length === 0;
   $("recommended-list").replaceChildren(...(menuHome ? selection.recommended.map((item) => itemRow(item, true)) : []));
+  renderQuiz(snapshot);
   const shortcuts: HTMLElement[] = [];
+  if (snapshot.quiz) shortcuts.push(button("不知道喝什麼？", () => startQuiz(), "shortcut"));
   if (experiences.length) shortcuts.push(button("手沖體驗", () => $("experiences").scrollIntoView({ block: "start" }), "shortcut"));
   if (selection.recommended.length) shortcuts.push(button("露坑推薦", () => $("recommendations").scrollIntoView({ block: "start" }), "shortcut"));
   const preferred = [selection.categories.find((category) => category.name === "咖啡"),
@@ -341,6 +345,63 @@ function renderMenu(snapshot: MenuSnapshot): void {
   if (takeHome.length) shortcuts.push(button("帶回家", () => $("take-home").scrollIntoView({ block: "start" }), "shortcut"));
   if (!shortcuts.length) shortcuts.push(button("看看菜單", () => selectCategory(ALL), "shortcut"));
   $("shortcuts").replaceChildren(...shortcuts);
+}
+function startQuiz(): void {
+  quizAnswers = [];
+  if (menu) renderQuiz(menu);
+  $("quiz").scrollIntoView({ block: "start" });
+}
+function answerQuiz(answer: number | null): void {
+  if (quizAnswers === null) return;
+  quizAnswers = answer === null ? quizAnswers.slice(0, -1) : [...quizAnswers, answer];
+  if (menu) renderQuiz(menu);
+  // 換題／出結果後把問答區頂端帶回畫面（不被上方固定列擋住）。
+  $("quiz").scrollIntoView({ block: "start" });
+}
+/** 「不知道喝什麼」（docs/63 §2 M2a）：一題一題問，答完給 1 主推＋最多 2 備選；對不上就給完整菜單。 */
+function renderQuiz(snapshot: MenuSnapshot): void {
+  const quiz = snapshot.quiz;
+  $("quiz").hidden = !menuHome || quiz === undefined;
+  const body = $("quiz-body");
+  if (quiz === undefined) { body.replaceChildren(); return; }
+  if (quizAnswers === null) {
+    body.replaceChildren(button("幫我挑", startQuiz, "action quiz-start"));
+    return;
+  }
+  const step = quizAnswers.length;
+  const question = quiz.questions[step];
+  if (question !== undefined) {
+    const options = el("div", "quiz-options");
+    options.append(...question.options.map((option, index) => button(option.label, () => answerQuiz(index), "quiz-option")));
+    const nav = el("div", "quiz-nav");
+    nav.append(button(step === 0 ? "先不用" : "上一題", () => {
+      if (step === 0) { quizAnswers = null; renderQuiz(snapshot); } else answerQuiz(null);
+    }, "link-button"));
+    body.replaceChildren(el("p", "quiz-step", `第 ${step + 1} / ${quiz.questions.length} 題`),
+      el("h3", "quiz-prompt", question.prompt), options, nav);
+    return;
+  }
+  const picks = quizResult(snapshot, quizAnswers);
+  const again = button("重新回答", startQuiz, "link-button");
+  if (picks.length === 0) {
+    body.replaceChildren(el("p", "quiz-empty", "今天沒有剛好符合的，看看完整菜單吧。"),
+      button("看完整菜單", () => selectCategory(ALL), "action"), again);
+    return;
+  }
+  const rows = picks.flatMap((ref, index): HTMLElement[] => {
+    let node: HTMLElement | null = null;
+    if (ref.kind === "item") {
+      const found = snapshot.items.find((entry) => entry.id === ref.id);
+      node = found ? itemRow(found, true) : null;
+    } else {
+      const experience = (snapshot.experiences ?? []).find((entry) => entry.id === ref.id);
+      const view = experience ? experienceView(snapshot, experience) : null;
+      node = view ? experienceMini(view, (from) => openExperience(view, from)) : null;
+    }
+    if (node === null) return [];
+    return index === 0 ? [el("p", "quiz-label", "最推薦"), node] : index === 1 ? [el("p", "quiz-label", "也可以試試"), node] : [node];
+  });
+  body.replaceChildren(...rows, again);
 }
 function renderFooter(): void {
   const footer = $("footer"); footer.replaceChildren();

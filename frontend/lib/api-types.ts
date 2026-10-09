@@ -2925,6 +2925,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/quiz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Menu Quiz
+         * @description 目前的引導推薦設定；還沒存過回預設題目（不啟用、沒勾品項）。
+         */
+        get: operations["getMenuQuiz"];
+        /**
+         * Update Menu Quiz
+         * @description 整份覆寫（題目、答案、每個答案勾的品項、啟用）；下次發佈才到客人頁。
+         */
+        put: operations["updateMenuQuiz"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/retail": {
         parameters: {
             query?: never;
@@ -9179,6 +9203,25 @@ export interface components {
              */
             show_remaining: boolean;
         };
+        /** MenuQuizRead */
+        MenuQuizRead: {
+            /** Is Active */
+            is_active: boolean;
+            /** Is Default */
+            is_default: boolean;
+            /** Questions */
+            questions: components["schemas"]["QuizQuestion"][];
+        };
+        /**
+         * MenuQuizWriteRequest
+         * @description 「不知道喝什麼」整份覆寫（docs/63 §2 M2a）：1–3 題、每題 2–4 個答案。
+         */
+        MenuQuizWriteRequest: {
+            /** Is Active */
+            is_active: boolean;
+            /** Questions */
+            questions: components["schemas"]["QuizQuestion"][];
+        };
         /**
          * MenuStockAdjustReason
          * @description 每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。
@@ -9798,6 +9841,33 @@ export interface components {
             lines: components["schemas"]["PurchaseOrderLineUpdate"][];
             /** Supplier Id */
             supplier_id: number;
+        };
+        /**
+         * QuizItemRef
+         * @description 答案勾的品項：菜單品項或手沖體驗卡。
+         */
+        QuizItemRef: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "item" | "experience";
+        };
+        /** QuizOption */
+        QuizOption: {
+            /** Items */
+            items?: components["schemas"]["QuizItemRef"][];
+            /** Label */
+            label: string;
+        };
+        /** QuizQuestion */
+        QuizQuestion: {
+            /** Options */
+            options: components["schemas"]["QuizOption"][];
+            /** Prompt */
+            prompt: string;
         };
         /**
          * ReasonCreateRequest
@@ -17523,6 +17593,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OnlineMenuPublishRead"];
+                };
+            };
+        };
+    };
+    getMenuQuiz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuQuizRead"];
+                };
+            };
+        };
+    };
+    updateMenuQuiz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuQuizWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuQuizRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

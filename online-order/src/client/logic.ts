@@ -1,6 +1,6 @@
 // 客人點餐頁的純邏輯（不碰 DOM，好測）。
 import type {
-  MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, UpsellRole,
+  MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
 } from "./types";
 import { isRetailLine } from "../pricing";
 import type { CartLine } from "./cart";
@@ -199,4 +199,37 @@ export function retailGroups(menu: MenuSnapshot): { category: string; products: 
   const other = groups.get(RETAIL_OTHER);
   if (other) ordered.push([RETAIL_OTHER, other]);
   return ordered.map(([category, products]) => ({ category, products }));
+}
+
+const QUIZ_PICKS = 3;
+
+/**
+ * 「不知道喝什麼」的推薦（docs/63 §2 M2a）：客人每題選一個答案（answers[題] = 答案序號），
+ * 每個答案勾的品項各加 1 分；分數高的排前面、同分照勾的先後。售完、看不到、已不在菜單上的不推。
+ * 回 1 主推＋最多 2 備選；一個都對不上回空陣列（客人頁改給完整菜單，不捏造推薦）。
+ */
+export function quizResult(menu: MenuSnapshot, answers: number[]): QuizRef[] {
+  const shown = new Set(visibleItems(menu.items).filter((item) => !itemSoldOut(item)).map((item) => item.id));
+  const experiences = new Set((menu.experiences ?? [])
+    .filter((experience) => {
+      const view = experienceView(menu, experience);
+      return view !== null && !view.soldOut && shown.has(view.item.id);
+    })
+    .map((experience) => experience.id));
+  const scores = new Map<string, { ref: QuizRef; score: number; order: number }>();
+  (menu.quiz?.questions ?? []).forEach((question, index) => {
+    const option = question.options[answers[index] ?? -1];
+    for (const ref of option?.items ?? []) {
+      const sellable = ref.kind === "item" ? shown.has(ref.id) : experiences.has(ref.id);
+      if (!sellable) continue;
+      const key = `${ref.kind}:${ref.id}`;
+      const entry = scores.get(key) ?? { ref, score: 0, order: scores.size };
+      entry.score += 1;
+      scores.set(key, entry);
+    }
+  });
+  return [...scores.values()]
+    .sort((a, b) => b.score - a.score || a.order - b.order)
+    .slice(0, QUIZ_PICKS)
+    .map((entry) => entry.ref);
 }

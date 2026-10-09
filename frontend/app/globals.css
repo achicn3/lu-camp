@@ -6638,3 +6638,13 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .online-order-handover { margin: var(--sp-1) 0 0; font-weight: 600; color: var(--accent); }
 /* 線上 LINE Pay 已付款自動成立的提示（docs/44 §4.4.2） */
 .pos-online-paid { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--accent); border-radius: var(--radius); background: #f0f5ef; font-weight: 600; }
+
+/* 「不知道喝什麼」引導推薦設定（docs/63 §2 M2a）。 */
+.quiz-form { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+.quiz-answer { display: grid; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
+.quiz-answer-head { display: flex; gap: var(--sp-2); align-items: center; }
+.quiz-answer-head input { flex: 1; min-width: 0; min-height: var(--tap-min); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--text-md); background: var(--surface); }
+.quiz-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.quiz-picks li { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px 4px 2px var(--sp-3); border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.quiz-picks .btn-ghost { min-height: 32px; padding: 0 var(--sp-2); }
+.quiz-question-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: space-between; }

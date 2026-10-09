@@ -114,6 +114,14 @@ describe("菜單", () => {
     includes: [{ title: "咖啡豆", detail: "現磨" }, { title: "器材", detail: null }],
     theme: "peach", art: "peach", effect: "truck",
   };
+  const QUIZ = {
+    questions: [
+      { prompt: "今天想來點什麼？", options: [
+        { label: "咖啡", items: [{ kind: "item", id: 5 }, { kind: "experience", id: 3 }] },
+        { label: "想吃甜的", items: [] },
+      ] },
+    ],
+  };
 
   it("手沖體驗卡與加購角色原樣保留", async () => {
     const snapshot = { ...SNAPSHOT, experiences: [EXPERIENCE],
@@ -133,6 +141,28 @@ describe("菜單", () => {
     ["預選選項不是整數陣列", { ...EXPERIENCE, option_ids: ["1"] }],
   ])("手沖體驗卡格式錯誤拒收：%s", async (_, experience) => {
     expect((await publish({ ...SNAPSHOT, experiences: [experience] })).status).toBe(422);
+  });
+
+  it("引導推薦（M2a）原樣保留", async () => {
+    const snapshot = { ...SNAPSHOT, experiences: [EXPERIENCE], quiz: QUIZ };
+    expect((await publish(snapshot)).status).toBe(200);
+    expect(await (await get("/api/menu")).json()).toEqual(snapshot);
+  });
+
+  const option = (items: object[]) => ({ label: "咖啡", items });
+  const itemRef = { kind: "item", id: SNAPSHOT.items[0]!.id };
+  it.each([
+    ["沒有題目", { questions: [] }],
+    ["超過 3 題", { questions: Array.from({ length: 4 }, () => QUIZ.questions[0]) }],
+    ["只有 1 個答案", { questions: [{ prompt: "想喝什麼？", options: [option([itemRef])] }] }],
+    ["題目過長", { questions: [{ ...QUIZ.questions[0], prompt: "長".repeat(31) }] }],
+    ["答案過長", { questions: [{ prompt: "想喝什麼？", options: [{ label: "長".repeat(21), items: [] }, option([])] }] }],
+    ["引用不在快照裡的品項", { questions: [{ prompt: "想喝什麼？", options: [option([{ kind: "item", id: 999 }]), option([])] }] }],
+    ["引用不在快照裡的體驗卡", { questions: [{ prompt: "想喝什麼？", options: [option([{ kind: "experience", id: 999 }]), option([])] }] }],
+    ["不認得的種類", { questions: [{ prompt: "想喝什麼？", options: [option([{ kind: "retail", id: 1 }]), option([])] }] }],
+    ["多欄位", { ...QUIZ, cost: 1 }],
+  ])("引導推薦格式錯誤拒收：%s", async (_, quiz) => {
+    expect((await publish({ ...SNAPSHOT, experiences: [EXPERIENCE], quiz })).status).toBe(422);
   });
 
   it("加購角色不認得的值拒收", async () => {

@@ -12697,6 +12697,58 @@
         "title": "MenuPresentationUpdateRequest",
         "type": "object"
       },
+      "MenuQuizRead": {
+        "properties": {
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuizQuestion"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "is_active",
+          "questions",
+          "is_default"
+        ],
+        "title": "MenuQuizRead",
+        "type": "object"
+      },
+      "MenuQuizWriteRequest": {
+        "description": "「不知道喝什麼」整份覆寫（docs/63 §2 M2a）：1–3 題、每題 2–4 個答案。",
+        "properties": {
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuizQuestion"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "is_active",
+          "questions"
+        ],
+        "title": "MenuQuizWriteRequest",
+        "type": "object"
+      },
       "MenuStockAdjustReason": {
         "description": "每日份數加減的原因（docs/44 §3.7）：之後才統計得出每天報廢多少。",
         "enum": [
@@ -14311,6 +14363,78 @@
           "lines"
         ],
         "title": "PurchaseOrderUpdate",
+        "type": "object"
+      },
+      "QuizItemRef": {
+        "description": "答案勾的品項：菜單品項或手沖體驗卡。",
+        "properties": {
+          "id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "item",
+              "experience"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "QuizItemRef",
+        "type": "object"
+      },
+      "QuizOption": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuizItemRef"
+            },
+            "maxItems": 30,
+            "title": "Items",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "QuizOption",
+        "type": "object"
+      },
+      "QuizQuestion": {
+        "properties": {
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/QuizOption"
+            },
+            "maxItems": 4,
+            "minItems": 2,
+            "title": "Options",
+            "type": "array"
+          },
+          "prompt": {
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "options"
+        ],
+        "title": "QuizQuestion",
         "type": "object"
       },
       "ReasonCreateRequest": {
@@ -29673,6 +29797,78 @@
           }
         ],
         "summary": "Publish Online Menu",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/quiz": {
+      "get": {
+        "description": "目前的引導推薦設定；還沒存過回預設題目（不啟用、沒勾品項）。",
+        "operationId": "getMenuQuiz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuQuizRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Menu Quiz",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "put": {
+        "description": "整份覆寫（題目、答案、每個答案勾的品項、啟用）；下次發佈才到客人頁。",
+        "operationId": "updateMenuQuiz",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuQuizWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuQuizRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Menu Quiz",
         "tags": [
           "online-order"
         ]

@@ -233,7 +233,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .section-heading { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
 .section-heading h2, .catalog-title { font-size: 24px; font-weight: 400; margin: 16px 0 8px; }
 .section-heading > span { font-family: var(--ui); font-size: 12px; color: var(--soft); }
-#recommendations { scroll-margin-top: 90px; }
+#recommendations, #quiz { scroll-margin-top: 90px; }
 .recommended-list { gap: 12px; }
 .recommended-list .item { padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #151719; }
 .catalog-title { margin-top: 30px; }
@@ -432,3 +432,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .pay-option small { color: var(--soft); font-size: 13px; }
 .invoice-fields { margin-top: 8px; }
 .invoice-fields select, .invoice-fields input { width: 100%; min-height: 44px; margin-top: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #151719; color: var(--ink); font: inherit; font-size: 16px; }
+
+/* 「不知道喝什麼」引導推薦（docs/63 §2 M2a）：一題一題問，答案是大按鈕。 */
+.quiz-start { margin: 8px 0 4px; }
+.quiz-step { margin: 4px 0 0; font-family: var(--ui); font-size: 12px; color: var(--soft); }
+.quiz-prompt { margin: 4px 0 12px; font-family: var(--hand); font-size: 22px; font-weight: 400; line-height: 1.4; }
+.quiz-options { display: grid; gap: 8px; }
+.quiz-option { min-height: 52px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 4px; background: var(--photo); color: inherit; font-family: var(--hand); font-size: 19px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.quiz-option:hover, .quiz-option:focus-visible { border-color: var(--gold); }
+.quiz-nav { margin-top: 8px; }
+.quiz-label { margin: 14px 0 4px; font-family: var(--ui); font-size: 13px; color: var(--gold); }
+.quiz-empty { margin: 8px 0 0; }
+.link-button { min-height: 44px; padding: 8px 0; border: 0; background: none; color: var(--soft); font-family: var(--ui); font-size: 14px; text-decoration: underline; cursor: pointer; }

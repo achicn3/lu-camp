@@ -17,6 +17,7 @@ import { ExperienceSection } from "@/features/menu/ExperienceSection";
 import { RetailSection } from "@/features/menu/RetailSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
+import { QuizSection } from "@/features/menu/QuizSection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -667,6 +668,7 @@ function MenuPageContent() {
         hidden={section !== "online"}
       >
         <OnlinePublishPanel />
+        <QuizSection />
         <ExperienceSection />
         <RetailSection />
       </div>

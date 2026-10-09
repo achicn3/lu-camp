@@ -67,6 +67,7 @@
 - [MacBook 正式機：升級到 2026-10-09 版（餐飲可用購物金折抵）](./73-macbook-upgrade-store-credit-for-food.md)
 - [MacBook 正式機：升級到 2026-10-09 版（待整理：客人不賣了可退回、成色選得到）](./74-macbook-upgrade-intake-return.md)
 - [MacBook 正式機：升級到 2026-10-09 版（餐飲品項一個視窗編輯、待整理顯示原價）](./75-macbook-upgrade-menu-edit-retail-price.md)
+- [MacBook 正式機：升級到 2026-10-09 版（線上點餐「不知道喝什麼」引導推薦）](./76-macbook-upgrade-online-menu-quiz.md)
 
 ## 評估與後續實作
 

@@ -97,6 +97,21 @@ function validRetail(value: unknown): boolean {
   });
 }
 
+/** 「不知道喝什麼」引導推薦（docs/63 §2 M2a）：1–3 題、每題 2–4 個答案；引用的品項／體驗卡要在同一份快照裡。 */
+function validQuiz(value: unknown, itemIds: Set<unknown>, experienceIds: Set<unknown>): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value) || !keysAre(value, ["questions"]) || !Array.isArray(value.questions)) return false;
+  const { questions } = value;
+  return questions.length >= 1 && questions.length <= 3 && questions.every((q: unknown) =>
+    isRecord(q) && keysAre(q, ["prompt", "options"]) && textUpTo(q.prompt, 30, false) &&
+    Array.isArray(q.options) && q.options.length >= 2 && q.options.length <= 4 &&
+    q.options.every((o: unknown) =>
+      isRecord(o) && keysAre(o, ["label", "items"]) && textUpTo(o.label, 20, false) &&
+      Array.isArray(o.items) && o.items.length <= 30 && o.items.every((r: unknown) =>
+        isRecord(r) && keysAre(r, ["kind", "id"]) &&
+        ((r.kind === "item" && itemIds.has(r.id)) || (r.kind === "experience" && experienceIds.has(r.id))))));
+}
+
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
@@ -105,6 +120,10 @@ export function validSnapshot(s: unknown): s is { version: number; published_at:
   const itemIds = new Set(o.items.map((item: unknown) => (isRecord(item) ? item.id : undefined)));
   if (!validExperiences(o.experiences, itemIds)) return false;
   if (!validRetail(o.retail)) return false;
+  const experienceIds = new Set(
+    Array.isArray(o.experiences) ? o.experiences.map((e: unknown) => (isRecord(e) ? e.id : undefined)) : [],
+  );
+  if (!validQuiz(o.quiz, itemIds, experienceIds)) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;

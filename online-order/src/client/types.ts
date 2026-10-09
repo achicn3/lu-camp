@@ -89,6 +89,14 @@ export interface MenuSnapshot {
   experiences?: MenuExperienceView[];
   /** 帶回家零售商品；舊快照沒有這欄（當成空的）。 */
   retail?: MenuRetailView[];
+  /** 「不知道喝什麼」引導推薦；沒設定或沒有可推薦品項時沒有這欄。 */
+  quiz?: MenuQuizView;
+}
+
+/** 答案勾的品項：菜單品項或手沖體驗卡（docs/63 §2 M2a）。 */
+export interface QuizRef { kind: "item" | "experience"; id: number }
+export interface MenuQuizView {
+  questions: { prompt: string; options: { label: string; items: QuizRef[] }[] }[];
 }
 
 export interface TableView {
