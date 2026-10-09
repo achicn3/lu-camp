@@ -2908,6 +2908,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/popularity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Menu Popularity
+         * @description 人氣標籤設定＋依設定算出的榜（預覽）；人氣只用 POS 真實成交算。
+         */
+        get: operations["getMenuPopularity"];
+        /**
+         * Update Menu Popularity
+         * @description 開關、算幾天、至少賣幾份才上榜；跟著可售狀態同步到客人頁，不必重新發佈。
+         */
+        put: operations["updateMenuPopularity"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/publish": {
         parameters: {
             query?: never;
@@ -9553,6 +9577,48 @@ export interface components {
          * @enum {string}
          */
         PayoutMethod: "CASH" | "STORE_CREDIT" | "SPLIT";
+        /** PopularityRankRead */
+        PopularityRankRead: {
+            /** Category */
+            category: string;
+            /** Item Id */
+            item_id: number;
+            /** Name */
+            name: string;
+            /** Qty */
+            qty: number;
+            /** Rank */
+            rank: number;
+        };
+        /** PopularityRead */
+        PopularityRead: {
+            /** Is Active */
+            is_active: boolean;
+            /** Min Qty */
+            min_qty: number;
+            /** Ranking */
+            ranking: components["schemas"]["PopularityRankRead"][];
+            /**
+             * Window Days
+             * @enum {integer}
+             */
+            window_days: 7 | 14 | 30 | 60 | 90;
+        };
+        /**
+         * PopularityWriteRequest
+         * @description 人氣標籤設定（docs/63 §7 M2b）：開關、算幾天、至少賣幾份才上榜。
+         */
+        PopularityWriteRequest: {
+            /** Is Active */
+            is_active: boolean;
+            /** Min Qty */
+            min_qty: number;
+            /**
+             * Window Days
+             * @enum {integer}
+             */
+            window_days: 7 | 14 | 30 | 60 | 90;
+        };
         /**
          * PremiumRateHistoryRead
          * @description 溢價率變更留痕輸出（docs/16 §1.3）。
@@ -17564,6 +17630,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MenuPresentationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getMenuPopularity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PopularityRead"];
+                };
+            };
+        };
+    };
+    updateMenuPopularity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PopularityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PopularityRead"];
                 };
             };
             /** @description Validation Error */

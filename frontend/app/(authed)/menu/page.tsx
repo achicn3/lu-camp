@@ -18,6 +18,7 @@ import { RetailSection } from "@/features/menu/RetailSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { QuizSection } from "@/features/menu/QuizSection";
+import { PopularitySection } from "@/features/menu/PopularitySection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -669,6 +670,7 @@ function MenuPageContent() {
       >
         <OnlinePublishPanel />
         <QuizSection />
+        <PopularitySection />
         <ExperienceSection />
         <RetailSection />
       </div>

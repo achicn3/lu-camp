@@ -156,3 +156,13 @@ describe("首頁選擇", () => {
     expect(selection.recommended).toEqual([]);
   });
 });
+
+describe("人氣標籤（M2b）", () => {
+  it("第一名人氣 No.1、二三名人氣推薦，排在人工標籤前面；沒上榜沒有", () => {
+    const now = new Date("2026-10-06T08:00:00Z");
+    expect(presentationBadges({ ...item, popularity: 1 }, now)).toEqual(["人氣 No.1"]);
+    expect(presentationBadges({ ...item, popularity: 3 }, now)).toEqual(["人氣推薦"]);
+    const featured = { ...item, popularity: 2, presentation: { ...presentation, is_new: true } };
+    expect(presentationBadges(featured, now)).toEqual(["人氣推薦", "新品"]);
+  });
+});

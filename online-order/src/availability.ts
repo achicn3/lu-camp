@@ -16,6 +16,21 @@ export interface AvailabilityUpdate {
   options: AvailabilityEntry[];
   /** 帶回家商品的現量（docs/63 §13）；舊版店內程式不送。 */
   retail?: AvailabilityEntry[];
+  /** 人氣名次（docs/63 §7 M2b）：照 POS 成交即時算，1＝人氣 No.1、2–3＝人氣推薦；舊版店內程式不送。 */
+  popular?: { id: number; rank: number }[];
+}
+
+function popularIsValid(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  const seen = new Set<unknown>();
+  return value.every((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const row = entry as Record<string, unknown>;
+    if (!keysAre(row, ["id", "rank"]) || seen.has(row.id)) return false;
+    seen.add(row.id);
+    return Number.isSafeInteger(row.id) && (row.id as number) > 0 &&
+      (row.rank === 1 || row.rank === 2 || row.rank === 3);
+  });
 }
 
 function keysAre(value: Record<string, unknown>, keys: string[], optional: string[] = []): boolean {
@@ -43,11 +58,12 @@ function entriesAreValid(value: unknown): value is AvailabilityEntry[] {
 function validUpdate(value: unknown): value is AvailabilityUpdate {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  return keysAre(row, ["menu_version", "revision", "items", "options"], ["retail"]) &&
+  return keysAre(row, ["menu_version", "revision", "items", "options"], ["retail", "popular"]) &&
     Number.isSafeInteger(row.menu_version) && (row.menu_version as number) > 0 &&
     Number.isSafeInteger(row.revision) && (row.revision as number) > 0 &&
     entriesAreValid(row.items) && entriesAreValid(row.options) &&
-    (row.retail === undefined || entriesAreValid(row.retail));
+    (row.retail === undefined || entriesAreValid(row.retail)) &&
+    (row.popular === undefined || popularIsValid(row.popular));
 }
 
 export async function publishAvailability(env: Env, storeId: number, raw: Uint8Array): Promise<Response> {
@@ -66,6 +82,9 @@ export async function publishAvailability(env: Env, storeId: number, raw: Uint8A
     options: body.options.map(({ id, available, remaining }) => ({ id, available, remaining })).sort((a, b) => a.id - b.id),
     ...(body.retail === undefined ? {} : {
       retail: body.retail.map(({ id, available, remaining }) => ({ id, available, remaining })).sort((a, b) => a.id - b.id),
+    }),
+    ...(body.popular === undefined ? {} : {
+      popular: body.popular.map(({ id, rank }) => ({ id, rank })).sort((a, b) => a.id - b.id),
     }),
   };
   const payload = JSON.stringify(normalized);

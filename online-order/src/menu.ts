@@ -193,16 +193,19 @@ async function loadEffectiveMenu(
   const items = new Map(state.items.map((entry) => [entry.id, entry]));
   const options = new Map(state.options.map((entry) => [entry.id, entry]));
   const retail = new Map((state.retail ?? []).map((entry) => [entry.id, entry]));
+  const popular = new Map((state.popular ?? []).map((entry) => [entry.id, entry.rank]));
   return {
     revision: row.revision ?? 0,
     menu: {
       ...menu,
       items: menu.items.map((item) => {
         const current = items.get(item.id);
+        const rank = popular.get(item.id);
         return {
           ...item,
           available: current?.available ?? false,
           remaining: current?.remaining ?? null,
+          ...(rank === undefined ? {} : { popularity: rank }),
           option_groups: item.option_groups.map((group) => ({
             ...group,
             options: group.options.map((option) => {

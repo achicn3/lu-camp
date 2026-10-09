@@ -26,6 +26,8 @@ export interface MenuItemView {
   remaining: number | null;
   option_groups: OptionGroupView[];
   presentation?: MenuPresentation;
+  /** 人氣名次（docs/63 §7）：1＝人氣 No.1、2–3＝人氣推薦；沒上榜沒有這欄。 */
+  popularity?: number;
 }
 
 export interface MenuPresentation {

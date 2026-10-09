@@ -6648,3 +6648,11 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .quiz-picks li { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px 4px 2px var(--sp-3); border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
 .quiz-picks .btn-ghost { min-height: 32px; padding: 0 var(--sp-2); }
 .quiz-question-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: space-between; }
+
+/* 人氣標籤設定（docs/63 §7 M2b）。 */
+.popularity-form { display: grid; gap: var(--sp-3); }
+.popularity-fields { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.popularity-fields .field { flex: 1 1 180px; }
+.popularity-fields select, .popularity-fields input { min-height: var(--tap-min); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--text-md); background: var(--surface); }
+.popularity-form .btn-primary { justify-self: start; }
+.popularity-board { margin: 0; padding-left: var(--sp-4); display: grid; gap: var(--sp-1); }

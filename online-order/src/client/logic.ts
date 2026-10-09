@@ -40,10 +40,13 @@ export function itemBadge(item: { remaining: number | null; presentation?: MenuP
 }
 
 /** 今日限定只看台北日期，不必為了跨日重發快照。 */
-export function presentationBadges(item: { presentation?: MenuPresentation }, now: Date): string[] {
+export function presentationBadges(
+  item: { presentation?: MenuPresentation; popularity?: number }, now: Date,
+): string[] {
+  // 人氣（docs/63 §7 M2b）照 POS 真實成交算；放在人工標籤前面。
+  const badges: string[] = item.popularity === 1 ? ["人氣 No.1"] : item.popularity ? ["人氣推薦"] : [];
   const settings = item.presentation;
-  if (!settings) return [];
-  const badges: string[] = [];
+  if (!settings) return badges;
   if (settings.is_recommended) badges.push("露坑推薦");
   if (settings.is_new) badges.push("新品");
   if (settings.limited_on === TAIPEI_DAY.format(now)) badges.push("今日限定");

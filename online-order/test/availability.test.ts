@@ -99,6 +99,25 @@ describe("可售狀態", () => {
     expect((await currentEffectiveMenu(env, 1))?.items[0]?.available).toBe(true);
   });
 
+  it("人氣名次（M2b）跟著可售狀態套到品項上；沒列到的品項沒有標籤", async () => {
+    await publish();
+    expect((await push({ ...update, popular: [{ id: 5, rank: 1 }, { id: 999, rank: 2 }] })).status).toBe(200);
+    const menu = await currentEffectiveMenu(env, 1);
+    expect(menu?.items[0]?.popularity).toBe(1);
+    await push({ ...update, revision: 2, popular: [] });
+    expect(Object.hasOwn((await currentEffectiveMenu(env, 1))!.items[0]!, "popularity")).toBe(false);
+  });
+
+  it.each([
+    ["名次不是 1–3", [{ id: 5, rank: 4 }]],
+    ["名次不是整數", [{ id: 5, rank: 1.5 }]],
+    ["多欄位", [{ id: 5, rank: 1, qty: 30 }]],
+    ["同一品項兩次", [{ id: 5, rank: 1 }, { id: 5, rank: 2 }]],
+  ])("人氣格式錯誤拒收：%s", async (_, popular) => {
+    await publish();
+    expect((await push({ ...update, popular })).status).toBe(422);
+  });
+
   it("修訂只能增加；同 revision 同內容可重送，內容不同則拒絕", async () => {
     await publish();
     expect((await push(update)).status).toBe(200);
