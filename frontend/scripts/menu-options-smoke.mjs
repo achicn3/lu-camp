@@ -1,5 +1,5 @@
 // 餐飲選項瀏覽器煙霧（docs/44 §3.2；O2）：
-// 菜單頁用表單建兩個選項群組（溫度必選、加購可選最多 2）→ 品項「選項與介紹」掛上兩群組＋填介紹
+// 菜單頁用表單建兩個選項群組（溫度必選、加購可選最多 2）→ 品項「編輯」掛上兩群組＋填介紹
 // → POS 選項彈窗：沒選溫度不能加、停售選項不能點、加價算進單價 → 外帶現金結帳
 // → 後端成交品名帶選項、單價＝底價＋加價、選項快照落盤。
 //
@@ -125,8 +125,8 @@ try {
 
   // 2. 品項掛群組＋介紹
   await page.getByRole("tab", { name: "品項", exact: true }).click();
-  await page.getByRole("button", { name: `${latteName} 選項與介紹` }).click();
-  const dialog = page.getByRole("dialog", { name: `${latteName} 的選項與介紹` });
+  await page.getByRole("button", { name: `${latteName} 編輯` }).click();
+  const dialog = page.getByRole("dialog", { name: `編輯 ${latteName}` });
   await dialog.getByRole("checkbox", { name: new RegExp(tempGroup) }).check();
   await dialog.getByRole("checkbox", { name: new RegExp(extraGroup) }).check();
   await dialog.getByLabel("介紹").fill("濃縮咖啡加鮮奶");

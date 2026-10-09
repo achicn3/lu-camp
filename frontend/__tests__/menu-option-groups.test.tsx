@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
+import { MenuItemEditDialog } from "@/features/menu/MenuItemEditDialog";
 import { OptionGroupsSection, parseOptionLines } from "@/features/menu/OptionGroupsSection";
 
 function json(body: unknown, status = 200): Response {
@@ -247,7 +247,7 @@ describe("選項群組管理", () => {
   });
 });
 
-describe("品項的選項與介紹", () => {
+describe("品項編輯（品名、分類、售價、成本、介紹、選項；店主 2026-10-09）", () => {
   const ITEM = {
     id: 5,
     store_id: 1,
@@ -275,7 +275,7 @@ describe("品項的選項與介紹", () => {
     });
     const onDone = vi.fn();
     const user = userEvent.setup();
-    wrap(<MenuItemOptionsDialog item={ITEM} onDone={onDone} onCancel={() => {}} />);
+    wrap(<MenuItemEditDialog item={ITEM} onDone={onDone} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog", { name: /拿鐵/ });
     const extra = await within(dialog).findByRole("checkbox", { name: /加購/ });
     expect((extra as HTMLInputElement).checked).toBe(true);
@@ -297,7 +297,7 @@ describe("品項的選項與介紹", () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
     wrap(
-      <MenuItemOptionsDialog
+      <MenuItemEditDialog
         item={{ ...ITEM, description: "舊介紹" }}
         onDone={onDone}
         onCancel={() => {}}
@@ -309,5 +309,89 @@ describe("品項的選項與介紹", () => {
     await user.click(within(dialog).getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ description: null });
+  });
+
+  it("帶出現有的品名、分類、售價、成本；改了的一次送出", async () => {
+    const calls = stubFetch((url, method) => {
+      if (method === "PATCH") return json(ITEM);
+      if (url.includes("/menu-option-groups")) return json(GROUPS);
+      return null;
+    });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    wrap(<MenuItemEditDialog item={{ ...ITEM, unit_cost: "40" }} onDone={onDone} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "編輯 拿鐵" });
+    await within(dialog).findByRole("checkbox", { name: /溫度/ });
+    expect((within(dialog).getByLabelText("品名") as HTMLInputElement).value).toBe("拿鐵");
+    expect((within(dialog).getByLabelText("分類") as HTMLInputElement).value).toBe("咖啡");
+    expect((within(dialog).getByLabelText("售價") as HTMLInputElement).value).toBe("150");
+    expect((within(dialog).getByLabelText("成本") as HTMLInputElement).value).toBe("40");
+    await user.clear(within(dialog).getByLabelText("品名"));
+    await user.type(within(dialog).getByLabelText("品名"), "燕麥拿鐵");
+    await user.clear(within(dialog).getByLabelText("分類"));
+    await user.type(within(dialog).getByLabelText("分類"), "特調");
+    await user.clear(within(dialog).getByLabelText("售價"));
+    await user.type(within(dialog).getByLabelText("售價"), "170");
+    await user.clear(within(dialog).getByLabelText("成本"));
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    const patches = calls.filter((c) => c.method === "PATCH");
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.body).toEqual({
+      name: "燕麥拿鐵",
+      category: "特調",
+      unit_price: "170",
+      unit_cost: null,
+    });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("清空分類送 null；什麼都沒改就不送", async () => {
+    const calls = stubFetch((url, method) => {
+      if (method === "PATCH") return json(ITEM);
+      if (url.includes("/menu-option-groups")) return json(GROUPS);
+      return null;
+    });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    wrap(<MenuItemEditDialog item={ITEM} onDone={onDone} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "編輯 拿鐵" });
+    await within(dialog).findByRole("checkbox", { name: /溫度/ });
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+    await user.clear(within(dialog).getByLabelText("分類"));
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(2));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ category: null });
+  });
+
+  it("品名空白、售價不是正整數、成本負數：擋下不送", async () => {
+    const calls = stubFetch((url) =>
+      url.includes("/menu-option-groups") ? json(GROUPS) : null,
+    );
+    const user = userEvent.setup();
+    wrap(<MenuItemEditDialog item={ITEM} onDone={() => {}} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "編輯 拿鐵" });
+    await within(dialog).findByRole("checkbox", { name: /溫度/ });
+    const save = within(dialog).getByRole("button", { name: "儲存" });
+
+    await user.clear(within(dialog).getByLabelText("品名"));
+    await user.click(save);
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("請輸入品名");
+    await user.type(within(dialog).getByLabelText("品名"), "拿鐵");
+    expect(within(dialog).queryByRole("alert")).toBeNull(); // 改了欄位就收掉舊錯誤
+
+    await user.clear(within(dialog).getByLabelText("售價"));
+    await user.type(within(dialog).getByLabelText("售價"), "0");
+    await user.click(save);
+    expect(within(dialog).getByRole("alert").textContent).toBe("售價須為正整數元");
+    await user.clear(within(dialog).getByLabelText("售價"));
+    await user.type(within(dialog).getByLabelText("售價"), "150");
+
+    await user.type(within(dialog).getByLabelText("成本"), "-5");
+    await user.click(save);
+    expect(within(dialog).getByRole("alert").textContent).toBe("成本須為 0 以上的整數元");
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 });

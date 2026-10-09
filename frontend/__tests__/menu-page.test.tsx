@@ -134,7 +134,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     await user.type(screen.getByLabelText("品名"), "還沒完成的拿鐵");
     await user.click(screen.getByRole("tab", { name: "選項群組" }));
     expect(screen.getByRole("form", { name: "新增選項群組" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "手沖-耶加 選項與介紹" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "手沖-耶加 編輯" })).toBeNull();
     await user.type(screen.getByLabelText("群組名稱"), "還沒完成的溫度");
     await user.click(screen.getByRole("tab", { name: "線上發布" }));
     expect(screen.getByRole("region", { name: "線上點餐" })).toBeTruthy();
@@ -177,7 +177,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(5);
     await user.selectOptions(screen.getByLabelText("品項分類"), "uncategorized");
     expect(within(table).getAllByRole("row")).toHaveLength(2);
-    expect(within(table).getByRole("button", { name: "季節限定 選項與介紹" })).toBeTruthy();
+    expect(within(table).getByRole("button", { name: "季節限定 編輯" })).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "線上發布" }));
     await user.click(screen.getByRole("tab", { name: "品項" }));
     expect((screen.getByLabelText("品項分類") as HTMLSelectElement).value).toBe("uncategorized");
@@ -210,7 +210,7 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1]);
   });
 
-  it("選項欄列出掛的群組；下方有選項群組管理；點設定開選項與介紹", async () => {
+  it("選項欄列出掛的群組；下方有選項群組管理；點編輯開品項編輯（含選項）", async () => {
     const group = { id: 3, name: "溫度", min_select: 1, max_select: 1, sort_order: 0, options: [] };
     stubFetch((url) => {
       if (url.includes("/menu-items")) return json([{ ...ITEMS[0], option_groups: [group] }, ITEMS[1]]);
@@ -223,8 +223,8 @@ describe("/menu 餐飲菜單管理頁", () => {
     await user.click(screen.getByRole("tab", { name: "選項群組" }));
     expect(await screen.findByRole("region", { name: "溫度" })).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "品項" }));
-    await user.click(screen.getByRole("button", { name: "手沖-耶加 選項與介紹" }));
-    const dialog = await screen.findByRole("dialog", { name: /手沖-耶加/ });
+    await user.click(screen.getByRole("button", { name: "手沖-耶加 編輯" }));
+    const dialog = await screen.findByRole("dialog", { name: "編輯 手沖-耶加" });
     expect(
       (await within(dialog).findByRole("checkbox", { name: /溫度/ }) as HTMLInputElement).checked,
     ).toBe(true);
@@ -373,44 +373,55 @@ describe("/menu 餐飲菜單管理頁", () => {
     expect(JSON.parse(posted).unit_cost).toBe(null);
   });
 
-  it("改成本：PATCH unit_cost", async () => {
+  it("編輯改成本：PATCH unit_cost，存好刷新清單", async () => {
     let patched = "";
+    let listCalls = 0;
     stubFetch((url, method, body) => {
       if (url.includes("/menu-items/1") && method === "PATCH") {
         patched = body;
         return json({ ...ITEMS[0], unit_cost: "70" });
       }
-      if (url.includes("/menu-items")) return json(ITEMS);
+      if (url.includes("/menu-option-groups")) return json([]);
+      if (url.includes("/menu-items")) {
+        listCalls += 1;
+        return json(ITEMS);
+      }
       return null;
     });
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
-    await user.click(screen.getAllByRole("button", { name: "改成本" })[0]);
-    const input = screen.getByLabelText("手沖-耶加 成本");
+    await user.click(screen.getByRole("button", { name: "手沖-耶加 編輯" }));
+    const dialog = await screen.findByRole("dialog", { name: "編輯 手沖-耶加" });
+    const input = within(dialog).getByLabelText("成本");
     await user.clear(input);
     await user.type(input, "70");
-    await user.click(screen.getAllByRole("button", { name: "儲存" })[0]);
+    const before = listCalls;
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(patched).toContain("unit_cost"));
-    expect(JSON.parse(patched).unit_cost).toBe("70");
+    expect(JSON.parse(patched)).toEqual({ unit_cost: "70" });
+    await waitFor(() => expect(listCalls).toBeGreaterThan(before));
+    expect(screen.queryByRole("dialog", { name: "編輯 手沖-耶加" })).toBeNull();
   });
 
-  it("清空成本欄位＝把成本改回未知（送 null）", async () => {
+  it("編輯清空成本＝把成本改回未知（送 null）", async () => {
     let patched = "";
     stubFetch((url, method, body) => {
       if (url.includes("/menu-items/1") && method === "PATCH") {
         patched = body;
         return json({ ...ITEMS[0], unit_cost: null });
       }
+      if (url.includes("/menu-option-groups")) return json([]);
       if (url.includes("/menu-items")) return json(ITEMS);
       return null;
     });
     const user = userEvent.setup();
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
-    await user.click(screen.getAllByRole("button", { name: "改成本" })[0]);
-    await user.clear(screen.getByLabelText("手沖-耶加 成本"));
-    await user.click(screen.getAllByRole("button", { name: "儲存" })[0]);
+    await user.click(screen.getByRole("button", { name: "手沖-耶加 編輯" }));
+    const dialog = await screen.findByRole("dialog", { name: "編輯 手沖-耶加" });
+    await user.clear(within(dialog).getByLabelText("成本"));
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(patched).toContain("unit_cost"));
     expect(JSON.parse(patched).unit_cost).toBe(null);
   });

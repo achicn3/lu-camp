@@ -1244,11 +1244,10 @@ a.btn-ghost {
   display: flex;
   gap: var(--sp-2);
 }
-.menu-edit-price,
-.menu-price-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
+/* 品項表的操作欄（編輯／線上呈現／下架／刪除）：排成 2×2，不把表格撐寬到要橫向捲動才看得到。 */
+td > .menu-row-actions {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
 }
 .menu-row-error {
   margin: var(--sp-1) 0 0;
@@ -5624,11 +5623,24 @@ a.btn-ghost {
 }
 
 /* 菜單照片（docs/44 §3.4；O1d） */
+/* 照片在上、上傳鈕在下：品項表欄位多，左右排會把表格撐到要橫向捲動（2026-10-09）。 */
 .menu-photo-cell {
   display: grid;
-  grid-template-columns: 56px auto;
-  align-items: center;
-  gap: var(--sp-2);
+  grid-template-columns: max-content;
+  justify-items: start;
+  gap: var(--sp-1);
+}
+.menu-option-names {
+  display: inline-block;
+  max-width: 8rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.inv-table td.menu-item-name {
+  min-width: 7rem;
+  max-width: 11rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .menu-photo-cell .form-error {
   grid-column: 1 / -1;

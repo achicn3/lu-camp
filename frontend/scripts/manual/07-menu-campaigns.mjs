@@ -1,4 +1,4 @@
-// 手冊 07：餐飲菜單（新增/改價/下架/上架/刪除）＋ 門市活動（建立/啟用/結束/作廢/篩選）。
+// 手冊 07：餐飲菜單（新增/編輯/下架/上架/刪除）＋ 門市活動（建立/啟用/結束/作廢/篩選）。
 import { apiJson, apiLogin, BASE, login, makeShot, newBrowser, note, shotsDir } from "./_lib.mjs";
 
 const dir = shotsDir("07-menu-campaigns");
@@ -53,12 +53,13 @@ await page.click('button:has-text("新增品項")');
 await page.waitForTimeout(1500);
 await shot(page, "menu-list", { locator: ".menu-list-section" });
 
-// 改價
-await page.locator('.inv-table tbody tr:has-text("現烤鬆餅") button:has-text("改價")').click();
+// 編輯（品名、分類、售價、成本、介紹、選項在同一個視窗；店主 2026-10-09）
+await page.getByRole("button", { name: "現烤鬆餅 編輯" }).click();
+const editDialog = page.getByRole("dialog", { name: "編輯 現烤鬆餅" });
+await editDialog.getByLabel("售價").fill("130");
 await page.waitForTimeout(300);
-await shot(page, "menu-edit-price", { locator: '.inv-table tbody tr:has-text("現烤鬆餅")' });
-await page.fill('input[aria-label="現烤鬆餅 售價"]', "130");
-await page.locator('.inv-table tbody tr:has-text("現烤鬆餅") button:has-text("儲存")').click();
+await shot(page, "menu-edit-price", { locator: '[role="dialog"][aria-label="編輯 現烤鬆餅"] .card' });
+await editDialog.getByRole("button", { name: "儲存" }).click();
 await page.waitForTimeout(1200);
 
 // 下架

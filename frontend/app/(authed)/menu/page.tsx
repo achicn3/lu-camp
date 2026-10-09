@@ -1,5 +1,5 @@
 "use client";
-// /menu 餐飲菜單管理頁（MANAGER 專用）：品項清單（含停售）＋ 建立 ＋ 改名改價/上下架/封存。
+// /menu 餐飲菜單管理頁（MANAGER 專用）：品項清單（含停售）＋ 建立 ＋ 編輯（品名、分類、售價、成本、介紹、選項）/上下架/刪除。
 // 純呈現：金額為整數元字串，走 OpenAPI 生成 client（禁手刻型別）。
 // 「選項群組」分頁管理溫度／加購等選項；品項列「選項」欄設定掛哪些群組與介紹（O2）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import { type FormEvent, type KeyboardEvent, Suspense, useState } from "react";
 
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
-import { MenuItemOptionsDialog } from "@/features/menu/MenuItemOptionsDialog";
+import { MenuItemEditDialog } from "@/features/menu/MenuItemEditDialog";
 import { MenuOrderingSection } from "@/features/menu/MenuOrderingSection";
 import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
@@ -214,7 +214,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
   );
 }
 
-// -- 單列操作（改價/上下架/封存）--
+// -- 單列操作（編輯/上下架/刪除）--
 function MenuItemRow({
   item,
   onChanged,
@@ -226,13 +226,9 @@ function MenuItemRow({
   rates: PricingRates;
   hidden: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [price, setPrice] = useState(item.unit_price);
-  const [editingCost, setEditingCost] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [editingOptions, setEditingOptions] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [editingPresentation, setEditingPresentation] = useState(false);
-  const [cost, setCost] = useState(item.unit_cost ?? "");
   const [rowError, setRowError] = useState<string | null>(null);
 
   const patch = useMutation({
@@ -246,8 +242,6 @@ function MenuItemRow({
     },
     onSuccess: () => {
       setRowError(null);
-      setEditing(false);
-      setEditingCost(false);
       onChanged();
     },
     onError: (err: Error) => setRowError(err.message),
@@ -272,29 +266,6 @@ function MenuItemRow({
     },
   });
 
-  function savePrice() {
-    const p = parseNtd(price);
-    if (p === null || p <= 0) {
-      setRowError("售價須為正整數元");
-      return;
-    }
-    patch.mutate({ unit_price: String(p) });
-  }
-
-  function saveCost() {
-    // 清空＝把成本改回「未知」（送 null）。填 0 會讓報表以為毛利 100%，兩者不可混為一談。
-    if (cost.trim() === "") {
-      patch.mutate({ unit_cost: null });
-      return;
-    }
-    const c = parseNtd(cost);
-    if (c === null || c < 0) {
-      setRowError("成本須為 0 以上的整數元");
-      return;
-    }
-    patch.mutate({ unit_cost: String(c) });
-  }
-
   const costNum = item.unit_cost == null ? null : parseNtd(item.unit_cost);
   const priceNum = parseNtd(item.unit_price);
   const margin =
@@ -307,109 +278,26 @@ function MenuItemRow({
       <td>
         <MenuPhotoCell item={item} onChanged={onChanged} />
       </td>
-      <td>{item.name}</td>
+      <td className="menu-item-name">{item.name}</td>
       <td>{item.category ?? "—"}</td>
       <td>
-        {editing ? (
-          <span className="menu-edit-price">
-            <input
-              className="pos-qty"
-              inputMode="numeric"
-              value={price}
-              aria-label={`${item.name} 售價`}
-              onChange={(e) => setPrice(e.target.value)}
-            />
-            <button type="button" className="btn-ghost" onClick={savePrice}>
-              儲存
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => {
-                setEditing(false);
-                setPrice(item.unit_price);
-                setRowError(null);
-              }}
-            >
-              取消
-            </button>
-          </span>
-        ) : (
-          <span className="menu-price-cell">
-            <span className="money">{formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
-            <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>
-              改價
-            </button>
-          </span>
-        )}
+        <span className="money">{formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
       </td>
       <td>
-        {editingCost ? (
-          <span className="menu-edit-price">
-            <input
-              className="pos-qty"
-              inputMode="numeric"
-              value={cost}
-              aria-label={`${item.name} 成本`}
-              onChange={(e) => setCost(e.target.value)}
-            />
-            <button type="button" className="btn-ghost" onClick={saveCost}>
-              儲存
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => {
-                setEditingCost(false);
-                setCost(item.unit_cost ?? "");
-                setRowError(null);
-              }}
-            >
-              取消
-            </button>
-          </span>
+        {costNum === null ? (
+          <span className="hint">未填</span>
         ) : (
-          <span className="menu-price-cell">
-            {costNum === null ? (
-              <span className="hint">未填</span>
-            ) : (
-              <span className="money">{formatNtd(costNum)}</span>
-            )}
-            <button type="button" className="btn-ghost" onClick={() => setEditingCost(true)}>
-              改成本
-            </button>
-          </span>
+          <span className="money">{formatNtd(costNum)}</span>
         )}
       </td>
       <td>{margin === null ? "—" : `${margin}%`}</td>
       <td>
-        <span className="menu-price-cell">
-          <span className={item.option_groups.length === 0 ? "hint" : undefined}>
-            {item.option_groups.length === 0
-              ? "沒有選項"
-              : item.option_groups.map((g) => g.name).join("、")}
-          </span>
-          <button
-            type="button"
-            className="btn-ghost"
-            aria-label={`${item.name} 選項與介紹`}
-            onClick={() => setEditingOptions(true)}
-          >
-            設定
-          </button>
+        <span className={`menu-option-names${item.option_groups.length === 0 ? " hint" : ""}`}>
+          {item.option_groups.length === 0
+            ? "沒有選項"
+            : item.option_groups.map((g) => g.name).join("、")}
         </span>
-        <button type="button" className="btn-ghost" aria-label={`${item.name} 線上呈現`} onClick={() => setEditingPresentation(true)}>線上呈現</button>
-        {editingPresentation && <MenuPresentationDialog itemId={item.id} itemName={item.name} onDone={() => setEditingPresentation(false)} onClose={() => setEditingPresentation(false)} />}
-        {editingOptions && (
-          <MenuItemOptionsDialog
-            item={item}
-            onDone={() => {
-              setEditingOptions(false);
-              onChanged();
-            }}
-            onCancel={() => setEditingOptions(false)}
-          />
-        )}
+
       </td>
       <td>
         <span className={`inv-badge inv-tone-${item.is_available ? "ok" : "muted"}`}>
@@ -437,6 +325,40 @@ function MenuItemRow({
       </td>
       <td>
         <div className="menu-row-actions">
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-label={`${item.name} 編輯`}
+            onClick={() => setEditing(true)}
+          >
+            編輯
+          </button>
+          {editing && (
+            <MenuItemEditDialog
+              item={item}
+              onDone={() => {
+                setEditing(false);
+                onChanged();
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          )}
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-label={`${item.name} 線上呈現`}
+            onClick={() => setEditingPresentation(true)}
+          >
+            線上呈現
+          </button>
+          {editingPresentation && (
+            <MenuPresentationDialog
+              itemId={item.id}
+              itemName={item.name}
+              onDone={() => setEditingPresentation(false)}
+              onClose={() => setEditingPresentation(false)}
+            />
+          )}
           <button
             type="button"
             className="btn-ghost"
