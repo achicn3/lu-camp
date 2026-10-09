@@ -275,10 +275,11 @@ class PurchasingService:
         )
         existing = {line.id: line for line in purchase_order.lines}
         await self._validate_edit(store_id, payload, existing, has_receipts=has_receipts)
+        # 「改前」一定要在任何變動之前記下（換供應商也是變動，Codex 第二輪）。
+        before = self._edit_snapshot(purchase_order)
         if payload.supplier_id != purchase_order.supplier_id:
             await self._change_supplier(store_id, purchase_order, payload.supplier_id)
 
-        before = self._edit_snapshot(purchase_order)
         old = self._received_by_product(
             (line.catalog_product_id, line.received_qty, line.unit_cost)
             for line in purchase_order.lines

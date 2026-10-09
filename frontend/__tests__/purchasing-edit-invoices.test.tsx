@@ -279,6 +279,23 @@ describe("/purchasing/[id]/edit 修改採購單", () => {
     expect((screen.getByLabelText("數量 瓦斯灌") as HTMLInputElement).value).toBe("2");
   });
 
+  it("原本的品項讀取失敗：不能加商品、不能儲存，免得把原品項刪掉（Codex 第二輪）", async () => {
+    loginAs("MANAGER");
+    const calls = stubFetch(
+      baseRoutes(RECEIVED_PO, (method, path) =>
+        method === "GET" && path.endsWith("/catalog-products/42")
+          ? json({ detail: "暫時讀不到" }, 500)
+          : null,
+      ),
+    );
+    renderWith(<EditPurchaseOrderPage />);
+    expect((await screen.findByRole("alert")).textContent).toContain("採購單的商品讀取失敗");
+    expect(screen.getByLabelText("搜尋一般商品")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "＋ 新增商品" })).toBeNull();
+    expect(screen.getByRole("button", { name: "儲存修改" })).toHaveProperty("disabled", true);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
   it("已收大於訂購就不能送出", async () => {
     loginAs("MANAGER");
     stubFetch(baseRoutes(RECEIVED_PO));

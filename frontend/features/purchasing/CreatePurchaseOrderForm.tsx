@@ -269,6 +269,9 @@ export function CreatePurchaseOrderForm({
   // 快取只放商品資料；數量、已收、進價一律取自傳進來的這份採購單（頁面保證是剛從伺服器拿的），
   // 不可連明細一起快取——存過再打開會帶出舊數量（Codex 第一輪）。
   const editSeeded = useRef(false);
+  // 原本的品項還沒帶進來之前，不能加商品、不能存：存了會把沒帶進來的原品項當成刪掉，
+  // 已收的庫存也會被扣回（Codex 第二輪）。
+  const [editReady, setEditReady] = useState(editing === undefined);
   const editProductIds = [...new Set((editing?.lines ?? []).map((l) => l.catalog_product_id))];
   const editProducts = useQuery({
     queryKey: ["catalog-products", "po-edit", editProductIds.join(",")],
@@ -304,6 +307,7 @@ export function CreatePurchaseOrderForm({
         ];
       }),
     );
+    setEditReady(true);
   }, [editProducts.data, editing, showReceived]);
 
   // 低庫存帶入：只在第一次拿到商品時放進明細（之後店員移除的不會被加回來）。
@@ -388,6 +392,7 @@ export function CreatePurchaseOrderForm({
   const create = useMutation({
     mutationFn: async (submit: boolean) => {
       if (supplierId === null) throw new Error("請選擇供應商");
+      if (!editReady) throw new Error("原本的品項還沒載入完成，請重新讀取後再存");
       if (editing !== undefined) {
         const { data, error } = await api.PUT("/api/v1/purchase-orders/{purchase_order_id}", {
           params: { path: { purchase_order_id: editing.id } },
@@ -534,9 +539,10 @@ export function CreatePurchaseOrderForm({
   const submittable = canSubmitPo(supplierId, lines);
   // 建立成功後到換頁完成前一直鎖住：明細頁載入慢時再按一次，會多開一張採購單。
   const created = create.isSuccess;
-  const submitDisabled = !submittable || create.isPending || createProduct.isPending || created;
+  const submitDisabled =
+    !editReady || !submittable || create.isPending || createProduct.isPending || created;
   const creating = newProductOpen || pendingCatalogCreate !== null;
-  const locked = pendingCatalogCreate !== null || createProduct.isPending;
+  const locked = !editReady || pendingCatalogCreate !== null || createProduct.isPending;
 
   return (
     <div className="pur-create-page">
@@ -644,7 +650,7 @@ export function CreatePurchaseOrderForm({
               onChange={(e) => setSearch(e.target.value)}
             />
           </label>
-          {!creating && (
+          {!creating && editReady && (
             <button type="button" className="btn-secondary" onClick={openNewProduct}>
               ＋ 新增商品
             </button>

@@ -456,3 +456,31 @@ async def test_resending_the_same_edit_changes_nothing_more(
 
     assert await _qty(db_session, a) == 3
     assert len(await _corrections(db_session, a)) == 1
+
+
+async def test_supplier_change_keeps_the_old_supplier_in_the_audit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """換供應商：稽核的「改前」要是原本那家（Codex 第二輪）。"""
+    token, store_id, _ = await _seed_store(db_session, name="換供應商稽核店")
+    a = await _seed_catalog(db_session, store_id, sku="SA-A")
+    old = await _create_supplier(client, token, name="舊廠")
+    new = await _create_supplier(client, token, name="新廠")
+    po_id = await _create_po(
+        client, token, supplier_id=old, catalog_product_id=a, qty=2, submit=False
+    )
+    line_id = (await _po_lines(client, token, po_id))[0]["id"]
+
+    resp = await _put(
+        client, token, po_id, {"supplier_id": new, "lines": [_line(a, 2, "120", line_id=line_id)]}
+    )
+    assert resp.status_code == 200, resp.text
+
+    log = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "UPDATE_PURCHASE_ORDER", AuditLog.entity_id == str(po_id)
+        )
+    )
+    assert log is not None and log.before is not None and log.after is not None
+    assert log.before["supplier_id"] == old
+    assert log.after["supplier_id"] == new
