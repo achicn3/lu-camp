@@ -220,6 +220,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(row_to_json(e)::text, ',' ORDER BY id)), '-') "
         "FROM online_menu_experiences e",
     ),
+    # 引導推薦（docs/63 §2 M2a）：店主寫的題目與每個答案勾的品項，弄丟要整份重設。
+    (
+        "線上點餐-引導推薦（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(row_to_json(q)::text, ',' ORDER BY store_id)), '-') "
+        "FROM online_menu_quizzes q",
+    ),
     (
         "線上點餐-可售狀態（版本／修訂／交付）",
         "SELECT count(*)::text || '/' || "

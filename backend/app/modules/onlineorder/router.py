@@ -16,8 +16,11 @@ from app.modules.onlineorder.presentation_schemas import (
     MenuExperienceWriteRequest,
     MenuPresentationRead,
     MenuPresentationUpdateRequest,
+    MenuQuizRead,
+    MenuQuizWriteRequest,
 )
 from app.modules.onlineorder.presentation_service import MenuPresentationService
+from app.modules.onlineorder.quiz_service import MenuQuizService
 from app.modules.onlineorder.retail_schemas import RetailListingRead, RetailListingWriteRequest
 from app.modules.onlineorder.retail_service import RetailListingService
 from app.modules.onlineorder.schemas import (
@@ -33,6 +36,7 @@ from app.shared.exceptions import (
     OnlineExperienceNotFound,
     OnlineOrderNotConfigured,
     OnlineOrderPushFailed,
+    OnlineQuizInvalid,
     OnlineRetailListingDuplicate,
     OnlineRetailListingNotFound,
     OnlineTableNotFound,
@@ -152,6 +156,31 @@ async def update_menu_presentation(
     except MenuItemNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return result
+
+
+# ── 「不知道喝什麼」引導推薦（docs/63 §2 M2a）──
+
+
+@router.get("/quiz", response_model=MenuQuizRead, operation_id="getMenuQuiz")
+async def get_menu_quiz(session: SessionDep, user: AuthDep) -> MenuQuizRead:
+    """目前的引導推薦設定；還沒存過回預設題目（不啟用、沒勾品項）。"""
+    return await MenuQuizService(session).get(user.store_id)
+
+
+@router.put("/quiz", response_model=MenuQuizRead, operation_id="updateMenuQuiz")
+async def update_menu_quiz(
+    body: MenuQuizWriteRequest, session: SessionDep, user: ManagerDep
+) -> MenuQuizRead:
+    """整份覆寫（題目、答案、每個答案勾的品項、啟用）；下次發佈才到客人頁。"""
+    try:
+        result = await MenuQuizService(session).save(user.store_id, body, actor_user_id=user.id)
+    except OnlineQuizInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     await session.commit()
     return result
 

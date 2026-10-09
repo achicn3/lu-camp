@@ -96,6 +96,22 @@ class OnlineMenuExperience(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
 
+class OnlineMenuQuiz(Base, TimestampMixin):
+    """「不知道喝什麼」引導推薦（docs/63 §2 M2a）：每店一份，題目與答案存成一份文件。
+
+    `questions`：[{prompt, options: [{label, items: [{kind: item|experience, id}]}]}]——
+    每個答案勾「適合的品項」，客人答完照被勾到的次數排序推薦。只引用既有品項／體驗卡，
+    不存價格或庫存；發佈時只帶上架中的。
+    """
+
+    __tablename__ = "online_menu_quizzes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), unique=True)
+    is_active: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+
+
 class OnlineRetailListing(Base, TimestampMixin):
     """線上「帶回家」的零售商品（docs/63 §13、M1d）：引用既有一般商品的呈現設定。
 

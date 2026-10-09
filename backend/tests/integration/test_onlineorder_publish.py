@@ -516,6 +516,63 @@ async def test_publish_includes_active_valid_experiences_with_public_fields_only
         assert forbidden not in encoded
 
 
+async def test_publish_includes_quiz_with_only_published_items(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """引導推薦（M2a）：只帶上架中的品項；沒有任何可推薦品項或沒啟用就不發佈問答。"""
+    _, manager = await _seed(db_session)
+    ids = await _menu(client, manager)
+    body = {
+        "is_active": True,
+        "questions": [
+            {
+                "prompt": "今天想來點什麼？",
+                "options": [
+                    {"label": "咖啡", "items": [{"kind": "item", "id": ids["拿鐵"]}]},
+                    {
+                        "label": "甜的",
+                        "items": [
+                            {"kind": "item", "id": ids["戚風"]},
+                            {"kind": "item", "id": ids["下架品"]},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    saved = await client.put("/api/v1/online-order/quiz", json=body, headers=_auth(manager))
+    assert saved.status_code == 200, saved.text
+
+    published = await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert published.status_code == 200, published.text
+    assert worker.menu()["quiz"] == {
+        "questions": [
+            {
+                "prompt": "今天想來點什麼？",
+                "options": [
+                    {"label": "咖啡", "items": [{"kind": "item", "id": ids["拿鐵"]}]},
+                    {"label": "甜的", "items": [{"kind": "item", "id": ids["戚風"]}]},
+                ],
+            }
+        ]
+    }
+
+    await client.put(
+        "/api/v1/online-order/quiz", json={**body, "is_active": False}, headers=_auth(manager)
+    )
+    await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert "quiz" not in worker.menu()
+
+
+async def test_publish_omits_default_quiz_without_items(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, manager = await _seed(db_session)
+    await _menu(client, manager)
+    await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert "quiz" not in worker.menu()
+
+
 async def test_publish_includes_active_retail_listings_with_their_photo_and_no_cost(
     client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
 ) -> None:

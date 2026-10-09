@@ -22,6 +22,7 @@ from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.font import subset_font
 from app.modules.onlineorder.models import OnlineMenuPublication, OnlineTableCode
 from app.modules.onlineorder.presentation_service import MenuPresentationService
+from app.modules.onlineorder.quiz_service import MenuQuizService
 from app.modules.onlineorder.repository import OnlineOrderRepository
 from app.modules.onlineorder.retail_service import RetailListingService
 from app.modules.onlineorder.snapshot import Snapshot, build_snapshot, snapshot_text
@@ -154,6 +155,14 @@ class OnlineOrderService:
             ),
             retail=await RetailListingService(self._session).snapshot_retail(store_id),
         )
+        # 引導推薦（M2a）：只引用這份快照裡有的品項與體驗卡；沒有可推薦的就不帶。
+        quiz = await MenuQuizService(self._session).snapshot_quiz(
+            store_id,
+            [item["id"] for item in snapshot["items"]],
+            [exp["id"] for exp in snapshot["experiences"]],
+        )
+        if quiz is not None:
+            snapshot["quiz"] = quiz
         return snapshot
 
     async def publish(self, store_id: int, *, actor_user_id: int) -> PublishResult:

@@ -1,6 +1,7 @@
 """Validated online menu presentation settings; no product, price or stock data."""
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
@@ -58,3 +59,32 @@ class MenuExperienceWriteRequest(BaseModel):
 
 class MenuExperienceRead(MenuExperienceWriteRequest):
     id: int
+
+
+class QuizItemRef(BaseModel):
+    """答案勾的品項：菜單品項或手沖體驗卡。"""
+
+    kind: Literal["item", "experience"]
+    id: StrictInt = Field(gt=0)
+
+
+class QuizOption(BaseModel):
+    label: str = Field(min_length=1, max_length=20)
+    items: list[QuizItemRef] = Field(default_factory=list, max_length=30)
+
+
+class QuizQuestion(BaseModel):
+    prompt: str = Field(min_length=1, max_length=30)
+    options: list[QuizOption] = Field(min_length=2, max_length=4)
+
+
+class MenuQuizWriteRequest(BaseModel):
+    """「不知道喝什麼」整份覆寫（docs/63 §2 M2a）：1–3 題、每題 2–4 個答案。"""
+
+    is_active: StrictBool
+    questions: list[QuizQuestion] = Field(min_length=1, max_length=3)
+
+
+class MenuQuizRead(MenuQuizWriteRequest):
+    # 還沒存過：回的是預設題目（沒勾品項、不啟用）。
+    is_default: bool

@@ -110,4 +110,7 @@ def snapshot_text(snapshot: Snapshot) -> str:
             parts += [str(include.get("title") or ""), str(include.get("detail") or "")]
     for product in snapshot.get("retail", []):
         parts += [str(product.get(k) or "") for k in ("name", "description", "category")]
+    for question in snapshot.get("quiz", {}).get("questions", []):
+        parts.append(str(question["prompt"]))
+        parts += [str(o["label"]) for o in question["options"]]
     return "".join(parts)
