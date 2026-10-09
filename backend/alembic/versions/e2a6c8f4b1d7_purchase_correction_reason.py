@@ -50,7 +50,7 @@ def abort_if_corrections_exist(conn: Connection) -> None:
         sa.text("SELECT count(*) FROM stock_movements WHERE reason = 'PURCHASE_CORRECTION'")
     ).scalar_one()
     if count:
-        raise RuntimeError(f"拒絕降版：已有 {count} 筆採購更正異動；只退程式、不要降資料庫")
+        raise RuntimeError(f"拒絕降版：已有 {count} 筆採購更正異動；請留在新版程式、不要降資料庫")
 
 
 def downgrade() -> None:

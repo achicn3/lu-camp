@@ -106,7 +106,7 @@ def abort_if_invoices_cannot_fold_back(conn: Connection) -> None:
     if bad:
         raise RuntimeError(
             f"拒絕降版：有 {bad} 張進項發票涵蓋多批收貨或沒有收貨，舊結構放不下；"
-            "只退程式、不要降資料庫"
+            "請留在新版程式、不要降資料庫（舊程式讀不懂新的發票／更正資料）"
         )
 
 
