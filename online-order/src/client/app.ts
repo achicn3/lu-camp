@@ -783,6 +783,10 @@ async function main(): Promise<void> {
     else showScreen("menu");
   });
   $("back-home").addEventListener("click", () => selectCategory(ALL, true));
+  // 付款完成後就不再輪詢；客人切回這個分頁時重抓一次，店裡後來退了款也看得到（docs/44 §4.5 C6）。
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && activeOrder !== null) void refreshOrder();
+  });
   window.addEventListener("popstate", (event: PopStateEvent) => {
     if (ORDER_PATH.test(location.pathname) || activeOrder) { location.reload(); return; }
     restoringHistory = true;
