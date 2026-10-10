@@ -428,3 +428,79 @@ async def test_basket_exposes_each_source_note_for_checkout_reminders(
     )
     read = (await client.get(f"/api/v1/bulk-baskets/{basket['id']}", headers=_h(token))).json()
     assert [s["note"] for s in read["sources"]] == [None, "有 3 支彎掉"]
+
+
+# ── 從現有散裝開新販售籃（店主 2026-10-10：豬尾巴後來想共用標籤，不必再透過收購頁）──
+
+
+async def test_new_basket_can_start_from_existing_lots_in_one_go(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _token(db_session)
+    await _open_drawer(client, token)
+    first = await _acquire_bulk(client, token, qty=5, cost="30", price="29", name="豬尾巴")
+    second = await _acquire_bulk(client, token, qty=8, cost="40", price="29", name="豬尾巴")
+    lots = [(await _lot(db_session, a["lot_code"])).id for a in (first, second)]
+
+    resp = await client.post(
+        "/api/v1/bulk-baskets",
+        headers=_h(token),
+        json={"name": "豬尾巴", "unit_price": "29", "bulk_lot_ids": lots},
+    )
+
+    assert resp.status_code == 201, resp.text
+    basket = resp.json()
+    assert basket["remaining_qty"] == 13
+    assert sorted(s["bulk_lot_id"] for s in basket["sources"]) == sorted(lots)
+    for lot_id in lots:
+        lot = await db_session.get(BulkLot, lot_id)
+        assert lot is not None
+        await db_session.refresh(lot)
+        assert lot.basket_id == basket["id"]
+
+
+async def test_new_basket_with_a_lot_that_cannot_join_is_not_created_at_all(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """任一筆加不進去（售價不同）就整筆不成立，不留下空籃。"""
+    _, token = await _token(db_session)
+    await _open_drawer(client, token)
+    ok_lot = await _acquire_bulk(client, token, qty=5, cost="30", price="29", name="豬尾巴")
+    other = await _acquire_bulk(client, token, qty=5, cost="30", price="35", name="豬尾巴")
+    lots = [(await _lot(db_session, a["lot_code"])).id for a in (ok_lot, other)]
+
+    resp = await client.post(
+        "/api/v1/bulk-baskets",
+        headers=_h(token),
+        json={"name": "豬尾巴", "unit_price": "29", "bulk_lot_ids": lots},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert "售價不同" in resp.json()["detail"]
+    listing = (await client.get("/api/v1/bulk-baskets", headers=_h(token))).json()
+    assert listing == []
+    lot = await _lot(db_session, ok_lot["lot_code"])
+    assert lot.basket_id is None
+
+
+async def test_only_managers_can_start_a_basket_from_existing_lots(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """把現有散裝放進籃子限管理者（同「加入現有散裝」）；開空籃（收購時）店員照舊可以。"""
+    store_id, manager = await _token(db_session)
+    await _open_drawer(client, manager)
+    clerk = await _user_token(db_session, store_id, UserRole.CLERK)
+    acquired = await _acquire_bulk(client, manager, qty=5, cost="30", price="29", name="豬尾巴")
+    lot_id = (await _lot(db_session, acquired["lot_code"])).id
+
+    with_lots = await client.post(
+        "/api/v1/bulk-baskets",
+        headers=_h(clerk),
+        json={"name": "豬尾巴", "unit_price": "29", "bulk_lot_ids": [lot_id]},
+    )
+    empty = await client.post(
+        "/api/v1/bulk-baskets", headers=_h(clerk), json={"name": "空籃", "unit_price": "29"}
+    )
+
+    assert with_lots.status_code == 403, with_lots.text
+    assert empty.status_code == 201, empty.text

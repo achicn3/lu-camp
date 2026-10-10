@@ -1640,6 +1640,15 @@
             ],
             "title": "Brand Id"
           },
+          "bulk_lot_ids": {
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 50,
+            "title": "Bulk Lot Ids",
+            "type": "array"
+          },
           "category_id": {
             "anyOf": [
               {
@@ -21070,7 +21079,7 @@
         ]
       },
       "post": {
-        "description": "建立空的販售籃（店員收購時也要能開新籃，故不限管理者）。",
+        "description": "建立販售籃（店員收購時也要能開新籃，故不限管理者）。\n\n帶 `bulk_lot_ids`＝從現有散裝開籃（店主 2026-10-10）：與「加入現有散裝」同規則（限管理者、\n同價、自有、未入其他籃）；任一筆加不進去整筆回滾，不留下空籃。",
         "operationId": "createBulkBasket",
         "requestBody": {
           "content": {

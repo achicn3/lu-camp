@@ -599,6 +599,8 @@ class BulkBasketCreate(BaseModel):
     brand_id: int | None = Field(default=None, ge=1)
     category_id: int | None = Field(default=None, ge=1)
     note: str | None = Field(default=None, max_length=500)
+    # 開籃時一併放進的現有散裝（店主 2026-10-10：不必透過收購頁）；限管理者，全數加得進去才成立。
+    bulk_lot_ids: list[Annotated[int, Field(ge=1)]] = Field(default_factory=list, max_length=50)
 
     @field_validator("name")
     @classmethod
@@ -612,6 +614,13 @@ class BulkBasketCreate(BaseModel):
     @classmethod
     def _positive_integer(cls, v: Decimal) -> Decimal:
         return _positive_price(v)
+
+    @field_validator("bulk_lot_ids")
+    @classmethod
+    def _unique_lots(cls, v: list[int]) -> list[int]:
+        if len(set(v)) != len(v):
+            raise ValueError("同一筆散裝不可重複選")
+        return v
 
 
 class BulkBasketUpdate(BaseModel):

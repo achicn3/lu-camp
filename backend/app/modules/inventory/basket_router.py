@@ -90,9 +90,18 @@ async def list_bulk_baskets(
 async def create_bulk_basket(
     payload: BulkBasketCreate, session: SessionDep, user: CurrentUserDep
 ) -> BulkBasketRead:
-    """建立空的販售籃（店員收購時也要能開新籃，故不限管理者）。"""
+    """建立販售籃（店員收購時也要能開新籃，故不限管理者）。
+
+    帶 `bulk_lot_ids`＝從現有散裝開籃（店主 2026-10-10）：與「加入現有散裝」同規則（限管理者、
+    同價、自有、未入其他籃）；任一筆加不進去整筆回滾，不留下空籃。
+    """
+    if payload.bulk_lot_ids and user.role != "MANAGER":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="把現有散裝放進販售籃限管理者"
+        )
+    service = BulkBasketService(session)
     try:
-        view = await BulkBasketService(session).create(
+        view = await service.create(
             user.store_id,
             name=payload.name,
             unit_price=payload.unit_price,
@@ -101,7 +110,11 @@ async def create_bulk_basket(
             note=payload.note,
             actor_user_id=user.id,
         )
-    except CrossStoreReference as exc:
+        for lot_id in payload.bulk_lot_ids:
+            view = await service.add_existing_lot(
+                user.store_id, view.basket.id, lot_id, actor_user_id=user.id
+            )
+    except (CrossStoreReference, BulkBasketNotFound, BulkBasketConflict) as exc:
         raise await _fail(session, exc) from exc
     await session.commit()
     return _read(view)

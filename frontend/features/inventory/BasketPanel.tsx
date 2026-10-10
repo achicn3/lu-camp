@@ -3,9 +3,11 @@
 // 庫存頁「販售籃」分頁（ADR-025）：同樣的散裝分次收購，放同一籃、貼同一張標籤、賣同一個價。
 // 一籃一列看總剩餘；展開看每次收購的來源（數量、成本各自保留，不合併）。
 // 改籃價限管理者，改完要重印籃子標籤——價格印在標籤上，不重印就會跟 POS 對不起來。
+// 管理者也能從現有散裝開新籃、把現有散裝加進籃（店主 2026-10-10），不必透過收購頁。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
 
+import { AddLotsForm, NewBasketForm } from "@/features/inventory/BasketForms";
 import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -46,6 +48,8 @@ export function BasketPanel() {
   const [showInactive, setShowInactive] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [addingTo, setAddingTo] = useState<number | null>(null);
 
   const baskets = useQuery({
     queryKey: ["bulk-baskets", "inventory", q, showInactive],
@@ -73,8 +77,23 @@ export function BasketPanel() {
   return (
     <div>
       <p className="hint">
-        同樣的散裝（例如無品牌營釘）分次收進來，可以放同一籃、共用一張標籤。收購時在散裝分頁選「開新販售籃」或「加入現有販售籃」。
+        同樣的散裝（例如無品牌營釘）分次收進來，可以放同一籃、共用一張標籤。收購時在散裝分頁選「開新販售籃」或「加入現有販售籃」；
+        已經在架上的散裝，管理者可以在這裡「開新販售籃」或在籃子上「加入現有散裝」。
       </p>
+      {isManager && !creating && (
+        <button type="button" className="btn-secondary" onClick={() => setCreating(true)}>
+          開新販售籃
+        </button>
+      )}
+      {creating && (
+        <NewBasketForm
+          onDone={(message) => {
+            setCreating(false);
+            setNotice(message);
+          }}
+          onCancel={() => setCreating(false)}
+        />
+      )}
       <form className="inv-filters" onSubmit={onSearch}>
         <input name="q" placeholder="搜尋販售籃名稱" className="inv-search" aria-label="搜尋販售籃" />
         <button type="submit" className="btn-primary">
@@ -125,8 +144,23 @@ export function BasketPanel() {
                   expanded={expanded === basket.id}
                   onToggle={() => setExpanded(expanded === basket.id ? null : basket.id)}
                   onNotice={setNotice}
+                  adding={addingTo === basket.id}
+                  onAdd={() => setAddingTo(addingTo === basket.id ? null : basket.id)}
                 />
                 {expanded === basket.id && <SourcesRow basket={basket} />}
+                {addingTo === basket.id && (
+                  <tr className="inv-basket-sources">
+                    <td colSpan={6}>
+                      <AddLotsForm
+                        basket={basket}
+                        onDone={(message) => {
+                          setAddingTo(null);
+                          setNotice(message);
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
               </Fragment>
             ))}
           </tbody>
@@ -147,6 +181,8 @@ function BasketRow({
   expanded,
   onToggle,
   onNotice,
+  adding,
+  onAdd,
 }: {
   basket: BulkBasket;
   /** undefined＝品牌名稱還沒查到（不送印，免得印成沒有品牌）。 */
@@ -155,6 +191,8 @@ function BasketRow({
   expanded: boolean;
   onToggle: () => void;
   onNotice: (message: string) => void;
+  adding: boolean;
+  onAdd: () => void;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -227,6 +265,11 @@ function BasketRow({
         {isManager && !editing && (
           <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>
             改售價
+          </button>
+        )}
+        {isManager && (
+          <button type="button" className="btn-ghost" onClick={onAdd} aria-expanded={adding}>
+            加入現有散裝
           </button>
         )}
         {isManager && editing && (

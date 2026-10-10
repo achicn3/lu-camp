@@ -390,7 +390,10 @@ export interface paths {
         put?: never;
         /**
          * Create Bulk Basket
-         * @description 建立空的販售籃（店員收購時也要能開新籃，故不限管理者）。
+         * @description 建立販售籃（店員收購時也要能開新籃，故不限管理者）。
+         *
+         *     帶 `bulk_lot_ids`＝從現有散裝開籃（店主 2026-10-10）：與「加入現有散裝」同規則（限管理者、
+         *     同價、自有、未入其他籃）；任一筆加不進去整筆回滾，不留下空籃。
          */
         post: operations["createBulkBasket"];
         delete?: never;
@@ -5288,6 +5291,8 @@ export interface components {
         BulkBasketCreate: {
             /** Brand Id */
             brand_id?: number | null;
+            /** Bulk Lot Ids */
+            bulk_lot_ids?: number[];
             /** Category Id */
             category_id?: number | null;
             /** Name */
