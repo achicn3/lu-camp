@@ -34,16 +34,21 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("store_id", name="online_staff_picks_store_id_key"),
     )
+    # 清單上限 30 項（API 與雲端都照這個收）：超過的照菜單排序只搬前 30 個（Codex 第一輪）。
     op.execute(
         """
         INSERT INTO online_staff_picks (store_id, items)
-        SELECT p.store_id,
-               jsonb_agg(jsonb_build_object('kind', 'item', 'id', p.menu_item_id)
-                         ORDER BY m.sort_order, m.id)
-        FROM online_menu_presentations p
-        JOIN menu_items m ON m.id = p.menu_item_id
-        WHERE p.is_recommended AND m.archived_at IS NULL
-        GROUP BY p.store_id
+        SELECT store_id,
+               jsonb_agg(jsonb_build_object('kind', 'item', 'id', menu_item_id) ORDER BY position)
+        FROM (
+            SELECT p.store_id, p.menu_item_id,
+                   row_number() OVER (PARTITION BY p.store_id ORDER BY m.sort_order, m.id) AS position
+            FROM online_menu_presentations p
+            JOIN menu_items m ON m.id = p.menu_item_id
+            WHERE p.is_recommended AND m.archived_at IS NULL
+        ) ranked
+        WHERE position <= 30
+        GROUP BY store_id
         """
     )
     op.drop_column("online_menu_presentations", "is_recommended")

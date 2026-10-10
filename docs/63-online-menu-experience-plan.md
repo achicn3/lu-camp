@@ -345,7 +345,8 @@ D1 `order_lines` 加 `catalog_product_id`（migration 0006），`orders` 加 `fu
 - **後台**：「線上發布」→「店員推薦」：下拉選單加入（已加的不再出現）、↑↓ 調順序、移除、儲存；最多 30 項。
   表 `online_staff_picks`（每店一份有序清單，JSONB），API `GET/PUT /online-order/staff-picks`（管理者改、寫稽核
   `UPDATE_ONLINE_STAFF_PICKS`）。發佈時快照多 `picks`（只帶這次有發佈的）。
-- **資料移轉** migration `c8e2a6f0d4b7`：原本勾了「露坑推薦」的餐飲品項照菜單排序放進清單，再移除
+- **資料移轉** migration `c8e2a6f0d4b7`：原本勾了「露坑推薦」的餐飲品項照菜單排序放進清單（超過 30 個只搬前 30 個，
+  Codex 第一輪；已在測試庫用 37 個實測），再移除
   `online_menu_presentations.is_recommended`；降版會把清單裡的餐飲品項標回推薦（體驗卡與帶著走商品放不回去）。
 - **部署順序：雲端 Worker 先上，再升店內**——舊 Worker 要求呈現設定一定要有 `is_recommended`，新版店內不送就會被拒收；
   新 Worker 對舊店內送的 `is_recommended` 照收不用。
