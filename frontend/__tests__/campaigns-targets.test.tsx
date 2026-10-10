@@ -405,6 +405,7 @@ describe("活動範圍與疊加", () => {
     const first = screen.getByRole("group", { name: "第 1 樣商品" });
     await user.type(within(first).getByLabelText("搜尋品牌"), "Snow");
     await user.click(await within(first).findByRole("button", { name: "加入 Snow Peak" }));
+    await user.click(screen.getByRole("button", { name: "再加一樣" }));
     const second = screen.getByRole("group", { name: "第 2 樣商品" });
     await user.type(within(second).getByLabelText("搜尋品牌"), "Cole");
     await user.click(await within(second).findByRole("button", { name: "加入 Coleman" }));
@@ -426,6 +427,33 @@ describe("活動範圍與疊加", () => {
       applies_consignment: false,
       stackable: false,
       targets: [],
+    });
+  });
+
+  it("組合價可以只有一樣：預設一樣、不能再拿掉，填好就能送出（店主 2026-10-10）", async () => {
+    stub();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("尚無活動");
+    await user.type(screen.getByLabelText("活動名稱"), "椅子三張組");
+    await user.click(screen.getByLabelText("組合價"));
+    expect(screen.queryByRole("group", { name: "第 2 樣商品" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拿掉這一樣" })).toBeNull();
+    await user.type(screen.getByLabelText("組合價（含稅，元）"), "2500");
+    const first = screen.getByRole("group", { name: "第 1 樣商品" });
+    await user.type(within(first).getByLabelText("搜尋品牌"), "Cole");
+    await user.click(await within(first).findByRole("button", { name: "加入 Coleman" }));
+    const qty = screen.getByLabelText("第 1 樣要幾件");
+    await user.clear(qty);
+    await user.type(qty, "3");
+    await user.type(screen.getByLabelText("開始時間"), "2026-06-20T00:00");
+    await user.type(screen.getByLabelText("結束時間"), "2026-06-30T23:59");
+    await user.click(screen.getByRole("button", { name: "建立活動" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      kind: "BUNDLE",
+      bundle_price: "2500",
+      bundle_slots: [{ qty: 3, targets: [{ target_type: "BRAND", target_id: 6 }] }],
     });
   });
 
@@ -451,10 +479,10 @@ describe("活動範圍與疊加", () => {
     await screen.findByText("尚無活動");
     await user.click(screen.getByLabelText("組合價"));
     await user.click(screen.getByRole("button", { name: "再加一樣" }));
-    const third = screen.getByRole("group", { name: "第 3 樣商品" });
-    await user.selectOptions(within(third).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
-    await user.type(within(third).getByLabelText("商品條碼"), "ITM-9");
-    await user.click(within(third).getByRole("button", { name: "加入這件" }));
+    const second = screen.getByRole("group", { name: "第 2 樣商品" });
+    await user.selectOptions(within(second).getByLabelText("範圍類型"), "SERIALIZED_ITEM");
+    await user.type(within(second).getByLabelText("商品條碼"), "ITM-9");
+    await user.click(within(second).getByRole("button", { name: "加入這件" }));
     expect(await screen.findByRole("button", { name: "查詢商品中…" })).toBeTruthy();
     const removes = screen.getAllByRole("button", { name: "拿掉這一樣" });
     await user.click(removes[removes.length - 1]);
@@ -473,6 +501,7 @@ describe("活動範圍與疊加", () => {
     const first = screen.getByRole("group", { name: "第 1 樣商品" });
     await user.type(within(first).getByLabelText("搜尋品牌"), "Snow");
     await user.click(await within(first).findByRole("button", { name: "加入 Snow Peak" }));
+    await user.click(screen.getByRole("button", { name: "再加一樣" }));
     const second = screen.getByRole("group", { name: "第 2 樣商品" });
     await user.type(within(second).getByLabelText("搜尋品牌"), "Cole");
     await user.click(await within(second).findByRole("button", { name: "加入 Coleman" }));

@@ -139,6 +139,7 @@ try {
   await page.getByLabel("組合價", { exact: true }).check();
   await page.getByLabel("組合價（含稅，元）").fill("7000");
   await addBrand("第 1 樣商品", TENT_BRAND);
+  await page.getByRole("button", { name: "再加一樣" }).click(); // 預設一樣（2026-10-10）
   await addBrand("第 2 樣商品", CHAIR_BRAND);
   await page.getByLabel("開始時間").fill(taipeiLocal(-1));
   await page.getByLabel("結束時間").fill(taipeiLocal(1));

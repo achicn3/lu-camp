@@ -45,8 +45,8 @@ class CampaignTargetRead(CampaignTargetInput):
     """顯示用名稱（型號含品牌、單件含條碼）。"""
 
 
-# 組合價的格子數（docs/40 §4）：至少兩格才叫組合。
-BUNDLE_SLOTS_MIN = 2
+# 組合價的格子數（docs/40 §4）：店主 2026-10-10 起一樣也可以（例：同款買 3 件一個價）。
+BUNDLE_SLOTS_MIN = 1
 BUNDLE_SLOTS_MAX = 10
 
 
@@ -92,7 +92,7 @@ class CampaignCreateRequest(BaseModel):
     # 買 N 送 M（docs/40 P3）：兩個都要填；寄售品一律不參加（裁示 7）。
     buy_qty: PromoQty | None = None
     free_qty: PromoQty | None = None
-    # 組合價（docs/40 P4）：整組含稅價＋至少兩個格子；寄售品不進組合包（裁示 7）。
+    # 組合價（docs/40 P4）：整組含稅價＋至少一個格子；寄售品不進組合包（裁示 7）。
     bundle_price: NTDPositive | None = None
     bundle_slots: Annotated[list[BundleSlotInput], Field(max_length=BUNDLE_SLOTS_MAX)] = []
     starts_at: AwareDateTime

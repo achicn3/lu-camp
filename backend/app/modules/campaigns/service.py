@@ -100,7 +100,7 @@ def _validate_kind_value(
 def _validate_bundle(
     bundle_price: Decimal | None, slots: list[BundleSlotInput], applies_consignment: bool
 ) -> None:
-    """組合價：至少兩格、每格有範圍、每件至少 1 元、不開寄售（schema 也擋，這裡是服務層防線）。"""
+    """組合價：至少一格、每格有範圍、每件至少 1 元、不開寄售（schema 也擋，這裡是服務層防線）。"""
     if len(slots) < BUNDLE_SLOTS_MIN or any(not slot.targets for slot in slots):
         raise InvalidDiscountPct(f"組合價至少要有 {BUNDLE_SLOTS_MIN} 樣商品，每樣都要指定是什麼")
     units = sum(slot.qty for slot in slots)

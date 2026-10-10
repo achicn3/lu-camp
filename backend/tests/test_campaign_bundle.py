@@ -297,3 +297,23 @@ def test_bundle_not_marked_stackable_stays_at_bundle_price() -> None:
         [line(6000, tent(1)), line(2000, chair(2))], [storewide, bundle(5, 7000, *TENT_CHAIR)]
     )
     assert sum(r.line_total for r in result) == Decimal(7000)
+
+
+def test_single_item_bundle_buy_n_for_a_price() -> None:
+    """組合價可以只有一樣（店主 2026-10-10）：瓦斯 3 罐 $250；買 7 罐＝兩組 $500＋1 罐原價。"""
+    offer = bundle(5, 250, (CampaignTargetType.CATALOG_PRODUCT, GAS, 3))
+    result = price_cart([line(100, CANISTER, qty=7)], [offer])
+    assert result[0].line_total == Decimal(250 * 2 + 100)
+    assert result[0].bundle_groups == ((0, 5, 3), (1, 5, 3))
+
+
+def test_single_item_bundle_of_one_is_a_fixed_price() -> None:
+    """只有一樣、一件：等於這件的活動價（比原價便宜才套用）。"""
+    result = price_cart(
+        [line(6000, tent(1))], [bundle(5, 5500, (CampaignTargetType.PRODUCT_MODEL, TENT_MODEL, 1))]
+    )
+    assert result[0].line_total == Decimal(5500)
+    pricier = price_cart(
+        [line(6000, tent(1))], [bundle(6, 6500, (CampaignTargetType.PRODUCT_MODEL, TENT_MODEL, 1))]
+    )
+    assert pricier[0].line_total == Decimal(6000)

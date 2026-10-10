@@ -38,10 +38,8 @@ interface SlotDraft {
   targets: PickedTarget[];
 }
 
-const EMPTY_SLOTS: SlotDraft[] = [
-  { key: 1, qty: "1", targets: [] },
-  { key: 2, qty: "1", targets: [] },
-];
+// 預設一樣（店主 2026-10-10：組合價一樣也可以，例如同款買 3 件一個價）；要多樣再按「再加一樣」。
+const EMPTY_SLOTS: SlotDraft[] = [{ key: 1, qty: "1", targets: [] }];
 
 /** 買 N 送 M 的件數：1–99 的整數；不合法回 null。 */
 function promoQty(value: string): number | null {
@@ -339,6 +337,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           <h3>組合內容</h3>
           <p className="hint">
             每一樣都湊齊才算一組，可以湊好幾組；湊齊時結帳自動套用組合價，按原價比例分到每一件。
+            只有一樣也可以（例：同款買 3 件一個價）。
             只有比其他活動划算才會套用；組合包退貨必須整組退。
           </p>
           {bundleSlots.map((slot, index) => (
@@ -354,7 +353,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
                     }
                   />
                 </label>
-                {bundleSlots.length > 2 && (
+                {bundleSlots.length > 1 && (
                   <button
                     type="button"
                     className="btn-ghost"

@@ -332,7 +332,7 @@ async def test_bundle_values_must_be_valid(
     one_slot = [{"qty": 1, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": tent}]}]
     bad: list[dict[str, object]] = [
         {"bundle_price": None},
-        {"bundle_slots": one_slot},  # 至少兩格
+        {"bundle_slots": []},  # 至少一格
         {"bundle_slots": [{"qty": 1, "targets": []}, *one_slot]},  # 每格要有範圍
         {"bundle_price": "2"},  # 組合價低於件數（每件至少 1 元）
         {"applies_consignment": True},  # 寄售不進組合包
@@ -344,6 +344,22 @@ async def test_bundle_values_must_be_valid(
     # 別種活動不可帶組合格子
     resp = await client.post(PATH, json=_payload(bundle_slots=one_slot), headers=_auth(mgr))
     assert resp.status_code == 422, resp.text
+
+
+async def test_bundle_can_have_a_single_slot(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """組合價可以只有一樣商品（店主 2026-10-10）：例如同款買 3 件一個價。"""
+    store_id, mgr = await _store(db_session)
+    tent, chair = await _two_models(db_session, store_id)
+    one_slot = [{"qty": 3, "targets": [{"target_type": "PRODUCT_MODEL", "target_id": chair}]}]
+    resp = await client.post(
+        PATH,
+        json=_bundle(tent, chair, bundle_slots=one_slot, bundle_price="250"),
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 201, resp.text
+    assert [(s["slot_no"], s["qty"]) for s in resp.json()["bundle_slots"]] == [(1, 3)]
 
 
 async def test_bundle_target_from_another_store_is_rejected(
