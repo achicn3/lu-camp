@@ -347,7 +347,8 @@ D1 `order_lines` 加 `catalog_product_id`（migration 0006），`orders` 加 `fu
   `UPDATE_ONLINE_STAFF_PICKS`）。發佈時快照多 `picks`（只帶這次有發佈的）。
 - **資料移轉** migration `c8e2a6f0d4b7`：原本勾了「露坑推薦」的餐飲品項照菜單排序放進清單（超過 30 個只搬前 30 個，
   Codex 第一輪；已在測試庫用 37 個實測），再移除
-  `online_menu_presentations.is_recommended`；降版會把清單裡的餐飲品項標回推薦（體驗卡與帶著走商品放不回去）。
+  `online_menu_presentations.is_recommended`；降版會把清單裡的餐飲品項標回推薦（從沒存過線上呈現的品項補一列，Codex 第二輪；
+  體驗卡與帶著走商品放不回去）。
 - **部署順序：雲端 Worker 先上，再升店內**——舊 Worker 要求呈現設定一定要有 `is_recommended`，新版店內不送就會被拒收；
   新 Worker 對舊店內送的 `is_recommended` 照收不用。
 - **驗證**：後端店員推薦／發佈測試、Worker 249、POS 1117、煙霧 `online-staff-picks-smoke` 9/9 與受影響的

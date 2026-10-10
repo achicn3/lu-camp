@@ -61,12 +61,16 @@ def downgrade() -> None:
         "online_menu_presentations",
         sa.Column("is_recommended", sa.Boolean(), server_default=sa.text("false"), nullable=False),
     )
+    # 清單裡的餐飲品項標回推薦；從沒存過線上呈現的品項補一列（其餘設定用預設值；Codex 第二輪）。
     op.execute(
         """
-        UPDATE online_menu_presentations p SET is_recommended = true
-        FROM online_staff_picks k, jsonb_array_elements(k.items) e
-        WHERE k.store_id = p.store_id AND e->>'kind' = 'item'
-          AND (e->>'id')::int = p.menu_item_id
+        INSERT INTO online_menu_presentations (store_id, menu_item_id, is_recommended)
+        SELECT k.store_id, m.id, true
+        FROM online_staff_picks k
+        CROSS JOIN LATERAL jsonb_array_elements(k.items) e
+        JOIN menu_items m ON m.id = (e->>'id')::int AND m.store_id = k.store_id
+        WHERE e->>'kind' = 'item'
+        ON CONFLICT (store_id, menu_item_id) DO UPDATE SET is_recommended = true
         """
     )
     op.drop_table("online_staff_picks")
