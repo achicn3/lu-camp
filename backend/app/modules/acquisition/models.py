@@ -156,6 +156,29 @@ class AcquisitionVoid(Base):
 # 庫存事後被改 acquisition_cost／搬走 acquisition_id 也在 COMMIT 時被擋（第二十輪）。
 ACQ_CREDIT_LEG_GUARD_DDL: tuple[str, ...] = (
     """
+CREATE OR REPLACE FUNCTION acquisition_credit_converted_to_cash(acq_id BIGINT) RETURNS boolean AS $$
+BEGIN
+  -- 改成付現（店主 2026-10-10）：這筆收購的 ACQUISITION CREDIT 已被**整筆**沖回
+  -- （REVERSAL、不是選品作廢、金額恰為負的原額），收購已把購物金腿歸零、
+  -- 改由等額現金腿承擔。只有這種情況才放行「購物金腿≠帳本 CREDIT 現金等值」。
+  RETURN EXISTS (
+    SELECT 1
+      FROM acquisitions a
+      JOIN store_credit_ledger c
+        ON c.source_type = 'ACQUISITION' AND c.entry_type = 'CREDIT' AND c.source_id = a.id
+       AND c.store_id = a.store_id AND c.contact_id = a.contact_id
+      JOIN store_credit_ledger r
+        ON r.reversal_of_id = c.id AND r.entry_type = 'REVERSAL'
+       AND r.acquisition_void_id IS NULL AND r.signed_amount = -c.signed_amount
+     WHERE a.id = acq_id
+       AND a.payout_method = 'CASH'
+       AND COALESCE(a.payout_credit_cash_equivalent, 0) = 0
+       AND COALESCE(a.payout_cash_amount, 0) = c.cash_equivalent
+  );
+END;
+$$ LANGUAGE plpgsql STABLE
+""",
+    """
 CREATE OR REPLACE FUNCTION acquisitions_verify_credit_backing(acq_id BIGINT) RETURNS void AS $$
 DECLARE
   acq RECORD;
@@ -221,9 +244,11 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  -- 有分錄：收購身分必須恆等對應（擋歸零/改 store/改 contact/改金額）
+  -- 有分錄：收購身分必須恆等對應（擋歸零/改 store/改 contact/改金額）；
+  -- 唯一例外是購物金已整筆沖回後改成付現（acquisition_credit_converted_to_cash）。
   IF led_store <> NEW.store_id OR led_contact <> NEW.contact_id
-     OR led_ce <> COALESCE(NEW.payout_credit_cash_equivalent, 0) THEN
+     OR (led_ce <> COALESCE(NEW.payout_credit_cash_equivalent, 0)
+         AND NOT acquisition_credit_converted_to_cash(NEW.id)) THEN
     RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
   END IF;
   -- 庫存背書（空殼收購不可鑄造負債）
@@ -243,6 +268,7 @@ FOR EACH ROW EXECUTE FUNCTION acquisitions_credit_leg_guard()
 ACQ_CREDIT_LEG_GUARD_DROP_DDL: tuple[str, ...] = (
     "DROP TRIGGER IF EXISTS trg_acquisitions_credit_leg_guard ON acquisitions",
     "DROP FUNCTION IF EXISTS acquisitions_credit_leg_guard()",
+    "DROP FUNCTION IF EXISTS acquisition_credit_converted_to_cash(BIGINT)",
     # 共用背書函式最後刪（acq 與 inventory guard 皆依賴；本元組於 downgrade 最末執行）
     "DROP FUNCTION IF EXISTS acquisitions_verify_credit_backing(BIGINT)",
 )
@@ -305,7 +331,8 @@ BEGIN
     FROM acquisitions
    WHERE id = NEW.source_id AND store_id = NEW.store_id
      AND contact_id = NEW.contact_id;
-  IF acq_credit IS NULL OR acq_credit <> NEW.cash_equivalent THEN
+  IF acq_credit IS NULL OR (acq_credit <> NEW.cash_equivalent
+                            AND NOT acquisition_credit_converted_to_cash(NEW.source_id)) THEN
     RAISE EXCEPTION 'ACQUISITION CREDIT 分錄必須對應同店同對象、credit 腿等值的收購';
   END IF;
   RETURN NEW;

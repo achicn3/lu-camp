@@ -231,6 +231,8 @@ class AcquisitionCombinedResult(BaseModel):
     """依序：買斷一張、散裝每堆一張。"""
 
     results: list[AcquisitionResult]
+
+
 class AcquisitionVoidItemRead(BaseModel):
     id: int
     item_code: str
@@ -261,6 +263,14 @@ class AcquisitionVoidRequest(BaseModel):
         if not stripped:
             raise ValueError("作廢原因不可為空白")
         return stripped
+
+
+class AcquisitionPayoutConversionResult(BaseModel):
+    """改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。"""
+
+    acquisition_id: int
+    reversed_credit: NTDAmount
+    cash_paid: NTDAmount
 
 
 class AcquisitionVoidResult(BaseModel):

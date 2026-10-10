@@ -127,6 +127,20 @@ describe("收購紀錄清單", () => {
     expect(screen.queryByRole("button", { name: "作廢" })).toBeNull();
   });
 
+  it("改成付現：只有管理者、只出現在全額購物金撥款的單（店主 2026-10-10）", async () => {
+    auth.role = "MANAGER";
+    stub();
+    wrap(<AcquisitionRecords />);
+    await waitFor(() => rowOf(12));
+    expect(within(rowOf(9)).getByRole("button", { name: "改成付現" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "改成付現" })).toHaveLength(1);
+    cleanup();
+    auth.role = "CLERK";
+    wrap(<AcquisitionRecords />);
+    await waitFor(() => rowOf(12));
+    expect(screen.queryByRole("button", { name: "改成付現" })).toBeNull();
+  });
+
   it("管理者：可作廢的單有作廢鈕；不能作廢的單反灰並講原因", async () => {
     auth.role = "MANAGER";
     stub();

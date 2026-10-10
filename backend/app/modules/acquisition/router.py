@@ -19,6 +19,7 @@ from app.modules.acquisition.schemas import (
     AcquisitionCombinedResult,
     AcquisitionCreate,
     AcquisitionListRead,
+    AcquisitionPayoutConversionResult,
     AcquisitionRead,
     AcquisitionReceiptRead,
     AcquisitionResult,
@@ -313,6 +314,34 @@ async def void_acquisition(
         raise
     await session.commit()
     return acquisition
+
+
+@router.post(
+    "/{acquisition_id}/convert-payout-to-cash",
+    response_model=AcquisitionPayoutConversionResult,
+    operation_id="convertAcquisitionPayoutToCash",
+)
+async def convert_acquisition_payout_to_cash(
+    acquisition_id: int, session: SessionDep, user: ManagerDep
+) -> AcquisitionPayoutConversionResult:
+    """購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。
+
+    購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。
+    不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
+    """
+    svc = AcquisitionService(session)
+    try:
+        result = await svc.convert_payout_to_cash(
+            user.store_id, acquisition_id, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
+    except Exception:
+        await session.rollback()
+        raise
+    await session.commit()
+    return result
 
 
 @router.get(

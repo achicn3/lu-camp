@@ -89,6 +89,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/acquisitions/{acquisition_id}/convert-payout-to-cash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert Acquisition Payout To Cash
+         * @description 購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。
+         *
+         *     購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。
+         *     不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
+         */
+        post: operations["convertAcquisitionPayoutToCash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/acquisitions/{acquisition_id}/receipt": {
         parameters: {
             query?: never;
@@ -4865,6 +4888,18 @@ export interface components {
             total_qty: number;
             /** Unit Price */
             unit_price: number | string;
+        };
+        /**
+         * AcquisitionPayoutConversionResult
+         * @description 改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。
+         */
+        AcquisitionPayoutConversionResult: {
+            /** Acquisition Id */
+            acquisition_id: number;
+            /** Cash Paid */
+            cash_paid: string;
+            /** Reversed Credit */
+            reversed_credit: string;
         };
         /**
          * AcquisitionRead
@@ -12025,6 +12060,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    convertAcquisitionPayoutToCash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionPayoutConversionResult"];
                 };
             };
             /** @description Validation Error */

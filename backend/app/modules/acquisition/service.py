@@ -31,6 +31,7 @@ from app.modules.acquisition.schemas import (
     AcquisitionCreate,
     AcquisitionListItem,
     AcquisitionListRead,
+    AcquisitionPayoutConversionResult,
     AcquisitionReceiptItem,
     AcquisitionReceiptRead,
     AcquisitionResult,
@@ -227,7 +228,13 @@ class AcquisitionService:
                 return AcquisitionVoidBlock.HAS_SOLD_ITEMS
             if (acq.payout_cash_amount or Decimal(0)) > 0 and not drawer_open:
                 return AcquisitionVoidBlock.NO_OPEN_CASH_SESSION
-            credit = credits.get(acq.id)
+            # 只有目前還是購物金撥款的單才看購物金有沒有花掉；
+            # 改成付現的單購物金已沖回（2026-10-10）。
+            credit = (
+                credits.get(acq.id)
+                if (acq.payout_credit_cash_equivalent or Decimal(0)) > 0
+                else None
+            )
             if credit is not None and balances.get(acq.contact_id, Decimal(0)) < credit:
                 return AcquisitionVoidBlock.CREDIT_SPENT
             return None
@@ -1093,6 +1100,79 @@ class AcquisitionService:
             voided_at=acquisition.voided_at,
             reversed_cash=cash_back,
             reversed_credit=credit_back,
+        )
+
+    async def convert_payout_to_cash(
+        self, store_id: int, acquisition_id: int, *, actor_user_id: int
+    ) -> AcquisitionPayoutConversionResult:
+        """購物金撥款改成付現（manager；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。
+
+        當初撥的購物金（含溢價）全數沖回，從抽屜付出溢價前的價值（記一般收購付現 BUYOUT_OUT），
+        收購單撥款方式改成現金、寫稽核。商品與批次不動；客人不重簽（裁示）。
+        原因只有一種（客人反悔改領現金），稽核記固定代碼——不收自由文字，免得把個資寫進稽核（§5）。
+        只限全額購物金撥款、沒作廢過（含部分作廢）的單。擋下（皆先於任何寫入）：找不到、已作廢、
+        不是全額購物金、作廢過部分商品、沒開帳；購物金已花用 → 沖正時擋下、整筆回滾。
+        """
+        acquisition = await self._repo.lock(store_id, acquisition_id)
+        if acquisition is None:
+            raise AcquisitionNotFound(f"找不到收購 {acquisition_id}")
+        if acquisition.voided_at is not None:
+            raise AcquisitionAlreadyVoid(f"收購 {acquisition_id} 已作廢，不能改成付現")
+        cash = acquisition.payout_credit_cash_equivalent or Decimal(0)
+        if (
+            acquisition.payout_method != PayoutMethod.STORE_CREDIT
+            or cash <= 0
+            or (acquisition.payout_cash_amount or Decimal(0)) > 0
+        ):
+            raise InvalidPayoutSplit("只有全額用購物金撥款的收購可以改成付現")
+        if await self._repo.list_voids(store_id, acquisition_id):
+            raise AcquisitionVoidUnsupported("這筆收購作廢過部分商品，不能改成付現")
+        if await self._cash.get_current_session(store_id) is None:
+            raise NoOpenCashSession("改成付現要從抽屜付錢，請先開帳")
+        try:
+            reversal = await self._storecredit.reverse_for_acquisition_void(
+                store_id, acquisition_id, created_by=actor_user_id
+            )
+        except InsufficientStoreCredit as exc:
+            raise AcquisitionCreditSpent("客人的購物金已經花掉一部分，不能改成付現") from exc
+        if reversal is None:
+            raise InvalidPayoutSplit("找不到這筆收購撥出的購物金，不能改成付現")
+        await self._cash.record_movement(
+            store_id,
+            CashMovementType.BUYOUT_OUT,
+            cash,
+            actor_user_id=actor_user_id,
+            ref_type="acquisition",
+            ref_id=acquisition_id,
+        )
+        acquisition.payout_method = PayoutMethod.CASH
+        acquisition.payout_cash_amount = cash
+        acquisition.payout_credit_cash_equivalent = Decimal(0)
+        acquisition.total_cash_paid = cash
+        await self._session.flush()
+        reversed_credit = -Decimal(reversal.signed_amount)
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="CONVERT_ACQUISITION_PAYOUT_TO_CASH",
+            entity_type="acquisition",
+            entity_id=str(acquisition_id),
+            before={
+                "payout_method": PayoutMethod.STORE_CREDIT.value,
+                "payout_credit_cash_equivalent": str(cash),
+                "store_credit_granted": str(reversed_credit),
+            },
+            after={
+                "payout_method": PayoutMethod.CASH.value,
+                "payout_cash_amount": str(cash),
+                "store_credit_reversal_id": reversal.id,
+                "reason": "CUSTOMER_CHANGED_MIND",
+            },
+            is_sensitive=True,
+        )
+        return AcquisitionPayoutConversionResult(
+            acquisition_id=acquisition_id, reversed_credit=reversed_credit, cash_paid=cash
         )
 
     async def void_items(self, store_id: int, acquisition_id: int) -> list[AcquisitionVoidItemRead]:

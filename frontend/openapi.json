@@ -659,6 +659,30 @@
         "title": "AcquisitionLotIn",
         "type": "object"
       },
+      "AcquisitionPayoutConversionResult": {
+        "description": "改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。",
+        "properties": {
+          "acquisition_id": {
+            "title": "Acquisition Id",
+            "type": "integer"
+          },
+          "cash_paid": {
+            "title": "Cash Paid",
+            "type": "string"
+          },
+          "reversed_credit": {
+            "title": "Reversed Credit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acquisition_id",
+          "reversed_credit",
+          "cash_paid"
+        ],
+        "title": "AcquisitionPayoutConversionResult",
+        "type": "object"
+      },
       "AcquisitionRead": {
         "description": "收購單查詢輸出。",
         "properties": {
@@ -20211,6 +20235,54 @@
           }
         ],
         "summary": "Get Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}/convert-payout-to-cash": {
+      "post": {
+        "description": "購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。\n\n購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。\n不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。",
+        "operationId": "convertAcquisitionPayoutToCash",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionPayoutConversionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Convert Acquisition Payout To Cash",
         "tags": [
           "acquisition"
         ]

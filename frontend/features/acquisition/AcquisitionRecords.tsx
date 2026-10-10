@@ -3,9 +3,11 @@
 // 能不能作廢由後端 void_block 事先算好（口徑與作廢端點一致）——不能作廢的單按鈕反灰並講原因，
 // 店長不必按下去才被拒絕。每列只有一顆「作廢」（2026-10-02 裁示）：買斷單跳出商品勾選視窗
 // （預設全勾＝整張），散裝單直接整張；最後都經 VoidConfirmDialog 填原因、二次確認（後端是最終權威）。
+// 全額購物金撥款的單另有「改成付現」（客人反悔要現金；2026-10-10）。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
+import { canConvertToCash, ConvertToCashAction } from "@/features/acquisition/ConvertToCashAction";
 import { ACQ_TYPE_LABEL } from "@/features/acquisition/labels";
 import {
   errorDetail,
@@ -115,6 +117,8 @@ export function AcquisitionRecords() {
   const closeSelecting = useCallback(() => setSelecting(null), []);
   const [voiding, setVoiding] = useState<number | null>(null);
   const [voidResult, setVoidResult] = useState<VoidResult | null>(null);
+  // 改成付現的結果：成功講要付多少現金、失敗講原因（後端擋下時）。
+  const [convertNotice, setConvertNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const filters = { type, voided, from, to, q: submittedSearch, page };
   const list = useQuery({
@@ -237,6 +241,12 @@ export function AcquisitionRecords() {
         </div>
       )}
 
+      {convertNotice !== null && (
+        <p role={convertNotice.ok ? "status" : "alert"} className={convertNotice.ok ? "form-success" : "form-error"}>
+          {convertNotice.text}
+        </p>
+      )}
+
       {list.isPending ? (
         <p>載入中…</p>
       ) : list.isError ? (
@@ -258,7 +268,7 @@ export function AcquisitionRecords() {
                 <th>付款</th>
                 <th>經手人</th>
                 <th>狀態</th>
-                {isManager && <th>作廢</th>}
+                {isManager && <th>管理</th>}
               </tr>
             </thead>
             <tbody>
@@ -293,10 +303,22 @@ export function AcquisitionRecords() {
                         row={row}
                         onVoid={(mode) => {
                           setVoidResult(null);
+                          setConvertNotice(null);
                           if (mode === "WHOLE") setVoiding(row.id);
                           else setSelecting({ id: row.id, preselectAll: mode === "SELECT_ALL" });
                         }}
                       />
+                      {canConvertToCash(row) && (
+                        <ConvertToCashAction
+                          row={row}
+                          onDone={(text) => {
+                            setVoidResult(null);
+                            setConvertNotice({ ok: true, text });
+                            void queryClient.invalidateQueries({ queryKey: ["acquisitions"] });
+                          }}
+                          onError={(text) => setConvertNotice({ ok: false, text })}
+                        />
+                      )}
                     </td>
                   )}
                 </tr>
@@ -335,6 +357,7 @@ export function AcquisitionRecords() {
           onClose={() => setVoiding(null)}
           onVoided={(result) => {
             setVoiding(null);
+            setConvertNotice(null);
             setVoidResult(result);
             void queryClient.invalidateQueries({ queryKey: ["acquisitions"] });
           }}
