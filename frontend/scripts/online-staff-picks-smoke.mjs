@@ -97,6 +97,8 @@ try {
   const listText = await guest.locator("#list").innerText();
   const order = [bean.name, latte.name, card.title].map((name) => listText.indexOf(name));
   ok("店員推薦照後台排的順序、三種東西都在", order.every((i) => i >= 0) && order[0] < order[1] && order[1] < order[2], order.join(","));
+  const cardWidth = await guest.locator("#list .brew-mini").first().evaluate((el) => el.getBoundingClientRect().width / innerWidth);
+  ok("店員推薦裡的體驗卡和手沖體驗分頁一樣是半寬卡片（不撐滿螢幕）", cardWidth < 0.6, cardWidth.toFixed(2));
   await guest.screenshot({ path: join(SHOTS, "02-guest-landing.png") });
   await guest.locator("#tabs").getByRole("button", { name: "帶著走", exact: true }).click();
   ok("帶著走分頁有這包豆子", (await guest.locator("#list").innerText()).includes(bean.name));

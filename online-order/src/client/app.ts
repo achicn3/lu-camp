@@ -301,9 +301,19 @@ function selectTab(key: string, push = true): void {
 /** 分頁內容：店員推薦照店主排的順序、手沖體驗是卡片、帶著走依商品分類分組，其他就是那一類的品項。 */
 function tabContent(snapshot: MenuSnapshot, tab: MenuTab): HTMLElement[] {
   if (tab.key === PICKS_TAB) {
-    return staffPicks(snapshot).map((pick) => pick.kind === "item" ? itemRow(pick.item, true)
-      : pick.kind === "experience" ? experienceMini(pick.view, (from) => openExperience(pick.view, from))
-        : retailRow(pick.product));
+    // 體驗卡放進和「手沖體驗」分頁一樣的兩欄卡片格（相鄰的放同一格），不然會被撐成整個螢幕寬。
+    const nodes: HTMLElement[] = [];
+    for (const pick of staffPicks(snapshot)) {
+      if (pick.kind !== "experience") {
+        nodes.push(pick.kind === "item" ? itemRow(pick.item, true) : retailRow(pick.product));
+        continue;
+      }
+      const last = nodes.at(-1);
+      const deck = last?.classList.contains("brew-deck") ? last : el("div", "brew-deck");
+      if (deck !== last) nodes.push(deck);
+      deck.append(experienceMini(pick.view, (from) => openExperience(pick.view, from)));
+    }
+    return nodes;
   }
   if (tab.key === BREW_TAB) {
     const deck = el("div", "brew-deck");

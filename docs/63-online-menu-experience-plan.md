@@ -351,5 +351,6 @@ D1 `order_lines` 加 `catalog_product_id`（migration 0006），`orders` 加 `fu
   體驗卡與帶著走商品放不回去）。
 - **部署順序：雲端 Worker 先上，再升店內**——舊 Worker 要求呈現設定一定要有 `is_recommended`，新版店內不送就會被拒收；
   新 Worker 對舊店內送的 `is_recommended` 照收不用。
-- **驗證**：後端店員推薦／發佈測試、Worker 249、POS 1117、煙霧 `online-staff-picks-smoke` 9/9 與受影響的
+- **驗證**：後端店員推薦／發佈測試、Worker 241、POS 1117、煙霧 `online-staff-picks-smoke` 9/9 與受影響的
   menu-home／presentation／typography／layout-audit／brew／quiz／popularity／retail／linepay／orders-pos 全過。
+  店員推薦裡的體驗卡放進和手沖體驗分頁一樣的兩欄卡片格（2026-10-10 店主看 staging 後修，原本被撐滿螢幕寬）。
