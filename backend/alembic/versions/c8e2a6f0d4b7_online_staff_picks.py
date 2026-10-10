@@ -42,7 +42,9 @@ def upgrade() -> None:
                jsonb_agg(jsonb_build_object('kind', 'item', 'id', menu_item_id) ORDER BY position)
         FROM (
             SELECT p.store_id, p.menu_item_id,
-                   row_number() OVER (PARTITION BY p.store_id ORDER BY m.sort_order, m.id) AS position
+                   row_number() OVER (
+                       PARTITION BY p.store_id ORDER BY m.sort_order, m.id
+                   ) AS position
             FROM online_menu_presentations p
             JOIN menu_items m ON m.id = p.menu_item_id
             WHERE p.is_recommended AND m.archived_at IS NULL
