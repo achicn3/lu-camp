@@ -308,7 +308,7 @@ function tabContent(snapshot: MenuSnapshot, tab: MenuTab): HTMLElement[] {
         nodes.push(pick.kind === "item" ? itemRow(pick.item, true) : retailRow(pick.product));
         continue;
       }
-      const last = nodes.at(-1);
+      const last = nodes[nodes.length - 1];
       const deck = last?.classList.contains("brew-deck") ? last : el("div", "brew-deck");
       if (deck !== last) nodes.push(deck);
       deck.append(experienceMini(pick.view, (from) => openExperience(pick.view, from)));
