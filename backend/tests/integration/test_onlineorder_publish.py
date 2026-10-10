@@ -412,7 +412,6 @@ async def test_publish_includes_only_public_presentation_without_altering_stock(
     settings = {
         "flavor_description": "蜜桃、花香",
         "audience_description": "喜歡清爽果香的你",
-        "is_recommended": True,
         "is_new": True,
         "limited_on": "2026-10-06",
         "show_remaining": False,
@@ -562,6 +561,31 @@ async def test_publish_includes_quiz_with_only_published_items(
     )
     await client.post("/api/v1/online-order/publish", headers=_auth(manager))
     assert "quiz" not in worker.menu()
+
+
+async def test_publish_includes_staff_picks_in_order_and_only_published(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """店員推薦：照店主排的順序發佈，只帶上架中的；一個都沒有就不帶。"""
+    _, manager = await _seed(db_session)
+    ids = await _menu(client, manager)
+    await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert "picks" not in worker.menu()
+
+    body = {
+        "items": [
+            {"kind": "item", "id": ids["戚風"]},
+            {"kind": "item", "id": ids["下架品"]},
+            {"kind": "item", "id": ids["拿鐵"]},
+        ]
+    }
+    saved = await client.put("/api/v1/online-order/staff-picks", json=body, headers=_auth(manager))
+    assert saved.status_code == 200, saved.text
+    await client.post("/api/v1/online-order/publish", headers=_auth(manager))
+    assert worker.menu()["picks"] == [
+        {"kind": "item", "id": ids["戚風"]},
+        {"kind": "item", "id": ids["拿鐵"]},
+    ]
 
 
 async def test_publish_omits_default_quiz_without_items(

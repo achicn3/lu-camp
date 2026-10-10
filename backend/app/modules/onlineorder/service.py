@@ -21,6 +21,7 @@ from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
 from app.modules.onlineorder.font import subset_font
 from app.modules.onlineorder.models import OnlineMenuPublication, OnlineTableCode
+from app.modules.onlineorder.picks_service import StaffPicksService
 from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.quiz_service import MenuQuizService
 from app.modules.onlineorder.repository import OnlineOrderRepository
@@ -163,6 +164,15 @@ class OnlineOrderService:
         )
         if quiz is not None:
             snapshot["quiz"] = quiz
+        # 店員推薦（2026-10-10）：照店主排的順序；只引用這份快照裡有的。
+        picks = await StaffPicksService(self._session).snapshot_picks(
+            store_id,
+            [item["id"] for item in snapshot["items"]],
+            [exp["id"] for exp in snapshot["experiences"]],
+            [product["id"] for product in snapshot["retail"]],
+        )
+        if picks:
+            snapshot["picks"] = picks
         return snapshot
 
     async def publish(self, store_id: int, *, actor_user_id: int) -> PublishResult:

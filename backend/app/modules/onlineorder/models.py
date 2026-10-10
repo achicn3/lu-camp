@@ -55,7 +55,6 @@ class OnlineMenuPresentation(Base, TimestampMixin):
     menu_item_id: Mapped[int] = mapped_column(ForeignKey("menu_items.id", ondelete="CASCADE"))
     flavor_description: Mapped[str | None] = mapped_column(String(120))
     audience_description: Mapped[str | None] = mapped_column(String(120))
-    is_recommended: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     is_new: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     limited_on: Mapped[date | None] = mapped_column(Date)
     show_remaining: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
@@ -131,6 +130,21 @@ class OnlineMenuPopularity(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     window_days: Mapped[int] = mapped_column(default=30, server_default=text("30"))
     min_qty: Mapped[int] = mapped_column(default=10, server_default=text("10"))
+
+
+class OnlineStaffPicks(Base, TimestampMixin):
+    """店員推薦（店主 2026-10-10）：每店一份有序清單，引用餐飲品項、手沖體驗卡或帶著走商品。
+
+    `items`：[{kind: item|experience|retail, id}]（retail 的 id 是一般商品 id）。
+    只引用、不存價格或庫存；
+    發佈時只帶上架中的。取代以前每個品項各自勾的「露坑推薦」。
+    """
+
+    __tablename__ = "online_staff_picks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), unique=True)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
 
 
 class OnlineRetailListing(Base, TimestampMixin):

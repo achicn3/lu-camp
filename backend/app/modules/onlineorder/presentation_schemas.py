@@ -15,7 +15,6 @@ class MenuPresentationUpdateRequest(BaseModel):
 
     flavor_description: str | None = Field(default=None, max_length=120)
     audience_description: str | None = Field(default=None, max_length=120)
-    is_recommended: StrictBool = False
     is_new: StrictBool = False
     limited_on: date | None = None
     show_remaining: StrictBool = True
@@ -109,3 +108,16 @@ class PopularityRankRead(BaseModel):
 class PopularityRead(PopularityWriteRequest):
     # 依目前設定算出的榜（不論開關，給店主預覽）；分類照菜單排序，各分類前三。
     ranking: list[PopularityRankRead]
+
+
+class StaffPickRef(BaseModel):
+    """店員推薦的一項：餐飲品項、手沖體驗卡或帶著走商品（retail 的 id 是一般商品 id）。"""
+
+    kind: Literal["item", "experience", "retail"]
+    id: StrictInt = Field(gt=0)
+
+
+class StaffPicks(BaseModel):
+    """店員推薦整份覆寫（順序就是客人看到的順序；最多 30 項）。"""
+
+    items: list[StaffPickRef] = Field(default_factory=list, max_length=30)

@@ -615,6 +615,10 @@ class OnlineQuizInvalid(DomainError):
     """引導推薦勾的品項不合法（不是本店、已封存、找不到或重複）。"""
 
 
+class OnlineStaffPicksInvalid(DomainError):
+    """店員推薦的商品不合法（不是本店、已封存、沒上線或重複）。"""
+
+
 class OnlineRetailListingNotFound(DomainError):
     """線上帶回家商品不存在（或商品不屬於本店）。"""
 

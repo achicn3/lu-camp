@@ -19,7 +19,6 @@ from app.shared.enums import UserRole
 DEFAULTS = {
     "flavor_description": None,
     "audience_description": None,
-    "is_recommended": False,
     "is_new": False,
     "limited_on": None,
     "show_remaining": True,
@@ -31,7 +30,6 @@ SETTINGS = {
     **DEFAULTS,
     "flavor_description": "蜜桃、花香",
     "audience_description": "喜歡清爽果香的你",
-    "is_recommended": True,
     "is_new": True,
     "limited_on": "2026-10-06",
     "show_remaining": False,
@@ -181,7 +179,7 @@ async def test_missing_and_archived_items_are_not_configurable(
         {"low_stock_threshold": True},
         {"low_stock_threshold": "5"},
         {"low_stock_threshold": None},
-        {"is_recommended": "false"},
+        {"is_recommended": True},  # 舊欄位：改由「店員推薦」清單選（2026-10-10）
         {"is_new": 1},
         {"show_remaining": None},
         {"hide_sold_out": "true"},

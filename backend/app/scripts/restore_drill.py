@@ -231,6 +231,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
      "SELECT count(*)::text || '/' || "
      "COALESCE(md5(string_agg(row_to_json(p)::text, ',' ORDER BY store_id)), '-') "
      "FROM online_menu_popularity p"),
+    # 店員推薦（2026-10-10）：店主挑的推薦清單與順序。
+    (
+        "線上點餐-店員推薦（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(row_to_json(k)::text, ',' ORDER BY store_id)), '-') "
+        "FROM online_staff_picks k",
+    ),
     (
         "線上點餐-可售狀態（版本／修訂／交付）",
         "SELECT count(*)::text || '/' || "

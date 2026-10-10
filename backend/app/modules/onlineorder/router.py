@@ -11,6 +11,7 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.menu.photos import MAX_UPLOAD_BYTES
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.experience_service import MenuExperienceService
+from app.modules.onlineorder.picks_service import StaffPicksService
 from app.modules.onlineorder.popularity_service import PopularityService
 from app.modules.onlineorder.presentation_schemas import (
     MenuExperienceRead,
@@ -21,6 +22,7 @@ from app.modules.onlineorder.presentation_schemas import (
     MenuQuizWriteRequest,
     PopularityRead,
     PopularityWriteRequest,
+    StaffPicks,
 )
 from app.modules.onlineorder.presentation_service import MenuPresentationService
 from app.modules.onlineorder.quiz_service import MenuQuizService
@@ -42,6 +44,7 @@ from app.shared.exceptions import (
     OnlineQuizInvalid,
     OnlineRetailListingDuplicate,
     OnlineRetailListingNotFound,
+    OnlineStaffPicksInvalid,
     OnlineTableNotFound,
 )
 
@@ -159,6 +162,31 @@ async def update_menu_presentation(
     except MenuItemNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return result
+
+
+# ── 店員推薦（店主 2026-10-10）──
+
+
+@router.get("/staff-picks", response_model=StaffPicks, operation_id="getStaffPicks")
+async def get_staff_picks(session: SessionDep, user: AuthDep) -> StaffPicks:
+    """店員推薦清單（順序就是客人看到的順序）。"""
+    return await StaffPicksService(session).get(user.store_id)
+
+
+@router.put("/staff-picks", response_model=StaffPicks, operation_id="updateStaffPicks")
+async def update_staff_picks(
+    body: StaffPicks, session: SessionDep, user: ManagerDep
+) -> StaffPicks:
+    """整份覆寫；下次發佈才到客人頁。"""
+    try:
+        result = await StaffPicksService(session).save(user.store_id, body, actor_user_id=user.id)
+    except OnlineStaffPicksInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     await session.commit()
     return result
 
