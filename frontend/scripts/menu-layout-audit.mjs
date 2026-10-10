@@ -13,7 +13,7 @@ const published = await (await fetch(`${ORDER}/api/menu`)).json();
 const longCategory = "Specialty" + "W".repeat(40);
 const longName = "Coffee".repeat(18);
 const longOption = "Temperature".repeat(4);
-const presentation = { flavor_description: "Coffee".repeat(15), audience_description: "甜點與咖啡", is_recommended: true, is_new: true, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false };
+const presentation = { flavor_description: "Coffee".repeat(15), audience_description: "甜點與咖啡", is_new: true, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false };
 const base = { id: 1, name: longName, description: "Description".repeat(25), category_id: 1, unit_price: 150, photo: null, available: true, remaining: 5, option_groups: [], presentation };
 const menu = { ...published, categories: [{ id: 1, name: longCategory }, { id: 2, name: "甜點" }], items: [base,
   { ...base, id: 2, category_id: 2, name: "咖啡", option_groups: [{ id: 1, name: longOption, min_select: 1, max_select: 1, options: [{ id: 1, name: longOption, price_delta: 10, available: true, remaining: 3 }, { id: 2, name: "售完", price_delta: 0, available: false, remaining: 0 }] }] },
@@ -74,7 +74,7 @@ try {
     await page.getByText("請依每組規則選好選項。", { exact: true }).waitFor();
     await check(page, "options-error", width, capture);
     await page.getByRole("button", { name: "關閉", exact: true }).click();
-    await page.locator("#tabs").getByRole("button", { name: "全部", exact: true }).click();
+    await page.locator("#tabs").getByRole("button", { name: longCategory, exact: true }).click();
     await page.locator('#list .item[data-item-id="3"] .item-detail').click();
     assert.equal(await page.locator("#detail-add").isDisabled(), true);
     await check(page, "sold-out", width, capture);

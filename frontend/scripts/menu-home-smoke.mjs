@@ -1,4 +1,5 @@
-// M1b: real POS data → published Worker menu → mobile home/navigation/cart recovery.
+// 掃碼直接進完整菜單（店主 2026-10-10；原 M1b 首頁煙霧改寫）：真 POS 資料 → 發佈 → 手機一進來就是「店員推薦」分頁
+// （店主排的順序）→ 切分類／選項／購物車／上一頁下一頁／即時售完。
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -23,18 +24,22 @@ const category = `手沖咖啡與今日甜點-${run}`;
 const items = [];
 for (let index = 0; index < 5; index++) {
   const item = await api("POST", "/menu-items", { name: `${["蜜桃花香手沖咖啡", "濃郁可可拿鐵", "今天的手作甜點", "風味咖啡", "售完甜點"][index]}-${run}`, category, unit_price: "150", unit_cost: "50", sort_order: -99999 + index });
-  await api("PUT", `/online-order/menu-items/${item.id}/presentation`, { is_recommended: true, flavor_description: "蜜桃・花香・甜感", audience_description: "適合喜歡果香與明亮酸甜的人" });
+  await api("PUT", `/online-order/menu-items/${item.id}/presentation`, { flavor_description: "蜜桃・花香・甜感", audience_description: "適合喜歡果香與明亮酸甜的人" });
   await api("PATCH", `/menu-items/${item.id}`, { daily_limited: true });
   await api("POST", `/menu-daily-stock/item/${item.id}/set`, { qty: index === 4 ? 0 : 5, expected_remaining: 0 });
   items.push(item);
 }
 const group = await api("POST", "/menu-option-groups", { name: `溫度-${run}`, min_select: 1, max_select: 1, options: [{ name: "熱", price_delta: "0" }, { name: "冰", price_delta: "10" }] });
 await api("PUT", `/menu-items/${items[1].id}/option-groups`, { group_ids: [group.id] });
+// 店員推薦：故意倒過來排（第 3、1、2 個），客人看到的要照這個順序
+const originalPicks = await api("GET", "/online-order/staff-picks");
+await api("PUT", "/online-order/staff-picks", { items: [2, 0, 1].map((index) => ({ kind: "item", id: items[index].id })) });
 await api("POST", "/online-order/publish");
 const table = (await api("GET", "/online-order/status")).tables.find((entry) => entry.label === "A1");
 assert.ok(table, "A1 must be seeded by online-guest-pos smoke");
 const snapshot = await (await fetch(`${ORDER}/api/menu`)).json();
-const expected = snapshot.items.filter((item) => item.presentation?.is_recommended && item.available && item.remaining !== 0).slice(0, 3).map((item) => String(item.id));
+const expected = snapshot.picks.filter((pick) => pick.kind === "item").map((pick) => String(pick.id));
+const pressed = (phone) => phone.locator('#tabs button[aria-pressed="true"]');
 const browser = await chromium.launch();
 const errors = [];
 try {
@@ -42,9 +47,10 @@ try {
     const phone = await browser.newPage({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
     phone.on("pageerror", (error) => errors.push(String(error)));
     await phone.goto(`${ORDER}/t/${table.code}`, { waitUntil: "networkidle" });
-    assert.equal(await phone.locator("#list .item").count(), 0, "Do not dump all products on entry");
-    assert.deepEqual(await phone.locator("#recommended-list .item").evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId)), expected);
-    assert.ok(expected.length <= 3);
+    assert.equal(await pressed(phone).innerText(), "店員推薦", "一進來就打開店員推薦");
+    assert.equal(await phone.locator("#tabs button").first().innerText(), "店員推薦");
+    assert.deepEqual(await phone.locator("#list .item").evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId)),
+      expected.slice(0, 3), "照店主排的順序");
     await phone.getByRole("heading", { name: "在露坑坐一下。" }).waitFor();
     assert.equal(await phone.locator("#splash").count(), 0);
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -63,14 +69,14 @@ try {
     await phone.getByText("合計 $460", { exact: true }).waitFor();
     await phone.screenshot({ path: join(shots, `cart-${width}.png`), fullPage: true });
     await phone.getByRole("button", { name: "← 返回菜單", exact: true }).click();
-    await phone.locator("#catalog-title").getByText(category, { exact: true }).waitFor();
+    await pressed(phone).getByText(category, { exact: true }).waitFor();
     assert.equal(new URL(phone.url()).pathname, `/t/${table.code}`);
     await phone.goBack();
-    await phone.getByRole("heading", { name: "在露坑坐一下。" }).waitFor();
+    await pressed(phone).getByText("店員推薦", { exact: true }).waitFor();
     await phone.goForward();
-    await phone.locator("#catalog-title").getByText(category, { exact: true }).waitFor();
+    await pressed(phone).getByText(category, { exact: true }).waitFor();
     await phone.reload({ waitUntil: "networkidle" });
-    await phone.locator("#catalog-title").getByText(category, { exact: true }).waitFor();
+    await pressed(phone).getByText(category, { exact: true }).waitFor();
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await phone.screenshot({ path: join(shots, `category-${width}.png`), fullPage: true });
     if (width === 430) {
@@ -100,5 +106,8 @@ try {
   const remaining = (await api("GET", "/menu-items")).find((item) => item.id === items[1].id).remaining;
   assert.equal(remaining, 5, "Cart selections must not reserve POS stock");
   assert.deepEqual(errors, []);
-  console.log(`PASS home/recommendations/options/cart/QR/history/live-stock, 375/390/430px. Screenshots: ${shots}`);
-} finally { await browser.close(); }
+  console.log(`PASS full-menu/staff-picks/options/cart/QR/history/live-stock, 375/390/430px. Screenshots: ${shots}`);
+} finally {
+  await browser.close();
+  await api("PUT", "/online-order/staff-picks", originalPicks).catch(() => {});
+}

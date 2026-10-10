@@ -69,6 +69,7 @@
 - [MacBook 正式機：升級到 2026-10-09 版（餐飲品項一個視窗編輯、待整理顯示原價）](./75-macbook-upgrade-menu-edit-retail-price.md)
 - [MacBook 正式機：升級到 2026-10-09 版（線上點餐「不知道喝什麼」引導推薦）](./76-macbook-upgrade-online-menu-quiz.md)
 - [MacBook 正式機：升級到 2026-10-10 版（線上點餐人氣標籤）](./77-macbook-upgrade-online-popularity.md)
+- [MacBook 正式機：升級到 2026-10-10 版（線上點餐直接進完整菜單＋店員推薦＋帶著走）](./78-macbook-upgrade-online-full-menu.md)
 
 ## 評估與後續實作
 

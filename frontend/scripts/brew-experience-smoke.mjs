@@ -59,7 +59,7 @@ const temp = await api("POST", "/menu-option-groups", {
 await api("PUT", `/menu-items/${brew.id}/option-groups`, { group_ids: [beans.id, temp.id] });
 const latte = await api("POST", "/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: `咖啡-${run}` });
 const cake = await api("POST", "/menu-items", { name: `戚風-${run}`, unit_price: "90", category: `甜點-${run}` });
-const role = (role) => ({ flavor_description: null, audience_description: null, is_recommended: false, is_new: false,
+const role = (role) => ({ flavor_description: null, audience_description: null, is_new: false,
   limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false, role });
 await api("PUT", `/online-order/menu-items/${latte.id}/presentation`, role("coffee"));
 await api("PUT", `/online-order/menu-items/${cake.id}/presentation`, role("dessert"));
@@ -84,13 +84,15 @@ page.on("pageerror", (error) => errors.push(String(error)));
 const mini = () => page.locator(`.brew-mini[data-experience-id="${card.id}"]`);
 try {
   await page.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
+  // 掃碼直接進完整菜單（2026-10-10）：手沖體驗是分類列上的一個分頁
+  ok("分類列有「手沖體驗」", (await page.locator("#tabs").getByRole("button", { name: "手沖體驗", exact: true }).count()) === 1);
+  await page.locator("#tabs").getByRole("button", { name: "手沖體驗", exact: true }).click();
   await mini().waitFor();
-  ok("首頁出現手沖體驗小卡", (await mini().innerText()).includes(title));
-  ok("首頁入口有「手沖體驗」", (await page.getByRole("button", { name: "手沖體驗", exact: true }).count()) === 1);
+  ok("手沖體驗分頁出現小卡", (await mini().innerText()).includes(title));
   const artLoaded = await mini().locator("img.brew-art").evaluate((img) =>
     img.decode().then(() => img.naturalWidth > 0, () => false));
   ok("小卡插畫（水彩 JPG）真的載入", artLoaded);
-  await page.locator("#experiences").screenshot({ path: join(SHOTS, "01-deck.png") });
+  await page.locator("#list").screenshot({ path: join(SHOTS, "01-deck.png") });
 
   // 六種抽卡動畫逐一跑：每種都要翻到正面、出現「看體驗內容」，期間不得有 JS 例外。
   for (const effect of ["soar", "truck", "smash", "seal", "shuffle", "bloom"]) {

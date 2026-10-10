@@ -49,7 +49,6 @@ try {
   let dialog = desk.getByRole("dialog", { name: `${low.name} 的線上呈現` });
   await dialog.getByLabel("風味描述", { exact: true }).fill("蜜桃・花香・甜感");
   await dialog.getByLabel("適合族群", { exact: true }).fill("適合喜歡明亮果香的人");
-  await dialog.getByLabel("露坑推薦", { exact: true }).check();
   await dialog.getByLabel("新品 NEW", { exact: true }).check();
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   await dialog.getByLabel("今日限定日期", { exact: true }).fill(day);
@@ -87,7 +86,7 @@ try {
     const lowCard = phone.locator(".item", { hasText: low.name });
     await lowCard.getByText("今天剩 3 份", { exact: true }).waitFor();
     await lowCard.getByText("蜜桃・花香・甜感", { exact: true }).waitFor();
-    assert.match(await lowCard.innerText(), /露坑推薦.*新品.*今日限定/);
+    assert.match(await lowCard.innerText(), /新品.*今日限定/);
     assert.equal(await phone.locator(".item", { hasText: high.name }).getByText(/剩/).count(), 0);
     assert.equal(await phone.locator(".item", { hasText: hidden.name }).count(), 0);
     const names = await phone.locator(".item-name").allTextContents();

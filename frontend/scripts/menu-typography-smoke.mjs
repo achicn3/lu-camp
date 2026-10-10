@@ -9,10 +9,12 @@ const ORDER = process.env.SMOKE_ORDER ?? "http://127.0.0.1:8789";
 const shots = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp/lu-camp-shots/menu-typography");
 mkdirSync(shots, { recursive: true });
 const snapshot = await (await fetch(`${ORDER}/api/menu`)).json();
-const recommendations = snapshot.items.filter((entry) => entry.presentation?.is_recommended && entry.available && entry.remaining !== 0 &&
+// 店員推薦（2026-10-10）：客人一進來就是這個分頁，照店主排的順序
+const pickedIds = (snapshot.picks ?? []).filter((pick) => pick.kind === "item").map((pick) => pick.id);
+const recommendations = pickedIds.map((id) => snapshot.items.find((entry) => entry.id === id)).filter((entry) => entry && entry.available && entry.remaining !== 0 &&
   entry.option_groups.every((group) => group.max_select >= group.min_select && group.options.filter((option) => option.available && option.remaining !== 0).length >= group.min_select)).slice(0, 3);
 const item = recommendations.find((entry) => entry.option_groups.length === 0);
-assert.ok(item, "The published menu must include an available POS item without options among the first three recommendations");
+assert.ok(item, "The published menu must include an available POS item without options among the first three staff picks");
 const browser = await chromium.launch();
 const errors = [];
 async function typeOf(locator) {
@@ -29,7 +31,7 @@ try {
     if (fallback) await phone.route("**/fonts/*.woff2", (route) => route.abort());
     await phone.goto(ORDER, { waitUntil: "networkidle" });
     if (snapshot.font && !fallback) await phone.waitForFunction(() => document.documentElement.classList.contains("hand-font-ready"));
-    const homeCard = phone.locator(`#recommended-list .item[data-item-id="${item.id}"]`);
+    const homeCard = phone.locator(`#list .item[data-item-id="${item.id}"]`);
     await homeCard.waitFor();
     if (fallback) assert.equal(await phone.locator("html").evaluate((node) => node.classList.contains("hand-font-ready")), false);
     const homeName = await typeOf(homeCard.locator(".item-name"));
@@ -42,8 +44,8 @@ try {
     assert.ok(Math.abs(nameBounds.x - priceBounds.x) < 1, "Name and price must share the card left edge");
     await phone.screenshot({ path: join(shots, `home-${label}.png`), fullPage: true });
     const category = snapshot.categories.find((entry) => entry.id === item.category_id);
-    await phone.locator("#tabs").getByRole("button", { name: category?.name ?? "全部", exact: true }).click();
-    assert.equal((await typeOf(phone.locator("#catalog-title"))).family, homeName.family);
+    await phone.locator("#tabs").getByRole("button", { name: category?.name ?? "其他", exact: true }).click();
+    assert.equal((await typeOf(phone.locator("#tabs .tab-on"))).family, homeName.family);
     for (const tab of await phone.locator("#tabs .tab").all()) {
       assert.equal((await typeOf(tab)).family, homeName.family, "Every category button must use the handwriting font");
     }
@@ -59,7 +61,7 @@ try {
     await phone.getByRole("button", { name: /購物車 1 份/ }).click();
     assert.deepEqual(await typeOf(phone.locator(".cart-line b")), homeName, "The same product name must retain its type role in cart");
     assert.deepEqual(await typeOf(phone.locator(".cart-line .item-price")), price);
-    for (const selector of [".qty-button", ".quiet-action", ".cart-controls > span", ".cart-total", ".note-label", ".payment-note", "#cart-body > .action"]) {
+    for (const selector of [".qty-button", ".quiet-action", ".cart-controls > span", ".cart-total", ".note-label", ".pay-choice", "#cart-body > .action"]) {
       assert.equal((await typeOf(phone.locator(selector).first())).family, add.family, `${selector} must use the shared UI font`);
     }
     const total = await typeOf(phone.locator(".cart-total"));
