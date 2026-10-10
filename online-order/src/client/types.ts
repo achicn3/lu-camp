@@ -33,7 +33,6 @@ export interface MenuItemView {
 export interface MenuPresentation {
   flavor_description: string | null;
   audience_description: string | null;
-  is_recommended: boolean;
   is_new: boolean;
   limited_on: string | null;
   show_remaining: boolean;
@@ -93,6 +92,8 @@ export interface MenuSnapshot {
   retail?: MenuRetailView[];
   /** 「不知道喝什麼」引導推薦；沒設定或沒有可推薦品項時沒有這欄。 */
   quiz?: MenuQuizView;
+  /** 店員推薦（2026-10-10）：店主排好的順序；沒設定時沒有這欄。retail 的 id 是帶著走商品 id。 */
+  picks?: { kind: "item" | "experience" | "retail"; id: number }[];
 }
 
 /** 答案勾的品項：菜單品項或手沖體驗卡（docs/63 §2 M2a）。 */

@@ -56,7 +56,6 @@ export function MenuPresentationDialog({ itemId, itemName, onDone, onClose }: {
 function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation; setBusy: (busy: boolean) => void; onSaved: (saved: Presentation) => void }) {
   const [flavor, setFlavor] = useState(initial.flavor_description ?? "");
   const [audience, setAudience] = useState(initial.audience_description ?? "");
-  const [recommended, setRecommended] = useState(initial.is_recommended);
   const [isNew, setNew] = useState(initial.is_new);
   const [limitedOn, setLimitedOn] = useState(initial.limited_on ?? "");
   const [showRemaining, setShowRemaining] = useState(initial.show_remaining);
@@ -81,14 +80,13 @@ function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation
       const value = Number(threshold);
       if (threshold.trim() === "" || !Number.isInteger(value) || value < 0 || value > 9999) { setError("低庫存門檻請填 0–9999 的整數。"); return; }
       save.mutate({ flavor_description: flavor.trim() || null, audience_description: audience.trim() || null,
-        is_recommended: recommended, is_new: isNew, limited_on: limitedOn || null,
+        is_new: isNew, limited_on: limitedOn || null,
         show_remaining: showRemaining, low_stock_threshold: value, hide_sold_out: hideSoldOut, role: role || null });
     }}>
       <fieldset disabled={save.isPending}>
         <label className="field"><span className="field-label">風味描述</span><input value={flavor} maxLength={120} placeholder="例如：蜜桃・花香・甜感" onChange={(event) => setFlavor(event.target.value)} /></label>
         <label className="field"><span className="field-label">適合族群</span><input value={audience} maxLength={120} placeholder="例如：適合喜歡果香與明亮酸甜的人" onChange={(event) => setAudience(event.target.value)} /></label>
         <div className="menu-presentation-checks">
-          <label><input type="checkbox" checked={recommended} onChange={(event) => setRecommended(event.target.checked)} />露坑推薦</label>
           <label><input type="checkbox" checked={isNew} onChange={(event) => setNew(event.target.checked)} />新品 NEW</label>
         </div>
         <label className="field"><span className="field-label">今日限定日期</span><input type="date" value={limitedOn} onChange={(event) => setLimitedOn(event.target.value)} /></label>

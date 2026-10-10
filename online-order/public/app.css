@@ -444,3 +444,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .quiz-label { margin: 14px 0 4px; font-family: var(--ui); font-size: 13px; color: var(--gold); }
 .quiz-empty { margin: 8px 0 0; }
 .link-button { min-height: 44px; padding: 8px 0; border: 0; background: none; color: var(--soft); font-family: var(--ui); font-size: 14px; text-decoration: underline; cursor: pointer; }
+
+/* 掃碼直接進完整菜單（2026-10-10）：分頁下的一句說明；「不知道喝什麼？」是問候語下的小按鈕。 */
+.tab-note { margin: 4px 0 8px; font-family: var(--ui); font-size: 13px; color: var(--soft); }
+.quiz-entry { flex: 0 1 auto; }

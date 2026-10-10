@@ -374,7 +374,7 @@ export function OnlineOrdersPanel({
                         {order.lines.map((line) => (
                           <li key={line.line_no}>
                             {line.name} ×{line.qty}
-                            {line.catalog_product_id != null ? "（帶回家）" : ""}
+                            {line.catalog_product_id != null ? "（帶著走）" : ""}
                           </li>
                         ))}
                       </ul>
@@ -427,7 +427,7 @@ export function OnlineOrdersPanel({
                       )}
                       {isAwaitingHandover(order) && (
                         <div className="online-order-actions">
-                          <span>把帶回家的商品交給客人後再按。</span>
+                          <span>把帶著走的商品交給客人後再按。</span>
                           <button
                             type="button"
                             className="btn-primary"

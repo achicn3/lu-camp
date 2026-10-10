@@ -12566,11 +12566,6 @@
             "title": "Is New",
             "type": "boolean"
           },
-          "is_recommended": {
-            "default": false,
-            "title": "Is Recommended",
-            "type": "boolean"
-          },
           "limited_on": {
             "anyOf": [
               {
@@ -12652,11 +12647,6 @@
           "is_new": {
             "default": false,
             "title": "Is New",
-            "type": "boolean"
-          },
-          "is_recommended": {
-            "default": false,
-            "title": "Is Recommended",
             "type": "boolean"
           },
           "limited_on": {
@@ -18934,6 +18924,46 @@
           "sale_id"
         ],
         "title": "StaffCartSessionRead",
+        "type": "object"
+      },
+      "StaffPickRef": {
+        "description": "店員推薦的一項：餐飲品項、手沖體驗卡或帶著走商品（retail 的 id 是一般商品 id）。",
+        "properties": {
+          "id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "item",
+              "experience",
+              "retail"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "StaffPickRef",
+        "type": "object"
+      },
+      "StaffPicks": {
+        "description": "店員推薦整份覆寫（順序就是客人看到的順序；最多 30 項）。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffPickRef"
+            },
+            "maxItems": 30,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "StaffPicks",
         "type": "object"
       },
       "StocktakeConfirmRequest": {
@@ -30319,6 +30349,78 @@
           }
         ],
         "summary": "Upload Retail Listing Photo",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/staff-picks": {
+      "get": {
+        "description": "店員推薦清單（順序就是客人看到的順序）。",
+        "operationId": "getStaffPicks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffPicks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Staff Picks",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "put": {
+        "description": "整份覆寫；下次發佈才到客人頁。",
+        "operationId": "updateStaffPicks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffPicks"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffPicks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Staff Picks",
         "tags": [
           "online-order"
         ]

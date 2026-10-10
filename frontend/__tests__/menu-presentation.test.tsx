@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { MenuPresentationDialog } from "@/features/menu/MenuPresentationDialog";
 
-const defaults = { menu_item_id: 7, flavor_description: null, audience_description: null, is_recommended: false, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false, role: null };
+const defaults = { menu_item_id: 7, flavor_description: null, audience_description: null, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false, role: null };
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }); }
 function mount(onDone = vi.fn(), onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -13,7 +13,7 @@ function mount(onDone = vi.fn(), onClose = vi.fn()) {
 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("載入設定後可儲存風味、推薦與低庫存政策，不送價格或庫存", async () => {
+it("載入設定後可儲存風味與低庫存政策，不送價格或庫存（推薦改由店員推薦清單選）", async () => {
   let body: Record<string, unknown> | undefined;
   vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
     if (input.method === "PUT") { body = await input.json(); return response({ ...defaults, ...body }); }
@@ -23,13 +23,13 @@ it("載入設定後可儲存風味、推薦與低庫存政策，不送價格或�
   const user = userEvent.setup();
   await user.type(await screen.findByLabelText("風味描述"), "蜜桃・花香");
   await user.type(screen.getByLabelText("適合族群"), "喜歡果香的人");
-  await user.click(screen.getByLabelText("露坑推薦"));
+  expect(screen.queryByLabelText("露坑推薦")).toBeNull();
   await user.clear(screen.getByLabelText("低庫存顯示門檻"));
   await user.type(screen.getByLabelText("低庫存顯示門檻"), "3");
   await user.click(screen.getByLabelText("售完後完全隱藏"));
   await user.click(screen.getByRole("button", { name: "儲存設定" }));
   await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
-  expect(body).toEqual({ flavor_description: "蜜桃・花香", audience_description: "喜歡果香的人", is_recommended: true, is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 3, hide_sold_out: true, role: null });
+  expect(body).toEqual({ flavor_description: "蜜桃・花香", audience_description: "喜歡果香的人", is_new: false, limited_on: null, show_remaining: true, low_stock_threshold: 3, hide_sold_out: true, role: null });
 });
 
 it("可以設定加購角色（例：甜點），客人點咖啡時會推它", async () => {

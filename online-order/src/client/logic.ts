@@ -47,7 +47,6 @@ export function presentationBadges(
   const badges: string[] = item.popularity === 1 ? ["人氣 No.1"] : item.popularity ? ["人氣推薦"] : [];
   const settings = item.presentation;
   if (!settings) return badges;
-  if (settings.is_recommended) badges.push("露坑推薦");
   if (settings.is_new) badges.push("新品");
   if (settings.limited_on === TAIPEI_DAY.format(now)) badges.push("今日限定");
   return badges;
@@ -85,12 +84,60 @@ export function tableCodeFromPath(pathname: string): string | null {
 }
 
 /** 首頁只使用已發布的人工推薦；保留後台順序，不推測人氣或品項角色。 */
-export function homeSelection(menu: Pick<MenuSnapshot, "categories" | "items">) {
+/** 有可展示品項的分類（照快照順序）。 */
+function shownCategories(menu: Pick<MenuSnapshot, "categories" | "items">) {
   const items = visibleItems(menu.items);
-  return {
-    recommended: menu.items.filter((item) => item.presentation?.is_recommended && !itemSoldOut(item)).slice(0, 3),
-    categories: menu.categories.filter((category) => items.some((item) => item.category_id === category.id)),
-  };
+  return menu.categories.filter((category) => items.some((item) => item.category_id === category.id));
+}
+
+export const PICKS_TAB = "picks";
+export const BREW_TAB = "brew";
+export const TAKEAWAY_TAB = "takeaway";
+export const OTHER_TAB = "other";
+export interface MenuTab { key: string; label: string; categoryId?: number }
+
+/**
+ * 完整菜單上方的分類列（店主 2026-10-10）：店員推薦（預設打開）→ 手沖體驗 → 各餐飲分類 →
+ * 沒分類的「其他」→ 帶著走。沒有內容的分頁不出現。
+ */
+export function menuTabs(menu: MenuSnapshot): MenuTab[] {
+  const tabs: MenuTab[] = [];
+  if (staffPicks(menu).length) tabs.push({ key: PICKS_TAB, label: "店員推薦" });
+  if ((menu.experiences ?? []).some((experience) => experienceView(menu, experience) !== null)) {
+    tabs.push({ key: BREW_TAB, label: "手沖體驗" });
+  }
+  for (const category of shownCategories(menu)) {
+    tabs.push({ key: `cat:${category.id}`, label: category.name, categoryId: category.id });
+  }
+  const known = new Set(menu.categories.map((category) => category.id));
+  if (visibleItems(menu.items).some((item) => item.category_id === null || !known.has(item.category_id))) {
+    tabs.push({ key: OTHER_TAB, label: "其他" });
+  }
+  if ((menu.retail ?? []).length) tabs.push({ key: TAKEAWAY_TAB, label: "帶著走" });
+  return tabs;
+}
+
+export type PickView =
+  | { kind: "item"; item: MenuItemView }
+  | { kind: "experience"; view: ExperienceView }
+  | { kind: "retail"; product: MenuRetailView };
+
+/** 店員推薦照店主排的順序；看不到的（隱藏、已不在菜單）略過。 */
+export function staffPicks(menu: MenuSnapshot): PickView[] {
+  const shown = visibleItems(menu.items);
+  return (menu.picks ?? []).flatMap((ref): PickView[] => {
+    if (ref.kind === "item") {
+      const item = shown.find((entry) => entry.id === ref.id);
+      return item ? [{ kind: "item", item }] : [];
+    }
+    if (ref.kind === "experience") {
+      const experience = (menu.experiences ?? []).find((entry) => entry.id === ref.id);
+      const view = experience ? experienceView(menu, experience) : null;
+      return view ? [{ kind: "experience", view }] : [];
+    }
+    const product = (menu.retail ?? []).find((entry) => entry.id === ref.id);
+    return product ? [{ kind: "retail", product }] : [];
+  });
 }
 
 export interface ExperienceView {

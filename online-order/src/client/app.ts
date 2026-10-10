@@ -2,9 +2,9 @@
 import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
 import {
-  experienceView, homeSelection, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
-  retailGroups, retailSoldOut, tableCodeFromPath, upsellSuggestions, visibleItems, type ExperienceView,
-  type UpsellPick,
+  BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
+  menuTabs, OTHER_TAB, PICKS_TAB, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine } from "../pricing";
 import {
@@ -13,7 +13,6 @@ import {
 
 const POLL_MS = 5000;
 const MENU_REFRESH_MS = 15000;
-const ALL = -1;
 const CART_KEY = "lk_cart_v1";
 const DRAFT_KEY = "lk_order_draft_v1";
 const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
@@ -53,8 +52,10 @@ let tableCode: string | null = null;
 let cart: CartLine[] = [];
 let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
-let activeCategory = ALL;
-let menuHome = true;
+/** 目前打開的分頁（null＝預設第一個，通常是店員推薦）。 */
+let activeTab: string | null = null;
+/** 問答區是否打開（「不知道喝什麼？」按鈕）。 */
+let quizOpen = false;
 let detailTrigger: HTMLElement | null = null;
 let feedbackTimer: number | null = null;
 let restoringHistory = false;
@@ -129,7 +130,7 @@ function showMessage(text: string): void {
 function clearMessage(): void { $("message").hidden = true; }
 function showScreen(screen: "menu" | "cart" | "order"): void {
   if (screen === "cart" && $("cart-view").hidden && !restoringHistory && !history.state?.cart) {
-    history.pushState({ menuCategory: activeCategory, menuHome, cart: true }, "");
+    history.pushState({ menuTab: activeTab, cart: true }, "");
   }
   $("cart-feedback").textContent = "";
   $("menu-view").hidden = screen !== "menu";
@@ -150,8 +151,8 @@ function closeDetail(): void {
   $("sheet").hidden = true;
   document.body.classList.remove("sheet-open");
   if (itemId === null) return;
-  const fallback = document.querySelector<HTMLElement>(`${menuHome ? "#recommended-list" : "#list"} .item[data-item-id="${itemId}"] .item-detail`)
-    ?? document.querySelector<HTMLElement>(menuHome ? "#shortcuts button" : "#back-home");
+  const fallback = document.querySelector<HTMLElement>(`#list .item[data-item-id="${itemId}"] .item-detail`)
+    ?? document.querySelector<HTMLElement>("#tabs button");
   (detailTrigger?.isConnected ? detailTrigger : fallback)?.focus({ preventScroll: true });
 }
 function openDetail(item: MenuItemView): void {
@@ -291,65 +292,75 @@ function retailRow(product: MenuRetailView): HTMLElement {
   actions.append(price, add); row.append(actions);
   return row;
 }
-function selectCategory(category: number, home = false, push = true): void {
-  activeCategory = category; menuHome = home;
-  if (push) history.pushState({ menuCategory: category, menuHome: home }, "");
+function selectTab(key: string, push = true): void {
+  activeTab = key;
+  if (push) history.pushState({ menuTab: key }, "");
   if (menu) renderMenu(menu);
-  window.scrollTo(0, 0);
+  $("tabs").scrollIntoView({ block: "start" });
 }
+/** 分頁內容：店員推薦照店主排的順序、手沖體驗是卡片、帶著走依商品分類分組，其他就是那一類的品項。 */
+function tabContent(snapshot: MenuSnapshot, tab: MenuTab): HTMLElement[] {
+  if (tab.key === PICKS_TAB) {
+    return staffPicks(snapshot).map((pick) => pick.kind === "item" ? itemRow(pick.item, true)
+      : pick.kind === "experience" ? experienceMini(pick.view, (from) => openExperience(pick.view, from))
+        : retailRow(pick.product));
+  }
+  if (tab.key === BREW_TAB) {
+    const deck = el("div", "brew-deck");
+    deck.append(...(snapshot.experiences ?? [])
+      .map((experience) => experienceView(snapshot, experience))
+      .filter((view): view is ExperienceView => view !== null)
+      .map((view) => experienceMini(view, (from) => openExperience(view, from))));
+    return [deck];
+  }
+  if (tab.key === TAKEAWAY_TAB) {
+    return retailGroups(snapshot).map((group) => {
+      const box = el("div", "take-home-group");
+      box.append(el("h3", "take-home-category", group.category), ...group.products.map(retailRow));
+      return box;
+    });
+  }
+  const known = new Set(snapshot.categories.map((category) => category.id));
+  return visibleItems(snapshot.items)
+    .filter((item) => tab.key === OTHER_TAB
+      ? item.category_id === null || !known.has(item.category_id)
+      : item.category_id === tab.categoryId)
+    .map((item) => itemRow(item));
+}
+const TAB_NOTES: Record<string, string> = {
+  [PICKS_TAB]: "店員最近愛的，慢慢選，慢慢喝。",
+  [BREW_TAB]: "點一張卡，抽一支今天的豆子。",
+  [TAKEAWAY_TAB]: "付款後請到櫃檯領取。",
+};
+/** 掃碼直接進完整菜單（店主 2026-10-10）：上方問候語＋「不知道喝什麼？」，分類列預設打開店員推薦。 */
 function renderMenu(snapshot: MenuSnapshot): void {
-  const key = JSON.stringify([snapshot, menuHome, activeCategory, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date())]);
+  const key = JSON.stringify([snapshot, activeTab, quizOpen, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date())]);
   if (key === renderedMenuKey) return;
   renderedMenuKey = key;
-  const tabs = $("tabs"); const list = $("list");
-  const selection = homeSelection(snapshot);
-  if (!selection.categories.some((category) => category.id === activeCategory)) activeCategory = ALL;
-  $("menu-home").hidden = !menuHome; $("back-home").hidden = menuHome;
-  $("catalog-title").textContent = menuHome ? "完整菜單" : selection.categories.find((category) => category.id === activeCategory)?.name ?? "全部品項";
-  const categories = [{ id: ALL, name: "全部" }, ...selection.categories];
-  tabs.replaceChildren(...categories.map((category) => {
-    const tab = button(category.name, () => selectCategory(category.id), !menuHome && category.id === activeCategory ? "tab tab-on" : "tab");
-    tab.setAttribute("aria-pressed", String(!menuHome && category.id === activeCategory)); return tab;
+  const tabs = menuTabs(snapshot);
+  const current = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
+  $("tabs").replaceChildren(...tabs.map((tab) => {
+    const on = tab.key === current?.key;
+    const node = button(tab.label, () => selectTab(tab.key), on ? "tab tab-on" : "tab");
+    node.setAttribute("aria-pressed", String(on)); return node;
   }));
-  tabs.hidden = false;
-  list.replaceChildren(...(menuHome ? [] : visibleItems(snapshot.items).filter((item) => activeCategory === ALL || item.category_id === activeCategory).map((item) => itemRow(item))));
-  if (!menuHome && !list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
-  const experiences = (snapshot.experiences ?? [])
-    .map((experience) => experienceView(snapshot, experience))
-    .filter((view): view is ExperienceView => view !== null);
-  $("experiences").hidden = experiences.length === 0;
-  $("experience-list").replaceChildren(...(menuHome ? experiences.map((view) => experienceMini(view, (from) => openExperience(view, from))) : []));
-  const takeHome = retailGroups(snapshot);
-  $("take-home").hidden = takeHome.length === 0;
-  $("take-home-list").replaceChildren(...(menuHome ? takeHome.map((group) => {
-    const box = el("div", "take-home-group");
-    box.append(el("h3", "take-home-category", group.category), ...group.products.map(retailRow));
-    return box;
-  }) : []));
-  $("recommendations").hidden = selection.recommended.length === 0;
-  $("recommended-list").replaceChildren(...(menuHome ? selection.recommended.map((item) => itemRow(item, true)) : []));
+  $("tabs").hidden = tabs.length === 0;
+  const note = current ? TAB_NOTES[current.key] : undefined;
+  $("tab-note").textContent = note ?? ""; $("tab-note").hidden = note === undefined;
+  const list = $("list");
+  list.replaceChildren(...(current ? tabContent(snapshot, current) : []));
+  if (!list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
+  $("shortcuts").replaceChildren(...(snapshot.quiz ? [button("不知道喝什麼？", () => startQuiz(), "shortcut quiz-entry")] : []));
   renderQuiz(snapshot);
-  const shortcuts: HTMLElement[] = [];
-  if (snapshot.quiz) shortcuts.push(button("不知道喝什麼？", () => startQuiz(), "shortcut"));
-  if (experiences.length) shortcuts.push(button("手沖體驗", () => $("experiences").scrollIntoView({ block: "start" }), "shortcut"));
-  if (selection.recommended.length) shortcuts.push(button("露坑推薦", () => $("recommendations").scrollIntoView({ block: "start" }), "shortcut"));
-  const preferred = [selection.categories.find((category) => category.name === "咖啡"),
-    selection.categories.find((category) => category.name === "甜點") ?? selection.categories.find((category) => category.name === "今日甜點"),
-    ...selection.categories];
-  const chosen = new Set<number>();
-  for (const category of preferred) {
-    if (!category || chosen.has(category.id)) continue;
-    chosen.add(category.id); shortcuts.push(button(category.name, () => selectCategory(category.id), "shortcut"));
-    if (chosen.size === 2) break;
-  }
-  if (takeHome.length) shortcuts.push(button("帶回家", () => $("take-home").scrollIntoView({ block: "start" }), "shortcut"));
-  if (!shortcuts.length) shortcuts.push(button("看看菜單", () => selectCategory(ALL), "shortcut"));
-  $("shortcuts").replaceChildren(...shortcuts);
 }
 function startQuiz(): void {
-  quizAnswers = [];
+  quizAnswers = []; quizOpen = true;
   if (menu) renderQuiz(menu);
   $("quiz").scrollIntoView({ block: "start" });
+}
+function closeQuiz(): void {
+  quizAnswers = null; quizOpen = false;
+  if (menu) renderQuiz(menu);
 }
 function answerQuiz(answer: number | null): void {
   if (quizAnswers === null) return;
@@ -361,13 +372,10 @@ function answerQuiz(answer: number | null): void {
 /** 「不知道喝什麼」（docs/63 §2 M2a）：一題一題問，答完給 1 主推＋最多 2 備選；對不上就給完整菜單。 */
 function renderQuiz(snapshot: MenuSnapshot): void {
   const quiz = snapshot.quiz;
-  $("quiz").hidden = !menuHome || quiz === undefined;
+  $("quiz").hidden = !quizOpen || quiz === undefined;
   const body = $("quiz-body");
   if (quiz === undefined) { body.replaceChildren(); return; }
-  if (quizAnswers === null) {
-    body.replaceChildren(button("幫我挑", startQuiz, "action quiz-start"));
-    return;
-  }
+  if (quizAnswers === null) { body.replaceChildren(); return; }
   const step = quizAnswers.length;
   const question = quiz.questions[step];
   if (question !== undefined) {
@@ -375,7 +383,7 @@ function renderQuiz(snapshot: MenuSnapshot): void {
     options.append(...question.options.map((option, index) => button(option.label, () => answerQuiz(index), "quiz-option")));
     const nav = el("div", "quiz-nav");
     nav.append(button(step === 0 ? "先不用" : "上一題", () => {
-      if (step === 0) { quizAnswers = null; renderQuiz(snapshot); } else answerQuiz(null);
+      if (step === 0) closeQuiz(); else answerQuiz(null);
     }, "link-button"));
     body.replaceChildren(el("p", "quiz-step", `第 ${step + 1} / ${quiz.questions.length} 題`),
       el("h3", "quiz-prompt", question.prompt), options, nav);
@@ -385,7 +393,7 @@ function renderQuiz(snapshot: MenuSnapshot): void {
   const again = button("重新回答", startQuiz, "link-button");
   if (picks.length === 0) {
     body.replaceChildren(el("p", "quiz-empty", "今天沒有剛好符合的，看看完整菜單吧。"),
-      button("看完整菜單", () => selectCategory(ALL), "action"), again);
+      button("看完整菜單", () => { closeQuiz(); $("tabs").scrollIntoView({ block: "start" }); }, "action"), again);
     return;
   }
   const rows = picks.flatMap((ref, index): HTMLElement[] => {
@@ -468,7 +476,7 @@ function renderCart(): void {
   noteLabel.append(note); body.append(noteLabel);
   const payment = paymentChoice();
   body.append(payment.node);
-  if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
+  if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
     const invoice = payment.invoice();
     if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
@@ -738,7 +746,7 @@ function orderState(view: OrderView): string {
   if (view.status === "REFUNDED") return `這張訂單已退款${amount}。`;
   if (view.status === "PARTIALLY_REFUNDED") return `這張訂單已部分退款${amount}。`;
   if (view.fulfillment === "HANDED_OVER") return "已領取，謝謝你。";
-  if (view.fulfillment === "AWAITING") return "已付款。帶回家商品請到櫃檯領取。";
+  if (view.fulfillment === "AWAITING") return "已付款。帶著走的商品請到櫃檯領取。";
   const linePay = linePayState(view);
   if (linePay !== null) return linePay;
   switch (view.status) {
@@ -761,10 +769,10 @@ async function refreshOrder(): Promise<void> {
   if (view.table_label) body.append(el("p", "", `桌號 ${view.table_label}`));
   else body.append(el("p", "", "外帶"));
   for (const line of view.lines) {
-    body.append(el("p", "order-line", `${line.name} × ${line.qty}　${money(line.line_total)}${line.take_home ? "　（帶回家）" : ""}`));
+    body.append(el("p", "order-line", `${line.name} × ${line.qty}　${money(line.line_total)}${line.take_home ? "　（帶著走）" : ""}`));
   }
   if (view.lines.some((line) => line.take_home) && view.fulfillment !== "HANDED_OVER" && view.status !== "REFUNDED") {
-    body.append(el("p", "take-home-note", "帶回家商品請到櫃檯領取。"));
+    body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   }
   body.append(el("p", "cart-total", `合計 ${money(view.total)}`));
   if (view.note) body.append(el("p", "", `備註：${view.note}`));
@@ -843,7 +851,6 @@ async function main(): Promise<void> {
     if (history.state?.cart) history.back();
     else showScreen("menu");
   });
-  $("back-home").addEventListener("click", () => selectCategory(ALL, true));
   // 付款完成後就不再輪詢；客人切回這個分頁時重抓一次，店裡後來退了款也看得到（docs/44 §4.5 C6）。
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && activeOrder !== null) void refreshOrder();
@@ -852,13 +859,14 @@ async function main(): Promise<void> {
     if (ORDER_PATH.test(location.pathname) || activeOrder) { location.reload(); return; }
     restoringHistory = true;
     closeDetail();
-    selectCategory(event.state?.menuCategory ?? ALL, event.state?.menuHome ?? true, false);
+    activeTab = event.state?.menuTab ?? null;
+    if (menu) renderMenu(menu);
     if (event.state?.cart) renderCart(); else showScreen("menu");
     restoringHistory = false;
   });
   if (!ORDER_PATH.test(location.pathname)) {
-    menuHome = history.state?.menuHome ?? true; activeCategory = history.state?.menuCategory ?? ALL;
-    history.replaceState({ menuCategory: activeCategory, menuHome, cart: history.state?.cart === true }, "");
+    activeTab = history.state?.menuTab ?? null;
+    history.replaceState({ menuTab: activeTab, cart: history.state?.cart === true }, "");
   }
   tableCode = tableCodeFromPath(location.pathname);
   const orderToken = ORDER_PATH.exec(location.pathname)?.[1];

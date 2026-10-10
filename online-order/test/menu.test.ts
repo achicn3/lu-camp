@@ -5,7 +5,7 @@ import { SNAPSHOT, get, integration } from "./helpers";
 
 const PRESENTATION = {
   flavor_description: "莓果、可可", audience_description: "適合喜歡明亮酸香的人",
-  is_recommended: true, is_new: false, limited_on: "2026-10-06",
+  is_new: false, limited_on: "2026-10-06",
   show_remaining: false, low_stock_threshold: 5, hide_sold_out: false,
 };
 
@@ -141,6 +141,29 @@ describe("菜單", () => {
     ["預選選項不是整數陣列", { ...EXPERIENCE, option_ids: ["1"] }],
   ])("手沖體驗卡格式錯誤拒收：%s", async (_, experience) => {
     expect((await publish({ ...SNAPSHOT, experiences: [experience] })).status).toBe(422);
+  });
+
+  it("舊版店內程式還會送 is_recommended（布林）：照收；新版不送也收", async () => {
+    const legacy = { ...SNAPSHOT, items: [{ ...SNAPSHOT.items[0], presentation: { ...PRESENTATION, is_recommended: true } }] };
+    expect((await publish(legacy)).status).toBe(200);
+  });
+
+  it("店員推薦（2026-10-10）原樣保留，順序不變", async () => {
+    const snapshot = { ...SNAPSHOT, experiences: [EXPERIENCE],
+      picks: [{ kind: "experience", id: 3 }, { kind: "item", id: 5 }] };
+    expect((await publish(snapshot)).status).toBe(200);
+    expect(((await (await get("/api/menu")).json()) as { picks: unknown }).picks).toEqual(snapshot.picks);
+  });
+
+  it.each([
+    ["引用不在快照裡的品項", [{ kind: "item", id: 999 }]],
+    ["引用不在快照裡的帶著走商品", [{ kind: "retail", id: 999 }]],
+    ["不認得的種類", [{ kind: "menu", id: 5 }]],
+    ["重複", [{ kind: "item", id: 5 }, { kind: "item", id: 5 }]],
+    ["多欄位", [{ kind: "item", id: 5, rank: 1 }]],
+    ["超過 30 項", Array.from({ length: 31 }, () => ({ kind: "item", id: 5 }))],
+  ])("店員推薦格式錯誤拒收：%s", async (_, picks) => {
+    expect((await publish({ ...SNAPSHOT, experiences: [EXPERIENCE], picks })).status).toBe(422);
   });
 
   it("引導推薦（M2a）原樣保留", async () => {

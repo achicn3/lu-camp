@@ -19,7 +19,7 @@ export function RetailEditor({ listingId }: { listingId: number | null }) {
     enabled: listingId !== null,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/online-order/retail");
-      if (!data) throw new Error(apiDetail(error, "讀取帶回家商品失敗"));
+      if (!data) throw new Error(apiDetail(error, "讀取帶著走商品失敗"));
       return data;
     },
   });
@@ -29,11 +29,11 @@ export function RetailEditor({ listingId }: { listingId: number | null }) {
   return (
     <section className="exp-page">
       <Link href={BACK} className="pur-back">← 回線上發布</Link>
-      <h1 className="page-title">{listingId === null ? "新增帶回家商品" : "編輯帶回家商品"}</h1>
+      <h1 className="page-title">{listingId === null ? "新增帶著走商品" : "編輯帶著走商品"}</h1>
       {loading && <p role="status">載入中…</p>}
       {listings.error && <p role="alert" className="form-error">{listings.error.message}</p>}
       {!loading && !listings.error && listingId !== null && initial === undefined && (
-        <p role="alert" className="form-error">找不到這個帶回家商品，可能已經下線了。</p>
+        <p role="alert" className="form-error">找不到這個帶著走商品，可能已經下線了。</p>
       )}
       {!loading && !listings.error && initial !== undefined && (
         <RetailForm

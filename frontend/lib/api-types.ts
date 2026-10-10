@@ -3030,6 +3030,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/staff-picks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Staff Picks
+         * @description 店員推薦清單（順序就是客人看到的順序）。
+         */
+        get: operations["getStaffPicks"];
+        /**
+         * Update Staff Picks
+         * @description 整份覆寫；下次發佈才到客人頁。
+         */
+        put: operations["updateStaffPicks"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/status": {
         parameters: {
             query?: never;
@@ -9168,11 +9192,6 @@ export interface components {
              * @default false
              */
             is_new: boolean;
-            /**
-             * Is Recommended
-             * @default false
-             */
-            is_recommended: boolean;
             /** Limited On */
             limited_on?: string | null;
             /**
@@ -9208,11 +9227,6 @@ export interface components {
              * @default false
              */
             is_new: boolean;
-            /**
-             * Is Recommended
-             * @default false
-             */
-            is_recommended: boolean;
             /** Limited On */
             limited_on?: string | null;
             /**
@@ -11468,6 +11482,27 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * StaffPickRef
+         * @description 店員推薦的一項：餐飲品項、手沖體驗卡或帶著走商品（retail 的 id 是一般商品 id）。
+         */
+        StaffPickRef: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "item" | "experience" | "retail";
+        };
+        /**
+         * StaffPicks
+         * @description 店員推薦整份覆寫（順序就是客人看到的順序；最多 30 項）。
+         */
+        StaffPicks: {
+            /** Items */
+            items?: components["schemas"]["StaffPickRef"][];
         };
         /**
          * StocktakeConfirmRequest
@@ -17939,6 +17974,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getStaffPicks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffPicks"];
+                };
+            };
+        };
+    };
+    updateStaffPicks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffPicks"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffPicks"];
                 };
             };
             /** @description Validation Error */

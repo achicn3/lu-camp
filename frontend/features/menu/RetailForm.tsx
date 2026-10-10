@@ -80,7 +80,7 @@ export function RetailForm({ initial, onDone, onCancel }: {
   }
 
   return (
-    <form className="exp-form retail-form" aria-label="帶回家商品" onSubmit={submit}>
+    <form className="exp-form retail-form" aria-label="帶著走商品" onSubmit={submit}>
       <div className="exp-form-main">
         <fieldset className="card exp-block" disabled={save.isPending}>
           <legend className="exp-block-title">商品</legend>

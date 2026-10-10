@@ -222,7 +222,7 @@ describe("POS 線上訂單", () => {
     const row = screen.getByRole("listitem", { name: /桌號 A1/ });
     expect(row.textContent).toContain("已付款・待交貨");
     expect(row.textContent).toContain("要交給客人：耶加雪菲 200g ×1");
-    expect(row.textContent).not.toContain("拿鐵 ×1（帶回家）");
+    expect(row.textContent).not.toContain("拿鐵 ×1（帶著走）");
     expect(screen.queryByRole("button", { name: "帶入結帳" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "已交貨" }));
     await waitFor(() =>

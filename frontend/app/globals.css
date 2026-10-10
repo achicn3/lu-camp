@@ -6656,3 +6656,12 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .popularity-fields select, .popularity-fields input { min-height: var(--tap-min); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--text-md); background: var(--surface); }
 .popularity-form .btn-primary { justify-self: start; }
 .popularity-board { margin: 0; padding-left: var(--sp-4); display: grid; gap: var(--sp-1); }
+
+/* 店員推薦清單（2026-10-10）。 */
+.staff-picks { display: grid; gap: var(--sp-3); }
+.staff-pick-list { margin: 0; padding-left: var(--sp-5, 24px); display: grid; gap: var(--sp-2); }
+.staff-pick-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
+.staff-pick-actions { display: inline-flex; gap: var(--sp-1); }
+.staff-pick-actions .btn-ghost { min-height: 36px; min-width: 40px; padding: 0 var(--sp-2); }
+.staff-pick-add { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.staff-pick-add select { flex: 1 1 240px; min-height: var(--tap-min); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--text-md); background: var(--surface); }

@@ -37,7 +37,7 @@ it("列出帶回家商品：名稱、售價、庫存、分類，編輯連到獨�
   expect(row.textContent).toContain("咖啡豆");
   expect(row.textContent).toContain("加購：咖啡豆");
   expect(within(row).getByRole("link", { name: "編輯" }).getAttribute("href")).toBe("/menu/retail/7");
-  expect(screen.getByRole("link", { name: "新增帶回家商品" }).getAttribute("href")).toBe("/menu/retail/new");
+  expect(screen.getByRole("link", { name: "新增帶著走商品" }).getAttribute("href")).toBe("/menu/retail/new");
 });
 
 it("新增：搜尋現有商品挑一個，送出的內容不含價格與庫存", async () => {
@@ -53,7 +53,7 @@ it("新增：搜尋現有商品挑一個，送出的內容不含價格與庫存"
   const done = vi.fn();
   wrap(<RetailForm initial={null} onDone={done} onCancel={vi.fn()} />);
   const user = userEvent.setup();
-  const form = screen.getByRole("form", { name: "帶回家商品" });
+  const form = screen.getByRole("form", { name: "帶著走商品" });
   await user.type(within(form).getByLabelText("搜尋商品"), "耶加");
   await user.click(await within(form).findByRole("radio", { name: /耶加雪菲 200g/ }));
   await user.type(within(form).getByLabelText("介紹"), "柑橘、茉莉");
@@ -80,7 +80,7 @@ it("編輯：商品固定、可以上傳照片（走帶回家商品的照片端�
     return response({ ...LISTING, photo_sha256: "a".repeat(64) });
   }));
   wrap(<RetailForm initial={LISTING as never} onDone={vi.fn()} onCancel={vi.fn()} />);
-  const form = screen.getByRole("form", { name: "帶回家商品" });
+  const form = screen.getByRole("form", { name: "帶著走商品" });
   expect(within(form).queryByLabelText("搜尋商品")).toBeNull();
   expect(form.textContent).toContain("耶加雪菲 200g");
   const user = userEvent.setup();

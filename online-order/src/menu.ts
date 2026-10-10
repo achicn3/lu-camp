@@ -34,16 +34,18 @@ function validDate(value: unknown): boolean {
 }
 
 function validPresentation(value: unknown): boolean {
+  // is_recommended：舊版店內程式還會送（2026-10-10 起改用店員推薦清單），收但不用。
   if (!isRecord(value) || !keysAre(value, [
-    "flavor_description", "audience_description", "is_recommended", "is_new",
+    "flavor_description", "audience_description", "is_new",
     "limited_on", "show_remaining", "low_stock_threshold", "hide_sold_out",
-  ], ["role"])) return false;
+  ], ["role", "is_recommended"])) return false;
+  if (Object.hasOwn(value, "is_recommended") && typeof value.is_recommended !== "boolean") return false;
   if (Object.hasOwn(value, "role") && value.role !== null &&
     !(UPSELL_ROLES as readonly unknown[]).includes(value.role)) return false;
   const shortText = (text: unknown) => text === null ||
     (typeof text === "string" && [...text].length <= 120);
   return shortText(value.flavor_description) && shortText(value.audience_description) &&
-    [value.is_recommended, value.is_new, value.show_remaining, value.hide_sold_out]
+    [value.is_new, value.show_remaining, value.hide_sold_out]
       .every((flag) => typeof flag === "boolean") &&
     validDate(value.limited_on) && Number.isInteger(value.low_stock_threshold) &&
     (value.low_stock_threshold as number) >= 0 && (value.low_stock_threshold as number) <= 9999;
@@ -112,6 +114,20 @@ function validQuiz(value: unknown, itemIds: Set<unknown>, experienceIds: Set<unk
         ((r.kind === "item" && itemIds.has(r.id)) || (r.kind === "experience" && experienceIds.has(r.id))))));
 }
 
+/** 店員推薦（2026-10-10）：有序、不重複、最多 30 項；引用的東西要在同一份快照裡。 */
+function validPicks(value: unknown, ids: Record<string, Set<unknown>>): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > 30) return false;
+  const seen = new Set<string>();
+  return value.every((r: unknown) => {
+    if (!isRecord(r) || !keysAre(r, ["kind", "id"]) || typeof r.kind !== "string") return false;
+    const key = `${r.kind}:${String(r.id)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return ids[r.kind]?.has(r.id) ?? false;
+  });
+}
+
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
@@ -124,6 +140,10 @@ export function validSnapshot(s: unknown): s is { version: number; published_at:
     Array.isArray(o.experiences) ? o.experiences.map((e: unknown) => (isRecord(e) ? e.id : undefined)) : [],
   );
   if (!validQuiz(o.quiz, itemIds, experienceIds)) return false;
+  const retailIds = new Set(
+    Array.isArray(o.retail) ? o.retail.map((r: unknown) => (isRecord(r) ? r.id : undefined)) : [],
+  );
+  if (!validPicks(o.picks, { item: itemIds, experience: experienceIds, retail: retailIds })) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;

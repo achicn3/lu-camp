@@ -20,7 +20,7 @@ export function RetailSection() {
     queryKey: RETAIL_KEY,
     queryFn: async () => {
       const { data, error: e } = await api.GET("/api/v1/online-order/retail");
-      if (!data) throw new Error(apiDetail(e, "讀取帶回家商品失敗"));
+      if (!data) throw new Error(apiDetail(e, "讀取帶著走商品失敗"));
       return data;
     },
   });
@@ -43,16 +43,16 @@ export function RetailSection() {
     <section className="card menu-experiences" aria-labelledby="menu-retail-title">
       <div className="menu-experiences-head">
         <div>
-          <h2 id="menu-retail-title">帶回家（零售商品）</h2>
+          <h2 id="menu-retail-title">帶著走（零售商品）</h2>
           <p className="hint">
             從現有商品挑上線上菜單，客人付款後到櫃檯領取。價格與庫存跟著原商品；改完到上方按「發佈到線上點餐」。
           </p>
         </div>
-        <Link href="/menu/retail/new" className="btn-primary">新增帶回家商品</Link>
+        <Link href="/menu/retail/new" className="btn-primary">新增帶著走商品</Link>
       </div>
       {listings.isError && <p role="alert" className="form-error">{listings.error.message}</p>}
       {error !== null && <p role="alert" className="form-error">{error}</p>}
-      {listings.data && listings.data.length === 0 && <p className="hint">還沒有帶回家商品。</p>}
+      {listings.data && listings.data.length === 0 && <p className="hint">還沒有帶著走商品。</p>}
       <ul className="menu-experience-list">
         {(listings.data ?? []).map((row) => (
           <li key={row.id} className={`menu-experience-row${row.is_active ? "" : " is-off"}`}>

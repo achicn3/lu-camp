@@ -1,8 +1,8 @@
 // 客人點餐頁的純邏輯（docs/44 §4.2；店主 2026-10-02 定案的問候語與顯示方式）。
 import { describe, expect, it } from "vitest";
 
-import type { MenuItemView, MenuPresentation } from "../src/client/types";
-import { homeSelection, greeting, itemBadge, itemSoldOut, presentationBadges, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
+import { greeting, itemBadge, itemSoldOut, menuTabs, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -59,7 +59,7 @@ describe("桌位碼", () => {
 
 const presentation: MenuPresentation = {
   flavor_description: null, audience_description: null,
-  is_recommended: false, is_new: false, limited_on: null,
+  is_new: false, limited_on: null,
   show_remaining: true, low_stock_threshold: 5, hide_sold_out: false,
 };
 const item: MenuItemView = {
@@ -81,15 +81,11 @@ describe("呈現庫存與可售判斷", () => {
 describe("人工標籤", () => {
   it("未設定不杜撰；今日限定在台北跨日自動失效", () => {
     expect(presentationBadges(item, new Date("2026-10-06T15:59:59Z"))).toEqual([]);
-    const featured = { ...item, presentation: { ...presentation,
-      is_recommended: true, is_new: true, limited_on: "2026-10-06",
-    } };
-    expect(presentationBadges(featured, new Date("2026-10-06T15:59:59Z")))
-      .toEqual(["露坑推薦", "新品", "今日限定"]);
-    expect(presentationBadges(featured, new Date("2026-10-06T16:00:00Z")))
-      .toEqual(["露坑推薦", "新品"]);
-    expect(presentationBadges(featured, new Date("2026-10-05T15:59:59Z")))
-      .toEqual(["露坑推薦", "新品"]);
+    // 「露坑推薦」標籤已改成「店員推薦」分頁（2026-10-10）
+    const featured = { ...item, presentation: { ...presentation, is_new: true, limited_on: "2026-10-06" } };
+    expect(presentationBadges(featured, new Date("2026-10-06T15:59:59Z"))).toEqual(["新品", "今日限定"]);
+    expect(presentationBadges(featured, new Date("2026-10-06T16:00:00Z"))).toEqual(["新品"]);
+    expect(presentationBadges(featured, new Date("2026-10-05T15:59:59Z"))).toEqual(["新品"]);
   });
 });
 
@@ -129,31 +125,49 @@ describe("售完展示", () => {
 });
 
 
-describe("首頁選擇", () => {
-  it("只推薦人工指定且可售品項，依原順序最多三項，不改來源", () => {
-    const featured = { ...item, presentation: { ...presentation, is_recommended: true } };
-    const items = [{ ...featured, id: 0, remaining: 0 }, ...[1, 2, 3, 4].map((id) => ({ ...featured, id })),
-      { ...featured, id: 5, option_groups: [required] }];
-    expect(homeSelection({ categories: [], items }).recommended.map((entry) => entry.id)).toEqual([1, 2, 3]);
-    expect(items).toHaveLength(6);
+describe("完整菜單的分類列（2026-10-10）", () => {
+  const exp: MenuExperienceView = {
+    id: 9, item_id: 1, option_ids: [], title: "手沖體驗", tag: null, origin: null, notes: null,
+    description: null, includes: [], theme: "peach", art: "peach", effect: "random",
+  };
+  const bean: MenuRetailView = {
+    id: 40, name: "咖啡豆", description: null, category: "豆", unit_price: 450, photo: null,
+    role: "bean", available: true, remaining: 3,
+  };
+  const base: MenuSnapshot = {
+    version: 1, published_at: "2026-10-10T00:00:00Z", store_name: "露坑", font: null,
+    categories: [{ id: 1, name: "咖啡" }, { id: 2, name: "甜點" }],
+    items: [item, { ...item, id: 2, category_id: 2 }],
+  };
+
+  it("店員推薦第一、手沖體驗、各分類、帶著走；沒有的就不出現", () => {
+    const full = { ...base, experiences: [exp], retail: [bean], picks: [{ kind: "item" as const, id: 2 }] };
+    expect(menuTabs(full).map((tab) => tab.label)).toEqual(["店員推薦", "手沖體驗", "咖啡", "甜點", "帶著走"]);
+    expect(menuTabs(base).map((tab) => tab.label)).toEqual(["咖啡", "甜點"]);
   });
-  it("不同分類交錯且首項售完時，推薦仍依發布順序", () => {
-    const featured = { ...item, presentation: { ...presentation, is_recommended: true } };
-    const items = [{ ...featured, id: 1, remaining: 0 }, { ...featured, id: 2, category_id: 2 }, { ...featured, id: 3 }];
-    expect(homeSelection({ categories: [], items }).recommended.map((entry) => entry.id)).toEqual([2, 3]);
+
+  it("沒分類的品項放「其他」，不會找不到", () => {
+    const loose = { ...base, items: [...base.items, { ...item, id: 3, category_id: null }] };
+    expect(menuTabs(loose).map((tab) => tab.label)).toEqual(["咖啡", "甜點", "其他"]);
   });
-  it("略過沒有可展示品項的分類；不把未設定商品假稱推薦", () => {
-    const selection = homeSelection({ categories: [{ id: 1, name: "咖啡" }, { id: 2, name: "甜點" }],
-      items: [item, { ...item, id: 2, category_id: 2, remaining: 0,
-        presentation: { ...presentation, hide_sold_out: true } }] });
-    expect(selection.recommended).toEqual([]);
-    expect(selection.categories).toEqual([{ id: 1, name: "咖啡" }]);
+
+  it("沒有可展示品項的分類不出現", () => {
+    const hidden = { ...base, items: [item, { ...item, id: 2, category_id: 2, remaining: 0,
+      presentation: { ...presentation, hide_sold_out: true } }] };
+    expect(menuTabs(hidden).map((tab) => tab.label)).toEqual(["咖啡"]);
   });
-  it("保留售完分類入口，未分類品項仍可透過全部選取", () => {
-    const selection = homeSelection({ categories: [{ id: 1, name: "咖啡" }],
-      items: [{ ...item, remaining: 0 }, { ...item, id: 2, category_id: null }] });
-    expect(selection.categories).toHaveLength(1);
-    expect(selection.recommended).toEqual([]);
+
+  it("店員推薦照店主排的順序；看不到的（隱藏、已不在菜單）略過；三種東西都能推", () => {
+    const menu = { ...base, experiences: [exp], retail: [bean], picks: [
+      { kind: "retail" as const, id: 40 }, { kind: "item" as const, id: 99 },
+      { kind: "experience" as const, id: 9 }, { kind: "item" as const, id: 2 },
+    ] };
+    expect(staffPicks(menu).map((pick) => `${pick.kind}:${pick.kind === "item" ? pick.item.id :
+      pick.kind === "experience" ? pick.view.experience.id : pick.product.id}`))
+      .toEqual(["retail:40", "experience:9", "item:2"]);
+    const none = { ...menu, picks: [{ kind: "item" as const, id: 99 }] };
+    expect(staffPicks(none)).toEqual([]);
+    expect(menuTabs(none).map((tab) => tab.label)[0]).toBe("手沖體驗");
   });
 });
 

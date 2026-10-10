@@ -18,6 +18,7 @@ import { RetailSection } from "@/features/menu/RetailSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { QuizSection } from "@/features/menu/QuizSection";
+import { StaffPicksSection } from "@/features/menu/StaffPicksSection";
 import { PopularitySection } from "@/features/menu/PopularitySection";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -669,6 +670,7 @@ function MenuPageContent() {
         hidden={section !== "online"}
       >
         <OnlinePublishPanel />
+        <StaffPicksSection />
         <QuizSection />
         <PopularitySection />
         <ExperienceSection />

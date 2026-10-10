@@ -16,7 +16,7 @@ const BREW: MenuItemView = {
   id: 1, name: "手沖咖啡", description: null, category_id: 1, unit_price: 220, photo: null,
   available: true, remaining: null, option_groups: [],
   presentation: {
-    flavor_description: null, audience_description: null, is_recommended: false, is_new: false,
+    flavor_description: null, audience_description: null, is_new: false,
     limited_on: null, show_remaining: true, low_stock_threshold: 5, hide_sold_out: false, role: "experience",
   },
 };
