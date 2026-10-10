@@ -71,6 +71,7 @@
 - [MacBook 正式機：升級到 2026-10-10 版（線上點餐人氣標籤）](./77-macbook-upgrade-online-popularity.md)
 - [MacBook 正式機：升級到 2026-10-10 版（線上點餐直接進完整菜單＋店員推薦＋帶著走）](./78-macbook-upgrade-online-full-menu.md)
 - [MacBook 正式機：升級到 2026-10-10 版（收購購物金「改成付現」）](./79-macbook-upgrade-convert-payout-to-cash.md)
+- [MacBook 正式機：升級到 2026-10-10 版（收購「改撥款方式」：購物金 ↔ 現金）](./80-macbook-upgrade-change-payout.md)
 
 ## 評估與後續實作
 

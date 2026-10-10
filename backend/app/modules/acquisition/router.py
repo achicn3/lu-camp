@@ -19,7 +19,8 @@ from app.modules.acquisition.schemas import (
     AcquisitionCombinedResult,
     AcquisitionCreate,
     AcquisitionListRead,
-    AcquisitionPayoutConversionResult,
+    AcquisitionPayoutChangeRequest,
+    AcquisitionPayoutChangeResult,
     AcquisitionRead,
     AcquisitionReceiptRead,
     AcquisitionResult,
@@ -317,22 +318,27 @@ async def void_acquisition(
 
 
 @router.post(
-    "/{acquisition_id}/convert-payout-to-cash",
-    response_model=AcquisitionPayoutConversionResult,
-    operation_id="convertAcquisitionPayoutToCash",
+    "/{acquisition_id}/change-payout",
+    response_model=AcquisitionPayoutChangeResult,
+    operation_id="changeAcquisitionPayout",
 )
-async def convert_acquisition_payout_to_cash(
-    acquisition_id: int, session: SessionDep, user: ManagerDep
-) -> AcquisitionPayoutConversionResult:
-    """購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。
+async def change_acquisition_payout(
+    acquisition_id: int,
+    payload: AcquisitionPayoutChangeRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> AcquisitionPayoutChangeResult:
+    """事後改撥款方式（限 MANAGER；店主 2026-10-10）：客人反悔，購物金 ↔ 現金。
 
-    購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。
-    不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
+    改成現金：購物金（含溢價）整筆沖回、從抽屜付溢價前的價值。改成購物金：客人把現金還回抽屜、
+    照當下溢價率撥購物金（要是會員）。商品不動、客人不重簽。
+    不是全額單一撥款／作廢過部分商品／曾撥過購物金又要改成購物金／非會員 → 422；
+    已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
     """
     svc = AcquisitionService(session)
     try:
-        result = await svc.convert_payout_to_cash(
-            user.store_id, acquisition_id, actor_user_id=user.id
+        result = await svc.change_payout(
+            user.store_id, acquisition_id, to=payload.payout_method, actor_user_id=user.id
         )
     except DomainError as exc:
         await session.rollback()

@@ -38,16 +38,17 @@ function row(over: Record<string, unknown> = {}) {
     payout_credit_cash_equivalent: null,
     voided_at: null,
     void_block: null,
+    payout_change_to: null,
     ...over,
   };
 }
 
 const ROWS = [
-  row(),
+  row({ payout_change_to: "STORE_CREDIT" }),
   row({ id: 13, type: "BULK_LOT", item_count: 1, item_names: ["營釘一批"] }),
   row({ id: 11, type: "CONSIGNMENT", void_block: "CONSIGNMENT", item_count: 1, item_names: ["寄賣椅"], payout_cash_amount: null, total_cash_paid: null }),
   row({ id: 10, void_block: "HAS_SOLD_ITEMS" }),
-  row({ id: 9, void_block: "CREDIT_SPENT", payout_method: "STORE_CREDIT", payout_cash_amount: null, payout_credit_cash_equivalent: "1100" }),
+  row({ id: 9, void_block: "CREDIT_SPENT", payout_method: "STORE_CREDIT", payout_cash_amount: null, payout_credit_cash_equivalent: "1100", payout_change_to: "CASH" }),
   row({ id: 8, void_block: "NO_OPEN_CASH_SESSION" }),
   row({ id: 7, void_block: "ALREADY_VOIDED", voided_at: "2026-09-21T03:00:00Z" }),
 ];
@@ -127,18 +128,21 @@ describe("收購紀錄清單", () => {
     expect(screen.queryByRole("button", { name: "作廢" })).toBeNull();
   });
 
-  it("改成付現：只有管理者、只出現在全額購物金撥款的單（店主 2026-10-10）", async () => {
+  it("改撥款方式：只有管理者、只出現在後端說可以改的單（店主 2026-10-10）", async () => {
     auth.role = "MANAGER";
     stub();
     wrap(<AcquisitionRecords />);
     await waitFor(() => rowOf(12));
-    expect(within(rowOf(9)).getByRole("button", { name: "改成付現" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "改成付現" })).toHaveLength(1);
+    expect(within(rowOf(9)).getByRole("button", { name: "改撥款方式" })).toBeTruthy(); // 購物金
+    expect(within(rowOf(12)).getByRole("button", { name: "改撥款方式" })).toBeTruthy(); // 現金
+    expect(within(rowOf(11)).queryByRole("button", { name: "改撥款方式" })).toBeNull(); // 寄售
+    expect(within(rowOf(10)).queryByRole("button", { name: "改撥款方式" })).toBeNull(); // 後端說不能改
+    expect(within(rowOf(7)).queryByRole("button", { name: "改撥款方式" })).toBeNull(); // 已作廢
     cleanup();
     auth.role = "CLERK";
     wrap(<AcquisitionRecords />);
     await waitFor(() => rowOf(12));
-    expect(screen.queryByRole("button", { name: "改成付現" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "改撥款方式" })).toBeNull();
   });
 
   it("管理者：可作廢的單有作廢鈕；不能作廢的單反灰並講原因", async () => {

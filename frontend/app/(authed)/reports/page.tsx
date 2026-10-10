@@ -967,7 +967,7 @@ function DailyCashPanel() {
               <th>買斷支出</th>
               <th>寄售付款</th>
               <th>退貨退現</th>
-              <th>作廢收回</th>
+              <th>收購退回現金</th>
               <th>手動調整</th>
               <th>應有現金</th>
               <th>實點現金</th>
@@ -1020,7 +1020,7 @@ function DailyCashPanel() {
           <dd><MoneyText value={report.total_sale_refund_out} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>作廢收回</dt>
+          <dt>收購退回現金</dt>
           <dd><MoneyText value={report.total_acquisition_void_in} /></dd>
         </div>
         <div className="rpt-stat">

@@ -89,7 +89,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/acquisitions/{acquisition_id}/convert-payout-to-cash": {
+    "/api/v1/acquisitions/{acquisition_id}/change-payout": {
         parameters: {
             query?: never;
             header?: never;
@@ -99,13 +99,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Convert Acquisition Payout To Cash
-         * @description 購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。
+         * Change Acquisition Payout
+         * @description 事後改撥款方式（限 MANAGER；店主 2026-10-10）：客人反悔，購物金 ↔ 現金。
          *
-         *     購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。
-         *     不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
+         *     改成現金：購物金（含溢價）整筆沖回、從抽屜付溢價前的價值。改成購物金：客人把現金還回抽屜、
+         *     照當下溢價率撥購物金（要是會員）。商品不動、客人不重簽。
+         *     不是全額單一撥款／作廢過部分商品／曾撥過購物金又要改成購物金／非會員 → 422；
+         *     已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。
          */
-        post: operations["convertAcquisitionPayoutToCash"];
+        post: operations["changeAcquisitionPayout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4830,6 +4832,7 @@ export interface components {
             item_names: string[];
             /** Payout Cash Amount */
             payout_cash_amount: string | null;
+            payout_change_to?: components["schemas"]["PayoutMethod"] | null;
             /** Payout Credit Cash Equivalent */
             payout_credit_cash_equivalent: string | null;
             payout_method: components["schemas"]["PayoutMethod"];
@@ -4890,16 +4893,31 @@ export interface components {
             unit_price: number | string;
         };
         /**
-         * AcquisitionPayoutConversionResult
-         * @description 改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。
+         * AcquisitionPayoutChangeRequest
+         * @description 事後改撥款方式（店主 2026-10-10）：改成現金或購物金（客人不重簽、原因固定）。
          */
-        AcquisitionPayoutConversionResult: {
+        AcquisitionPayoutChangeRequest: {
+            /**
+             * Payout Method
+             * @enum {string}
+             */
+            payout_method: "CASH" | "STORE_CREDIT";
+        };
+        /**
+         * AcquisitionPayoutChangeResult
+         * @description 改撥款方式的結果。
+         *
+         *     改成現金：cash＝從抽屜付給客人的現金（溢價前的價值）、store_credit＝扣回的購物金（含溢價）。
+         *     改成購物金：cash＝客人還回抽屜的現金、store_credit＝撥給客人的購物金（含當下溢價）。
+         */
+        AcquisitionPayoutChangeResult: {
             /** Acquisition Id */
             acquisition_id: number;
-            /** Cash Paid */
-            cash_paid: string;
-            /** Reversed Credit */
-            reversed_credit: string;
+            /** Cash */
+            cash: string;
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Store Credit */
+            store_credit: string;
         };
         /**
          * AcquisitionRead
@@ -6158,7 +6176,8 @@ export interface components {
          * @description 現金異動類型。
          *
          *     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
-         *     ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；
+         *     ACQUISITION_VOID_IN 收購付出的現金退回抽屜（進帳，落當前開帳 session）：作廢收購（F6.5），
+         *     或事後把撥款從現金改成購物金、客人把現金還回（2026-10-10）；
          *     SALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。
          * @enum {string}
          */
@@ -12073,7 +12092,7 @@ export interface operations {
             };
         };
     };
-    convertAcquisitionPayoutToCash: {
+    changeAcquisitionPayout: {
         parameters: {
             query?: never;
             header?: never;
@@ -12082,7 +12101,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionPayoutChangeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -12090,7 +12113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcquisitionPayoutConversionResult"];
+                    "application/json": components["schemas"]["AcquisitionPayoutChangeResult"];
                 };
             };
             /** @description Validation Error */

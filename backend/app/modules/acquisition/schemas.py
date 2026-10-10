@@ -265,12 +265,23 @@ class AcquisitionVoidRequest(BaseModel):
         return stripped
 
 
-class AcquisitionPayoutConversionResult(BaseModel):
-    """改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。"""
+class AcquisitionPayoutChangeRequest(BaseModel):
+    """事後改撥款方式（店主 2026-10-10）：改成現金或購物金（客人不重簽、原因固定）。"""
+
+    payout_method: Literal[PayoutMethod.CASH, PayoutMethod.STORE_CREDIT]
+
+
+class AcquisitionPayoutChangeResult(BaseModel):
+    """改撥款方式的結果。
+
+    改成現金：cash＝從抽屜付給客人的現金（溢價前的價值）、store_credit＝扣回的購物金（含溢價）。
+    改成購物金：cash＝客人還回抽屜的現金、store_credit＝撥給客人的購物金（含當下溢價）。
+    """
 
     acquisition_id: int
-    reversed_credit: NTDAmount
-    cash_paid: NTDAmount
+    payout_method: PayoutMethod
+    cash: NTDAmount
+    store_credit: NTDAmount
 
 
 class AcquisitionVoidResult(BaseModel):
@@ -365,6 +376,9 @@ class AcquisitionListItem(BaseModel):
     void_block: AcquisitionVoidBlock | None
     # 排隊收購付款後還沒上架的件數（散裝算剩餘件數）；0＝都上架了或不是排隊收購。
     pending_listing_count: int = 0
+    payout_change_to: PayoutMethod | None = None
+    """事後改撥款方式可以改成什麼（2026-10-10）：全額購物金→CASH、全額現金且沒撥過購物金→STORE_CREDIT；
+    作廢、寄售、混合撥款、撥過購物金又改回現金的單→None。最終判斷仍在改撥款端點。"""
 
 
 class AcquisitionListRead(BaseModel):

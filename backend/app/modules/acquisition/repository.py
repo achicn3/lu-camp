@@ -44,6 +44,20 @@ class AcquisitionRepository:
             )
         )
 
+    async def ids_with_voids(self, store_id: int, acquisition_ids: list[int]) -> set[int]:
+        """這批收購裡有作廢紀錄（含選品作廢）的單。"""
+        if not acquisition_ids:
+            return set()
+        rows = await self._session.scalars(
+            select(AcquisitionVoid.acquisition_id)
+            .where(
+                AcquisitionVoid.store_id == store_id,
+                AcquisitionVoid.acquisition_id.in_(acquisition_ids),
+            )
+            .distinct()
+        )
+        return set(rows.all())
+
     async def add_void(self, record: AcquisitionVoid) -> AcquisitionVoid:
         self._session.add(record)
         await self._session.flush()

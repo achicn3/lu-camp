@@ -430,6 +430,16 @@
             ],
             "title": "Payout Cash Amount"
           },
+          "payout_change_to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "payout_credit_cash_equivalent": {
             "anyOf": [
               {
@@ -659,28 +669,50 @@
         "title": "AcquisitionLotIn",
         "type": "object"
       },
-      "AcquisitionPayoutConversionResult": {
-        "description": "改成付現的結果：扣回多少購物金（含當初溢價）、從抽屜付出多少現金（溢價前的價值）。",
+      "AcquisitionPayoutChangeRequest": {
+        "description": "事後改撥款方式（店主 2026-10-10）：改成現金或購物金（客人不重簽、原因固定）。",
+        "properties": {
+          "payout_method": {
+            "enum": [
+              "CASH",
+              "STORE_CREDIT"
+            ],
+            "title": "Payout Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payout_method"
+        ],
+        "title": "AcquisitionPayoutChangeRequest",
+        "type": "object"
+      },
+      "AcquisitionPayoutChangeResult": {
+        "description": "改撥款方式的結果。\n\n改成現金：cash＝從抽屜付給客人的現金（溢價前的價值）、store_credit＝扣回的購物金（含溢價）。\n改成購物金：cash＝客人還回抽屜的現金、store_credit＝撥給客人的購物金（含當下溢價）。",
         "properties": {
           "acquisition_id": {
             "title": "Acquisition Id",
             "type": "integer"
           },
-          "cash_paid": {
-            "title": "Cash Paid",
+          "cash": {
+            "title": "Cash",
             "type": "string"
           },
-          "reversed_credit": {
-            "title": "Reversed Credit",
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
+          "store_credit": {
+            "title": "Store Credit",
             "type": "string"
           }
         },
         "required": [
           "acquisition_id",
-          "reversed_credit",
-          "cash_paid"
+          "payout_method",
+          "cash",
+          "store_credit"
         ],
-        "title": "AcquisitionPayoutConversionResult",
+        "title": "AcquisitionPayoutChangeResult",
         "type": "object"
       },
       "AcquisitionRead": {
@@ -4175,7 +4207,7 @@
         "type": "object"
       },
       "CashMovementType": {
-        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；\nACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；\nSALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。",
+        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；\nACQUISITION_VOID_IN 收購付出的現金退回抽屜（進帳，落當前開帳 session）：作廢收購（F6.5），\n或事後把撥款從現金改成購物金、客人把現金還回（2026-10-10）；\nSALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。",
         "enum": [
           "SALE_IN",
           "BUYOUT_OUT",
@@ -20240,10 +20272,10 @@
         ]
       }
     },
-    "/api/v1/acquisitions/{acquisition_id}/convert-payout-to-cash": {
+    "/api/v1/acquisitions/{acquisition_id}/change-payout": {
       "post": {
-        "description": "購物金撥款改成付現（限 MANAGER；店主 2026-10-10）：客人選了購物金、送出後反悔要現金。\n\n購物金（含溢價）全數沖回、從抽屜付出溢價前的價值、撥款方式改現金、寫稽核；商品不動。\n不是全額購物金／作廢過部分商品 → 422；已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。",
-        "operationId": "convertAcquisitionPayoutToCash",
+        "description": "事後改撥款方式（限 MANAGER；店主 2026-10-10）：客人反悔，購物金 ↔ 現金。\n\n改成現金：購物金（含溢價）整筆沖回、從抽屜付溢價前的價值。改成購物金：客人把現金還回抽屜、\n照當下溢價率撥購物金（要是會員）。商品不動、客人不重簽。\n不是全額單一撥款／作廢過部分商品／曾撥過購物金又要改成購物金／非會員 → 422；\n已作廢／購物金已花用／沒開帳 → 409；找不到 → 404。",
+        "operationId": "changeAcquisitionPayout",
         "parameters": [
           {
             "in": "path",
@@ -20255,12 +20287,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquisitionPayoutChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AcquisitionPayoutConversionResult"
+                  "$ref": "#/components/schemas/AcquisitionPayoutChangeResult"
                 }
               }
             },
@@ -20282,7 +20324,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Convert Acquisition Payout To Cash",
+        "summary": "Change Acquisition Payout",
         "tags": [
           "acquisition"
         ]

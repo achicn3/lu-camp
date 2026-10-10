@@ -89,7 +89,7 @@ class DailyCashSessionRow(BaseModel):
     closed_by: int | None
     opening_float: NTDAmount
     cash_sales: NTDAmount  # SALE_IN（僅現金 leg）
-    acquisition_void_in: NTDAmount  # 作廢收購退現（F6.5，進帳）
+    acquisition_void_in: NTDAmount  # 收購退回現金（作廢 F6.5／改撥購物金，進帳）
     buyout_out: NTDAmount
     consignment_payout_out: NTDAmount
     sale_refund_out: NTDAmount  # 退貨退現（出帳）

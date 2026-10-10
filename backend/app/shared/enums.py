@@ -91,7 +91,8 @@ class CashMovementType(StrEnum):
     """現金異動類型。
 
     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
-    ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；
+    ACQUISITION_VOID_IN 收購付出的現金退回抽屜（進帳，落當前開帳 session）：作廢收購（F6.5），
+    或事後把撥款從現金改成購物金、客人把現金還回（2026-10-10）；
     SALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。
     """
 
