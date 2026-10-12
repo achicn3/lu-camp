@@ -251,3 +251,70 @@ describe("線上 LINE Pay", () => {
     expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(409);
   });
 });
+
+
+describe("付款端點防濫用（docs/44 §8.4）", () => {
+  const paymentPost = (token: string, suffix = "", ip = "10.99.0.1", body?: string) =>
+    exports.default.fetch(new Request(`https://order.test/api/orders/${token}/linepay${suffix}`, {
+      method: "POST", headers: { "CF-Connecting-IP": ip }, body,
+    }));
+
+  it("同 IP 反覆重開付款最多每分鐘 5 次；被限流仍能完成已授權付款", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { body } = await place();
+    for (let i = 0; i < 5; i++) {
+      expect((await paymentPost(body.token)).status).toBe(200);
+      if (i < 4) expect((await paymentPost(body.token, "/cancel")).status).toBe(200);
+    }
+    const blocked = await paymentPost(body.token);
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual({ error: "rate_limited" });
+    expect(fake.txs.size).toBe(5);
+    authorize(4);
+    expect((await paymentPost(body.token, "/confirm")).status).toBe(200);
+    expect((await view(body.token)).status).toBe("PAID");
+    expect(fake.confirmCalls).toBe(1);
+  });
+
+  it("付款限流依 IP 與分鐘分開，送單額度不被付款重試吃掉", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { body } = await place();
+    for (let i = 0; i < 5; i++) expect((await paymentPost(body.token)).status).toBe(200);
+    expect((await paymentPost(body.token)).status).toBe(429);
+    expect((await paymentPost(body.token, "", "10.99.0.2")).status).toBe(200);
+    const newOrder = await exports.default.fetch(new Request("https://order.test/api/orders", {
+      method: "POST", headers: { "CF-Connecting-IP": "10.99.0.1" },
+      body: JSON.stringify({
+        idempotency_key: crypto.randomUUID(), table_code: null, payment_method: "CASH",
+        turnstile_token: "tok", lines: [{ item_id: 5, option_ids: [], qty: 1 }],
+      }),
+    }));
+    expect(newOrder.status).toBe(201);
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 60_000);
+    expect((await paymentPost(body.token)).status).toBe(200);
+  });
+
+  it.each(["", "/confirm", "/cancel"])("付款 %s 拒絕超大 body，沒有交易或狀態副作用", async (suffix) => {
+    const { body } = await place();
+    expect((await paymentPost(body.token)).status).toBe(200);
+    authorize();
+    const before = await env.DB.prepare("SELECT * FROM orders").first();
+    const oversized = await paymentPost(body.token, suffix, "10.99.0.1", "x".repeat(16 * 1024 + 1));
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "payload_too_large" });
+    expect(await env.DB.prepare("SELECT * FROM orders").first()).toEqual(before);
+    expect(fake.txs.size).toBe(1);
+    expect(fake.confirmCalls).toBe(0);
+  });
+
+  it("偽造成功回呼及金額不能把未授權交易變成已付款", async () => {
+    const { body } = await place();
+    expect((await paymentPost(body.token)).status).toBe(200);
+    const response = await paymentPost(body.token, "/confirm?returnCode=0000&transactionId=1", "10.99.0.1",
+      JSON.stringify({ status: "PAID", amount: 1, transactionId: "1" }));
+    expect(response.status).toBe(202);
+    expect((await view(body.token)).status).toBe("PENDING");
+    expect([...fake.txs.values()][0]?.state).toBe("reserved");
+  });
+});

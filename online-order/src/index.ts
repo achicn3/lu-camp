@@ -12,7 +12,7 @@ import { BodyTooLarge, error, readBody, withSecurityHeaders } from "./http";
 import { type MediaKind, getMedia, mediaLimit, putMedia } from "./media";
 import { cancelLinePay, confirmLinePay, startLinePay } from "./linepay-orders";
 import { MENU_MAX_BYTES, publishMenu, readMenu } from "./menu";
-import { ORDER_MAX_BYTES, createOrder, readOrder, storeStatus } from "./orders";
+import { ORDER_MAX_BYTES, createOrder, paymentRateLimited, readOrder, storeStatus } from "./orders";
 import { publishTables, readTable } from "./tables";
 
 const TABLES_MAX_BYTES = 64 * 1024;
@@ -67,9 +67,17 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   const pay = /^\/api\/orders\/([^/]+)\/linepay(\/confirm|\/cancel)?$/.exec(path);
   if (pay && req.method === "POST") {
+    // 維持既有空 body 相容性；任何付款副作用前先限制實際讀取量。
+    try {
+      await readBody(req, ORDER_MAX_BYTES);
+    } catch (e) {
+      if (e instanceof BodyTooLarge) return error("payload_too_large", 413);
+      throw e;
+    }
     const token = pay[1] ?? "";
     if (pay[2] === "/confirm") return confirmLinePay(env, storeId, token);
     if (pay[2] === "/cancel") return cancelLinePay(env, storeId, token);
+    if (await paymentRateLimited(req, env, storeId)) return error("rate_limited", 429);
     return startLinePay(req, env, storeId, token);
   }
   if (req.method !== "GET" && req.method !== "HEAD") {

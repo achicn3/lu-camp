@@ -136,19 +136,28 @@ function deviceCookie(id: string): string {
   return `${DEVICE_COOKIE}=${id}; Path=/api; Max-Age=31536000; HttpOnly; Secure; SameSite=Strict`;
 }
 
-async function rateLimited(env: Env, storeId: number, ipHash: string, now: number): Promise<boolean> {
+async function rateLimited(
+  env: Env, storeId: number, ipHash: string, now: number, scope = "order",
+): Promise<boolean> {
   const windowStart = Math.floor(now / 60000) * 60000;
   const row = await env.DB.prepare(
     "INSERT INTO rate_counters (store_id, key, window_start, count) VALUES (?, ?, ?, 1) " +
       "ON CONFLICT (store_id, key, window_start) DO UPDATE SET count = count + 1 RETURNING count",
   )
-    .bind(storeId, `order:${ipHash}`, windowStart)
+    .bind(storeId, `${scope}:${ipHash}`, windowStart)
     .first<{ count: number }>();
   // 順手清掉舊的計數列，表不會一直長。
   await env.DB.prepare("DELETE FROM rate_counters WHERE store_id = ? AND window_start < ?")
     .bind(storeId, windowStart - 60000)
     .run();
   return (row?.count ?? 0) > RATE_PER_MINUTE;
+}
+
+/** 付款發起另計每 IP 每分鐘 5 次；不攔 confirm／補查，避免阻擋已授權付款。 */
+export async function paymentRateLimited(req: Request, env: Env, storeId: number): Promise<boolean> {
+  const ip = req.headers.get("CF-Connecting-IP") ?? "";
+  const ipHash = hex(await hmac(env.INTEGRATION_SECRET, `ip:${ip}`));
+  return rateLimited(env, storeId, ipHash, Date.now(), "payment");
 }
 
 export async function accepting(env: Env, storeId: number, now = Date.now()): Promise<boolean> {
