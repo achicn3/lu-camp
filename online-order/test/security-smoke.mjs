@@ -16,19 +16,24 @@ const token = randomBytes(32).toString("base64url");
 const results = [];
 async function probe(name, path, expectedStatus, expectedError, init = {}) {
   let actualStatus = null;
+  let check = "request";
   try {
     const res = await fetch(new URL(path, target), { ...init, redirect: "error", signal: AbortSignal.timeout(10_000) });
     actualStatus = res.status;
     const body = await res.json();
+    check = "status";
     assert.equal(res.status, expectedStatus);
+    check = "error code";
     if (expectedError !== null) assert.equal(body.error, expectedError);
+    check = "CSP";
     assert.match(res.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+    check = "MIME header";
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     results.push({ name, pass: true, status: res.status });
     return body;
   } catch (error) {
     // Never dump response bodies, order tokens, request headers or credentials.
-    results.push({ name, pass: false, status: actualStatus, reason: error instanceof assert.AssertionError ? "unexpected status/body/security headers" : "request failed" });
+    results.push({ name, pass: false, status: actualStatus, reason: error instanceof assert.AssertionError ? `unexpected ${check}` : "request failed" });
     return null;
   }
 }
@@ -50,6 +55,16 @@ for (const suffix of ["", "/confirm", "/cancel"]) {
     { method: "POST", body: "x".repeat(16 * 1024 + 1) });
 }
 await probe("oversized order", "/api/orders", 413, "payload_too_large", { method: "POST", body: "x".repeat(16 * 1024 + 1) });
+
+// Invalid notes must be rejected before accepting/challenge checks and before D1 persists them.
+for (const [name, note] of [["NUL note", "bad\u0000note"], ["lone surrogate note", "bad\ud800note"]]) {
+  await probe(name, "/api/orders", 422, "invalid_request", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idempotency_key: randomBytes(16).toString("hex"), table_code: null,
+      payment_method: "CASH", turnstile_token: "security-probe-invalid-note", note,
+      lines: [{ item_id: 1, option_ids: [], qty: 1 }] }),
+  });
+}
 
 // Six invalid requests per endpoint prove the 5/min guards; avoid a minute boundary.
 for (const kind of ["order", "payment"]) {

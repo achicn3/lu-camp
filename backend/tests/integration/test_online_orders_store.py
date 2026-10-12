@@ -97,12 +97,15 @@ class FakeWorker:
                 return httpx.Response(503, json={"error": "down"})
             return httpx.Response(
                 200,
-                json={
-                    "accepting": self.accepting,
-                    "paused_reason": self.paused_reason,
-                    "server_time": "2026-10-02T08:00:00.000Z",
-                    "orders": self.orders,
-                },
+                content=json.dumps(
+                    {
+                        "accepting": self.accepting,
+                        "paused_reason": self.paused_reason,
+                        "server_time": "2026-10-02T08:00:00.000Z",
+                        "orders": self.orders,
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
             )
         if request.method == "POST" and path.startswith("/integration/orders/"):
             remote_id = path.split("/")[3]
@@ -630,6 +633,31 @@ async def test_bad_orders_are_skipped_and_good_ones_still_import(
     assert [r.remote_id for r in (await db_session.scalars(select(OnlineOrder))).all()] == [
         _rid(20)
     ]
+
+
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [("少\x00冰☕\n謝謝", "少冰☕\n謝謝"), ("\x00", None), ("少\ud800冰", "少冰")],
+)
+async def test_customer_note_cannot_poison_pos_import_queue(
+    db_session: AsyncSession, ctx: Ctx, note: str, expected: str | None
+) -> None:
+    """Legacy cloud orders containing NUL must not abort the entire PostgreSQL pull."""
+    poisoned = {**_order(_rid(201), [_line(1, ctx.latte, "拿鐵", 150)]), "note": note}
+    good = _order(_rid(202), [_line(1, ctx.latte, "拿鐵", 150)])
+    ctx.worker.orders = [poisoned, good]
+    svc = _svc(db_session, ctx)
+
+    result = await svc.pull_once(ctx.store_id)
+    assert result.imported == 2
+    assert (await _order_row(db_session, _rid(201))).note == expected
+    assert (await _order_row(db_session, _rid(202))).note == "少冰"
+    await svc.flush_outbox(ctx.store_id)
+    assert ctx.worker.reports == [
+        (_rid(201), {"sync_status": "IMPORTED"}),
+        (_rid(202), {"sync_status": "IMPORTED"}),
+    ]
+    assert (await svc.pull_once(ctx.store_id)).imported == 0
 
 
 async def test_hold_rejects_item_that_is_archived_or_stopped(

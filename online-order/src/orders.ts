@@ -70,6 +70,9 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   }
   const note = o.note ?? "";
   if (typeof note !== "string" || [...note].length > NOTE_MAX) return null;
+  // PostgreSQL cannot store NUL or lone UTF-16 surrogates. Reject before D1
+  // accepts an order that would poison the POS import queue; emoji stay valid.
+  if (/[\u0000\uD800-\uDFFF]/u.test(note)) return null;
   if (!Array.isArray(o.lines)) return null;
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {

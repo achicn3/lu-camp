@@ -191,6 +191,19 @@ describe("送單", () => {
   });
 });
 
+describe("惡意備註不能毒化 POS 同步", () => {
+  it.each(["少\u0000冰", "\u0000", "少\ud800冰", "少\udfff冰"])("拒絕 PostgreSQL 無法保存的備註 %j", async (note) => {
+    const resp = await order({ note });
+    expect(resp.status).toBe(422);
+    expect(await resp.json()).toEqual({ error: "invalid_request" });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 0 });
+  });
+
+  it("正常 emoji 與換行仍可送單", async () => {
+    expect((await order({ note: "少冰☕😀\n謝謝" })).status).toBe(201);
+  });
+});
+
 describe("接單狀態", () => {
   it("POS 太久沒來拉單（超過 2 分鐘）：視為暫停，請至櫃台", async () => {
     await open(3 * 60 * 1000);

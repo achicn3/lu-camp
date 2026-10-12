@@ -182,6 +182,18 @@ export async function confirmLinePay(env: Env, storeId: number, token: string): 
   if (row.payment_status === "PAID") return json({ status: "PAID" });
   if (row.payment_status === "CONFIRMING") return json({ status: "CONFIRMING" }, 202);
   if (row.payment_status !== "PENDING") return error("not_pending", 409);
+  // 未授權時 confirm→check 會回到 PENDING；只鎖 CONFIRMING 擋不住連續呼叫金流。
+  // 每筆付款每 30 秒只讓第一個公開回呼查金流，其餘回目前狀態。POS 補查不受影響；
+  // 不共用 linepay_checked_at，避免 POS 剛查過就擋住客人第一次正常授權回呼。
+  const windowStart = Math.floor(Date.now() / RECHECK_MS) * RECHECK_MS;
+  const [claimed] = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO rate_counters (store_id, key, window_start, count) VALUES (?, ?, ?, 1)",
+    ).bind(storeId, `linepay-confirm:${row.id}:${row.linepay_attempt}`, windowStart),
+    env.DB.prepare("DELETE FROM rate_counters WHERE store_id = ? AND window_start < ?")
+      .bind(storeId, windowStart - 60_000),
+  ]);
+  if (claimed?.meta.changes !== 1) return json({ status: "PENDING" }, 202);
   const outcome = await capture(env, storeId, config, row);
   if (outcome === "PAID") return json({ status: "PAID" });
   if (outcome === "CONFIRMING") return json({ status: "CONFIRMING" }, 202);

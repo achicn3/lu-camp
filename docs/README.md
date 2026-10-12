@@ -86,3 +86,5 @@
 - [UTM Ubuntu Turnkey／電子發票歷史方案](./18-utm-ubuntu-turnkey-einvoice-plan.md)
 
 架構決策記錄位於 [`adr/`](./adr/)，測試與評估截圖位於 [`screenshots/`](./screenshots/)。
+
+- [線上點餐攻擊驗證與修補（2026-10-13）](./79-online-order-security-audit.md)
