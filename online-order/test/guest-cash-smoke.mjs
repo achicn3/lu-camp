@@ -62,7 +62,7 @@ page.on("pageerror", (error) => errors.push(String(error)));
 let firstToken = "";
 try {
   await page.goto(base, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByRole("button", { name: "咖啡", exact: true }).click();
   await page.locator(".item", { hasText: `拿鐵 ${run}` }).locator(".item-detail").click();
   await page.getByRole("button", { name: "加入購物車" }).click();
   await page.getByText("請依每組規則選好選項。").waitFor();
@@ -74,7 +74,7 @@ try {
   await page.screenshot({ path: join(shots, "cart.png"), fullPage: true });
   await page.getByRole("button", { name: "−" }).click();
   await page.getByText("合計 $160").waitFor();
-  await page.locator("#order-note").fill("少冰");
+  assert.equal(await page.locator("#order-note").count(), 0, "不提供自由備註");
 
   await page.route("**/api/orders", async (route) => {
     const response = await route.fetch();

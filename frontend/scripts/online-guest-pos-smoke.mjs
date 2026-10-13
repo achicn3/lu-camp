@@ -35,7 +35,6 @@ token = (await api("POST", "/auth/login", {
 })).access_token;
 const run = randomUUID().slice(0, 6);
 const name = `客人煙霧拿鐵-${run}`;
-const note = `少冰-${run}`;
 const item = await api("POST", "/menu-items", { name, unit_price: "150", category: "咖啡" });
 await api("PATCH", `/menu-items/${item.id}`, { daily_limited: true });
 await api("POST", `/menu-daily-stock/item/${item.id}/set`, { qty: 2, expected_remaining: 0 });
@@ -52,11 +51,11 @@ const errors = [];
 page.on("pageerror", (error) => errors.push(String(error)));
 try {
   await page.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByRole("button", { name: "咖啡", exact: true }).click();
   await page.locator(".item", { hasText: name }).locator(".item-detail").click();
   await page.getByRole("button", { name: "加入購物車" }).click();
   await page.getByRole("button", { name: /購物車 1 份/ }).click();
-  await page.locator("#order-note").fill(note);
+  assert.equal(await page.locator("#order-note").count(), 0, "不提供自由備註");
   assert.equal(await page.locator("#footer").isVisible(), false, "Cart footer must not cover the form");
   await page.screenshot({ path: join(SHOTS, "01-cart.png"), fullPage: true });
   await page.getByRole("button", { name: "送出現金訂單" }).click();
@@ -65,7 +64,7 @@ try {
   assert.equal(await page.getByRole("button", { name: /取消/ }).count(), 0, "客人送單後不能自行取消");
   const guestCancel = await fetch(`${page.url().replace("/order/", "/api/orders/")}/cancel`, { method: "POST" });
   assert.equal(guestCancel.status, 405, "公開 API 不提供客人取消訂單");
-  const order = await waitFor(async () => (await api("GET", "/online-orders")).orders.find((o) => o.note === note), "POS import");
+  const order = await waitFor(async () => (await api("GET", "/online-orders")).orders.find((o) => o.lines.some((line) => line.item_id === item.id)), "POS import");
   assert.equal(order.table_label, "A1");
   assert.equal(order.total, "150");
   assert.equal(order.lines[0].item_id, item.id);

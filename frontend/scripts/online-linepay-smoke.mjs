@@ -98,7 +98,7 @@ const ok = (name, pass, detail = "") => { results.push(pass); console.log(`${pas
 
 token = (await must("POST", "/auth/login", { username: USERNAME, password: PASSWORD })).access_token;
 const run = randomUUID().slice(0, 6);
-await must("POST", "/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: `咖啡-${run}` });
+const latte = await must("POST", "/menu-items", { name: `拿鐵-${run}`, unit_price: "150", category: `咖啡-${run}` });
 const settings = await must("GET", "/settings");
 await must("PATCH", "/settings", { dine_in_tables: [...new Set([...(settings.dine_in_tables ?? []), "A1"])] });
 await must("POST", "/online-order/publish");
@@ -113,12 +113,12 @@ const guestCtx = await browser.newContext({ ...devices["iPhone 13"] });
 const guest = await guestCtx.newPage();
 guest.on("pageerror", (e) => errors.push(`客人頁：${e}`));
 
-async function orderLatte(note) {
+async function orderLatte() {
   await guest.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
   await guest.getByRole("button", { name: `咖啡-${run}`, exact: true }).click();
   await guest.locator(".item", { hasText: `拿鐵-${run}` }).getByRole("button", { name: /加入/ }).click();
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
-  await guest.locator("#order-note").fill(note);
+  assert.equal(await guest.locator("#order-note").count(), 0, "不提供自由備註");
   await guest.getByLabel(/LINE Pay/).check();
 }
 
@@ -133,8 +133,7 @@ try {
   await desk.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
 
   // ① 付款成功
-  const note = `LINE付-${run}`;
-  await orderLatte(note);
+  await orderLatte();
   await guest.locator("#invoice-kind").selectOption("carrier");
   await guest.getByLabel("手機條碼", { exact: true }).fill("/ABC+123");
   await guest.screenshot({ path: join(SHOTS, "01-guest-choose-linepay.png"), fullPage: true });
@@ -147,7 +146,7 @@ try {
   ok("導回訂單頁：已付款，網址上的參數拿掉了", !guest.url().includes("linepay="));
   await guest.screenshot({ path: join(SHOTS, "02-guest-paid.png"), fullPage: true });
 
-  const paid = await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.note === note && o.sale_id), "POS 自動成立銷售", 45000);
+  const paid = await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.lines.some((line) => line.item_id === latte.id) && o.sale_id), "POS 自動成立銷售", 45000);
   ok("開著的 POS 自動成立銷售", paid.sync_status === "SETTLED");
   const notice = desk.locator(".pos-online-paid", { hasText: "線上 LINE Pay 已付款：桌號 A1 $150" });
   await notice.waitFor({ timeout: 20000 });
@@ -170,8 +169,7 @@ try {
   await guest.screenshot({ path: join(SHOTS, "02b-guest-refunded.png"), fullPage: true });
 
   // ② 取消付款
-  const note2 = `LINE取消-${run}`;
-  await orderLatte(note2);
+  await orderLatte();
   await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();
   await guest.waitForURL(/127\.0\.0\.1:8955\/pay\/\d+$/, { timeout: 45000 });
   await guest.locator("#cancel").click();
@@ -180,7 +178,7 @@ try {
   ok("取消後客人頁：沒有扣款、可以重付", (await guest.getByRole("button", { name: "用 LINE Pay 付款" }).count()) === 1);
   await guest.screenshot({ path: join(SHOTS, "04-guest-cancelled.png"), fullPage: true });
   await desk.getByRole("button", { name: /線上訂單/ }).click();
-  const row = desk.getByRole("dialog", { name: "線上訂單" }).getByRole("listitem").filter({ hasText: note2 });
+  const row = desk.getByRole("dialog", { name: "線上訂單" }).getByRole("listitem").filter({ hasText: `拿鐵-${run}` }).filter({ hasText: "等待 LINE Pay 付款" });
   await row.getByText("等待 LINE Pay 付款").waitFor({ timeout: 20000 });
   ok("POS：等待 LINE Pay 付款、不能帶入收現金", (await row.getByRole("button", { name: "帶入結帳" }).count()) === 0);
   await desk.screenshot({ path: join(SHOTS, "05-pos-awaiting-linepay.png") });
@@ -193,7 +191,7 @@ try {
   await desk.screenshot({ path: join(SHOTS, "zz-desk.png"), fullPage: true }).catch(() => {});
 } finally {
   // 取消這次留下來沒付的單：留著會占住同一個 IP 的未付款上限，下一個煙霧就送不了單
-  const left = (await api("GET", "/online-orders")).body?.orders?.filter((o) => o.note?.endsWith(run) && o.sync_status === "IMPORTED") ?? [];
+  const left = (await api("GET", "/online-orders")).body?.orders?.filter((o) => o.lines.some((line) => line.item_id === latte.id) && o.sync_status === "IMPORTED") ?? [];
   for (const o of left) await api("POST", `/online-orders/${o.id}/cancel`);
   await browser.close();
   fake.close();

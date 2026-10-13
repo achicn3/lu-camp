@@ -3,6 +3,38 @@
 > **給接手的人（或 AI）**：這份是「目前做到哪、上線要注意什麼、接下來做什麼」的總整理。
 > 細節以各編號規格為準；本文只指路。最後更新：2026-10-13；日期較早的段落為歷史紀錄，以最新段落為準。
 
+## 2026-10-13：共用選項手機驗收與測試站部署
+
+- 接手 `test/online-order-security-audit` 的未提交功能：選填單選群組增加「不選擇」、
+  移除客人自由備註，新訂單 API 拒收非空備註；既存帶備註訂單重試仍取回原單。
+- 真 Chromium 手機模式 375／390／430 × 844，連本機 Worker/D1 → backend/Postgres：
+  三個品項共用同一組必選／選填群組；未選必選不能加入、售完選項不可選。
+  每張單加入「150 + 燕麥奶20 = 170」及「選燕麥奶後取消 = 150」兩行，合計 320。
+  客人購物車、POS 收單 API、POS 線上訂單畫面及帶入結帳皆一致，取消那行沒有燕麥奶；
+  檢查 option IDs、單價及合計，另驗證 POS 停售選項同步至客人菜單。
+- `frontend/scripts/online-shared-options-smoke.mjs` 可重跑；修正了舊腳本不唯一的錯誤訊息定位，
+  新增觸控手機模式、取消加購實際送單及 POS 畫面檢查。接手時分類點擊逾時未重現。
+  本機前端 node_modules 是跨 worktree symlink，Turbopack 無法啟動，使用 `next dev --webpack` 驗收。
+- 實跑：Worker **261/261**、Worker／客人頁 TypeScript、修改煙霧腳本 ESLint、diff whitespace 全過；
+  真 Worker/D1 → PostgreSQL 六組資安驗證通過（新備註含 XSS／SQL 均直接拒收）。
+- 已部署 staging **`77cf9555-e5f9-4239-b3e2-8ba0eaad7da7`**；部署後資安腳本 **24/24**，
+  390px 真瀏覽器菜單／詳情無 JS 錯誤及橫向溢出，線上 app.js 與本機驗收 build 完全相同。
+  [測試站](https://lu-camp-online-order-staging.noiping2.workers.dev)。
+- [驗收截圖與部署後資安 JSON](screenshots/2026-10-13-shared-options/)；
+  [POS 兩行 170／150、合計 320](screenshots/2026-10-13-shared-options/pos-cart-390.png)。
+- 範圍：完整送單在隔離庫 `lucamp_security_e2e_1013` 完成，測試單已取消；測試站既有示範菜單
+  沒有選填群組，所以部署後未重做加購送單。未收現／開票、未驗真手機或真金流、未升級正式 POS。
+  本次未合併 main，沒有 migration。下方資安待辦仍有效，不能視為完整資安已驗收。
+- 遠端核對：資安修補及 docs/79 已推至分支 `test/online-order-security-audit` 的 `8653f342`，
+  遠端 main 仍為 `928401f5`；原資安 staging 版本 `a316aba4…` 已由本次相容功能版本接替。
+
+重跑（先起對應隔離 backend :8116、Worker :8794、POS :3116；backend CORS 允許 POS origin）：
+
+```bash
+LD_LIBRARY_PATH="$HOME/.cache/lu-camp-e2e/pwlibs/usr/lib/x86_64-linux-gnu" \
+SMOKE_ALLOW_WRITE=1 node frontend/scripts/online-shared-options-smoke.mjs
+```
+
 ## 2026-10-13：主動攻擊測試與 POS 收單漏洞修補
 
 - 已重現／修補：NUL 備註能令 PostgreSQL 匯入整輪回滾，阻斷後續正常訂單。

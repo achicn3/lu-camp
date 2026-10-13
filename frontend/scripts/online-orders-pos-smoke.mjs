@@ -46,7 +46,7 @@ async function api(method, path, body) {
 }
 
 /** 客人送單（每張用不同的裝置 cookie，免得撞「同一裝置未付款上限」）。 */
-async function placeOrder(tableCode, lines, note = "") {
+async function placeOrder(tableCode, lines) {
   const resp = await fetch(`${ORDER}/api/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `lk_dev=${randomUUID().replaceAll("-", "")}` },
@@ -55,7 +55,6 @@ async function placeOrder(tableCode, lines, note = "") {
       table_code: tableCode,
       payment_method: "CASH",
       turnstile_token: TURNSTILE_TEST_TOKEN,
-      note,
       lines,
     }),
   });
@@ -135,7 +134,6 @@ try {
       { item_id: latte.id, option_ids: [], qty: 1 },
       { item_id: cake.id, option_ids: [], qty: 2 },
     ],
-    "拿鐵少冰",
   );
   ok("客人送單成功", first.status === 201 || first.status === 200, `${first.status} ${JSON.stringify(first.body)}`);
   const firstToken = first.body.token;
@@ -155,15 +153,15 @@ try {
   ok("POS 有線上訂單徽章", (await page.locator(".online-orders-badge").innerText()).trim().length > 0);
   await toggle.click();
   const sheet = page.getByRole("dialog", { name: "線上訂單" });
-  const row = sheet.getByRole("listitem", { name: /桌號 A1 \$330/ }).first();
+  const row = sheet.getByRole("listitem").filter({ hasText: `拿鐵-${run} ×1` });
   await row.waitFor();
   const rowText = await row.innerText();
-  ok("清單：桌號、品項、合計、已保留、備註", rowText.includes(`拿鐵-${run} ×1`) && rowText.includes("已保留份數") && rowText.includes("拿鐵少冰"), rowText.replace(/\n/g, " "));
+  ok("清單：桌號、品項、合計、已保留", rowText.includes(`拿鐵-${run} ×1`) && rowText.includes("已保留份數") && rowText.includes("$330"), rowText.replace(/\n/g, " "));
   await page.screenshot({ path: join(SHOTS, "01-online-orders.png") });
   await row.getByRole("button", { name: "帶入結帳" }).click();
   await sheet.waitFor({ state: "detached" });
   await page.getByText("正在結線上單（桌號 A1）").waitFor();
-  ok("橫幅寫出客人備註", (await page.locator(".pos-online-banner").innerText()).includes("客人備註：拿鐵少冰"));
+  ok("新訂單橫幅沒有自由備註", !(await page.locator(".pos-online-banner").innerText()).includes("客人備註："));
   ok("帶入購物車：兩個品項", (await page.getByText(`拿鐵-${run}`).count()) > 0 && (await page.getByText(`戚風-${run}`).count()) > 0);
   ok("內用桌號 A1 已選好", (await page.locator('.pos-dinein-table[aria-checked="true"]').innerText()).includes("A1"));
   await page.screenshot({ path: join(SHOTS, "02-loaded-cart.png") });

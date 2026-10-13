@@ -1,0 +1,134 @@
+{
+  "target": "https://lu-camp-online-order-staging.noiping2.workers.dev",
+  "at": "2026-10-13T00:23:14.590Z",
+  "results": [
+    {
+      "name": "public status",
+      "pass": true,
+      "status": 200
+    },
+    {
+      "name": "guessed order token",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "unsigned POS pull",
+      "pass": true,
+      "status": 401
+    },
+    {
+      "name": "unsigned POS status update",
+      "pass": true,
+      "status": 401
+    },
+    {
+      "name": "forged POS signature",
+      "pass": true,
+      "status": 401
+    },
+    {
+      "name": "forged payment confirmation",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "oversized payment start",
+      "pass": true,
+      "status": 413
+    },
+    {
+      "name": "oversized payment /confirm",
+      "pass": true,
+      "status": 413
+    },
+    {
+      "name": "oversized payment /cancel",
+      "pass": true,
+      "status": 413
+    },
+    {
+      "name": "oversized order",
+      "pass": true,
+      "status": 413
+    },
+    {
+      "name": "NUL note",
+      "pass": true,
+      "status": 422
+    },
+    {
+      "name": "lone surrogate note",
+      "pass": true,
+      "status": 422
+    },
+    {
+      "name": "invalid-order rate probe 1",
+      "pass": true,
+      "status": 422
+    },
+    {
+      "name": "invalid-order rate probe 2",
+      "pass": true,
+      "status": 422
+    },
+    {
+      "name": "invalid-order rate probe 3",
+      "pass": true,
+      "status": 422
+    },
+    {
+      "name": "invalid-order rate probe 4",
+      "pass": true,
+      "status": 429
+    },
+    {
+      "name": "invalid-order rate probe 5",
+      "pass": true,
+      "status": 429
+    },
+    {
+      "name": "invalid-order rate probe 6",
+      "pass": true,
+      "status": 429
+    },
+    {
+      "name": "invalid-payment rate probe 1",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "invalid-payment rate probe 2",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "invalid-payment rate probe 3",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "invalid-payment rate probe 4",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "invalid-payment rate probe 5",
+      "pass": true,
+      "status": 404
+    },
+    {
+      "name": "invalid-payment rate probe 6",
+      "pass": true,
+      "status": 429
+    }
+  ],
+  "passed": 24,
+  "total": 24,
+  "limitations": [
+    "Does not create orders, reserve stock, charge payments, or modify POS state.",
+    "Valid-signature replay, price tampering, stock exhaustion and browser XSS require isolated fixtures.",
+    "Turnstile real-token rejection/replay must be tested separately; dummy keys cannot prove it.",
+    "Invalid-request probes increment this IP's minute counters; allow a minute before manual demo orders."
+  ]
+}

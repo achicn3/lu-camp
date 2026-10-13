@@ -177,6 +177,12 @@ function openDetail(item: MenuItemView): void {
     const rule = group.min_select === 1 && group.max_select === 1 ? "必選 1 項" :
       group.min_select > 0 ? `選 ${group.min_select}–${group.max_select} 項` : `最多 ${group.max_select} 項`;
     field.append(el("legend", "opt-group-name", `${group.name} · ${rule}`));
+    if (group.min_select === 0 && group.max_select === 1) {
+      const label = el("label", "opt-choice");
+      const input = el("input"); input.type = "radio"; input.name = `group-${group.id}`;
+      input.value = ""; input.checked = true;
+      label.append(input, el("span", "", "不選擇")); field.append(label);
+    }
     for (const option of group.options) {
       const label = el("label", "opt-choice");
       const input = el("input");
@@ -199,7 +205,7 @@ function openDetail(item: MenuItemView): void {
     const error = el("p", "field-error"); error.setAttribute("role", "alert");
     const add = button("加入購物車", () => {
       if (menu === null) return;
-      const optionIds = Array.from(groups.querySelectorAll<HTMLInputElement>("input:checked"), (input) => Number(input.value));
+      const optionIds = Array.from(groups.querySelectorAll<HTMLInputElement>('input:checked:not([value=""])'), (input) => Number(input.value));
       try {
         cart = addLine(menu, cart, { item_id: item.id, option_ids: optionIds, qty: Number(qty.value) });
         saveCart(); renderFooter(); closeDetail(); clearMessage();
@@ -479,18 +485,13 @@ function renderCart(): void {
   body.append(el("p", "cart-total", `合計 ${money(priced.total)}`));
   const upsell = upsellBlock();
   if (upsell) body.append(upsell);
-  const noteLabel = el("label", "note-label", "備註（最多 60 字）");
-  const note = el("textarea") as HTMLTextAreaElement; note.id = "order-note"; note.maxLength = 60;
-  note.rows = 2; note.value = sessionStorage.getItem("lk_note") ?? "";
-  note.addEventListener("input", () => sessionStorage.setItem("lk_note", note.value));
-  noteLabel.append(note); body.append(noteLabel);
   const payment = paymentChoice();
   body.append(payment.node);
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
     const invoice = payment.invoice();
     if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
-    void startCheckout(note.value, payment.method(), invoice);
+    void startCheckout(payment.method(), invoice);
   });
   payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單"; });
   body.append(submit);
@@ -651,22 +652,21 @@ async function challenge(): Promise<string> {
     }, 200);
   });
 }
-function newDraft(note: string): Draft {
+function newDraft(): Draft {
   return { idempotency_key: crypto.randomUUID(), table_code: tableCode, payment_method: "CASH",
-    note: note.trim(), lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }) };
+    note: "", lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }) };
 }
-async function startCheckout(note: string, method: PayMethod = "CASH", invoice: InvoiceInput = { carrier: null, tax_id: null }): Promise<void> {
+async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput = { carrier: null, tax_id: null }): Promise<void> {
   if (menu === null || checkoutStarting || submitting) return;
   checkoutStarting = true;
   try {
   const priced = checkCart(menu, cart);
   if (!priced.ok) { showMessage(cartError(new Error(priced.reason))); return; }
-  if ([...note].length > 60) { showMessage("備註最多 60 字。"); return; }
   const live = await getJson<StoreStatus>("/api/status"); status = live.body;
   if (!status?.accepting) { showMessage("目前暫停接單，請到櫃台點餐。"); return; }
   if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃台點餐。"); return; }
   if (method === "LINE_PAY" && !status.linepay) { showMessage("LINE Pay 暫時不能用，請改用現金。"); return; }
-  const draft = { ...newDraft(note), payment_method: method, invoice };
+  const draft = { ...newDraft(), payment_method: method, invoice };
   localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   await submitDraft(draft);
   } finally { checkoutStarting = false; }

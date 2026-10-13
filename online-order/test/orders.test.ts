@@ -3,7 +3,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SNAPSHOT, integration } from "./helpers";
+import { SNAPSHOT, integration, sha256Hex } from "./helpers";
 
 const MENU = {
   ...SNAPSHOT,
@@ -191,6 +191,22 @@ describe("送單", () => {
   });
 });
 
+describe("舊訂單備註相容", () => {
+  it("舊訂單帶原備註重試仍取回同一單，不會重建", async () => {
+    const key = crypto.randomUUID();
+    const first = await (await order({ idempotency_key: key })).json() as { token: string };
+    const fingerprint = await sha256Hex(JSON.stringify([
+      TABLE, "CASH", "少冰", [{ item_id: 5, option_ids: [], qty: 2 }], { carrier: null, tax_id: null },
+    ]));
+    await env.DB.prepare("UPDATE orders SET note = ?, fingerprint = ? WHERE idem_key = ?")
+      .bind("少冰", fingerprint, key).run();
+    const retry = await order({ idempotency_key: key, note: "少冰" });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({ token: first.token });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 1 });
+  });
+});
+
 describe("惡意備註不能毒化 POS 同步", () => {
   it.each(["少\u0000冰", "\u0000", "少\ud800冰", "少\udfff冰"])("拒絕 PostgreSQL 無法保存的備註 %j", async (note) => {
     const resp = await order({ note });
@@ -199,8 +215,11 @@ describe("惡意備註不能毒化 POS 同步", () => {
     expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 0 });
   });
 
-  it("正常 emoji 與換行仍可送單", async () => {
-    expect((await order({ note: "少冰☕😀\n謝謝" })).status).toBe(201);
+  it.each(["少冰", "少冰☕😀\n謝謝", "<script>alert(1)</script>"])("新的自由備註 %j 一律拒收", async (note) => {
+    const resp = await order({ note });
+    expect(resp.status).toBe(422);
+    expect(await resp.json()).toEqual({ error: "notes_not_allowed" });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 0 });
   });
 });
 

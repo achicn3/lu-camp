@@ -35,7 +35,7 @@ async function until(fn, label) {
 }
 let client = 0;
 const run = randomUUID().slice(0, 6);
-function submit(item, note, extra = {}) {
+function submit(item, note = "", extra = {}) {
   return fetch(`${ORDER}/api/orders`, {
     method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": `10.${parseInt(run.slice(0, 2), 16)}.0.${++client}` },
     body: JSON.stringify({ idempotency_key: randomUUID(), table_code: null,
@@ -65,14 +65,21 @@ try {
   findings.push("NUL and lone surrogate rejected by real Worker before POS import");
 
   for (const qty of [-1, 0, 0.5, 11]) {
-    const res = await submit(item.id, "invalid quantity", { lines: [{ item_id: item.id, option_ids: [], qty }] });
+    const res = await submit(item.id, "", { lines: [{ item_id: item.id, option_ids: [], qty }] });
     assert.equal(res.status, 422);
     assert.equal((await res.json()).error, "invalid_qty");
   }
   findings.push("Negative, zero, fractional and excessive quantities rejected");
 
   const xss = `<img src=x onerror="window.__security_xss=1"> ${run}`;
-  const response = await submit(item.id, xss, {
+  const sqlNote = `'; DROP TABLE online_orders; -- ${run}`;
+  for (const note of ["少冰", xss, sqlNote]) {
+    const rejected = await submit(item.id, note);
+    assert.equal(rejected.status, 422);
+    assert.equal((await rejected.json()).error, "notes_not_allowed");
+  }
+  findings.push("Normal, XSS and SQL notes rejected before order creation");
+  const response = await submit(item.id, "", {
     total: 1, payment_status: "PAID", linepay_transaction_id: "1",
     lines: [{ item_id: item.id, option_ids: [], qty: 1, unit_price: 1 }],
   });
@@ -80,7 +87,7 @@ try {
   const created = await response.json();
   assert.equal(created.total, 150);
   assert.equal(created.status, "UNPAID");
-  const pos = await until(async () => (await api("GET", "/online-orders")).orders.find((o) => o.note === xss), "XSS note import");
+  const pos = await until(async () => (await api("GET", "/online-orders")).orders.find((o) => o.lines.some((line) => line.item_id === item.id)), "note-free order import");
   cleanup.push(pos.id);
   assert.equal(pos.total, "150");
   assert.equal(pos.payment_status, "UNPAID");
@@ -90,22 +97,18 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.goto(`${ORDER}/order/${created.token}`, { waitUntil: "networkidle" });
-  await page.getByText(`備註：${xss}`, { exact: true }).waitFor();
+  await page.getByText("合計 $150").waitFor();
+  assert.equal(pos.note, null);
+  assert.equal(await page.getByText(xss, { exact: true }).count(), 0);
   assert.equal(await page.evaluate(() => window.__security_xss), undefined);
   assert.equal(await page.locator('img[onerror]').count(), 0);
-  await page.screenshot({ path: `${SHOTS}/guest-xss-text.png`, fullPage: true });
-  findings.push("Stored XSS note renders as text in real guest browser, no executable image");
+  await page.screenshot({ path: `${SHOTS}/guest-no-note.png`, fullPage: true });
+  findings.push("Note-free guest order renders correctly; rejected XSS never reaches POS");
 
-  const sqlNote = `'; DROP TABLE online_orders; -- ${run}`;
-  assert.equal((await submit(item.id, sqlNote)).status, 201);
-  const sqlOrder = await until(async () => (await api("GET", "/online-orders")).orders.find((o) => o.note === sqlNote), "SQL note import");
-  cleanup.push(sqlOrder.id);
-  findings.push("SQL injection note preserved as text; PostgreSQL order APIs remain available");
-
-  const attempts = await Promise.all([submit(scarce.id, `race-a-${run}`), submit(scarce.id, `race-b-${run}`)]);
+  const attempts = await Promise.all([submit(scarce.id), submit(scarce.id)]);
   for (const res of attempts) assert.equal(res.status, 201);
   const raced = await until(async () => {
-    const rows = (await api("GET", "/online-orders")).orders.filter((o) => o.note === `race-a-${run}` || o.note === `race-b-${run}`);
+    const rows = (await api("GET", "/online-orders")).orders.filter((o) => o.lines.some((line) => line.item_id === scarce.id));
     return rows.length === 2 && rows.every((o) => ["HELD", "REJECTED"].includes(o.hold_status)) ? rows : null;
   }, "last item holds");
   assert.deepEqual(raced.map((o) => o.hold_status).sort(), ["HELD", "REJECTED"]);

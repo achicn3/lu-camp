@@ -125,13 +125,12 @@ try {
   await guest.screenshot({ path: join(SHOTS, "04-guest-cart.png"), fullPage: true });
   const overflow = await guest.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   ok("手機不橫向捲動", overflow <= 0, `溢出 ${overflow}px`);
-  const note = `帶回家-${run}`;
-  await guest.locator("#order-note").fill(note);
+  assert.equal(await guest.locator("#order-note").count(), 0, "不提供自由備註");
   await guest.getByRole("button", { name: "送出現金訂單" }).click();
   await guest.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
 
   // ③ POS 拉單：保留現量
-  const order = await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.note === note), "POS 拉到單");
+  const order = await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.lines.some((line) => line.catalog_product_id === product.id)), "POS 拉到單");
   await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.id === order.id && o.hold_status === "HELD"), "保留成功");
   ok("拉單即保留：庫存 3 → 2", (await onHand(product.id)) === 2);
   await guest.getByText("請到櫃台付現金").waitFor({ timeout: 20000 });
@@ -141,7 +140,7 @@ try {
   await desk.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
   await desk.getByRole("button", { name: /線上訂單/ }).click();
   const sheet = desk.getByRole("dialog", { name: "線上訂單" });
-  const row = sheet.getByRole("listitem").filter({ hasText: note });
+  const row = sheet.getByRole("listitem").filter({ hasText: name });
   ok("清單標出帶回家商品", (await row.innerText()).includes(`${name} ×1（帶著走）`));
   await row.getByRole("button", { name: "帶入結帳" }).click();
   await sheet.waitFor({ state: "detached" });
@@ -155,7 +154,7 @@ try {
   await desk.getByRole("button", { name: "不用，完成" }).click().catch(() => {});
   await desk.getByRole("button", { name: "開始下一筆" }).click();
   await desk.getByRole("button", { name: /線上訂單/ }).click();
-  const paidRow = desk.getByRole("dialog", { name: "線上訂單" }).getByRole("listitem").filter({ hasText: note });
+  const paidRow = desk.getByRole("dialog", { name: "線上訂單" }).getByRole("listitem").filter({ hasText: name });
   await paidRow.getByText("已付款・待交貨").waitFor({ timeout: 15000 });
   ok("付了錢還留在清單：已付款・待交貨", true);
   ok("列出要交給客人的商品（照實際結帳）", (await paidRow.innerText()).includes(`要交給客人：${name} ×1`));

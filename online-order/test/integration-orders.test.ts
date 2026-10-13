@@ -40,7 +40,7 @@ async function place(lines: PlaceLine[] = [{ item_id: 5, option_ids: [], qty: 1 
         table_code: null,
         payment_method: "CASH",
         turnstile_token: "tok",
-        note: "少冰",
+        note: "",
         lines,
       }),
     }),
@@ -81,7 +81,7 @@ describe("POS 拉單", () => {
     const first = await pull();
     expect(first.orders).toHaveLength(1);
     const o = first.orders[0]!;
-    expect(o).toMatchObject({ total: 150, note: "少冰", hold_status: "NONE" });
+    expect(o).toMatchObject({ total: 150, note: null, hold_status: "NONE" });
     expect(o.lines).toEqual([expect.objectContaining({ item_id: 5, qty: 1, option_ids: [] })]);
     expect((await report(o.id, { sync_status: "IMPORTED" })).status).toBe(200);
     expect((await pull()).orders).toHaveLength(0);
