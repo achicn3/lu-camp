@@ -49,12 +49,16 @@ type InventoryValueReport = components["schemas"]["InventoryValueReport"];
 type ConsignmentPayablesReport = components["schemas"]["ConsignmentPayablesReport"];
 type InvoiceRegisterRow = components["schemas"]["InvoiceRegisterRow"];
 type CampaignPerformanceReport = components["schemas"]["CampaignPerformanceReport"];
+type MenuItemsReport = components["schemas"]["MenuItemsReport"];
+type MenuItemRankRow = components["schemas"]["MenuItemRankRow"];
 
 type Tab =
   | "dashboard"
   | "insights"
   | "trends"
   | "dine-in"
+  | "menu-today"
+  | "menu-items"
   | "daily-cash"
   | "sales-margin"
   | "discounts"
@@ -77,6 +81,7 @@ const GROUPS: { key: string; label: string; tabs: { key: Tab; label: string }[] 
     tabs: [
       { key: "dashboard", label: "今日營運" },
       { key: "daily-cash", label: "現金對帳" },
+      { key: "menu-today", label: "今日餐飲" },
     ],
   },
   {
@@ -86,6 +91,7 @@ const GROUPS: { key: string; label: string; tabs: { key: Tab; label: string }[] 
       { key: "sales-margin", label: "銷售毛利" },
       { key: "insights", label: "經營洞察" },
       { key: "trends", label: "趨勢" },
+      { key: "menu-items", label: "餐飲品項" },
       { key: "dine-in", label: "餐飲內用/外帶" },
     ],
   },
@@ -746,6 +752,251 @@ function InsightsPanel() {
           <BreakdownTable
             rows={dimension === "brand" ? report.brand_breakdown : report.category_breakdown}
           />
+        </>
+      )}
+    </div>
+  );
+}
+
+// -- 餐飲品項（店主 2026-10-15）：哪個品項賣得好、排名、和上一期比、哪些沒賣出 --
+
+type MenuSortKey = "units" | "revenue" | "margin" | "margin_rate" | "order_count";
+const MENU_SORTS: { key: MenuSortKey; label: string }[] = [
+  { key: "units", label: "份數" },
+  { key: "revenue", label: "營收" },
+  { key: "margin", label: "毛利" },
+  { key: "margin_rate", label: "毛利率" },
+  { key: "order_count", label: "筆數" },
+];
+
+function menuSortValue(row: MenuItemRankRow, key: MenuSortKey): number {
+  const value = row[key];
+  if (value === null || value === undefined) return -Infinity; // 沒填成本的排最後
+  return typeof value === "number" ? value : Number(value);
+}
+
+/** 排名變化：上一期第 3、這期第 1 →「↑2」；上一期沒賣 →「新上榜」。 */
+function rankChange(row: MenuItemRankRow): { text: string; tone: "up" | "down" | "same" | "new" } {
+  if (row.prev_rank === null || row.prev_rank === undefined) return { text: "新上榜", tone: "new" };
+  const diff = row.prev_rank - row.rank;
+  if (diff > 0) return { text: `↑${diff}`, tone: "up" };
+  if (diff < 0) return { text: `↓${-diff}`, tone: "down" };
+  return { text: "—", tone: "same" };
+}
+
+/** 和上一期比的差額：「▲ 20」「▼ 1,700」；一樣 →「持平」。 */
+function DeltaText({ now, prev }: { now: number; prev: number }) {
+  const diff = now - prev;
+  if (diff === 0) return <span className="rpt-delta">持平</span>;
+  return (
+    <span className={`rpt-delta ${diff > 0 ? "rpt-delta--up" : "rpt-delta--down"}`}>
+      {diff > 0 ? "▲" : "▼"} {formatNtd(Math.abs(diff))}
+    </span>
+  );
+}
+
+function MenuItemsPanel({ mode }: { mode: "day" | "range" }) {
+  const defaults = defaultDateRange();
+  const [day, setDay] = useState(isoDate(new Date()));
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+  const [sortKey, setSortKey] = useState<MenuSortKey>("units");
+  const range =
+    mode === "day"
+      ? { from: startOfDay(day), to: exclusiveEnd(day) }
+      : { from: startOfDay(from), to: exclusiveEnd(to) };
+  const compareLabel = mode === "day" ? "比前一天" : "比上一期";
+
+  const query = useQuery({
+    queryKey: ["reports", "menu-items", range],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/menu-items", {
+        params: { query: range },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取餐飲品項報表失敗");
+    },
+  });
+  const report: MenuItemsReport | undefined = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/menu-items", fmt, range);
+    void downloadReport(url, `menu-items-${mode === "day" ? day : `${from}-${to}`}.${fmt}`);
+  }
+
+  const rows = report
+    ? [...report.rows].sort(
+        (a, b) => menuSortValue(b, sortKey) - menuSortValue(a, sortKey) || a.rank - b.rank,
+      )
+    : [];
+  const s = report?.summary;
+  const avg = s && s.order_count > 0 ? Math.round((s.units / s.order_count) * 10) / 10 : null;
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        {mode === "day" ? (
+          <label>
+            日期
+            <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+          </label>
+        ) : (
+          <>
+            <label>
+              起始日期
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label>
+              結束日期
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </label>
+          </>
+        )}
+      </div>
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && s && (
+        <>
+          <section className="rpt-kind-cards" aria-label="餐飲總覽">
+            <div className="rpt-kind-card">
+              <h4 className="rpt-kind-card-title">份數</h4>
+              <dl>
+                <div>
+                  <dt>{mode === "day" ? "這一天" : "這段期間"}</dt>
+                  <dd className="money">{s.units}</dd>
+                </div>
+              </dl>
+              <p className="rpt-kind-card-count">
+                {compareLabel} <DeltaText now={s.units} prev={s.prev_units} />
+              </p>
+            </div>
+            <div className="rpt-kind-card">
+              <h4 className="rpt-kind-card-title">營收</h4>
+              <dl>
+                <div>
+                  <dt>{mode === "day" ? "這一天" : "這段期間"}</dt>
+                  <dd><MoneyText value={s.revenue} /></dd>
+                </div>
+              </dl>
+              <p className="rpt-kind-card-count">
+                {compareLabel} <DeltaText now={parseNtd(s.revenue) ?? 0} prev={parseNtd(s.prev_revenue) ?? 0} />
+              </p>
+            </div>
+            <div className="rpt-kind-card">
+              <h4 className="rpt-kind-card-title">毛利</h4>
+              <dl>
+                <div>
+                  <dt>已扣損耗</dt>
+                  <dd>
+                    <MoneyText value={s.margin} />
+                    <span className="rpt-rate">{s.margin_rate ? formatRate(s.margin_rate) : "—"}</span>
+                  </dd>
+                </div>
+              </dl>
+              <p className="rpt-kind-card-count">
+                共 {s.order_count} 筆{avg !== null ? ` · 平均每筆 ${avg} 份` : ""}
+              </p>
+            </div>
+          </section>
+
+          <h3 className="rpt-layer-h">品項排名</h3>
+          {rows.length === 0 ? (
+            <p className="hint">這段期間沒有賣出餐飲。</p>
+          ) : (
+            <div className="inv-table-wrap">
+              <table className="inv-table rpt-insight-table" aria-label="餐飲品項排名">
+                <thead>
+                  <tr>
+                    <th className="num">排名</th>
+                    <th>品項</th>
+                    <th>分類</th>
+                    {MENU_SORTS.map((col) => (
+                      <th key={col.key} className="num" aria-sort={sortKey === col.key ? "descending" : "none"}>
+                        <button
+                          type="button"
+                          className={`rpt-sort${sortKey === col.key ? " rpt-sort--active" : ""}`}
+                          onClick={() => setSortKey(col.key)}
+                        >
+                          {col.label}
+                          {sortKey === col.key ? " ▼" : ""}
+                        </button>
+                      </th>
+                    ))}
+                    <th className="num">營收佔比</th>
+                    <th className="num">{compareLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const change = rankChange(r);
+                    return (
+                      <tr key={r.menu_item_id}>
+                        <td className="num">{r.rank}</td>
+                        <td>{r.name}</td>
+                        <td>{r.category_name ?? "—"}</td>
+                        <td className="num">{r.units}</td>
+                        <td className="num"><MoneyText value={r.revenue} /></td>
+                        <td className="num">{r.margin === null || r.margin === undefined ? "—" : <MoneyText value={r.margin} />}</td>
+                        <td className="num">{r.margin_rate ? formatRate(r.margin_rate) : "—"}</td>
+                        <td className="num">{r.order_count}</td>
+                        <td className="num">{r.revenue_share ? formatRate(r.revenue_share) : "—"}</td>
+                        <td className="num">
+                          <span className={`rpt-rank-change rpt-rank-change--${change.tone}`}>{change.text}</span>
+                          <span className="rpt-prev-units">（{r.prev_units} 份）</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="hint">
+            份數與營收已扣退款；品項毛利只算有填成本的，沒填成本顯示「—」（總覽的毛利另外扣了損耗）。
+          </p>
+
+          {report.categories.length > 0 && (
+            <>
+              <h3 className="rpt-layer-h">分類小計</h3>
+              <div className="inv-table-wrap">
+                <table className="inv-table rpt-insight-table" aria-label="餐飲分類小計">
+                  <thead>
+                    <tr>
+                      <th>分類</th>
+                      <th className="num">份數</th>
+                      <th className="num">營收</th>
+                      <th className="num">營收佔比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.categories.map((c) => (
+                      <tr key={c.category_name}>
+                        <td>{c.category_name}</td>
+                        <td className="num">{c.units}</td>
+                        <td className="num"><MoneyText value={c.revenue} /></td>
+                        <td className="num">{c.revenue_share ? formatRate(c.revenue_share) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <h3 className="rpt-layer-h">這段期間沒賣出的品項</h3>
+          {report.not_sold.length === 0 ? (
+            <p className="hint">上架中的品項都有賣出。</p>
+          ) : (
+            <ul className="rpt-unsold">
+              {report.not_sold.map((u) => (
+                <li key={u.menu_item_id}>
+                  {u.name}
+                  {u.category_name && <span className="rpt-unsold-cat">{u.category_name}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <DownloadButtons onDownload={handleDownload} />
         </>
       )}
     </div>
@@ -2628,6 +2879,10 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
       return <TrendsPanel />;
     case "dine-in":
       return <DineInPanel />;
+    case "menu-today":
+      return <MenuItemsPanel mode="day" />;
+    case "menu-items":
+      return <MenuItemsPanel mode="range" />;
     case "daily-cash":
       return <DailyCashPanel />;
     case "sales-margin":

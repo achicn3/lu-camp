@@ -11812,6 +11812,40 @@
         "title": "MenuCategoryRead",
         "type": "object"
       },
+      "MenuCategoryRow": {
+        "properties": {
+          "category_name": {
+            "title": "Category Name",
+            "type": "string"
+          },
+          "revenue": {
+            "title": "Revenue",
+            "type": "string"
+          },
+          "revenue_share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Share"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "category_name",
+          "units",
+          "revenue"
+        ],
+        "title": "MenuCategoryRow",
+        "type": "object"
+      },
       "MenuCategoryUpdateRequest": {
         "properties": {
           "name": {
@@ -12160,6 +12194,105 @@
         "title": "MenuItemOptionGroupsRequest",
         "type": "object"
       },
+      "MenuItemRankRow": {
+        "description": "餐飲品項報表的一列（店主 2026-10-15）：份數與營收已扣期間內的退款。",
+        "properties": {
+          "category_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Name"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Rate"
+          },
+          "menu_item_id": {
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "order_count": {
+            "title": "Order Count",
+            "type": "integer"
+          },
+          "prev_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Rank"
+          },
+          "prev_units": {
+            "title": "Prev Units",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "revenue": {
+            "title": "Revenue",
+            "type": "string"
+          },
+          "revenue_share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Share"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "menu_item_id",
+          "name",
+          "rank",
+          "units",
+          "revenue",
+          "order_count",
+          "prev_units"
+        ],
+        "title": "MenuItemRankRow",
+        "type": "object"
+      },
       "MenuItemRead": {
         "properties": {
           "category": {
@@ -12288,6 +12421,35 @@
         "title": "MenuItemRead",
         "type": "object"
       },
+      "MenuItemUnsold": {
+        "properties": {
+          "category_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Name"
+          },
+          "menu_item_id": {
+            "title": "Menu Item Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "menu_item_id",
+          "name"
+        ],
+        "title": "MenuItemUnsold",
+        "type": "object"
+      },
       "MenuItemUpdateRequest": {
         "description": "部分更新；未提供的欄位不變。category 可明確設為 null 以清空。",
         "properties": {
@@ -12395,6 +12557,122 @@
           }
         },
         "title": "MenuItemUpdateRequest",
+        "type": "object"
+      },
+      "MenuItemsReport": {
+        "description": "餐飲品項報表：期間排名、和上一期（緊接在前、同樣長）比、分類小計、沒賣出的品項。",
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/MenuCategoryRow"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "not_sold": {
+            "items": {
+              "$ref": "#/components/schemas/MenuItemUnsold"
+            },
+            "title": "Not Sold",
+            "type": "array"
+          },
+          "prev_from": {
+            "format": "date-time",
+            "title": "Prev From",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/MenuItemRankRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/MenuItemsSummary"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "prev_from",
+          "summary",
+          "rows",
+          "categories",
+          "not_sold"
+        ],
+        "title": "MenuItemsReport",
+        "type": "object"
+      },
+      "MenuItemsSummary": {
+        "description": "期間餐飲總覽（與今日營運的餐飲卡同源：margin_breakdown）。毛利已扣損耗。",
+        "properties": {
+          "margin": {
+            "title": "Margin",
+            "type": "string"
+          },
+          "margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Rate"
+          },
+          "order_count": {
+            "title": "Order Count",
+            "type": "integer"
+          },
+          "prev_revenue": {
+            "title": "Prev Revenue",
+            "type": "string"
+          },
+          "prev_units": {
+            "title": "Prev Units",
+            "type": "integer"
+          },
+          "revenue": {
+            "title": "Revenue",
+            "type": "string"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "units",
+          "revenue",
+          "margin",
+          "order_count",
+          "prev_units",
+          "prev_revenue"
+        ],
+        "title": "MenuItemsSummary",
         "type": "object"
       },
       "MenuOptionGroupCreateRequest": {
@@ -33198,6 +33476,76 @@
           }
         ],
         "summary": "Invoice Register",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/menu-items": {
+      "get": {
+        "description": "餐飲品項報表（店主 2026-10-15）：期間品項排名、和上一期比、分類小計、沒賣出的品項。\n\n半開區間 [from, to)；to<=from → 422。上一期＝緊接在前、同樣長的期間。\n份數與營收扣期間內（依退款日）的退款；品項毛利只算有填成本的部分、未扣損耗。",
+        "operationId": "menuItemsReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Menu Items",
         "tags": [
           "reports"
         ]

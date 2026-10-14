@@ -385,6 +385,7 @@ function stubReportsFetch(override?: (url: string) => Response | null) {
       // Financial reports (Phase 6)
       if (url.includes("/reports/daily-summary")) return json(DAILY_SUMMARY_DATA);
       if (url.includes("/reports/insights")) return json(INSIGHTS_DATA);
+      if (url.includes("/reports/menu-items")) return json(MENU_ITEMS_DATA);
       if (url.includes("/reports/trends")) return json(TRENDS_DATA);
       if (url.includes("/reports/daily-cash")) return json(DAILY_CASH_DATA);
       if (url.includes("/reports/sales-margin")) return json(SALES_MARGIN_DATA);
@@ -400,6 +401,45 @@ function stubReportsFetch(override?: (url: string) => Response | null) {
     }),
   );
 }
+
+const MENU_ITEMS_DATA = {
+  generated_at: "2026-10-15T00:00:00Z",
+  store_id: 1,
+  date_from: "2026-10-01T00:00:00Z",
+  date_to: "2026-10-15T00:00:00Z",
+  prev_from: "2026-09-17T00:00:00Z",
+  summary: {
+    units: 120,
+    revenue: "18300",
+    margin: "11900",
+    margin_rate: "0.6500",
+    order_count: 80,
+    prev_units: 100,
+    prev_revenue: "20000",
+  },
+  rows: [
+    {
+      menu_item_id: 1, name: "拿鐵", category_name: "咖啡", rank: 1, units: 70, revenue: "10500",
+      margin: "7350", margin_rate: "0.7000", revenue_share: "0.5738", order_count: 55,
+      prev_units: 50, prev_rank: 3,
+    },
+    {
+      menu_item_id: 2, name: "司康", category_name: "甜點", rank: 2, units: 30, revenue: "2400",
+      margin: null, margin_rate: null, revenue_share: "0.1311", order_count: 25,
+      prev_units: 0, prev_rank: null,
+    },
+    {
+      menu_item_id: 3, name: "手沖耶加", category_name: "咖啡", rank: 3, units: 20, revenue: "5400",
+      margin: "4550", margin_rate: "0.8426", revenue_share: "0.2951", order_count: 18,
+      prev_units: 40, prev_rank: 1,
+    },
+  ],
+  categories: [
+    { category_name: "咖啡", units: 90, revenue: "15900", revenue_share: "0.8689" },
+    { category_name: "甜點", units: 30, revenue: "2400", revenue_share: "0.1311" },
+  ],
+  not_sold: [{ menu_item_id: 9, name: "冰美式", category_name: "咖啡" }],
+};
 
 const INSIGHTS_DATA = {
   generated_at: "2026-06-26T00:00:00Z",
@@ -467,6 +507,8 @@ const REPORT_GROUPS: Record<string, string> = {
   現金對帳: "每天看",
   銷售毛利: "賣得如何",
   經營洞察: "賣得如何",
+  今日餐飲: "每天看",
+  餐飲品項: "賣得如何",
   趨勢: "賣得如何",
   "餐飲內用/外帶": "賣得如何",
   活動成效: "促銷",
@@ -948,7 +990,7 @@ describe("ReportsPage", () => {
 });
 
 describe("報表分組", () => {
-  it("16 張報表分成 5 組；預設在「每天看」，切到購物金只看得到購物金的四張", async () => {
+  it("18 張報表分成 5 組；預設在「每天看」，切到購物金只看得到購物金的四張", async () => {
     loginAs("MANAGER");
     stubReportsFetch();
     renderPage();
@@ -964,6 +1006,7 @@ describe("報表分組", () => {
     expect(within(reports).getAllByRole("tab").map((t) => t.textContent)).toEqual([
       "今日營運",
       "現金對帳",
+      "今日餐飲",
     ]);
     await userEvent.click(within(groups).getByRole("tab", { name: "購物金" }));
     expect(
@@ -981,4 +1024,41 @@ describe("報表分組", () => {
       expect(screen.queryByRole("tab", { name: old })).toBeNull();
     }
   });
+
+  // -- 餐飲品項（店主 2026-10-15）--
+
+  it("每天看有「今日餐飲」：排名、和前一天比、沒賣出的品項", async () => {
+    loginAs("MANAGER");
+    stubReportsFetch();
+    renderPage();
+    await screen.findByText("120,000");
+    await openReport("今日餐飲");
+    const table = await screen.findByRole("table", { name: "餐飲品項排名" });
+    const names = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[1].textContent);
+    expect(names).toEqual(["拿鐵", "司康", "手沖耶加"]);
+    expect(within(table).getByText("↑2")).toBeTruthy(); // 拿鐵 3 → 1
+    expect(within(table).getByText("新上榜")).toBeTruthy(); // 司康上一期沒賣
+    expect(within(table).getByText("↓2")).toBeTruthy(); // 手沖 1 → 3
+    expect(screen.getAllByText("比前一天").length).toBeGreaterThan(0);
+    expect(screen.getByText("冰美式")).toBeTruthy(); // 沒賣出
+  });
+
+  it("賣得如何有「餐飲品項」：點欄位標題改排序", async () => {
+    loginAs("MANAGER");
+    stubReportsFetch();
+    renderPage();
+    await screen.findByText("120,000");
+    await openReport("餐飲品項");
+    const table = await screen.findByRole("table", { name: "餐飲品項排名" });
+    await userEvent.click(within(table).getByRole("button", { name: /營收/ }));
+    const names = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[1].textContent);
+    expect(names).toEqual(["拿鐵", "手沖耶加", "司康"]);
+    expect(screen.getAllByText("比上一期").length).toBeGreaterThan(0);
+    // 總覽：份數 120（上一期 100 → ▲20）、營收比上一期少
+    const summary = screen.getByRole("region", { name: "餐飲總覽" });
+    expect(summary.textContent).toContain("▲ 20");
+    expect(summary.textContent).toContain("▼ 1,700");
+    expect(summary.textContent).toContain("共 80 筆 · 平均每筆 1.5 份");
+  });
 });
+

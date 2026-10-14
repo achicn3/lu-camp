@@ -203,7 +203,7 @@
   font-size: var(--text-md);
   color: var(--ink);
 }
-.rpt-layer-h:first-of-type {
+.rpt-filters + .rpt-layer-h {
   margin-top: 0;
 }
 .rpt-kind-cards {
@@ -263,4 +263,66 @@
 /* 第一層卡片一樣高（交易筆數多兩行小字也不會比別張大）。 */
 .rpt-dashboard-cards.rpt-top-cards {
   align-items: stretch;
+}
+
+/* 餐飲品項（店主 2026-10-15）：可點的欄位標題、排名變化、和上一期比、沒賣出的品項。 */
+.rpt-sort {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.rpt-sort--active {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+.rpt-rank-change {
+  font-weight: 700;
+}
+.rpt-rank-change--up {
+  color: var(--success);
+}
+.rpt-rank-change--down {
+  color: var(--danger);
+}
+.rpt-rank-change--new {
+  color: var(--info);
+}
+.rpt-prev-units {
+  margin-left: 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.rpt-delta {
+  font-weight: 600;
+}
+.rpt-delta--up {
+  color: var(--success);
+}
+.rpt-delta--down {
+  color: var(--danger);
+}
+.rpt-unsold {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  list-style: none;
+}
+.rpt-unsold li {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.rpt-unsold-cat {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
 }

@@ -3749,6 +3749,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/menu-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Menu Items
+         * @description 餐飲品項報表（店主 2026-10-15）：期間品項排名、和上一期比、分類小計、沒賣出的品項。
+         *
+         *     半開區間 [from, to)；to<=from → 422。上一期＝緊接在前、同樣長的期間。
+         *     份數與營收扣期間內（依退款日）的退款；品項毛利只算有填成本的部分、未扣損耗。
+         */
+        get: operations["menuItemsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/sales-margin": {
         parameters: {
             query?: never;
@@ -9062,6 +9085,17 @@ export interface components {
             /** Sort Order */
             sort_order: number;
         };
+        /** MenuCategoryRow */
+        MenuCategoryRow: {
+            /** Category Name */
+            category_name: string;
+            /** Revenue */
+            revenue: string;
+            /** Revenue Share */
+            revenue_share?: string | null;
+            /** Units */
+            units: number;
+        };
         /** MenuCategoryUpdateRequest */
         MenuCategoryUpdateRequest: {
             /** Name */
@@ -9170,6 +9204,36 @@ export interface components {
             /** Group Ids */
             group_ids: number[];
         };
+        /**
+         * MenuItemRankRow
+         * @description 餐飲品項報表的一列（店主 2026-10-15）：份數與營收已扣期間內的退款。
+         */
+        MenuItemRankRow: {
+            /** Category Name */
+            category_name?: string | null;
+            /** Margin */
+            margin?: string | null;
+            /** Margin Rate */
+            margin_rate?: string | null;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /** Name */
+            name: string;
+            /** Order Count */
+            order_count: number;
+            /** Prev Rank */
+            prev_rank?: number | null;
+            /** Prev Units */
+            prev_units: number;
+            /** Rank */
+            rank: number;
+            /** Revenue */
+            revenue: string;
+            /** Revenue Share */
+            revenue_share?: string | null;
+            /** Units */
+            units: number;
+        };
         /** MenuItemRead */
         MenuItemRead: {
             /** Category */
@@ -9203,6 +9267,15 @@ export interface components {
             /** Unit Price */
             unit_price: string;
         };
+        /** MenuItemUnsold */
+        MenuItemUnsold: {
+            /** Category Name */
+            category_name?: string | null;
+            /** Menu Item Id */
+            menu_item_id: number;
+            /** Name */
+            name: string;
+        };
         /**
          * MenuItemUpdateRequest
          * @description 部分更新；未提供的欄位不變。category 可明確設為 null 以清空。
@@ -9224,6 +9297,61 @@ export interface components {
             unit_cost?: number | string | null;
             /** Unit Price */
             unit_price?: number | string | null;
+        };
+        /**
+         * MenuItemsReport
+         * @description 餐飲品項報表：期間排名、和上一期（緊接在前、同樣長）比、分類小計、沒賣出的品項。
+         */
+        MenuItemsReport: {
+            /** Categories */
+            categories: components["schemas"]["MenuCategoryRow"][];
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Not Sold */
+            not_sold: components["schemas"]["MenuItemUnsold"][];
+            /**
+             * Prev From
+             * Format: date-time
+             */
+            prev_from: string;
+            /** Rows */
+            rows: components["schemas"]["MenuItemRankRow"][];
+            /** Store Id */
+            store_id: number;
+            summary: components["schemas"]["MenuItemsSummary"];
+        };
+        /**
+         * MenuItemsSummary
+         * @description 期間餐飲總覽（與今日營運的餐飲卡同源：margin_breakdown）。毛利已扣損耗。
+         */
+        MenuItemsSummary: {
+            /** Margin */
+            margin: string;
+            /** Margin Rate */
+            margin_rate?: string | null;
+            /** Order Count */
+            order_count: number;
+            /** Prev Revenue */
+            prev_revenue: string;
+            /** Prev Units */
+            prev_units: number;
+            /** Revenue */
+            revenue: string;
+            /** Units */
+            units: number;
         };
         /** MenuOptionGroupCreateRequest */
         MenuOptionGroupCreateRequest: {
@@ -19598,6 +19726,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRegisterReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    menuItemsReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemsReport"];
                 };
             };
             /** @description Validation Error */
