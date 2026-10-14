@@ -148,10 +148,10 @@ from app.shared.exceptions import (
 _POINTS_DIVISOR = Decimal(100)  # 會員點數：floor(含稅總額 ÷ 100)，docs/16 §0
 
 
-
 if TYPE_CHECKING:
     # 只供型別：returns 在執行期依賴 sales（函式內 import 破循環，同 margin_breakdown）。
     from app.modules.returns.repository import ReturnsMarginAdjustments
+
 
 @dataclass
 class LinePayAttemptState:
@@ -197,8 +197,9 @@ class MarginBreakdown:
     cash_received: Decimal
     store_credit_redeemed: Decimal
     transaction_count: int
-    # 餐飲/二手分列（裁示）：food_revenue=餐飲認列營收；secondhand_revenue=非餐飲認列營收
-    # （＝recognized_revenue − food_revenue，含二手買斷/寄售抽成/一般商品）。
+    # 營收分列（店主 2026-10-14）：food_revenue＝餐飲認列營收；
+    # camping_goods_revenue＝露營用品總營收（＝recognized_revenue − food_revenue）＝
+    # secondhand_revenue（二手買斷＋散裝＋寄售抽成）＋ catalog_revenue（一般商品）。
     food_revenue: Decimal
     secondhand_revenue: Decimal
     # 支付手續費（docs/30 §7 決策 1）：手續費為店家成本、獨立支出行——認列營收/gross_margin 不含，
@@ -227,6 +228,12 @@ class MarginBreakdown:
     # 已從 food_margin 與 gross_margin 扣除。
     food_waste_cost: Decimal = Decimal(0)
     food_waste_breakdown: tuple[FoodWasteRow, ...] = ()
+    # 露營用品總營收＝二手（secondhand_revenue）＋一般商品（catalog_revenue），見上方營收分列。
+    camping_goods_revenue: Decimal = Decimal(0)
+    catalog_revenue: Decimal = Decimal(0)  # 一般商品認列營收（有無進價都算）
+    # 一般商品毛利只算有成本快照的（沒填進價的不假造毛利，同 gross_margin 口徑）。
+    catalog_margin: Decimal = Decimal(0)
+    catalog_units_sold: int = 0
 
 
 @dataclass(frozen=True)
@@ -2524,6 +2531,7 @@ class SalesService:
             catalog_revenue=comp.catalog_revenue - adj.catalog_revenue,
             catalog_known_revenue=comp.catalog_known_revenue - adj.catalog_known_revenue,
             catalog_cogs=comp.catalog_cogs - adj.catalog_cogs,
+            catalog_units=comp.catalog_units - adj.catalog_units,
             unknown_cost_revenue=comp.unknown_cost_revenue
             - adj.catalog_revenue
             - adj.no_cost_serialized_revenue
@@ -2557,6 +2565,8 @@ class SalesService:
         bulk_margin = comp.owned_bulk_revenue - comp.owned_bulk_cogs
         # 有成本快照的一般商品也認列毛利（收貨帶入進價後才有；沒有的仍走「成本未知」桶）。
         catalog_margin = comp.catalog_known_revenue - comp.catalog_cogs
+        # comp.catalog_revenue 是**沒有成本快照**的一般商品（沿用舊名），加上有快照的才是全部。
+        catalog_revenue = comp.catalog_revenue + comp.catalog_known_revenue
         # 餐飲同理：品項有填成本才認毛利，沒填的留在「成本未知」桶（裁示 2026-09-17）。
         # 損耗（docs/49）從餐飲毛利扣：報廢／盤點短少的材料錢、以及客訴退款報銷那份的成本。
         food_waste = await self._food_waste(store_id, date_from, date_to, adj)
@@ -2595,7 +2605,11 @@ class SalesService:
             food_waste_cost=food_waste_cost,
             food_waste_breakdown=food_waste,
             food_revenue=comp.menu_revenue,
-            secondhand_revenue=recognized_revenue - comp.menu_revenue,
+            secondhand_revenue=recognized_revenue - comp.menu_revenue - catalog_revenue,
+            camping_goods_revenue=recognized_revenue - comp.menu_revenue,
+            catalog_revenue=catalog_revenue,
+            catalog_margin=catalog_margin,
+            catalog_units_sold=comp.catalog_units,
             payment_fee_total=comp.payment_fee_total,
             net_margin=gross_margin - comp.payment_fee_total,
             payment_methods=payment_methods,
@@ -2670,6 +2684,12 @@ class SalesService:
     ]:
         """期間售出散裝的洞察原始列（經營洞察把散裝納入品牌/類型排行；Codex P2）。"""
         return await self._repo.bulk_sold_rows(store_id, date_from, date_to)
+
+    async def catalog_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[int | None, int | None, int, Decimal, Decimal | None]]:
+        """期間售出一般商品的洞察原始列（暢銷排行把一般商品與二手分開列，店主 2026-10-14）。"""
+        return await self._repo.catalog_sold_rows(store_id, date_from, date_to)
 
     async def excess_spend_components(
         self, store_id: int, date_from: datetime, date_to: datetime

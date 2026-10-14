@@ -399,3 +399,96 @@ async def test_sales_margin_csv_export(client: httpx.AsyncClient, db_session: As
     assert "貢獻毛利（淨毛利扣淨贈品成本）" in text
     assert "付款方式 CASH 淨收款" in text
     assert "付款方式 CASH 手續費" in text
+
+
+# ── 一般商品 vs 二手（店主 2026-10-14）────────────────────────────────
+# 露營用品總營收＝認列營收−餐飲；二手營收＝買斷＋散裝＋寄售抽成；一般商品另列營收／毛利／件數。
+
+
+async def _add_costed_catalog(
+    session: AsyncSession, store_id: int, *, sku: str, price: str, cost: str | None
+) -> int:
+    product = CatalogProduct(
+        store_id=store_id,
+        sku=sku,
+        name="一般商品",
+        unit_price=Decimal(price),
+        unit_cost=None if cost is None else Decimal(cost),
+        quantity_on_hand=10,
+    )
+    session.add(product)
+    await session.flush()
+    return product.id
+
+
+async def test_catalog_is_split_out_of_secondhand(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    costed = await _add_costed_catalog(db_session, store_id, sku="C-1", price="100", cost="60")
+    no_cost = await _add_costed_catalog(db_session, store_id, sku="C-2", price="50", cost=None)
+    menu_id = await _add_menu(db_session, store_id, name="拿鐵", price="180")
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+            {"line_type": "CATALOG", "catalog_product_id": costed, "qty": 2},
+            {"line_type": "CATALOG", "catalog_product_id": no_cost, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": menu_id, "qty": 1},
+        ],
+        key="split1",
+    )
+
+    body = await _margin(client, mgr)
+    assert body["recognized_revenue"] == "930"
+    assert body["food_revenue"] == "180"
+    assert body["camping_goods_revenue"] == "750"  # 930 − 180
+    assert body["catalog_revenue"] == "250"  # 200 + 50
+    assert body["catalog_units_sold"] == 3
+    assert body["catalog_margin"] == "80"  # 只算有進價的：200 − 120
+    assert body["secondhand_revenue"] == "500"  # 750 − 250
+
+
+async def test_consignment_commission_counts_as_secondhand(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, consignor, _clerk_id = await _seed(db_session)
+    await _add_consignment_serialized(
+        db_session, store_id, consignor, code="CON-1", price="1050", commission_pct=50
+    )
+    await _sell(client, clerk, [{"line_type": "SERIALIZED", "item_code": "CON-1"}], key="con1")
+
+    body = await _margin(client, mgr)
+    assert body["catalog_revenue"] == "0"
+    assert body["secondhand_revenue"] == body["consignment_commission_income"]
+    assert body["camping_goods_revenue"] == body["secondhand_revenue"]
+
+
+async def test_catalog_return_nets_revenue_units_and_margin(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    costed = await _add_costed_catalog(db_session, store_id, sku="C-1", price="100", cost="60")
+    sale = await _sell(
+        client, clerk, [{"line_type": "CATALOG", "catalog_product_id": costed, "qty": 2}], key="r1"
+    )
+    lines = sale["lines"]
+    assert isinstance(lines, list)
+    resp = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "退一件",
+            "lines": [{"sale_line_id": lines[0]["id"], "qty": 1}],
+        },
+        headers=_auth(clerk, idem="r1-return"),
+    )
+    assert resp.status_code == 201, resp.text
+
+    body = await _margin(client, mgr)
+    assert body["catalog_revenue"] == "100"
+    assert body["catalog_units_sold"] == 1
+    assert body["catalog_margin"] == "40"
+    assert body["secondhand_revenue"] == "0"

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, PlainSerializer
 
 from app.core.money import format_ntd, format_rate
 from app.modules.campaigns.schemas import CampaignTargetRead
-from app.shared.enums import CampaignKind, CampaignStatus
+from app.shared.enums import CampaignKind, CampaignStatus, GoodsKind
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 # 比率（毛利率等）不是金額：小數、非整數元。與金額分開宣告，才不會被金額守衛誤收，
@@ -162,9 +162,14 @@ class SalesMarginReport(BaseModel):
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt  # 毛利 ÷ 已知成本營收；分母 0 → null
     unknown_cost_sales: NTDAmount  # 成本未知營收（catalog + 餐飲 + 缺成本自有），不假造毛利
-    # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
+    # 營收分列（店主 2026-10-14）：food＝餐飲；camping_goods＝露營用品總營收（＝recognized−food）
+    # ＝ secondhand（二手買斷＋散裝＋寄售抽成）＋ catalog（一般商品）。
     food_revenue: NTDAmount
     secondhand_revenue: NTDAmount
+    camping_goods_revenue: NTDAmount = Decimal(0)
+    catalog_revenue: NTDAmount = Decimal(0)
+    catalog_margin: NTDAmount = Decimal(0)  # 只算有進價（成本快照）的一般商品
+    catalog_units_sold: int = 0
     cash_received: NTDAmount = Field(description="現金淨收款（銷售收現減退現）")
     store_credit_redeemed: NTDAmount = Field(description="購物金淨收款（購物金兌付減退回購物金）")
     transaction_count: int
@@ -205,9 +210,14 @@ class DailySummaryReport(BaseModel):
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt  # 分母 0 → null
     unknown_cost_sales: NTDAmount
-    # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
+    # 營收分列（店主 2026-10-14）：food＝餐飲；camping_goods＝露營用品總營收（＝recognized−food）
+    # ＝ secondhand（二手買斷＋散裝＋寄售抽成）＋ catalog（一般商品）。
     food_revenue: NTDAmount
     secondhand_revenue: NTDAmount
+    camping_goods_revenue: NTDAmount = Decimal(0)
+    catalog_revenue: NTDAmount = Decimal(0)
+    catalog_margin: NTDAmount = Decimal(0)  # 只算有進價（成本快照）的一般商品
+    catalog_units_sold: int = 0
     # 現金/支出面（與 R1 同源）
     cash_sales_in: NTDAmount
     acquisition_void_in: NTDAmount
@@ -233,6 +243,8 @@ class TrendRow(BaseModel):
     recognized_revenue: NTDAmount
     food_revenue: NTDAmount
     secondhand_revenue: NTDAmount
+    camping_goods_revenue: NTDAmount = Decimal(0)
+    catalog_revenue: NTDAmount = Decimal(0)
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt
     cogs: NTDAmount
@@ -520,6 +532,8 @@ class InsightsBreakdownRow(BaseModel):
 
     key: int | None
     label: str
+    goods_kind: GoodsKind
+    """一般商品或二手（同一品牌／類型兩種都有就分兩列）。"""
     units_sold: int
     revenue: NTDAmount
     margin: NTDAmount
@@ -542,8 +556,11 @@ class InsightsRevenueMix(BaseModel):
     """經營洞察：業態營收結構（認列口徑：寄售只認抽成）。"""
 
     secondhand: NTDAmount
+    """二手買斷／散裝（不含寄售抽成，抽成另列）。"""
     consignment_commission: NTDAmount
     food: NTDAmount
+    catalog: NTDAmount = Decimal(0)
+    """一般商品。"""
 
 
 class InsightsReport(BaseModel):

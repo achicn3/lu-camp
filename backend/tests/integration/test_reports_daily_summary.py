@@ -21,7 +21,7 @@ from app.main import create_app
 from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
-from app.modules.inventory.models import SerializedItem
+from app.modules.inventory.models import CatalogProduct, SerializedItem
 from app.modules.sales.models import Sale
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -255,3 +255,42 @@ async def test_daily_summary_manager_only_and_export(
     assert csv_resp.status_code == 200
     text = csv_resp.content.decode("utf-8-sig")
     assert "毛利" in text and "營業額" in text and "估算淨利" not in text
+
+
+async def test_daily_summary_splits_catalog_from_secondhand(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """每日報表：露營用品總營收＝二手＋一般商品；一般商品另列營收／毛利／件數。
+
+    店主 2026-10-14。
+    """
+    mgr, clerk, store_id, _consignor = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    product = CatalogProduct(
+        store_id=store_id,
+        sku="C-1",
+        name="瓦斯罐",
+        unit_price=Decimal(100),
+        unit_cost=Decimal(60),
+        quantity_on_hand=10,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [
+                {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+                {"line_type": "CATALOG", "catalog_product_id": product.id, "qty": 3},
+            ]
+        },
+        headers=_auth(clerk, idem="split"),
+    )
+    assert resp.status_code == 201, resp.text
+    summary = await _summary(client, mgr, await _day(db_session, store_id))
+
+    assert summary["camping_goods_revenue"] == "800"
+    assert summary["secondhand_revenue"] == "500"
+    assert summary["catalog_revenue"] == "300"
+    assert summary["catalog_margin"] == "120"
+    assert summary["catalog_units_sold"] == 3

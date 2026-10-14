@@ -33,10 +33,12 @@ from app.modules.reports.schemas import (
     TrendsReport,
 )
 from app.modules.reports.service import ReportsService
-from app.shared.enums import CampaignKind, CampaignTargetMode
+from app.shared.enums import CampaignKind, CampaignTargetMode, GoodsKind
 from app.shared.exceptions import DomainError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+_GOODS_KIND_LABEL = {GoodsKind.CATALOG: "一般商品", GoodsKind.SECONDHAND: "二手"}
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
@@ -153,7 +155,11 @@ async def daily_summary(
             ["毛利率", rate],
             ["成本未知營收", format_ntd(report.unknown_cost_sales)],
             ["餐飲營收", format_ntd(report.food_revenue)],
-            ["二手營收", format_ntd(report.secondhand_revenue)],
+            ["露營用品總營收", format_ntd(report.camping_goods_revenue)],
+            ["二手營收（買斷＋散裝＋寄售抽成）", format_ntd(report.secondhand_revenue)],
+            ["一般商品營收", format_ntd(report.catalog_revenue)],
+            ["一般商品毛利（有進價的）", format_ntd(report.catalog_margin)],
+            ["一般商品售出件數", str(report.catalog_units_sold)],
             ["現金銷售", format_ntd(report.cash_sales_in)],
             ["收購退回現金（作廢／改撥購物金）", format_ntd(report.acquisition_void_in)],
             ["收購付現", format_ntd(report.buyout_out)],
@@ -212,7 +218,9 @@ async def trends(
             "營業額",
             "認列營收",
             "餐飲營收",
+            "露營用品總營收",
             "二手營收",
+            "一般商品營收",
             "毛利",
             "毛利率",
             "銷貨成本",
@@ -227,7 +235,9 @@ async def trends(
                 format_ntd(r.gross_turnover),
                 format_ntd(r.recognized_revenue),
                 format_ntd(r.food_revenue),
+                format_ntd(r.camping_goods_revenue),
                 format_ntd(r.secondhand_revenue),
+                format_ntd(r.catalog_revenue),
                 format_ntd(r.gross_margin),
                 "N/A" if r.gross_margin_rate is None else format_rate(r.gross_margin_rate),
                 format_ntd(r.cogs),
@@ -275,14 +285,16 @@ async def insights(
         ("迄", store_datetime_iso(report.date_to)),
         ("在庫>90天件數", str(t.in_stock_over_90d)),
         ("平均周轉天數", _days(t.avg_turnover_days)),
-        ("二手營收", format_ntd(mix.secondhand)),
+        ("二手買斷/散裝營收", format_ntd(mix.secondhand)),
         ("寄售抽成", format_ntd(mix.consignment_commission)),
         ("餐飲營收", format_ntd(mix.food)),
+        ("一般商品營收", format_ntd(mix.catalog)),
     ]
     rows = [
         [
             dim,
             r.label,
+            _GOODS_KIND_LABEL[r.goods_kind],
             str(r.units_sold),
             format_ntd(r.revenue),
             format_ntd(r.margin),
@@ -296,7 +308,7 @@ async def insights(
         sheet="經營洞察",
         filename_stem=f"insights-{report.store_id}",
         meta=meta,
-        headers=["維度", "名稱", "售出件數", "營收", "毛利", "平均單價", "平均在庫天數"],
+        headers=["維度", "名稱", "種類", "售出件數", "營收", "毛利", "平均單價", "平均在庫天數"],
         rows=rows,
     )
     return export_response(exp, fmt)
@@ -492,7 +504,11 @@ async def sales_margin(
             ["餐飲成本", format_ntd(report.food_cogs)],
             ["餐飲損耗（報廢＋盤點短少＋客訴退款）", format_ntd(report.food_waste_cost)],
             ["餐飲毛利（已填成本的品項，已扣損耗）", format_ntd(report.food_margin)],
-            ["二手營收", format_ntd(report.secondhand_revenue)],
+            ["露營用品總營收", format_ntd(report.camping_goods_revenue)],
+            ["二手營收（買斷＋散裝＋寄售抽成）", format_ntd(report.secondhand_revenue)],
+            ["一般商品營收", format_ntd(report.catalog_revenue)],
+            ["一般商品毛利（有進價的）", format_ntd(report.catalog_margin)],
+            ["一般商品售出件數", str(report.catalog_units_sold)],
             ["現金淨收款（扣退款）", format_ntd(report.cash_received)],
             ["購物金淨收款（扣退款）", format_ntd(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],

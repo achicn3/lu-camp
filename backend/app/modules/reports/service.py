@@ -81,6 +81,7 @@ from app.shared.enums import (
     BulkLotStatus,
     CampaignStatus,
     EInvoiceIssueChannel,
+    GoodsKind,
     InvoiceStatus,
     OwnershipType,
     SerializedItemStatus,
@@ -157,6 +158,7 @@ class _NormRow:
     revenue: Decimal
     margin: Decimal
     days: int | None
+    kind: GoodsKind = GoodsKind.SECONDHAND
 
 
 MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
@@ -532,6 +534,10 @@ class ReportsService:
             unknown_cost_sales=bd.unknown_cost_sales,
             food_revenue=bd.food_revenue,
             secondhand_revenue=bd.secondhand_revenue,
+            camping_goods_revenue=bd.camping_goods_revenue,
+            catalog_revenue=bd.catalog_revenue,
+            catalog_margin=bd.catalog_margin,
+            catalog_units_sold=bd.catalog_units_sold,
             cash_received=bd.cash_received,
             store_credit_redeemed=bd.store_credit_redeemed,
             transaction_count=bd.transaction_count,
@@ -617,17 +623,38 @@ class ReportsService:
         return out
 
     @staticmethod
+    def _normalize_catalog(
+        rows: list[tuple[int | None, int | None, int, Decimal, Decimal | None]],
+    ) -> list[_NormRow]:
+        """一般商品售出列 → 正規化列。沒有逐件入庫日（在庫天數不計）；沒進價不假造毛利。"""
+        return [
+            _NormRow(
+                brand_id,
+                category_id,
+                qty,
+                net_amount,
+                Decimal(0) if cost is None else net_amount - cost,
+                None,
+                GoodsKind.CATALOG,
+            )
+            for brand_id, category_id, qty, net_amount, cost in rows
+        ]
+
+    @staticmethod
     def _aggregate_insights(
         rows: list[_NormRow],
         by_brand: bool,
         name_map: dict[int, str],
         default_label: str,
     ) -> list[InsightsBreakdownRow]:
-        """逐品牌/類型彙整正規化售出列：件數/營收/毛利/均價/平均在庫天數（序號品＋散裝統一口徑）。"""
-        groups: dict[int | None, _InsightAcc] = {}
+        """逐品牌/類型彙整正規化售出列：件數/營收/毛利/均價/平均在庫天數。
+
+        一般商品與二手（序號品＋散裝）分開彙整：同一品牌兩種都有就是兩列（店主 2026-10-14）。
+        """
+        groups: dict[tuple[int | None, GoodsKind], _InsightAcc] = {}
         for r in rows:
             key = r.brand_id if by_brand else r.category_id
-            acc = groups.setdefault(key, _InsightAcc())
+            acc = groups.setdefault((key, r.kind), _InsightAcc())
             acc.units += r.units
             acc.revenue += r.revenue
             acc.margin += r.margin
@@ -638,6 +665,7 @@ class ReportsService:
             InsightsBreakdownRow(
                 key=key,
                 label=name_map.get(key, default_label) if key is not None else default_label,
+                goods_kind=kind,
                 units_sold=acc.units,
                 revenue=acc.revenue,
                 margin=acc.margin,
@@ -646,7 +674,7 @@ class ReportsService:
                     round(acc.day_weight / acc.day_units, 1) if acc.day_units else None
                 ),
             )
-            for key, acc in groups.items()
+            for (key, kind), acc in groups.items()
         ]
         result.sort(key=lambda row: row.revenue, reverse=True)
         return result
@@ -844,7 +872,12 @@ class ReportsService:
         bulk = await self._sales.bulk_sold_rows(store_id, date_from, date_to)
         consigned_sale_ids = list({r[8] for r in ser if r[2] == OwnershipType.CONSIGNMENT})
         commissions = await self._consignment.commission_by_sale_item(store_id, consigned_sale_ids)
-        norm = self._normalize_serialized(ser, commissions) + self._normalize_bulk(bulk)
+        catalog = await self._sales.catalog_sold_rows(store_id, date_from, date_to)
+        norm = (
+            self._normalize_serialized(ser, commissions)
+            + self._normalize_bulk(bulk)
+            + self._normalize_catalog(catalog)
+        )
         # 依正規化列實際出現的品牌/類型 id 取名（不受清單上限限制；Codex P2）。
         brand_ids = list({n.brand_id for n in norm if n.brand_id is not None})
         cat_ids = list({n.category_id for n in norm if n.category_id is not None})
@@ -886,6 +919,7 @@ class ReportsService:
                 secondhand=bd.secondhand_revenue - bd.consignment_commission_income,
                 consignment_commission=bd.consignment_commission_income,
                 food=bd.food_revenue,
+                catalog=bd.catalog_revenue,
             ),
         )
 
@@ -1250,6 +1284,8 @@ class ReportsService:
                     recognized_revenue=margin.recognized_revenue,
                     food_revenue=margin.food_revenue,
                     secondhand_revenue=margin.secondhand_revenue,
+                    camping_goods_revenue=margin.camping_goods_revenue,
+                    catalog_revenue=margin.catalog_revenue,
                     gross_margin=margin.gross_margin,
                     gross_margin_rate=margin.gross_margin_rate,
                     # 一般商品成本也要算進來，否則同一份報表裡成本與毛利互相矛盾。
@@ -1321,6 +1357,10 @@ class ReportsService:
             unknown_cost_sales=margin.unknown_cost_sales,
             food_revenue=margin.food_revenue,
             secondhand_revenue=margin.secondhand_revenue,
+            camping_goods_revenue=margin.camping_goods_revenue,
+            catalog_revenue=margin.catalog_revenue,
+            catalog_margin=margin.catalog_margin,
+            catalog_units_sold=margin.catalog_units_sold,
             cash_sales_in=cash.total_cash_sales,
             acquisition_void_in=cash.total_acquisition_void_in,
             buyout_out=cash.total_buyout_out,

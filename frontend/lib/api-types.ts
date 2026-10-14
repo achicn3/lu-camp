@@ -6859,10 +6859,30 @@ export interface components {
             avg_ticket: string | null;
             /** Buyout Out */
             buyout_out: string;
+            /**
+             * Camping Goods Revenue
+             * @default 0
+             */
+            camping_goods_revenue: string;
             /** Cash Sales In */
             cash_sales_in: string;
             /** Cash Variance */
             cash_variance: string;
+            /**
+             * Catalog Margin
+             * @default 0
+             */
+            catalog_margin: string;
+            /**
+             * Catalog Revenue
+             * @default 0
+             */
+            catalog_revenue: string;
+            /**
+             * Catalog Units Sold
+             * @default 0
+             */
+            catalog_units_sold: number;
             /** Cogs */
             cogs: string;
             /** Consignment Commission Income */
@@ -7470,6 +7490,12 @@ export interface components {
             store_id: number;
         };
         /**
+         * GoodsKind
+         * @description 報表區分「一般商品」（進貨的全新品）與「二手」（買斷／散裝／寄售），店主 2026-10-14。
+         * @enum {string}
+         */
+        GoodsKind: "SECONDHAND" | "CATALOG";
+        /**
          * GoodsReceiptRead
          * @description 單一收貨批次（分批收貨事件）＋所掛的進項發票（沒有＝還沒開發票）。
          */
@@ -7642,6 +7668,7 @@ export interface components {
             avg_days_in_stock: number | null;
             /** Avg Unit Price */
             avg_unit_price: string;
+            goods_kind: components["schemas"]["GoodsKind"];
             /** Key */
             key: number | null;
             /** Label */
@@ -7687,6 +7714,11 @@ export interface components {
          * @description 經營洞察：業態營收結構（認列口徑：寄售只認抽成）。
          */
         InsightsRevenueMix: {
+            /**
+             * Catalog
+             * @default 0
+             */
+            catalog: string;
             /** Consignment Commission */
             consignment_commission: string;
             /** Food */
@@ -10958,6 +10990,11 @@ export interface components {
             /** Bulk Cogs */
             bulk_cogs: string;
             /**
+             * Camping Goods Revenue
+             * @default 0
+             */
+            camping_goods_revenue: string;
+            /**
              * Cash Received
              * @description 現金淨收款（銷售收現減退現）
              */
@@ -10967,6 +11004,21 @@ export interface components {
              * @default 0
              */
             catalog_cogs: string;
+            /**
+             * Catalog Margin
+             * @default 0
+             */
+            catalog_margin: string;
+            /**
+             * Catalog Revenue
+             * @default 0
+             */
+            catalog_revenue: string;
+            /**
+             * Catalog Units Sold
+             * @default 0
+             */
+            catalog_units_sold: number;
             /** Consignment Commission Income */
             consignment_commission_income: string;
             /**
@@ -11897,6 +11949,16 @@ export interface components {
          * @description 財務趨勢單一期間（docs/19 R6）。period 為桶起始日。
          */
         TrendRow: {
+            /**
+             * Camping Goods Revenue
+             * @default 0
+             */
+            camping_goods_revenue: string;
+            /**
+             * Catalog Revenue
+             * @default 0
+             */
+            catalog_revenue: string;
             /** Cogs */
             cogs: string;
             /** Food Revenue */

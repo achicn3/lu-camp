@@ -13,7 +13,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.consignment.models import ConsignmentSettlement
-from app.modules.inventory.models import Brand, BulkLot, Category, SerializedItem
+from app.modules.inventory.models import Brand, BulkLot, CatalogProduct, Category, SerializedItem
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -230,6 +230,7 @@ async def test_insights_csv_export(
     assert resp.status_code == 200
     text = resp.content.decode("utf-8-sig")
     assert "維度" in text and "售出件數" in text and "平均在庫天數" in text
+    assert "種類" in text and "二手" in text
     assert "Snow Peak" in text
     assert "平均周轉天數" in text  # 周轉摘要置於 meta
 
@@ -342,3 +343,95 @@ async def test_insights_consignment_margin_keeps_historical_settlement_amount(
     assert resp.status_code == 200, resp.text
     rows = {r["label"]: r for r in resp.json()["brand_breakdown"]}
     assert rows["Coleman"]["margin"] == "525"
+
+
+async def test_insights_ranks_catalog_and_secondhand_as_separate_rows(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """暢銷排行要看得出一般商品還是二手（店主 2026-10-14）：同一品牌拆兩列、各帶種類。"""
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    brand = Brand(store_id=store.id, name="Snow Peak")
+    cat = Category(store_id=store.id, name="燈具", target_margin_pct=40)
+    db_session.add_all([mgr, clerk, brand, cat])
+    await db_session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+    item = SerializedItem(
+        store_id=store.id,
+        item_code="OWN-L",
+        name="二手營燈",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal(1500),
+        acquisition_cost=Decimal(800),
+        brand_id=brand.id,
+        category_id=cat.id,
+        status=SerializedItemStatus.SOLD,
+        intake_date=datetime(2026, 6, 1, tzinfo=UTC),
+        sold_date=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    product = CatalogProduct(
+        store_id=store.id,
+        sku="LAMP-NEW",
+        name="全新營燈",
+        brand_id=brand.id,
+        category_id=cat.id,
+        unit_price=Decimal(300),
+        unit_cost=Decimal(100),
+        quantity_on_hand=5,
+    )
+    db_session.add_all([item, product])
+    await db_session.flush()
+    await _sell(db_session, store.id, clerk.id, item, Decimal(1500))
+    sale = Sale(
+        store_id=store.id,
+        clerk_user_id=clerk.id,
+        subtotal=Decimal(600),
+        tax=Decimal(0),
+        total=Decimal(600),
+        created_at=datetime(2026, 6, 21, tzinfo=UTC),
+    )
+    db_session.add(sale)
+    await db_session.flush()
+    db_session.add(
+        SaleLine(
+            store_id=store.id,
+            sale_id=sale.id,
+            line_type=SaleLineType.CATALOG,
+            catalog_product_id=product.id,
+            description=product.name,
+            qty=2,
+            unit_price=Decimal(300),
+            line_total=Decimal(600),
+            net_amount=Decimal(600),
+            cost_snapshot=Decimal(200),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/reports/insights",
+        params={"from": "2026-01-01T00:00:00Z", "to": "2026-12-31T00:00:00Z"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    brand_rows = [
+        (r["label"], r["goods_kind"], r["units_sold"], r["revenue"], r["margin"])
+        for r in body["brand_breakdown"]
+    ]
+    assert brand_rows == [
+        ("Snow Peak", "SECONDHAND", 1, "1500", "700"),
+        ("Snow Peak", "CATALOG", 2, "600", "400"),
+    ]
+    catalog_row = next(r for r in body["brand_breakdown"] if r["goods_kind"] == "CATALOG")
+    assert catalog_row["avg_days_in_stock"] is None  # 一般商品沒有逐件入庫日
+    assert [(r["label"], r["goods_kind"]) for r in body["category_breakdown"]] == [
+        ("燈具", "SECONDHAND"),
+        ("燈具", "CATALOG"),
+    ]
+    assert body["revenue_mix"]["catalog"] == "600"
+    assert body["revenue_mix"]["secondhand"] == "1500"

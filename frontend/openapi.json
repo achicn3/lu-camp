@@ -6062,6 +6062,11 @@
             "title": "Buyout Out",
             "type": "string"
           },
+          "camping_goods_revenue": {
+            "default": "0",
+            "title": "Camping Goods Revenue",
+            "type": "string"
+          },
           "cash_sales_in": {
             "title": "Cash Sales In",
             "type": "string"
@@ -6069,6 +6074,21 @@
           "cash_variance": {
             "title": "Cash Variance",
             "type": "string"
+          },
+          "catalog_margin": {
+            "default": "0",
+            "title": "Catalog Margin",
+            "type": "string"
+          },
+          "catalog_revenue": {
+            "default": "0",
+            "title": "Catalog Revenue",
+            "type": "string"
+          },
+          "catalog_units_sold": {
+            "default": 0,
+            "title": "Catalog Units Sold",
+            "type": "integer"
           },
           "cogs": {
             "title": "Cogs",
@@ -7435,6 +7455,15 @@
         "title": "GiftReport",
         "type": "object"
       },
+      "GoodsKind": {
+        "description": "報表區分「一般商品」（進貨的全新品）與「二手」（買斷／散裝／寄售），店主 2026-10-14。",
+        "enum": [
+          "SECONDHAND",
+          "CATALOG"
+        ],
+        "title": "GoodsKind",
+        "type": "string"
+      },
       "GoodsReceiptRead": {
         "description": "單一收貨批次（分批收貨事件）＋所掛的進項發票（沒有＝還沒開發票）。",
         "properties": {
@@ -7844,6 +7873,9 @@
             "title": "Avg Unit Price",
             "type": "string"
           },
+          "goods_kind": {
+            "$ref": "#/components/schemas/GoodsKind"
+          },
           "key": {
             "anyOf": [
               {
@@ -7875,6 +7907,7 @@
         "required": [
           "key",
           "label",
+          "goods_kind",
           "units_sold",
           "revenue",
           "margin",
@@ -7943,6 +7976,11 @@
       "InsightsRevenueMix": {
         "description": "經營洞察：業態營收結構（認列口徑：寄售只認抽成）。",
         "properties": {
+          "catalog": {
+            "default": "0",
+            "title": "Catalog",
+            "type": "string"
+          },
           "consignment_commission": {
             "title": "Consignment Commission",
             "type": "string"
@@ -17051,6 +17089,11 @@
             "title": "Bulk Cogs",
             "type": "string"
           },
+          "camping_goods_revenue": {
+            "default": "0",
+            "title": "Camping Goods Revenue",
+            "type": "string"
+          },
           "cash_received": {
             "description": "現金淨收款（銷售收現減退現）",
             "title": "Cash Received",
@@ -17060,6 +17103,21 @@
             "default": "0",
             "title": "Catalog Cogs",
             "type": "string"
+          },
+          "catalog_margin": {
+            "default": "0",
+            "title": "Catalog Margin",
+            "type": "string"
+          },
+          "catalog_revenue": {
+            "default": "0",
+            "title": "Catalog Revenue",
+            "type": "string"
+          },
+          "catalog_units_sold": {
+            "default": 0,
+            "title": "Catalog Units Sold",
+            "type": "integer"
           },
           "consignment_commission_income": {
             "title": "Consignment Commission Income",
@@ -19930,6 +19988,16 @@
       "TrendRow": {
         "description": "財務趨勢單一期間（docs/19 R6）。period 為桶起始日。",
         "properties": {
+          "camping_goods_revenue": {
+            "default": "0",
+            "title": "Camping Goods Revenue",
+            "type": "string"
+          },
+          "catalog_revenue": {
+            "default": "0",
+            "title": "Catalog Revenue",
+            "type": "string"
+          },
           "cogs": {
             "title": "Cogs",
             "type": "string"

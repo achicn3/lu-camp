@@ -137,6 +137,13 @@ class ItemKind(StrEnum):
     BULK_LOT = "BULK_LOT"
 
 
+class GoodsKind(StrEnum):
+    """報表區分「一般商品」（進貨的全新品）與「二手」（買斷／散裝／寄售），店主 2026-10-14。"""
+
+    SECONDHAND = "SECONDHAND"
+    CATALOG = "CATALOG"
+
+
 class StockDirection(StrEnum):
     """庫存異動方向。"""
 

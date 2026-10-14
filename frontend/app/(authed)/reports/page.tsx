@@ -128,8 +128,11 @@ const TIP_RECOGNIZED_REVENUE =
   "真正屬於店家的收入。自有商品算全額；寄售品只算抽成（其餘要付給寄售人）。" +
   "例：賣出寄售品 1,000 元、抽成 50% → 認列營收只有 500。" +
   "注意這是「收入」不是「利潤」——還沒扣掉收購成本，要看賺賠請看毛利。";
-// secondhand_revenue ＝ 認列營收 − 餐飲營收，因此也含一般商品（新品），不只二手與寄售。
-const TIP_SECONDHAND_REVENUE = "認列營收中扣掉餐飲的部分：二手買賣、寄售抽成與一般商品的收入。";
+// 店主 2026-10-14：露營用品總營收（＝認列營收 − 餐飲）＝ 二手 ＋ 一般商品，各自分開看。
+const TIP_CAMPING_GOODS_REVENUE = "認列營收中扣掉餐飲的部分：二手和一般商品加起來。";
+const TIP_SECONDHAND_REVENUE = "只算二手：買斷的二手、散裝，加上寄售品的抽成。不含一般商品。";
+const TIP_CATALOG_REVENUE =
+  "進貨來賣的一般商品（全新品）。毛利只算有填進價的商品；沒填進價的不知道成本，不算毛利。";
 const TIP_FOOD_REVENUE = "認列營收中屬於餐飲（內用）的部分。";
 const TIP_OUTSTANDING =
   "已發出但客人還沒用掉的購物金總額——這是店家欠客人的金額（負債），日後客人消費時會用掉。";
@@ -378,10 +381,27 @@ function DashboardPanel() {
         </div>
         <div className="rpt-stat">
           <dt>
+            露營用品總營收
+            <InfoTip text={TIP_CAMPING_GOODS_REVENUE} />
+          </dt>
+          <dd><MoneyText value={report.camping_goods_revenue} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>
             二手營收
             <InfoTip text={TIP_SECONDHAND_REVENUE} />
           </dt>
           <dd><MoneyText value={report.secondhand_revenue} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>
+            一般商品營收
+            <InfoTip text={TIP_CATALOG_REVENUE} />
+          </dt>
+          <dd><MoneyText value={report.catalog_revenue} /></dd>
+          <dd className="rpt-stat-sub">
+            毛利 $<MoneyText value={report.catalog_margin} /> · 售出 {report.catalog_units_sold} 件
+          </dd>
         </div>
         <div className="rpt-stat">
           <dt>
@@ -458,6 +478,12 @@ function ClientPager({ page, pages, onPage }: { page: number; pages: number; onP
 
 // -- 經營洞察（#8）：品牌/類型暢銷、趨勢圖、周轉/滯銷、業態結構 --
 
+// 暢銷排行標出一般商品／二手（店主 2026-10-14）：同一品牌兩種都有就是兩列。
+const GOODS_KIND_LABEL: Record<InsightsBreakdownRow["goods_kind"], string> = {
+  CATALOG: "一般商品",
+  SECONDHAND: "二手",
+};
+
 function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
   const paged = usePaged(rows);
   if (rows.length === 0) return <p className="hint">此期間查無售出資料。</p>;
@@ -467,6 +493,7 @@ function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
         <thead>
           <tr>
             <th>名稱</th>
+            <th>種類</th>
             <th className="num">售出件數</th>
             <th className="num">營收</th>
             <th className="num">毛利</th>
@@ -476,8 +503,13 @@ function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
         </thead>
         <tbody>
           {paged.rows.map((r) => (
-            <tr key={`${r.key ?? "none"}-${r.label}`}>
+            <tr key={`${r.key ?? "none"}-${r.label}-${r.goods_kind}`}>
               <td>{r.label}</td>
+              <td>
+                <span className={`rpt-kind rpt-kind--${r.goods_kind === "CATALOG" ? "catalog" : "secondhand"}`}>
+                  {GOODS_KIND_LABEL[r.goods_kind]}
+                </span>
+              </td>
               <td className="num">{r.units_sold}</td>
               <td className="num"><MoneyText value={r.revenue} /></td>
               <td className="num"><MoneyText value={r.margin} /></td>
@@ -597,6 +629,10 @@ function InsightsPanel() {
             <div className="rpt-insight-card">
               <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.secondhand} /></span>
               <span className="rpt-insight-cap">二手買斷/散裝</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.catalog} /></span>
+              <span className="rpt-insight-cap">一般商品</span>
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.consignment_commission} /></span>
@@ -887,6 +923,7 @@ function TrendsPanel() {
                   <th>期間</th>
                   <th>認列營收</th>
                   <th>二手營收</th>
+                  <th>一般商品營收</th>
                   <th>餐飲營收</th>
                   <th>毛利</th>
                   <th>毛利率</th>
@@ -900,6 +937,7 @@ function TrendsPanel() {
                     <td>{row.period}</td>
                     <td><MoneyText value={row.recognized_revenue} /></td>
                     <td><MoneyText value={row.secondhand_revenue} /></td>
+                    <td><MoneyText value={row.catalog_revenue} /></td>
                     <td><MoneyText value={row.food_revenue} /></td>
                     <td><MoneyText value={row.gross_margin} /></td>
                     <td>{formatRate(row.gross_margin_rate)}</td>
@@ -1186,8 +1224,24 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.consignment_commission_income} /></td>
                 </tr>
                 <tr>
-                  <td>二手營收</td>
+                  <td>露營用品總營收</td>
+                  <td><MoneyText value={report.camping_goods_revenue} /></td>
+                </tr>
+                <tr>
+                  <td>二手營收（買斷＋散裝＋寄售抽成）</td>
                   <td><MoneyText value={report.secondhand_revenue} /></td>
+                </tr>
+                <tr>
+                  <td>一般商品營收</td>
+                  <td><MoneyText value={report.catalog_revenue} /></td>
+                </tr>
+                <tr>
+                  <td>一般商品毛利（有填進價的）</td>
+                  <td><MoneyText value={report.catalog_margin} /></td>
+                </tr>
+                <tr>
+                  <td>一般商品售出件數</td>
+                  <td className="money">{report.catalog_units_sold}</td>
                 </tr>
                 <tr>
                   <td>餐飲營收</td>

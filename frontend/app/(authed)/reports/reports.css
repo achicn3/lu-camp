@@ -171,3 +171,28 @@
   display: block;
   margin: 0 auto;
 }
+
+/* 每日報表卡片下方的小字（例：一般商品的毛利與件數）。 */
+.rpt-stat .rpt-stat-sub {
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
+}
+/* 暢銷排行的種類標籤：一般商品／二手（店主 2026-10-14）。 */
+.rpt-kind {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rpt-kind--secondhand {
+  background: rgba(47, 93, 58, 0.12);
+  color: var(--accent);
+}
+.rpt-kind--catalog {
+  background: rgba(44, 110, 143, 0.12);
+  color: var(--info);
+}

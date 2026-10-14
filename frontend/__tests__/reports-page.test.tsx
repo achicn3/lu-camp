@@ -26,7 +26,11 @@ const DAILY_SUMMARY_DATA = {
   consignment_commission_income: "15000",
   unknown_cost_sales: "5000",
   food_revenue: "21000",
-  secondhand_revenue: "74000",
+  secondhand_revenue: "62000",
+  camping_goods_revenue: "74000",
+  catalog_revenue: "12000",
+  catalog_margin: "4300",
+  catalog_units_sold: 17,
   net_sales_ex_tax: "90476",
   tax: "4524",
   total_cash_out: "30000",
@@ -57,6 +61,8 @@ const TRENDS_DATA = {
       recognized_revenue: "40000",
       food_revenue: "9000",
       secondhand_revenue: "31000",
+      camping_goods_revenue: "36600",
+      catalog_revenue: "5600",
       gross_margin: "18000",
       gross_margin_rate: "0.45",
       cogs: "22000",
@@ -71,6 +77,8 @@ const TRENDS_DATA = {
       recognized_revenue: "55000",
       food_revenue: "12000",
       secondhand_revenue: "43000",
+      camping_goods_revenue: "47100",
+      catalog_revenue: "4100",
       gross_margin: "27000",
       gross_margin_rate: "0.49",
       cogs: "28000",
@@ -142,6 +150,10 @@ const SALES_MARGIN_DATA = {
     { reason: "REFUND", qty: 1, cost: "150", unknown_cost_qty: 0 },
   ],
   secondhand_revenue: "312000",
+  camping_goods_revenue: "347000",
+  catalog_revenue: "35000",
+  catalog_margin: "9100",
+  catalog_units_sold: 64,
   cash_received: "450000",
   store_credit_redeemed: "50000",
   transaction_count: 200,
@@ -387,6 +399,7 @@ const INSIGHTS_DATA = {
     {
       key: 1,
       label: "Snow Peak",
+      goods_kind: "SECONDHAND",
       units_sold: 12,
       revenue: "60000",
       margin: "20000",
@@ -398,6 +411,7 @@ const INSIGHTS_DATA = {
     {
       key: 2,
       label: "帳篷",
+      goods_kind: "CATALOG",
       units_sold: 8,
       revenue: "40000",
       margin: "15000",
@@ -413,7 +427,12 @@ const INSIGHTS_DATA = {
     bulk_on_sale: 4,
     catalog_in_stock: 7,
   },
-  revenue_mix: { secondhand: "100000", consignment_commission: "8000", food: "20000" },
+  revenue_mix: {
+    secondhand: "100000",
+    consignment_commission: "8000",
+    food: "20000",
+    catalog: "15500",
+  },
 };
 
 function renderPage() {
@@ -496,12 +515,16 @@ describe("ReportsPage", () => {
     renderPage();
     await screen.findByText("120,000"); // dashboard 先載入
     await openReport("經營洞察");
-    expect(await screen.findByText("Snow Peak")).toBeTruthy();
+    const snowPeak = (await screen.findByText("Snow Peak")).closest("tr") as HTMLElement;
+    // 暢銷排行標出一般商品／二手（店主 2026-10-14）
+    expect(within(snowPeak).getByText("二手")).toBeTruthy();
     expect(screen.getByText("在庫 > 90 天件數")).toBeTruthy();
     expect(screen.getByText("寄售抽成")).toBeTruthy();
+    expect(screen.getByText("15,500")).toBeTruthy(); // revenue_mix.catalog
     // 切到類型維度
     await userEvent.click(screen.getByRole("button", { name: "類型" }));
-    expect(await screen.findByText("帳篷")).toBeTruthy();
+    const tent = (await screen.findByText("帳篷")).closest("tr") as HTMLElement;
+    expect(within(tent).getByText("一般商品")).toBeTruthy();
   });
 
   it("經營洞察：趨勢查詢失敗時顯示錯誤而非永遠載入中（Codex P3）", async () => {
@@ -706,9 +729,15 @@ describe("ReportsPage", () => {
     expect(screen.getByText("50")).toBeTruthy();
     // avg_ticket
     expect(screen.getByText("2,400")).toBeTruthy();
-    // 餐飲/二手分列
-    expect(screen.getByText("74,000")).toBeTruthy(); // secondhand_revenue
+    // 露營用品總營收＝二手＋一般商品；二手只算二手；一般商品另列營收／毛利／件數（店主 2026-10-14）
+    expect(screen.getByText("露營用品總營收")).toBeTruthy();
+    expect(screen.getByText("74,000")).toBeTruthy(); // camping_goods_revenue
+    expect(screen.getByText("62,000")).toBeTruthy(); // secondhand_revenue
     expect(screen.getByText("21,000")).toBeTruthy(); // food_revenue
+    const catalogCard = screen.getByText("一般商品營收").closest(".rpt-stat") as HTMLElement;
+    expect(within(catalogCard).getByText("12,000")).toBeTruthy();
+    expect(catalogCard.textContent).toContain("毛利 $4,300");
+    expect(catalogCard.textContent).toContain("售出 17 件");
   });
 
   it("trends tab shows data table and has granularity selector", async () => {
@@ -733,6 +762,8 @@ describe("ReportsPage", () => {
     expect(screen.getByText("二手營收")).toBeTruthy();
     expect(screen.getAllByText("9,000").length).toBeGreaterThanOrEqual(1); // food row 1
     expect(screen.getAllByText("31,000").length).toBeGreaterThanOrEqual(1); // secondhand row 1
+    expect(screen.getByRole("columnheader", { name: "一般商品營收" })).toBeTruthy();
+    expect(screen.getByText("5,600")).toBeTruthy(); // catalog_revenue row 1
 
     // Granularity selector exists (look within select elements)
     const selects = screen.getAllByRole("combobox");
@@ -779,6 +810,11 @@ describe("ReportsPage", () => {
     // 餐飲/二手分列
     expect(screen.getByText("88,000")).toBeTruthy(); // food_revenue
     expect(screen.getByText("312,000")).toBeTruthy(); // secondhand_revenue
+    expect(screen.getByText("露營用品總營收")).toBeTruthy();
+    expect(screen.getByText("347,000")).toBeTruthy(); // camping_goods_revenue
+    expect(screen.getByText("35,000")).toBeTruthy(); // catalog_revenue
+    expect(screen.getByText("9,100")).toBeTruthy(); // catalog_margin
+    expect(screen.getByText("64")).toBeTruthy(); // catalog_units_sold
     // 餐飲成本與毛利：毛利由後端算（只認有填成本的品項），前端不可用營收−成本反推
     expect(screen.getByText("餐飲成本")).toBeTruthy();
     expect(screen.getByText("26,000")).toBeTruthy(); // food_cogs

@@ -14,7 +14,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
-from app.modules.inventory.models import BulkLot, SerializedItem
+from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.sales.inputs import LINEPAY_RETURN_RECOVERY_KIND
 from app.modules.sales.models import (
     DiscountReason,
@@ -72,6 +72,9 @@ _BulkSoldRowDB = tuple[
     Decimal | None,
 ]
 
+# 一般商品售出列：(brand_id, category_id, 件數, net_amount, 成交成本快照)
+_CatalogSoldRowDB = tuple[int | None, int | None, int, Decimal, Decimal | None]
+
 
 @dataclass(frozen=True)
 class SalesMarginComponents:
@@ -103,6 +106,7 @@ class SalesMarginComponents:
     # 有成本快照的一般商品（收貨帶入進價後才有）：營收與成本認列進毛利。
     catalog_known_revenue: Decimal = Decimal(0)
     catalog_cogs: Decimal = Decimal(0)
+    catalog_units: int = 0  # 一般商品售出件數（有無成本都算）
     # 有填成本的餐飲品項（menu_items.unit_cost → 成交快照）：營收與成本認列進毛利。
     # menu_known_revenue 是 menu_revenue 的子集，**不要再加一次進營業額**。
     menu_known_revenue: Decimal = Decimal(0)
@@ -716,6 +720,35 @@ class SalesRepository:
         )
         return [tuple(r) for r in rows]
 
+    async def catalog_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[_CatalogSoldRowDB]:
+        """期間（未作廢）售出一般商品的洞察原始列：品牌/類型/件數/成交額/成交成本快照。
+
+        經營洞察的暢銷排行要把一般商品和二手分開列（店主 2026-10-14）；口徑同序號品與散裝：
+        成交額認實付、排除贈品、成本取成交快照（沒有＝成本未知，不假造毛利）。
+        """
+        rows = await self._session.execute(
+            select(
+                CatalogProduct.brand_id,
+                CatalogProduct.category_id,
+                SaleLine.qty,
+                SaleLine.net_amount,
+                SaleLine.cost_snapshot,
+            )
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .join(CatalogProduct, SaleLine.catalog_product_id == CatalogProduct.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_type == SaleLineType.CATALOG,
+                SaleLine.line_kind != SaleLineKind.GIFT,
+            )
+        )
+        return [tuple(r) for r in rows]
+
     async def count_lines_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
         """各銷售單的明細行數（單一 grouped 查詢，避免 N+1；空 → {}）。"""
         if not sale_ids:
@@ -1215,6 +1248,7 @@ class SalesRepository:
                         0,
                     ),
                     func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
+                    func.coalesce(func.sum(SaleLine.qty), 0),
                 )
                 .join(Sale, SaleLine.sale_id == Sale.id)
                 .where(
@@ -1230,6 +1264,7 @@ class SalesRepository:
         catalog_revenue = Decimal(catalog_row[0])  # 成本未知的一般商品（沿用舊口徑）
         catalog_known_revenue = Decimal(catalog_row[1])
         catalog_cogs = Decimal(catalog_row[2])
+        catalog_units = int(catalog_row[3])
 
         # 餐飲/內用營收：與一般商品同口徑分成「有成本快照」與「成本未知」兩桶。
         # 咖啡/甜點的成本填在品項上、成交時凍結；沒填的仍走「不假造毛利」的舊路。
@@ -1365,6 +1400,7 @@ class SalesRepository:
             catalog_revenue=catalog_revenue,
             catalog_known_revenue=catalog_known_revenue,
             catalog_cogs=catalog_cogs,
+            catalog_units=catalog_units,
             menu_revenue=menu_revenue,
             menu_known_revenue=menu_known_revenue,
             menu_cogs=menu_cogs,
