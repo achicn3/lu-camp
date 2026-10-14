@@ -8,6 +8,7 @@ import { type OrderLineInput, priceOrder } from "./pricing";
 import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
 import { TABLE_CODE } from "./tables";
+import { withinHours } from "./hours";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
 const NOTE_MAX = 60;
@@ -171,7 +172,7 @@ export async function accepting(env: Env, storeId: number, now = Date.now()): Pr
     .first<{ accepting_orders: number; last_pos_seen_ms: number | null }>();
   if (meta === null || meta.accepting_orders !== 1 || meta.last_pos_seen_ms === null) return false;
   // POS 太久沒來拉單（店內斷線）＝自動視為暫停（§7）。
-  return now - meta.last_pos_seen_ms <= POS_STALE_MS;
+  return now - meta.last_pos_seen_ms <= POS_STALE_MS && await withinHours(env, storeId, now);
 }
 
 async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boolean> {
@@ -448,6 +449,7 @@ export async function storeStatus(env: Env, storeId: number): Promise<Response> 
   return json(
     {
       accepting: await accepting(env, storeId),
+      within_hours: await withinHours(env, storeId),
       turnstile_site_key: env.TURNSTILE_SITE_KEY ?? null,
       linepay: linePayConfig(env) !== null,
     },

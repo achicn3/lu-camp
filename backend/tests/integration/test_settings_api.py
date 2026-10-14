@@ -181,3 +181,47 @@ async def test_store_credit_invoice_mode_is_no_longer_a_setting(
     )
     assert resp.status_code == 200, resp.text
     assert "store_credit_invoice_mode" not in resp.json()
+
+
+async def test_weekly_online_hours_are_saved_and_store_scoped(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    manager = await _seed_user(db_session, UserRole.MANAGER)
+    clerk = await _seed_user(db_session, UserRole.CLERK)
+    schedule = {"enabled": True, "days": [{"opens": "20:00", "closes": "02:00"}] + [None] * 6}
+    saved = await client.patch(
+        "/api/v1/settings", headers=_auth(manager), json={"online_order_hours": schedule}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["online_order_hours"] == schedule
+    assert (await client.get("/api/v1/settings", headers=_auth(manager))).json()[
+        "online_order_hours"
+    ] == schedule
+    other = await client.get("/api/v1/settings", headers=_auth(clerk))
+    assert other.json()["online_order_hours"]["enabled"] is False
+    assert (
+        await client.patch(
+            "/api/v1/settings", headers=_auth(clerk), json={"online_order_hours": schedule}
+        )
+    ).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "days",
+    [
+        [],
+        [None] * 8,
+        [{"opens": "25:00", "closes": "02:00"}] + [None] * 6,
+        [{"opens": "09:00", "closes": "09:00"}] + [None] * 6,
+    ],
+)
+async def test_invalid_online_hours_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession, days: list[object]
+) -> None:
+    manager = await _seed_user(db_session, UserRole.MANAGER)
+    result = await client.patch(
+        "/api/v1/settings",
+        headers=_auth(manager),
+        json={"online_order_hours": {"enabled": True, "days": days}},
+    )
+    assert result.status_code == 422

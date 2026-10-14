@@ -690,3 +690,18 @@ async def test_publish_includes_active_retail_listings_with_their_photo_and_no_c
     encoded = json.dumps(menu)
     for forbidden in ("unit_cost", "BEAN-1", "沒上線的", "catalog_product_id"):
         assert forbidden not in encoded
+
+
+async def test_published_hours_follow_saved_settings(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, mgr = await _seed(db_session)
+    await _menu(client, mgr)
+    hours = {"enabled": True, "days": [{"opens": "09:00", "closes": "17:00"}] + [None] * 6}
+    saved = await client.patch(
+        "/api/v1/settings", headers=_auth(mgr), json={"online_order_hours": hours}
+    )
+    assert saved.status_code == 200
+    response = await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    assert response.status_code == 200, response.text
+    assert worker.menu()["hours"] == hours

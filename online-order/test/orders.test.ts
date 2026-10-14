@@ -312,3 +312,51 @@ describe("防灌單上限（§8.2）", () => {
     expect((await order()).status).toBe(503);
   });
 });
+
+it("台北營業時間之外拒收新單；舊單仍可查詢及冪等重試", async () => {
+  const original = { idempotency_key: crypto.randomUUID() };
+  const old = await (await order(original)).json() as { token: string };
+  const published = await integration("PUT", "/integration/menu", JSON.stringify({
+    ...MENU, version: 4, hours: { enabled: true, days: Array(7).fill(null) },
+  }));
+  expect(published.status).toBe(200);
+  expect((await (await exports.default.fetch(new Request("https://order.test/api/status"))).json())).toMatchObject({ accepting: false, within_hours: false });
+  expect((await order()).status).toBe(503);
+  expect((await order(original)).status).toBe(200);
+  expect((await exports.default.fetch(new Request(`https://order.test/api/orders/${old.token}`))).status).toBe(200);
+});
+
+it.each([
+  ["2026-10-12T11:59:59Z", false], // Monday 19:59 Taipei
+  ["2026-10-12T12:00:00Z", true],
+  ["2026-10-12T17:59:59Z", true], // Tuesday 01:59, Monday spillover
+  ["2026-10-12T18:00:00Z", false],
+  ["2026-10-14T00:59:59Z", false],
+  ["2026-10-14T01:00:00Z", true],
+  ["2026-10-14T08:59:59Z", true],
+  ["2026-10-14T09:00:00Z", false],
+  ["2026-10-18T14:00:00Z", true], // Sunday 22:00
+  ["2026-10-18T16:59:59Z", true], // Monday 00:59, week rollover
+  ["2026-10-18T17:00:00Z", false],
+])("營業邊界 %s => %s", async (at, allowed) => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
+  await open();
+  const published = await integration("PUT", "/integration/menu", JSON.stringify({
+    ...MENU, version: 4, hours: { enabled: true, days: [
+      {opens:"20:00",closes:"02:00"}, null, {opens:"09:00",closes:"17:00"}, null, null, null,
+      {opens:"22:00",closes:"01:00"},
+    ] },
+  }));
+  expect(published.status).toBe(200);
+  const status = await exports.default.fetch(new Request("https://order.test/api/status"));
+  expect(await status.json()).toMatchObject({ accepting: allowed, within_hours: allowed });
+  expect((await order()).status).toBe(allowed ? 201 : 503);
+});
+
+it("營業時段不能覆蓋店員暫停；錯誤時段不能發佈", async () => {
+  await integration("PUT", "/integration/store-status", JSON.stringify({accepting:false}));
+  expect((await order()).status).toBe(503);
+  expect((await integration("PUT", "/integration/menu", JSON.stringify({
+    ...MENU, version:4, hours:{enabled:true,days:[{opens:"25:00",closes:"09:00"},...Array(6).fill(null)]},
+  }))).status).toBe(422);
+});

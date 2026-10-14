@@ -318,3 +318,24 @@ describe("付款端點防濫用（docs/44 §8.4）", () => {
     expect([...fake.txs.values()][0]?.state).toBe("reserved");
   });
 });
+
+it.each([false, true])("付款超過十分鐘仍未定，POS 收到提醒；補查付款成功後提醒消失（舊版嘗試 %s）", async (legacy) => {
+  const start = Date.now();
+  vi.spyOn(Date, "now").mockReturnValue(start - 120000);
+  const { body } = await place();
+  vi.mocked(Date.now).mockReturnValue(start);
+  expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(200);
+  if (legacy) await env.DB.prepare("UPDATE orders SET linepay_started_at = NULL").run();
+  vi.mocked(Date.now).mockReturnValue(start + 599999);
+  let result = await (await integration("GET", "/integration/orders")).json() as {payment_alerts: unknown[]};
+  expect(result.payment_alerts).toEqual([]);
+  vi.mocked(Date.now).mockReturnValue(start + 600000);
+  result = await (await integration("GET", "/integration/orders")).json() as {payment_alerts: unknown[]};
+  expect(result.payment_alerts).toEqual([expect.objectContaining({
+    total:150, status:"PENDING", started_at:new Date(start).toISOString(),
+  })]);
+  authorize();
+  vi.mocked(Date.now).mockReturnValue(start + 631000);
+  result = await (await integration("GET", "/integration/orders")).json() as {payment_alerts: unknown[]};
+  expect(result.payment_alerts).toEqual([]);
+});

@@ -9397,6 +9397,23 @@ export interface components {
             /** Total */
             total: string;
         };
+        /** OnlineHours */
+        OnlineHours: {
+            /** Days */
+            days?: (components["schemas"]["OnlineHoursDay"] | null)[];
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+        };
+        /** OnlineHoursDay */
+        OnlineHoursDay: {
+            /** Closes */
+            closes: string;
+            /** Opens */
+            opens: string;
+        };
         /** OnlineMenuPublishRead */
         OnlineMenuPublishRead: {
             /** Font Pushed */
@@ -9503,6 +9520,44 @@ export interface components {
             orders: components["schemas"]["OnlineOrderRead"][];
             /** Paused Reason */
             paused_reason: string | null;
+            /**
+             * Payment Alert Count
+             * @default 0
+             */
+            payment_alert_count: number;
+            /** Payment Alerts */
+            payment_alerts?: components["schemas"]["OnlinePaymentAlert"][];
+            /**
+             * Within Hours
+             * @default true
+             */
+            within_hours: boolean;
+        };
+        /** OnlinePaymentAlert */
+        OnlinePaymentAlert: {
+            /** Id */
+            id: string;
+            /**
+             * Service Mode
+             * @enum {string}
+             */
+            service_mode: "DINE_IN" | "TAKEOUT";
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "PENDING" | "CONFIRMING";
+            /** Table Label */
+            table_label?: string | null;
+            /** Total */
+            total: string;
+            /** Transaction Id */
+            transaction_id?: string | null;
         };
         /**
          * OnlineSettlePaidRead
@@ -11213,6 +11268,7 @@ export interface components {
             linepay_fee_pct: string;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow: string;
+            online_order_hours?: components["schemas"]["OnlineHours"];
             /** Premium Rate */
             premium_rate: string;
             /** Premium Rate Max */
@@ -11276,6 +11332,7 @@ export interface components {
             linepay_fee_pct?: number | string | null;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow?: number | string | null;
+            online_order_hours?: components["schemas"]["OnlineHours"] | null;
             /** Premium Change Reason */
             premium_change_reason?: string | null;
             /** Premium Rate */

@@ -308,6 +308,9 @@ export function OnlineOrdersPanel({
         {openCount > 0 && <span className="online-orders-badge">{openCount}</span>}
         {paused && <span className="online-orders-paused-tag">暫停中</span>}
       </button>
+      {(data.payment_alert_count ?? 0) > 0 && <p role="status" className="form-error">
+        線上付款待確認 {data.payment_alert_count} 筆，請開啟線上訂單核對。
+      </p>}
       {open && (
         <div className="online-orders-overlay" role="dialog" aria-modal="true" aria-labelledby="online-orders-title">
           <div className="online-orders-sheet">
@@ -339,6 +342,18 @@ export function OnlineOrdersPanel({
                 {data.last_pull_error}（新單暫時進不來，網路恢復後會自動補上）
               </p>
             )}
+            {data.within_hours === false && <p role="status">非營業時間，目前不接新單</p>}
+            {(data.payment_alert_count ?? 0) > 0 && <section className="online-payment-alerts" aria-label="線上付款對帳">
+              <h3>付款待確認 {data.payment_alert_count} 筆</h3>
+              <p>發起付款已超過 10 分鐘，系統會持續補查。請先核對 LINE Pay 交易結果，再處理收款。</p>
+              {(data.payment_alerts ?? []).map(alert => <article key={alert.id}>
+                <strong>{alert.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${alert.table_label ?? "—"}`}・{money(alert.total)}</strong>
+                <p>{alert.status === "CONFIRMING" ? "請款結果未確認" : "等待付款結果"}・{formatTaipeiDateTime(alert.started_at)}</p>
+                <p>訂單 {alert.id}；交易號 {alert.transaction_id ?? "尚未取得"}</p>
+              </article>)}
+              {(data.payment_alert_count ?? 0) > (data.payment_alerts?.length ?? 0) && <p>目前顯示最早的 50 筆，其他尚待確認。</p>}
+            </section>}
+            <p className="hint">現金單送出後 10 分鐘尚未結帳會自動取消；付款處理中的訂單會先確認結果。</p>
             {error !== null && (
               <p role="alert" className="form-error">
                 {error}

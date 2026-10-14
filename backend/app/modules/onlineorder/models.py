@@ -407,6 +407,11 @@ class OnlineOrderLink(Base, TimestampMixin):
 
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), primary_key=True)
     accepting: Mapped[bool | None] = mapped_column(Boolean)
+    within_hours: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    payment_alerts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    payment_alert_count: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     paused_reason: Mapped[str | None] = mapped_column(String(100))
     last_pull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_pull_error: Mapped[str | None] = mapped_column(String(200))

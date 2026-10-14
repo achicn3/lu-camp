@@ -69,6 +69,9 @@ function overview(orders: Order[], extra: Partial<Overview> = {}): Overview {
   return {
     configured: true,
     accepting: true,
+    within_hours: true,
+    payment_alert_count: 0,
+    payment_alerts: [],
     paused_reason: null,
     last_pull_at: new Date().toISOString(),
     last_pull_error: null,
@@ -351,4 +354,20 @@ describe("新單提示", () => {
     expect(newOpenOrderIds(new Set([1]), [order(1), order(2)])).toEqual([2]);
     expect(newOpenOrderIds(new Set([1]), [order(1), order(3, { hold_status: "REJECTED" })])).toEqual([]);
   });
+});
+
+it("付款逾時獨立提醒，打烊不把手動開關變成暫停", async () => {
+  stubFetch(() => json(overview([], {
+    within_hours: false, payment_alert_count: 1,
+    payment_alerts: [{id:"a".repeat(32), table_label:"A1", service_mode:"DINE_IN",total:"150",
+      status:"CONFIRMING", transaction_id:"2026101300000000001", started_at:new Date(Date.now()-660000).toISOString()}],
+  })));
+  const user = userEvent.setup();
+  wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+  await user.click(await screen.findByRole("button", {name:/線上訂單/}));
+  expect(await screen.findByText("非營業時間，目前不接新單")).toBeTruthy();
+  expect(screen.getByRole("button", {name:"暫停接單"})).toBeTruthy();
+  expect(screen.getByRole("heading", {name:"付款待確認 1 筆"})).toBeTruthy();
+  expect(screen.getByText(/2026101300000000001/)).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"帶入結帳"})).toBeNull();
 });

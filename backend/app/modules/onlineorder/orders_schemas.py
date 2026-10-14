@@ -4,11 +4,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, PlainSerializer
+from pydantic import BaseModel, Field, PlainSerializer
 
 from app.core.money import format_ntd
 from app.modules.onlineorder.models import OnlineOrder
 from app.modules.onlineorder.orders_service import OnlineCart, OnlineOrdersOverview
+from app.modules.onlineorder.payment_alerts import OnlinePaymentAlert
 
 NTDOut = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
@@ -90,6 +91,9 @@ class OnlineOrderRead(BaseModel):
 
 class OnlineOrdersRead(BaseModel):
     configured: bool
+    within_hours: bool = True
+    payment_alerts: list[OnlinePaymentAlert] = Field(default_factory=list)
+    payment_alert_count: int = 0
     accepting: bool | None
     """雲端說的接單狀態；還沒拉過單是 null。"""
     paused_reason: str | None
@@ -102,6 +106,11 @@ class OnlineOrdersRead(BaseModel):
         link = o.link
         return cls(
             configured=o.configured,
+            within_hours=True if link is None else link.within_hours,
+            payment_alerts=[]
+            if link is None
+            else [OnlinePaymentAlert.model_validate(a) for a in link.payment_alerts],
+            payment_alert_count=0 if link is None else link.payment_alert_count,
             accepting=None if link is None else link.accepting,
             paused_reason=None if link is None else link.paused_reason,
             last_pull_at=None if link is None else link.last_pull_at,

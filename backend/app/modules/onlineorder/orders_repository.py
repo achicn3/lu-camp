@@ -100,6 +100,26 @@ class OnlineOrdersRepository:
             )
         ).all()
 
+    async def unpaid_cash_before(self, store_id: int, cutoff: datetime) -> Sequence[OnlineOrder]:
+        """Lock overdue cash orders, including those without a stock reservation."""
+        return (
+            await self._session.scalars(
+                select(OnlineOrder)
+                .where(
+                    OnlineOrder.store_id == store_id,
+                    OnlineOrder.payment_method == "CASH",
+                    OnlineOrder.payment_status == "UNPAID",
+                    OnlineOrder.sync_status == "IMPORTED",
+                    OnlineOrder.hold_status != "REJECTED",
+                    OnlineOrder.remote_created_at <= cutoff,
+                    OnlineOrder.sale_id.is_(None),
+                )
+                .order_by(OnlineOrder.id)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+
     async def pending_outbox(self, store_id: int) -> Sequence[OnlineOrderOutbox]:
         """每張單只取最早待送的一筆；前筆被其他程序鎖住時不可越過它。"""
         earlier = aliased(OnlineOrderOutbox)

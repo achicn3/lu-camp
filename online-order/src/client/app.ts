@@ -18,7 +18,7 @@ const DRAFT_KEY = "lk_order_draft_v1";
 const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
 const UPSELL_KEY = "lk_upsell_skip_v1";
 
-interface StoreStatus { accepting: boolean; turnstile_site_key?: string | null; linepay?: boolean }
+interface StoreStatus { accepting: boolean; within_hours?: boolean; turnstile_site_key?: string | null; linepay?: boolean }
 type PayMethod = "CASH" | "LINE_PAY";
 interface InvoiceInput { carrier: string | null; tax_id: string | null }
 const PAY_KEY = "lk_pay_v1";
@@ -350,6 +350,8 @@ const TAB_NOTES: Record<string, string> = {
 };
 /** 掃碼直接進完整菜單（店主 2026-10-10）：上方問候語＋「不知道喝什麼？」，分類列預設打開店員推薦。 */
 function renderMenu(snapshot: MenuSnapshot): void {
+  $("hours-note").textContent = "目前非營業時間，可先看看菜單。";
+  $("hours-note").hidden = status?.within_hours !== false;
   const key = JSON.stringify([snapshot, activeTab, quizOpen, new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date())]);
   if (key === renderedMenuKey) return;
   renderedMenuKey = key;
@@ -487,6 +489,7 @@ function renderCart(): void {
   if (upsell) body.append(upsell);
   const payment = paymentChoice();
   body.append(payment.node);
+  body.append(el("p", "take-home-note", "現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。"));
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
     const invoice = payment.invoice();
@@ -663,7 +666,7 @@ async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput =
   const priced = checkCart(menu, cart);
   if (!priced.ok) { showMessage(cartError(new Error(priced.reason))); return; }
   const live = await getJson<StoreStatus>("/api/status"); status = live.body;
-  if (!status?.accepting) { showMessage("目前暫停接單，請到櫃台點餐。"); return; }
+  if (!status?.accepting) { showMessage(status?.within_hours === false ? "目前非營業時間，可先看看菜單。" : "目前暫停接單，請到櫃台點餐。"); return; }
   if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃台點餐。"); return; }
   if (method === "LINE_PAY" && !status.linepay) { showMessage("LINE Pay 暫時不能用，請改用現金。"); return; }
   const draft = { ...newDraft(), payment_method: method, invoice };
@@ -762,7 +765,7 @@ function orderState(view: OrderView): string {
   switch (view.status) {
     case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項。請稍候。";
     case "HELD": return "訂單已確認。請到櫃台付現金，付款後才會製作。";
-    case "UNPAID": return "訂單已收到。請到櫃台付現金，付款後才會製作。";
+    case "UNPAID": return "訂單已收到。請在送出後 10 分鐘內到櫃台結帳，逾時自動取消；付款後才會製作。";
     case "PAID": return "已付款，謝謝你。";
     case "REJECTED": return "份數不足，這張訂單未成立。請回菜單重新選。";
     case "CANCELLED": return "這張訂單已取消。";
@@ -822,6 +825,7 @@ async function refreshAvailability(): Promise<void> {
     if (add) add.disabled = unavailable;
     let invalidSelection = false;
     for (const input of $("sheet-body").querySelectorAll<HTMLInputElement>(".opt-choice input")) {
+      if (input.value === "") continue; // Optional-group clear choice has no stock record.
       const option = item?.option_groups.flatMap((group) => group.options).find((entry) => entry.id === Number(input.value));
       input.disabled = !option || !option.available || option.remaining === 0;
       const off = input.parentElement?.querySelector<HTMLElement>(".opt-off");

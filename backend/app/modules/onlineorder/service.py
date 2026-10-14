@@ -156,6 +156,8 @@ class OnlineOrderService:
             ),
             retail=await RetailListingService(self._session).snapshot_retail(store_id),
         )
+        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        snapshot["hours"] = settings.online_order_hours
         # 引導推薦（M2a）：只引用這份快照裡有的品項與體驗卡；沒有可推薦的就不帶。
         quiz = await MenuQuizService(self._session).snapshot_quiz(
             store_id,

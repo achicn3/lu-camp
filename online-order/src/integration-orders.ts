@@ -5,6 +5,7 @@
 // - 暫停／恢復（PUT /integration/store-status）。
 import { error, json } from "./http";
 import { reconcileLinePay } from "./linepay-orders";
+import { withinHours } from "./hours";
 
 const PULL_LIMIT = 50;
 const PAID_UPDATE_LIMIT = 20;
@@ -97,6 +98,8 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
         ).results;
   return json({
     ...(await storeMeta(env, storeId)),
+    within_hours: await withinHours(env, storeId, now),
+    ...(await paymentAlerts(env, storeId, now)),
     server_time: new Date(now).toISOString(),
     orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, ...o }) => ({
       ...o,
@@ -125,6 +128,30 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
         })),
     })),
   });
+}
+
+async function paymentAlerts(env: Env, storeId: number, now: number): Promise<object> {
+  // Old Worker instances may start a payment between migration and deployment.
+  // Use the initiation event, never the reconciliation-updated timestamp.
+  const startedAt = "COALESCE(linepay_started_at, (SELECT MAX(e.at) FROM order_events e " +
+    "WHERE e.store_id = orders.store_id AND e.order_id = orders.id AND e.source = 'linepay' " +
+    "AND e.from_state = 'UNPAID' AND e.to_state = 'PENDING'), created_at)";
+  const rows = await env.DB.prepare(
+    "SELECT id, table_label, service_mode, total, payment_status AS status, " +
+    `linepay_transaction_id AS transaction_id, ${startedAt} AS started_at, ` +
+    "COUNT(*) OVER () AS total_count FROM orders WHERE store_id = ? AND payment_method = 'LINE_PAY' " +
+    "AND payment_status IN ('PENDING', 'CONFIRMING') AND sync_status IN ('NEW', 'IMPORTED') " +
+    `AND ${startedAt} <= ? ORDER BY started_at, id LIMIT 50`,
+  ).bind(storeId, now - 10 * 60 * 1000).all<{
+    id: string; table_label: string | null; service_mode: string; total: number;
+    status: string; transaction_id: string | null; started_at: number; total_count: number;
+  }>();
+  return {
+    payment_alert_count: rows.results[0]?.total_count ?? 0,
+    payment_alerts: rows.results.map(({total_count: _, started_at, ...row}) => ({
+      ...row, started_at: new Date(started_at).toISOString(),
+    })),
+  };
 }
 
 type Target = {

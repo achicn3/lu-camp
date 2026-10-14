@@ -2,7 +2,7 @@
 
 - 拉單（每幾秒，兼心跳）：新單匯入一次（remote_id 唯一）；要確認庫存的單在**同一交易**內直接扣
   每日限量份數＝保留，回報 HELD；不夠就 REJECTED。回報一律先排進持久化佇列（本機先 commit）。
-- 保留：現金單 30 分鐘沒來付就加回（單子不取消，之後來付時結帳會重新檢查份數）；取消加回；
+- 保留：現金單自送出起 10 分鐘未結帳就取消並加回（付款處理中／結果不明時保護）；取消加回；
   帶入結帳成立銷售時，結帳交易內先加回、再由一般結帳扣（淨額只扣一次、交易內持鎖）。
 - 回報佇列：同一張單照先後送；連不上／雲端忙退避重試；雲端明確拒收（狀態不合法、找不到）不再重試。
 
@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -34,6 +35,7 @@ from app.modules.onlineorder.models import (
     StockReservation,
 )
 from app.modules.onlineorder.orders_repository import OnlineOrdersRepository
+from app.modules.onlineorder.payment_alerts import OnlinePaymentAlert
 from app.modules.sales.inputs import (
     CARRIER_TYPE_MOBILE,
     InvoiceInfoInput,
@@ -69,8 +71,8 @@ from app.shared.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-# 現金單保留份數多久（docs/44 §3.7）：到期只放掉保留，單子不取消。
-RESERVATION_TTL = timedelta(minutes=30)
+# 現金單從客人送出算 10 分鐘，未付款自動取消（2026-10-13 店主裁示）。
+RESERVATION_TTL = timedelta(minutes=10)
 # 線上 LINE Pay 單保留 10 分鐘（docs/44 §3.7）：客人在手機上付，過期雲端就不請款（C10）。
 LINEPAY_RESERVATION_TTL = timedelta(minutes=10)
 _LINE_PAY = "LINE_PAY"
@@ -174,6 +176,13 @@ class OnlineOrdersService:
             return PullResult(error=link.last_pull_error)
         link.last_pull_at = utc_now()
         link.last_pull_error = None
+        link.within_hours = data.get("within_hours", True) is True
+        alerts = TypeAdapter(list[OnlinePaymentAlert]).validate_python(
+            data.get("payment_alerts", [])
+        )
+        link.payment_alerts = [alert.model_dump(mode="json") for alert in alerts]
+        count = data.get("payment_alert_count", len(alerts))
+        link.payment_alert_count = max(len(alerts), count) if type(count) is int else len(alerts)
         accepting = data.get("accepting")
         link.accepting = accepting if isinstance(accepting, bool) else None
         reason = data.get("paused_reason")
@@ -262,7 +271,9 @@ class OnlineOrdersService:
             order.reject_reason = str(exc)[:300]
             return None
         order.hold_status = OnlineOrderHold.HELD
-        expires_at = utc_now() + _reservation_ttl(order)
+        expires_at = (
+            order.remote_created_at if order.payment_method == "CASH" else utc_now()
+        ) + _reservation_ttl(order)
         self._repo.add(
             StockReservation(
                 store_id=store_id,
@@ -292,12 +303,42 @@ class OnlineOrdersService:
         reservation.ended_at = utc_now()
 
     async def expire_reservations(self, store_id: int, *, now: datetime | None = None) -> int:
-        """現金單保留到期就加回份數；單子不取消（客人之後來付，結帳會重新檢查份數）。"""
+        """取消逾時現金單並釋放保留；LINE Pay 維持既有付款保護。"""
         moment = now or utc_now()
         expired = 0
+        for order in await self._repo.unpaid_cash_before(store_id, moment - RESERVATION_TTL):
+            if await self._payment_pending(store_id, order.id):
+                continue
+            reservation = await self._repo.reservation(store_id, order.id, for_update=True)
+            if reservation is not None and reservation.status == StockReservationStatus.ACTIVE:
+                await self._release(store_id, reservation, StockReservationStatus.EXPIRED)
+            order.sync_status = OnlineOrderSync.VOIDED
+            order.payment_status = OnlineOrderPayment.CANCELLED
+            order.cancelled_at = moment
+            order.cancelled_by = None
+            self._enqueue(
+                order,
+                {
+                    "sync_status": OnlineOrderSync.VOIDED,
+                    "payment_status": OnlineOrderPayment.CANCELLED,
+                },
+            )
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=None,
+                action="AUTO_CANCEL_ONLINE_ORDER",
+                entity_type="online_order",
+                entity_id=str(order.id),
+                before={"payment_status": "UNPAID"},
+                after={"payment_status": "CANCELLED", "reason": "cash_timeout_10m"},
+            )
+            expired += 1
         link = await self._repo.link(store_id)
         last_heard = link.last_pull_at if link is not None else None
         for order in await self._repo.expired_orders(store_id, moment):
+            if order.payment_method == "CASH":
+                continue
             # 可能已扣款的商品不能釋放給下一位客人；明確未付款後才恢復到期處理。
             if await self._payment_pending(store_id, order.id):
                 continue

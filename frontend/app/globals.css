@@ -6687,3 +6687,12 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .staff-pick-actions .btn-ghost { min-height: 36px; min-width: 40px; padding: 0 var(--sp-2); }
 .staff-pick-add { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 .staff-pick-add select { flex: 1 1 240px; min-height: var(--tap-min); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--text-md); background: var(--surface); }
+/* Weekly online ordering hours and unresolved payment observations. */
+.online-hours { margin: 1rem 0; }
+.online-hours summary { cursor: pointer; padding: .5rem 0; }
+.online-hours fieldset { border: 0; padding: 0; min-width: 0; }
+.online-hours-row { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: .7rem 0; }
+.online-hours-row label { min-width: 6rem; }
+.online-hours-row input[type="time"] { min-width: 0; width: 7.5rem; padding: .5rem; }
+.online-payment-alerts { padding: 1rem; border: 1px solid var(--warn); border-radius: .5rem; }
+.online-payment-alerts article { padding: .5rem 0; overflow-wrap: anywhere; }

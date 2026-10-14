@@ -1,5 +1,7 @@
 """同一張訂單的回報不可因 SKIP LOCKED 越過仍在送出的前一筆。"""
 
+from datetime import timedelta
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -69,4 +71,37 @@ async def test_locked_predecessor_blocks_later_report_until_committed() -> None:
             )
             await cleanup.execute(delete(OnlineOrder).where(OnlineOrder.store_id == store.id))
             await cleanup.execute(delete(Store).where(Store.id == store.id))
+            await cleanup.commit()
+
+
+async def test_cash_expiry_skips_order_locked_by_checkout_then_cancels_once() -> None:
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with sessions() as seed:
+        store = Store(name="現金逾時並發驗收")
+        seed.add(store)
+        await seed.flush()
+        raw = _order(_rid(902), [_line(1, 1, "拿鐵", 150)])
+        raw["created_at"] = (utc_now() - timedelta(minutes=11)).isoformat()
+        order = _order_from_cloud(store.id, raw)
+        seed.add(order)
+        await seed.commit()
+    try:
+        async with sessions() as checkout, sessions() as timer, sessions() as second_timer:
+            await OnlineOrdersService(checkout, None).check_payment_available(store.id, order.id)
+            assert await OnlineOrdersService(timer, None).expire_reservations(store.id) == 0
+            await timer.commit()
+            await checkout.rollback()
+            assert await OnlineOrdersService(timer, None).expire_reservations(store.id) == 1
+            assert await OnlineOrdersService(second_timer, None).expire_reservations(store.id) == 0
+            await timer.commit()
+            assert await OnlineOrdersService(second_timer, None).expire_reservations(store.id) == 0
+            overview = await OnlineOrdersService(second_timer, None).overview(store.id)
+            assert overview.orders[0].payment_status == "CANCELLED"
+    finally:
+        async with sessions() as cleanup:
+            await cleanup.execute(
+                delete(OnlineOrderOutbox).where(OnlineOrderOutbox.store_id == store.id)
+            )
+            await cleanup.execute(delete(OnlineOrder).where(OnlineOrder.store_id == store.id))
+            # Audit log is append-only; its store lives until the isolated test DB is dropped.
             await cleanup.commit()

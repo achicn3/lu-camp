@@ -37,6 +37,7 @@ from app.modules.settings.defaults import (
     DEFAULT_TAX_RATE,
 )
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
+from app.modules.settings.online_hours import OnlineHours
 from app.modules.settings.repository import SettingsRepository
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.store.service import StoreService
@@ -52,6 +53,7 @@ def _new_settings(store_id: int) -> StoreSettings:
     """以 defaults 組一列設定（含 SC-5 新欄位），供暫態有效值與首次建列共用。"""
     return StoreSettings(
         store_id=store_id,
+        online_order_hours=OnlineHours().model_dump(),
         einvoice_enabled=DEFAULT_EINVOICE_ENABLED,
         tax_rate=DEFAULT_TAX_RATE,
         default_commission_pct=DEFAULT_COMMISSION_PCT,

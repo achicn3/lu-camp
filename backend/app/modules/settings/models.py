@@ -26,6 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
 from app.modules.settings.defaults import DEFAULT_STORE_CREDIT_ENGINE_PARAMS
+from app.modules.settings.online_hours import OnlineHours
 
 
 class StoreSettings(Base, TimestampMixin):
@@ -46,6 +47,13 @@ class StoreSettings(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    online_order_hours: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=lambda: OnlineHours().model_dump(),
+        server_default=text(
+            '\'{"enabled": false,"days":[null,null,null,null,null,null,null]}\'::jsonb'
+        ),
+    )
     einvoice_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )

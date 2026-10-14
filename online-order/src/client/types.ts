@@ -1,4 +1,9 @@
 // 菜單快照的形狀（店內 backend app/modules/onlineorder/snapshot.py 產生）。
+export interface OnlineHours {
+  enabled: boolean;
+  days: ({ opens: string; closes: string } | null)[];
+}
+
 export interface MenuOptionView {
   id: number;
   name: string;

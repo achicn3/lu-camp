@@ -1,6 +1,7 @@
 // 菜單快照（docs/44 §3.5）：店內 POS 發佈、客人讀目前生效的版本。
 // 快照內容由店內 backend 組好（已驗證過的菜單），這裡只檢查形狀，擋住格式錯誤的發佈。
 import { error, json, sha256Hex } from "./http";
+import { validHours } from "./hours";
 import {
   BREW_ARTS, BREW_EFFECTS, BREW_THEMES, RETAIL_ROLES, UPSELL_ROLES, type MenuSnapshot,
 } from "./client/types";
@@ -131,6 +132,7 @@ function validPicks(value: unknown, ids: Record<string, Set<unknown>>): boolean 
 export function validSnapshot(s: unknown): s is { version: number; published_at: string } {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
+  if (!validHours(o.hours)) return false;
   if (!isPositiveInt(o.version) || typeof o.published_at !== "string") return false;
   if (!Array.isArray(o.categories) || !Array.isArray(o.items)) return false;
   const itemIds = new Set(o.items.map((item: unknown) => (isRecord(item) ? item.id : undefined)));

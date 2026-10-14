@@ -101,6 +101,7 @@ export async function startLinePay(req: Request, env: Env, storeId: number, toke
   const attempt = row.linepay_attempt + 1;
   if (!(await move(env, storeId, row, ["UNPAID"], "PENDING", {
     linepay_attempt: attempt, linepay_result: null, linepay_transaction_id: null, linepay_payment_url: null,
+    linepay_started_at: Date.now(),
   }))) {
     return error("payment_in_progress", 409);
   }

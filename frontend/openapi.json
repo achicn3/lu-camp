@@ -13010,6 +13010,55 @@
         "title": "OnlineCartRead",
         "type": "object"
       },
+      "OnlineHours": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OnlineHoursDay"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 7,
+            "minItems": 7,
+            "title": "Days",
+            "type": "array"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "OnlineHours",
+        "type": "object"
+      },
+      "OnlineHoursDay": {
+        "additionalProperties": false,
+        "properties": {
+          "closes": {
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Closes",
+            "type": "string"
+          },
+          "opens": {
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Opens",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opens",
+          "closes"
+        ],
+        "title": "OnlineHoursDay",
+        "type": "object"
+      },
       "OnlineMenuPublishRead": {
         "properties": {
           "font_pushed": {
@@ -13373,6 +13422,23 @@
               }
             ],
             "title": "Paused Reason"
+          },
+          "payment_alert_count": {
+            "default": 0,
+            "title": "Payment Alert Count",
+            "type": "integer"
+          },
+          "payment_alerts": {
+            "items": {
+              "$ref": "#/components/schemas/OnlinePaymentAlert"
+            },
+            "title": "Payment Alerts",
+            "type": "array"
+          },
+          "within_hours": {
+            "default": true,
+            "title": "Within Hours",
+            "type": "boolean"
           }
         },
         "required": [
@@ -13384,6 +13450,72 @@
           "orders"
         ],
         "title": "OnlineOrdersRead",
+        "type": "object"
+      },
+      "OnlinePaymentAlert": {
+        "properties": {
+          "id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "service_mode": {
+            "enum": [
+              "DINE_IN",
+              "TAKEOUT"
+            ],
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "CONFIRMING"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "table_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Label"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          },
+          "transaction_id": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{1,20}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transaction Id"
+          }
+        },
+        "required": [
+          "id",
+          "service_mode",
+          "total",
+          "status",
+          "started_at"
+        ],
+        "title": "OnlinePaymentAlert",
         "type": "object"
       },
       "OnlineSettlePaidRead": {
@@ -17750,6 +17882,9 @@
             "title": "Monthly Fixed Cash Outflow",
             "type": "string"
           },
+          "online_order_hours": {
+            "$ref": "#/components/schemas/OnlineHours"
+          },
           "premium_rate": {
             "title": "Premium Rate",
             "type": "string"
@@ -18005,6 +18140,16 @@
               }
             ],
             "title": "Monthly Fixed Cash Outflow"
+          },
+          "online_order_hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OnlineHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "premium_change_reason": {
             "anyOf": [

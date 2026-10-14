@@ -18,7 +18,7 @@ mkdirSync(SHOTS, { recursive: true });
 let token = "";
 async function api(method, path, body) {
   const r = await fetch(`${API}/api/v1${path}`, { method,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Connection: "close", Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body) });
   assert.ok(r.ok, `${path}: ${r.status}`); return r.json();
 }
@@ -63,6 +63,12 @@ try {
     await sheet.locator(`input[value="${required.options[0].id}"]`).check();
     await sheet.locator(`input[value="${optional.options[0].id}"]`).check();
     await sheet.getByLabel("不選擇", { exact: true }).check();
+    // Keep the sheet open through the real 15-second menu refresh.
+    const refresh = await page.waitForResponse(response => response.url() === `${ORDER}/api/menu`);
+    await refresh.finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await sheet.getByLabel("不選擇", { exact: true }).isEnabled(), true, "Clear selection must remain usable after refresh");
+    assert.equal(await sheet.getByLabel("不選擇", { exact: true }).isChecked(), true);
     assert.equal(await sheet.locator(`input[value="${optional.options[0].id}"]`).isChecked(), false);
     assert.equal(await sheet.locator(`input[value="${optional.options[1].id}"]`).isDisabled(), true);
     await sheet.locator(`input[value="${optional.options[0].id}"]`).check();
