@@ -10,6 +10,7 @@ import {
   estimateLine,
   pctToDiscount,
 } from "@/features/intake/estimate";
+import { type ShortNameSuggestion, ShortNameInput } from "@/features/intake/ShortNameInput";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
 
@@ -34,6 +35,7 @@ export function LineForm({
   onSubmit,
   onCancel,
   quick = false,
+  searchShortNames,
 }: {
   initial?: Line;
   rates: PricingRates;
@@ -46,6 +48,8 @@ export function LineForm({
    * （「詳細」按折數會帶出建議價）；表單開著時列上也可能存了新價或換了類型，所以類型、收購價、
    * 成色在這裡沒動過就跟著 `initial`（列上最新的值）顯示、也不送，免得用打開時的舊值蓋掉。 */
   quick?: boolean;
+  /** 測試用：商品簡稱建議的查詢；預設查後端。 */
+  searchShortNames?: (query: string) => Promise<ShortNameSuggestion[]>;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
   const [qty, setQty] = useState(String(initial?.qty ?? 1));
@@ -151,11 +155,11 @@ export function LineForm({
   return (
     <form className="intake-line-form" onSubmit={submit} aria-label={initial ? `修改第 ${initial.line_no} 列` : "新增一列"}>
       <div className="intake-line-grid">
-        <label className="field intake-field-wide">
+        <div className="field intake-field-wide">
           <span className="field-label">商品簡稱</span>
-          <input aria-label="商品簡稱" value={shortName} maxLength={100} placeholder="例如：黑色折疊椅"
-            onChange={(e) => setShortName(e.target.value)} />
-        </label>
+          <ShortNameInput value={shortName} onChange={setShortName} excludeLineId={initial?.id}
+            search={searchShortNames} />
+        </div>
         {!quick && (
           <>
             <label className="field">

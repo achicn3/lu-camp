@@ -9656,6 +9656,101 @@
         "title": "IntakeReturnResult",
         "type": "object"
       },
+      "IntakeShortNameSuggestion": {
+        "description": "估價時打過的商品簡稱（同名不同品牌分開列），附最近一次估的價格（每件；散裝是整堆）。",
+        "properties": {
+          "acquisition_type": {
+            "$ref": "#/components/schemas/AcquisitionType"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "bulk_piece_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Piece Count"
+          },
+          "deal_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deal Cost"
+          },
+          "estimated_on": {
+            "format": "date",
+            "title": "Estimated On",
+            "type": "string"
+          },
+          "expected_listed_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Listed Price"
+          },
+          "reference_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Price"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          },
+          "times": {
+            "title": "Times",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "short_name",
+          "times",
+          "estimated_on",
+          "acquisition_type"
+        ],
+        "title": "IntakeShortNameSuggestion",
+        "type": "object"
+      },
       "IntakeSignatureRead": {
         "properties": {
           "signature_task_id": {
@@ -27568,6 +27663,77 @@
           }
         ],
         "summary": "List Intake Awaiting Listing",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/api/v1/intake-batches/short-name-suggestions": {
+      "get": {
+        "description": "估價打簡稱時的自動完成：打過的簡稱＋品牌＋最近一次估的價格。`exclude_line_id`＝正在改的那列。",
+        "operationId": "listIntakeShortNameSuggestions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_line_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Line Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntakeShortNameSuggestion"
+                  },
+                  "title": "Response Listintakeshortnamesuggestions",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Intake Short Name Suggestions",
         "tags": [
           "intake"
         ]

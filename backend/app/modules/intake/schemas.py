@@ -265,6 +265,24 @@ class IntakeLineRead(BaseModel):
     returned_to_customer: bool
 
 
+class IntakeShortNameSuggestion(BaseModel):
+    """估價時打過的商品簡稱（同名不同品牌分開列），附最近一次估的價格（每件；散裝是整堆）。"""
+
+    short_name: str
+    brand_id: int | None = None
+    brand_name: str | None = None
+    """估價列上帶的品牌，或那一列建出的商品上架時補的品牌；都沒有＝None。"""
+    times: int
+    """估過幾次。"""
+    estimated_on: date
+    """下面這組價格是哪天估的。"""
+    acquisition_type: AcquisitionType
+    reference_price: NTDOutOpt = None
+    expected_listed_price: NTDOutOpt = None
+    deal_cost: NTDOutOpt = None
+    bulk_piece_count: int | None = None
+
+
 class IntakeBatchRead(BaseModel):
     id: int
     ticket_date: date

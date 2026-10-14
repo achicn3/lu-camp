@@ -2039,6 +2039,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-batches/short-name-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Intake Short Name Suggestions
+         * @description 估價打簡稱時的自動完成：打過的簡稱＋品牌＋最近一次估的價格。`exclude_line_id`＝正在改的那列。
+         */
+        get: operations["listIntakeShortNameSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intake-batches/{batch_id}": {
         parameters: {
             query?: never;
@@ -8278,6 +8298,34 @@ export interface components {
             reversed_cash: string;
             /** Reversed Credit */
             reversed_credit: string;
+        };
+        /**
+         * IntakeShortNameSuggestion
+         * @description 估價時打過的商品簡稱（同名不同品牌分開列），附最近一次估的價格（每件；散裝是整堆）。
+         */
+        IntakeShortNameSuggestion: {
+            acquisition_type: components["schemas"]["AcquisitionType"];
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Brand Name */
+            brand_name?: string | null;
+            /** Bulk Piece Count */
+            bulk_piece_count?: number | null;
+            /** Deal Cost */
+            deal_cost?: string | null;
+            /**
+             * Estimated On
+             * Format: date
+             */
+            estimated_on: string;
+            /** Expected Listed Price */
+            expected_listed_price?: string | null;
+            /** Reference Price */
+            reference_price?: string | null;
+            /** Short Name */
+            short_name: string;
+            /** Times */
+            times: number;
         };
         /** IntakeSignatureRead */
         IntakeSignatureRead: {
@@ -16169,6 +16217,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntakeAwaitingListingRead"][];
+                };
+            };
+        };
+    };
+    listIntakeShortNameSuggestions: {
+        parameters: {
+            query: {
+                q: string;
+                exclude_line_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeShortNameSuggestion"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

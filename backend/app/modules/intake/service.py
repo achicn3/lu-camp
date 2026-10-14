@@ -40,6 +40,7 @@ from app.modules.intake.schemas import (
     IntakeReceiptRead,
     IntakeReturnRequest,
     IntakeReturnResult,
+    IntakeShortNameSuggestion,
 )
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.inventory.service import InventoryService
@@ -85,6 +86,12 @@ _PREFILL_MAX = 200  # 快速估價一次預先建好的件數上限
 CUSTOMER_DECLINED_REASON = "客人確認都不賣"
 # 估價列的必填欄位：修改時帶 null 不能清掉（其他欄位帶 null＝清掉那個選填值）。
 _REQUIRED_LINE_FIELDS = ("short_name", "qty", "acquisition_type")
+# 快速估價預先建好的每件先叫「第 N 件」（docs/42 §13）；不是店員打的，不拿來當簡稱建議。
+PREFILL_NAME = "第 {n} 件"
+_PREFILL_NAME_PATTERN = r"^第 [0-9]+ 件$"
+# 簡稱建議：最多翻最近幾列估價、回幾筆。
+_SUGGESTION_SCAN = 200
+_SUGGESTION_LIMIT = 8
 OPEN_STATUSES = [
     IntakeBatchStatus.PENDING_ESTIMATE,
     IntakeBatchStatus.ESTIMATING,
@@ -194,7 +201,7 @@ class IntakeService:
                             store_id=store_id,
                             batch_id=batch.id,
                             line_no=n,
-                            short_name=f"第 {n} 件",
+                            short_name=PREFILL_NAME.format(n=n),
                             qty=1,
                             acquisition_type=AcquisitionType.BUYOUT,
                         )
@@ -818,6 +825,90 @@ class IntakeService:
             )
             for item in items
         ]
+
+    async def short_name_suggestions(
+        self, store_id: int, query: str, *, exclude_line_id: int | None = None
+    ) -> list[IntakeShortNameSuggestion]:
+        """估價時打過、含 `query` 的商品簡稱（店主 2026-10-14）：同名不同品牌分開列，附最近一次
+        有估價的原價／預計售價／收購價。開頭就符合的排前面，其餘依最近估的先列。"""
+        if not query:
+            return []
+        lines = await self._repo.search_lines(
+            store_id,
+            query,
+            exclude_name_pattern=_PREFILL_NAME_PATTERN,
+            exclude_line_id=exclude_line_id,
+            limit=_SUGGESTION_SCAN,
+        )
+        brands = await self._line_brands(store_id, lines)
+        groups: dict[tuple[str, int | None], list[IntakeLine]] = {}
+        for line in lines:  # 新的在前
+            groups.setdefault((line.short_name, brands.get(line.id)), []).append(line)
+        brand_names = await InventoryService(self._session).brand_names(
+            store_id, [b for _, b in groups if b is not None]
+        )
+        needle = query.casefold()
+        ordered = sorted(
+            groups.items(),
+            key=lambda kv: not kv[0][0].casefold().startswith(needle),
+        )  # 穩定排序：同一組內保持新的在前
+        return [
+            self._suggestion(name, brand_id, brand_names.get(brand_id) if brand_id else None, group)
+            for (name, brand_id), group in ordered[:_SUGGESTION_LIMIT]
+        ]
+
+    @staticmethod
+    def _suggestion(
+        name: str, brand_id: int | None, brand_name: str | None, group: list[IntakeLine]
+    ) -> IntakeShortNameSuggestion:
+        def has_price(line: IntakeLine) -> bool:
+            return any(
+                v is not None
+                for v in (line.reference_price, line.expected_listed_price, line.deal_cost)
+            )
+
+        shown = next((line for line in group if has_price(line)), group[0])
+        return IntakeShortNameSuggestion(
+            short_name=name,
+            brand_id=brand_id,
+            brand_name=brand_name,
+            times=len(group),
+            estimated_on=store_date(shown.created_at),
+            acquisition_type=shown.acquisition_type,
+            reference_price=shown.reference_price,
+            expected_listed_price=shown.expected_listed_price,
+            deal_cost=shown.deal_cost,
+            bulk_piece_count=shown.bulk_piece_count,
+        )
+
+    async def _line_brands(self, store_id: int, lines: list[IntakeLine]) -> dict[int, int]:
+        """每列的品牌：列上有帶就用；否則看那一列付款時建出的商品（品牌多半上架時才補）。"""
+        brands = {line.id: line.brand_id for line in lines if line.brand_id is not None}
+        batch_ids = list(
+            {line.batch_id for line in lines if line.brand_id is None and self._accepted(line)}
+        )
+        acquisitions = await self._repo.acquisition_ids_for(store_id, batch_ids)
+        batch_of = {acq: batch for batch, acqs in acquisitions.items() for acq in acqs}
+        items = await self._inventory_items(store_id, list(batch_of), include_gone=True)
+        items_by_batch: dict[int, list[SerializedItem | BulkLot]] = {}
+        for item in items:
+            items_by_batch.setdefault(batch_of[item.acquisition_id or 0], []).append(item)
+        all_lines = await self._repo.lines_for(store_id, list(items_by_batch))
+        lines_by_batch: dict[int, list[IntakeLine]] = {}
+        for line in all_lines:
+            lines_by_batch.setdefault(line.batch_id, []).append(line)
+        item_brand: dict[tuple[int, int], int] = {}  # (批次, 第幾列) → 品牌
+        for batch_id, batch_items in items_by_batch.items():
+            line_nos = self._line_numbers(lines_by_batch.get(batch_id, []), batch_items)
+            for item in batch_items:
+                line_no = line_nos.get((self._kind(item), item.id))
+                if line_no is not None and item.brand_id is not None:
+                    item_brand.setdefault((batch_id, line_no), item.brand_id)
+        for line in lines:
+            brand = item_brand.get((line.batch_id, line.line_no))
+            if line.id not in brands and brand is not None:
+                brands[line.id] = brand
+        return brands
 
     @classmethod
     def _line_numbers(

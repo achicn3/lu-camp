@@ -32,6 +32,7 @@ from app.modules.intake.schemas import (
     IntakeReceiptRead,
     IntakeReturnRequest,
     IntakeReturnResult,
+    IntakeShortNameSuggestion,
     IntakeSignatureRead,
     IntakeSignatureRequest,
 )
@@ -173,6 +174,23 @@ async def list_intake_awaiting_listing(
 ) -> list[IntakeAwaitingListingRead]:
     """待整理清單：已付款、還有件沒上架的批次，放最久的排前面。"""
     return await IntakeService(session).awaiting_listing(user.store_id)
+
+
+@router.get(
+    "/short-name-suggestions",
+    response_model=list[IntakeShortNameSuggestion],
+    operation_id="listIntakeShortNameSuggestions",
+)
+async def list_intake_short_name_suggestions(
+    session: SessionDep,
+    user: AuthDep,
+    q: Annotated[str, Query(min_length=1, max_length=100)],
+    exclude_line_id: Annotated[int | None, Query(gt=0)] = None,
+) -> list[IntakeShortNameSuggestion]:
+    """估價打簡稱時的自動完成：打過的簡稱＋品牌＋最近一次估的價格。`exclude_line_id`＝正在改的那列。"""
+    return await IntakeService(session).short_name_suggestions(
+        user.store_id, q.strip(), exclude_line_id=exclude_line_id
+    )
 
 
 @router.get("/{batch_id}", response_model=IntakeBatchRead, operation_id="getIntakeBatch")

@@ -63,6 +63,26 @@ class IntakeRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def search_lines(
+        self,
+        store_id: int,
+        query: str,
+        *,
+        exclude_name_pattern: str,
+        exclude_line_id: int | None,
+        limit: int,
+    ) -> list[IntakeLine]:
+        """簡稱含 `query` 的估價列（不分大小寫、字面比對），新的在前。"""
+        stmt = select(IntakeLine).where(
+            IntakeLine.store_id == store_id,
+            IntakeLine.short_name.icontains(query, autoescape=True),
+            ~IntakeLine.short_name.regexp_match(exclude_name_pattern),
+        )
+        if exclude_line_id is not None:
+            stmt = stmt.where(IntakeLine.id != exclude_line_id)
+        stmt = stmt.order_by(IntakeLine.created_at.desc(), IntakeLine.id.desc()).limit(limit)
+        return list((await self._session.scalars(stmt)).all())
+
     async def get_line(self, store_id: int, batch_id: int, line_id: int) -> IntakeLine | None:
         stmt = select(IntakeLine).where(
             IntakeLine.id == line_id,
