@@ -40,7 +40,8 @@ it("可以設定加購角色（例：甜點），客人點咖啡時會推它", a
   }));
   const done = vi.fn(); mount(done);
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("加購角色"), "dessert");
+  await user.selectOptions(await screen.findByLabelText("商品類型（搭配推薦用）"), "dessert");
+  expect(screen.getByText(/客人點咖啡時，這份甜點可出現在搭配推薦中/)).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "儲存設定" }));
   await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
   expect(body?.role).toBe("dessert");

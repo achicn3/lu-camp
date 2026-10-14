@@ -115,7 +115,7 @@ try {
   await page.getByRole("tab", { name: "品項" }).click();
   await page.getByRole("button", { name: `${brewName} 線上呈現` }).click();
   const dialog = page.getByRole("dialog", { name: `${brewName} 的線上呈現` });
-  await dialog.getByLabel("加購角色").selectOption("experience");
+  await dialog.getByLabel("商品類型（搭配推薦用）").selectOption("experience");
   await dialog.getByRole("button", { name: "儲存設定" }).click();
   await dialog.waitFor({ state: "detached" }).catch(() => {});
   const presentation = await api("GET", `/online-order/menu-items/${brew.id}/presentation`);

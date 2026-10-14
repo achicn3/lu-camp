@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useDialogFocus } from "@/features/common/useDialogFocus";
+import { UpsellRoleHelp } from "@/features/menu/UpsellRoleHelp";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 
@@ -12,7 +13,7 @@ type Update = components["schemas"]["MenuPresentationUpdateRequest"];
 type Role = NonNullable<Update["role"]>;
 /** 加購角色（docs/63 §6）：咖啡→推甜點、甜點→推咖啡、手沖體驗→推咖啡豆／濾掛、咖啡豆→推濾掛／其他豆款。 */
 const ROLE_OPTIONS: { value: Role | ""; label: string }[] = [
-  { value: "", label: "不參與加購" },
+  { value: "", label: "不參與搭配推薦" },
   { value: "coffee", label: "咖啡" },
   { value: "dessert", label: "甜點" },
   { value: "experience", label: "手沖體驗" },
@@ -91,12 +92,12 @@ function PresentationForm({ initial, setBusy, onSaved }: { initial: Presentation
         </div>
         <label className="field"><span className="field-label">今日限定日期</span><input type="date" value={limitedOn} onChange={(event) => setLimitedOn(event.target.value)} /></label>
         <p className="hint">只在指定的台北日期顯示「今日限定」標籤，清空日期即可取消標籤。</p>
-        <label className="field"><span className="field-label">加購角色</span>
+        <label className="field"><span className="field-label">商品類型（搭配推薦用）</span>
           <select value={role} onChange={(event) => setRole(event.target.value as Role | "")}>
             {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
-        <p className="hint">客人點了咖啡，購物車下方會推「甜點」角色的品項（反之亦然）；最多推 2 項、不會自動加入。</p>
+        <UpsellRoleHelp role={role} />
         <h3>庫存顯示</h3>
         <div className="menu-presentation-checks"><label><input type="checkbox" checked={showRemaining} onChange={(event) => setShowRemaining(event.target.checked)} />低庫存時顯示剩餘數量</label></div>
         <label className="field"><span className="field-label">低庫存顯示門檻</span><input type="number" min={0} max={9999} step={1} required value={threshold} onChange={(event) => setThreshold(event.target.value)} /></label>

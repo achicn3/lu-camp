@@ -84,7 +84,7 @@ try {
   await form.getByLabel("搜尋商品").fill(name);
   await form.getByRole("radio", { name: new RegExp(name) }).check();
   await form.getByLabel("介紹").fill("柑橘、茉莉花香，淺焙");
-  await form.getByLabel("加購角色").selectOption("bean");
+  await form.getByLabel("商品類型（搭配推薦用）").selectOption("bean");
   await desk.screenshot({ path: join(SHOTS, "01-admin-new.png"), fullPage: true });
   await form.getByRole("button", { name: "儲存" }).click();
   await desk.waitForURL(/\/menu\/retail\/\d+$/);

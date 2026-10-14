@@ -6,6 +6,7 @@ import { type FormEvent, useState } from "react";
 
 import { apiDetail } from "@/features/menu/experienceOptions";
 import { MenuPhotoCell } from "@/features/menu/MenuPhotoCell";
+import { UpsellRoleHelp } from "@/features/menu/UpsellRoleHelp";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -131,9 +132,9 @@ export function RetailForm({ initial, onDone, onCancel }: {
           </label>
           <div className="exp-grid">
             <label className="field">
-              <span className="field-label">加購角色</span>
+              <span className="field-label">商品類型（搭配推薦用）</span>
               <select value={role} onChange={(e) => setRole(e.target.value as Role | "")}>
-                <option value="">不參與加購</option>
+                <option value="">不參與搭配推薦</option>
                 {ROLES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
@@ -142,6 +143,7 @@ export function RetailForm({ initial, onDone, onCancel }: {
               <input type="number" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
             </label>
           </div>
+          <UpsellRoleHelp role={role} />
           <label className="field-toggle">
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             <span>啟用（發佈後客人看得到）</span>

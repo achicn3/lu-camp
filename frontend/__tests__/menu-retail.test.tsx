@@ -57,7 +57,7 @@ it("新增：搜尋現有商品挑一個，送出的內容不含價格與庫存"
   await user.type(within(form).getByLabelText("搜尋商品"), "耶加");
   await user.click(await within(form).findByRole("radio", { name: /耶加雪菲 200g/ }));
   await user.type(within(form).getByLabelText("介紹"), "柑橘、茉莉");
-  await user.selectOptions(within(form).getByLabelText("加購角色"), "bean");
+  await user.selectOptions(within(form).getByLabelText("商品類型（搭配推薦用）"), "bean");
   await user.click(within(form).getByRole("button", { name: "儲存" }));
   await waitFor(() => expect(done).toHaveBeenCalled());
   expect(body).toEqual({

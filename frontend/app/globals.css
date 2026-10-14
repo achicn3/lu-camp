@@ -6438,7 +6438,7 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 }
 
 /* 線上菜單呈現與排序：管理操作沿用 POS 表單，單一捲動容器。 */
-.menu-presentation-dialog { width: min(560px, 100%); max-height: 90dvh; overflow-y: auto; }
+.menu-presentation-dialog { width: min(560px, 100%); max-height: 90dvh; overflow-y: auto; white-space: normal; overflow-wrap: anywhere; }
 .menu-presentation-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .menu-presentation-heading h2 { margin: 0; }
 .menu-presentation-heading button { min-width: 44px; min-height: 44px; font-size: 24px; }
