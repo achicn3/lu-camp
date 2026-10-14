@@ -1,7 +1,7 @@
 // 排隊收購「詳細」的商品簡稱建議（店主 2026-10-14）。
 // 先用 API 在另一批估兩次同名商品（Coleman 收 250、Snow Peak 收 300，品牌帶在估價列上）→
 // 新報到 1 件 → 「詳細」打簡稱一部分 → 清單列出兩筆、各帶品牌與上次估的原價／預計售價／收購價 →
-// 點 Snow Peak 那筆 → 簡稱帶入、下方留著「上次估價」→ 存檔，後端簡稱正確。
+// 點 Snow Peak 那筆 → 簡稱帶入、下方留著「上次估價」→ 按「帶入」填上次的價格 → 存檔，後端簡稱／收購價／品牌正確。
 // 需 backend + frontend 已起、已 seed（dev-manager）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/intake-short-name-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -115,19 +115,33 @@ try {
   const last = form.getByLabel("上次估價");
   const lastText = (await last.textContent()) ?? "";
   ok("下方留著上次估價（Snow Peak、收購價 300）", lastText.includes(`Snow Peak-${RUN}`) && lastText.includes("收購價$300"), lastText);
-  ok("價格不自動填", (await form.getByLabel("原價／件").inputValue()) === "");
+  ok("只點選不帶價格（要按帶入）", (await form.getByLabel("原價／件").inputValue()) === "");
   await page.screenshot({ path: join(SHOTS, "02-picked.png") });
+
+  // 帶入（店主 2026-10-15）：原價、折數、預計售價、收購價、品牌一起帶
+  await form.getByRole("button", { name: "帶入" }).click();
+  ok("帶入：原價 1000", (await form.getByLabel("原價／件").inputValue()) === "1000");
+  ok("帶入：5 折", (await form.getByRole("button", { name: "5折" }).getAttribute("aria-pressed")) === "true");
+  ok("帶入：預計售價 500", (await form.getByLabel("預計售價／件").inputValue()) === "500");
+  ok("帶入：收購價 300（Snow Peak 那次）", (await form.getByLabel("收購價／件").inputValue()) === "300");
+  await page.screenshot({ path: join(SHOTS, "03-applied.png") });
 
   await form.getByRole("button", { name: "儲存詳細" }).click();
   await page.waitForFunction(
     async ([api, id, auth, name]) => {
       const r = await fetch(`${api}/api/v1/intake-batches/${id}`, { headers: { Authorization: `Bearer ${auth}` } });
-      return (await r.json()).lines?.[0]?.short_name === name;
+      const line = (await r.json()).lines?.[0];
+      return line?.short_name === name && line?.deal_cost === "300";
     },
     [API, batchId, token, NAME],
     { timeout: 8000 },
   );
-  ok("存檔後端簡稱正確", true, NAME);
+  const saved = await call(`/intake-batches/${batchId}`);
+  ok(
+    "存檔後端：簡稱、收購價、品牌都對",
+    saved.lines[0].short_name === NAME && saved.lines[0].deal_cost === "300" && saved.lines[0].brand_id === snowPeak.id,
+    JSON.stringify([saved.lines[0].short_name, saved.lines[0].deal_cost, saved.lines[0].brand_id]),
+  );
   ok("頁面無 JS 例外", pageErrors.length === 0, pageErrors.join(" / "));
 } catch (error) {
   ok("流程例外", false, String(error));

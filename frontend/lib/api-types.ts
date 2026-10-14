@@ -8313,6 +8313,8 @@ export interface components {
             bulk_piece_count?: number | null;
             /** Deal Cost */
             deal_cost?: string | null;
+            /** Discount Pct */
+            discount_pct?: number | null;
             /**
              * Estimated On
              * Format: date

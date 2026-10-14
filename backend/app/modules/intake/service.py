@@ -878,6 +878,7 @@ class IntakeService:
             estimated_on=store_date(shown.created_at),
             acquisition_type=shown.acquisition_type,
             reference_price=shown.reference_price,
+            discount_pct=shown.discount_pct,
             expected_listed_price=shown.expected_listed_price,
             deal_cost=shown.deal_cost,
             bulk_piece_count=shown.bulk_piece_count,

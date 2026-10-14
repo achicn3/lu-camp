@@ -100,6 +100,7 @@ export function ShortNameInput({
   onChange,
   excludeLineId,
   search,
+  onApply,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -107,6 +108,8 @@ export function ShortNameInput({
   excludeLineId?: number;
   /** 測試用；預設查後端。 */
   search?: Search;
+  /** 「帶入」：把上次估的內容填進表單（店主 2026-10-15）。沒給就不顯示按鈕。 */
+  onApply?: (suggestion: ShortNameSuggestion) => void;
 }) {
   const [options, setOptions] = useState<ShortNameSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -239,6 +242,15 @@ export function ShortNameInput({
             <When suggestion={shownPick} />
           </span>
           <EstimateLine suggestion={shownPick} />
+          {onApply && (
+            <button
+              type="button"
+              className="btn-secondary sn-apply"
+              onClick={() => onApply(shownPick)}
+            >
+              帶入
+            </button>
+          )}
         </div>
       )}
     </div>

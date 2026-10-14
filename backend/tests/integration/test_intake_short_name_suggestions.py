@@ -88,6 +88,7 @@ async def test_lists_past_short_names_with_their_last_estimate(
     assert chair["times"] == 2
     # 最近一次的估價
     assert chair["reference_price"] == "1000"
+    assert chair["discount_pct"] == 50  # 「帶入」要連折數一起帶
     assert chair["expected_listed_price"] == "500"
     assert chair["deal_cost"] == "250"
     assert chair["acquisition_type"] == "BUYOUT"

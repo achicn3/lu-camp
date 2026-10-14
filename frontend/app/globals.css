@@ -6803,3 +6803,9 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .online-hours-row input[type="time"] { min-width: 0; width: 7.5rem; padding: .5rem; }
 .online-payment-alerts { padding: 1rem; border: 1px solid var(--warn); border-radius: .5rem; }
 .online-payment-alerts article { padding: .5rem 0; overflow-wrap: anywhere; }
+.sn-last .sn-apply {
+  align-self: flex-start;
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 4px 16px;
+}

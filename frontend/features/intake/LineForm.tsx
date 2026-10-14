@@ -24,6 +24,7 @@ const TYPE_OPTIONS: { value: AcqType; label: string }[] = [
   { value: "CONSIGNMENT", label: "寄售" },
   { value: "BULK_LOT", label: "散裝" },
 ];
+const TYPE_LABEL: Record<AcqType, string> = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝" };
 const QUICK_DISCOUNTS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 export function LineForm({
@@ -73,6 +74,8 @@ export function LineForm({
   const [gradeInput, setGrade] = useState<Grade | "">(initial?.grade ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   const [error, setError] = useState<string | null>(null);
+  // 按「帶入」用的那筆以前的估價：簡稱沒改掉，送出時連品牌一起帶（上架時自動帶入）。
+  const [applied, setApplied] = useState<ShortNameSuggestion | null>(null);
 
   // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
   const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
@@ -84,6 +87,31 @@ export function LineForm({
   // 快速估價的「詳細」也帶收購價（店主 2026-10-04：填原價、按折數就要帶出收購價）——只限買斷：
   // 散裝在列上填的是整堆總價、寄售填寄售售價，每件建議收購價對不上。
   const showDealCost = quick ? effectiveType === "BUYOUT" : !isConsignment;
+
+  const appliedBrandId =
+    applied !== null && applied.short_name === shortName.trim() ? (applied.brand_id ?? null) : null;
+  const appliedTypeNote =
+    applied !== null && applied.short_name === shortName.trim() && applied.acquisition_type !== effectiveType
+      ? `上次是${TYPE_LABEL[applied.acquisition_type]}，只帶入原價（收購價、售價的算法不同）`
+      : null;
+
+  /** 帶入上次估的內容（店主 2026-10-15）。類型不同時售價／收購價意思不一樣（散裝是整堆、寄售沒有
+   * 收購價），只帶原價。 */
+  function applyPrevious(previous: ShortNameSuggestion) {
+    setApplied(previous);
+    if (previous.reference_price != null) setReference(previous.reference_price);
+    if (previous.acquisition_type !== effectiveType) return;
+    if (previous.discount_pct != null) {
+      const next = pctToDiscount(previous.discount_pct);
+      setDiscount(next);
+      setCustomDiscount(!QUICK_DISCOUNTS.includes(next));
+    }
+    if (previous.expected_listed_price != null) setListed(previous.expected_listed_price);
+    if (showDealCost && previous.deal_cost != null) {
+      setDealCost(previous.deal_cost);
+      setDealTouched(true);
+    }
+  }
 
   function applyPricing(nextReference: string, nextDiscount: string) {
     const next = estimateLine(nextReference, nextDiscount, rates);
@@ -130,6 +158,7 @@ export function LineForm({
           : {}),
         ...(showDealCost && dealTouched ? { deal_cost: money(dealCost) } : {}),
         ...quickGrade(),
+        ...(appliedBrandId !== null ? { brand_id: appliedBrandId } : {}),
         note: note.trim() || null,
       });
       return;
@@ -146,6 +175,7 @@ export function LineForm({
       commission_pct: isConsignment ? Number(commission) : null,
       // 成色沒點時依折數推斷（與收購頁同一支 gradeFromDiscount，裁示 10）。
       grade: inferred,
+      brand_id: appliedBrandId ?? initial?.brand_id ?? null,
       note: note.trim() || null,
     });
   }
@@ -158,7 +188,8 @@ export function LineForm({
         <div className="field intake-field-wide">
           <span className="field-label">商品簡稱</span>
           <ShortNameInput value={shortName} onChange={setShortName} excludeLineId={initial?.id}
-            search={searchShortNames} />
+            search={searchShortNames} onApply={applyPrevious} />
+          {appliedTypeNote !== null && <span className="intake-field-hint">{appliedTypeNote}</span>}
         </div>
         {!quick && (
           <>

@@ -278,6 +278,8 @@ class IntakeShortNameSuggestion(BaseModel):
     """下面這組價格是哪天估的。"""
     acquisition_type: AcquisitionType
     reference_price: NTDOutOpt = None
+    discount_pct: int | None = None
+    """預計售價折數（十分位整數，50＝五折）；估價「帶入」用。"""
     expected_listed_price: NTDOutOpt = None
     deal_cost: NTDOutOpt = None
     bulk_piece_count: int | None = None

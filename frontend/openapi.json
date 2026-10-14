@@ -9706,6 +9706,17 @@
             ],
             "title": "Deal Cost"
           },
+          "discount_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Pct"
+          },
           "estimated_on": {
             "format": "date",
             "title": "Estimated On",

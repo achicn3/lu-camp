@@ -30,6 +30,7 @@ function suggestion(
     estimated_on: "2026-10-03",
     acquisition_type: "BUYOUT",
     reference_price: "1000",
+    discount_pct: 50,
     expected_listed_price: "500",
     deal_cost: "250",
     bulk_piece_count: null,
@@ -118,16 +119,14 @@ describe("商品簡稱建議", () => {
   });
 
   it("方向鍵選、Enter 帶入，不會送出表單", async () => {
-    const search = vi
-      .fn()
-      .mockResolvedValue([
-        suggestion(),
-        suggestion({
-          short_name: "黑色折疊桌",
-          brand_id: null,
-          brand_name: null,
-        }),
-      ]);
+    const search = vi.fn().mockResolvedValue([
+      suggestion(),
+      suggestion({
+        short_name: "黑色折疊桌",
+        brand_id: null,
+        brand_name: null,
+      }),
+    ]);
     const onSubmit = renderForm(search);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("商品簡稱"), "黑色");
@@ -166,6 +165,81 @@ describe("商品簡稱建議", () => {
     expect((screen.getByLabelText("商品簡稱") as HTMLInputElement).value).toBe(
       "新東西",
     );
+  });
+});
+
+describe("帶入上次的內容（店主 2026-10-15）", () => {
+  it("按「帶入」填上原價、折數、預計售價、收購價，送出時連品牌一起帶", async () => {
+    const onSubmit = renderForm(vi.fn().mockResolvedValue([suggestion()]));
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "折疊");
+    await user.click((await menuOptions())[0]);
+    await user.click(screen.getByRole("button", { name: "帶入" }));
+
+    expect((screen.getByLabelText("原價／件") as HTMLInputElement).value).toBe(
+      "1000",
+    );
+    expect(
+      screen.getByRole("button", { name: "5折" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      (screen.getByLabelText("預計售價／件") as HTMLInputElement).value,
+    ).toBe("500");
+    expect(
+      (screen.getByLabelText("成交收購價／件") as HTMLInputElement).value,
+    ).toBe("250");
+
+    await user.click(screen.getByRole("button", { name: "存這一件" }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        short_name: "黑色折疊椅",
+        reference_price: "1000",
+        discount_pct: 50,
+        expected_listed_price: "500",
+        deal_cost: "250",
+        brand_id: 1,
+      }),
+    );
+  });
+
+  it("上次類型不同（散裝）就只帶原價，收購價不帶", async () => {
+    renderForm(
+      vi
+        .fn()
+        .mockResolvedValue([
+          suggestion({
+            acquisition_type: "BULK_LOT",
+            deal_cost: "50",
+            bulk_piece_count: 10,
+          }),
+        ]),
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "折疊");
+    await user.click((await menuOptions())[0]);
+    await user.click(screen.getByRole("button", { name: "帶入" }));
+
+    expect((screen.getByLabelText("原價／件") as HTMLInputElement).value).toBe(
+      "1000",
+    );
+    expect(
+      (screen.getByLabelText("成交收購價／件") as HTMLInputElement).value,
+    ).not.toBe("50");
+    expect(screen.getByText(/上次是散裝，只帶入原價/)).toBeTruthy();
+  });
+
+  it("帶入後改掉簡稱，就不送品牌", async () => {
+    const onSubmit = renderForm(
+      vi.fn().mockResolvedValueOnce([suggestion()]).mockResolvedValue([]),
+    );
+    const user = userEvent.setup();
+    const input = screen.getByLabelText("商品簡稱");
+    await user.type(input, "折疊");
+    await user.click((await menuOptions())[0]);
+    await user.click(screen.getByRole("button", { name: "帶入" }));
+    await user.type(input, "２");
+    await user.click(screen.getByRole("button", { name: "存這一件" }));
+    expect(onSubmit.mock.calls[0][0].brand_id).toBeNull();
   });
 });
 
