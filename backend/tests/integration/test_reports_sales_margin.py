@@ -577,3 +577,36 @@ async def test_secondhand_margin_includes_commission_and_units_net_returns(
     assert body["secondhand_margin_rate"] == "1.0000"
     assert body["secondhand_units_sold"] == 1  # 寄售那件；買斷的退掉了
     assert body["food_units_sold"] == 1
+
+
+async def test_each_kind_counts_orders(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """詳細內容每類要有「共幾筆」：有這類商品的交易筆數（一筆同時買兩類，兩類各算一筆）。"""
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    lot = await _add_bulk(db_session, store_id, cost="1000", total_qty=3, unit_price="500")
+    costed = await _add_costed_catalog(db_session, store_id, sku="C-1", price="100", cost="60")
+    latte = await _add_menu(db_session, store_id, name="拿鐵", price="150", cost="45")
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+            {"line_type": "BULK_LOT", "bulk_lot_id": lot, "qty": 1},
+            {"line_type": "CATALOG", "catalog_product_id": costed, "qty": 2},
+        ],
+        key="orders1",
+    )
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "CATALOG", "catalog_product_id": costed, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": latte, "qty": 2},
+        ],
+        key="orders2",
+    )
+
+    body = await _margin(client, mgr)
+    assert body["secondhand_order_count"] == 1  # 序號＋散裝同一筆只算一筆
+    assert body["catalog_order_count"] == 2
+    assert body["food_order_count"] == 1

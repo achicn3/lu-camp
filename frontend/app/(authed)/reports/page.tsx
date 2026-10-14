@@ -141,6 +141,14 @@ const TIP_OUTSTANDING =
 
 // -- Shared sub-components --
 
+/** 「共 3 筆 · 售出 5 件 · 平均每筆 1.7 件」：0 筆時不算平均。 */
+function kindCount(orders: number, units: number, unit: "件" | "份"): string {
+  const sold = unit === "件" ? `售出 ${units} 件` : `${units} 份`;
+  if (orders === 0) return `共 0 筆 · ${sold}`;
+  const avg = Math.round((units / orders) * 10) / 10;
+  return `共 ${orders} 筆 · ${sold} · 平均每筆 ${avg} ${unit}`;
+}
+
 /** 今日營運第二層：一類一張卡，營收、毛利（毛利率）、件數格式一致，方便三類並排比較。 */
 function KindCard({
   title,
@@ -411,7 +419,7 @@ function DashboardPanel() {
 
       {/* 今日營運三層（店主 2026-10-15）：先一眼看整天、再細看各類、對帳數字放最下面。 */}
       <h3 className="rpt-layer-h">今天整體</h3>
-      <dl className="rpt-summary rpt-dashboard-cards">
+      <dl className="rpt-summary rpt-dashboard-cards rpt-top-cards">
         <div className="rpt-stat rpt-stat-hero">
           <dt>
             營業額
@@ -430,9 +438,12 @@ function DashboardPanel() {
         </div>
         <div className="rpt-stat rpt-stat-hero">
           <dt>交易筆數</dt>
-          <dd className="money">{report.transaction_count} 筆</dd>
+          <dd className="money">{report.transaction_count}</dd>
           <dd className="rpt-stat-sub">
             客單價 {report.avg_ticket === null ? "—" : <>$<MoneyText value={report.avg_ticket} /></>}
+          </dd>
+          <dd className="rpt-stat-sub">
+            全部共 {report.secondhand_units_sold + report.catalog_units_sold + report.food_units_sold} 件
           </dd>
         </div>
         <div className="rpt-stat rpt-stat-hero">
@@ -451,7 +462,7 @@ function DashboardPanel() {
         </div>
       </dl>
 
-      <h3 className="rpt-layer-h">各類細看</h3>
+      <h3 className="rpt-layer-h">詳細內容</h3>
       <div className="rpt-kind-cards">
         <KindCard
           title="二手"
@@ -459,7 +470,7 @@ function DashboardPanel() {
           revenue={report.secondhand_revenue}
           margin={report.secondhand_margin}
           rate={report.secondhand_margin_rate}
-          count={`售出 ${report.secondhand_units_sold} 件`}
+          count={kindCount(report.secondhand_order_count, report.secondhand_units_sold, "件")}
           note={
             parseNtd(report.consignment_commission_income) ? (
               <>含寄售抽成 $<MoneyText value={report.consignment_commission_income} /></>
@@ -472,7 +483,7 @@ function DashboardPanel() {
           revenue={report.catalog_revenue}
           margin={report.catalog_margin}
           rate={report.catalog_margin_rate}
-          count={`售出 ${report.catalog_units_sold} 件`}
+          count={kindCount(report.catalog_order_count, report.catalog_units_sold, "件")}
           note={
             parseNtd(report.catalog_unknown_cost_revenue) ? (
               <>其中 $<MoneyText value={report.catalog_unknown_cost_revenue} /> 沒填進價，未算毛利</>
@@ -485,7 +496,7 @@ function DashboardPanel() {
           revenue={report.food_revenue}
           margin={report.food_margin}
           rate={report.food_margin_rate}
-          count={`${report.food_units_sold} 份`}
+          count={kindCount(report.food_order_count, report.food_units_sold, "份")}
           note={null}
         />
       </div>

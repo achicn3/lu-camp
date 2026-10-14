@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import String, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
@@ -110,6 +110,10 @@ class SalesMarginComponents:
     # 二手售出件數（序號品每件 1、自有散裝依件數；寄售散裝沒有認列營收，不算）與餐飲份數。
     secondhand_units: int = 0
     menu_units: int = 0
+    # 有這類商品的交易筆數（一筆同時買兩類，兩類各算一筆；不含贈品行）。
+    secondhand_orders: int = 0
+    catalog_orders: int = 0
+    menu_orders: int = 0
     # 有填成本的餐飲品項（menu_items.unit_cost → 成交快照）：營收與成本認列進毛利。
     # menu_known_revenue 是 menu_revenue 的子集，**不要再加一次進營業額**。
     menu_known_revenue: Decimal = Decimal(0)
@@ -722,6 +726,31 @@ class SalesRepository:
             )
         )
         return [tuple(r) for r in rows]
+
+    async def _orders_by_kind(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[str, int]:
+        """期間（未作廢）有二手／一般商品／餐飲的交易各幾筆。序號品與散裝同屬二手。"""
+        kind = case(
+            (
+                SaleLine.line_type.in_([SaleLineType.SERIALIZED, SaleLineType.BULK_LOT]),
+                literal("SECONDHAND"),
+            ),
+            else_=cast(SaleLine.line_type, String),
+        )
+        rows = await self._session.execute(
+            select(kind, func.count(func.distinct(Sale.id)))
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_kind != SaleLineKind.GIFT,
+            )
+            .group_by(kind)
+        )
+        return {str(k): int(n) for k, n in rows}
 
     async def catalog_sold_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
@@ -1395,7 +1424,11 @@ class SalesRepository:
         ).one()
 
         unknown_cost_revenue += catalog_revenue + menu_unknown_revenue
+        orders = await self._orders_by_kind(store_id, date_from, date_to)
         return SalesMarginComponents(
+            secondhand_orders=orders.get("SECONDHAND", 0),
+            catalog_orders=orders.get("CATALOG", 0),
+            menu_orders=orders.get("MENU", 0),
             manual_discount_total=manual_discount_total,
             gift_retail_value=Decimal(gift_row[0]),
             gift_cost=Decimal(gift_row[1]),

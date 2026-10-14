@@ -178,6 +178,10 @@ class SalesMarginReport(BaseModel):
     secondhand_units_sold: int = 0
     food_margin_rate: RateOpt = None
     food_units_sold: int = 0
+    # 有這類商品的交易筆數（一筆同時買兩類，兩類各算一筆）。
+    secondhand_order_count: int = 0
+    catalog_order_count: int = 0
+    food_order_count: int = 0
     cash_received: NTDAmount = Field(description="現金淨收款（銷售收現減退現）")
     store_credit_redeemed: NTDAmount = Field(description="購物金淨收款（購物金兌付減退回購物金）")
     transaction_count: int
@@ -234,6 +238,10 @@ class DailySummaryReport(BaseModel):
     secondhand_units_sold: int = 0
     food_margin_rate: RateOpt = None
     food_units_sold: int = 0
+    # 有這類商品的交易筆數（一筆同時買兩類，兩類各算一筆）。
+    secondhand_order_count: int = 0
+    catalog_order_count: int = 0
+    food_order_count: int = 0
     # 現金/支出面（與 R1 同源）
     food_margin: NTDAmount = Decimal(0)  # 只認有填成本的餐飲，已扣損耗
     cash_sales_in: NTDAmount

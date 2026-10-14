@@ -241,6 +241,9 @@ class MarginBreakdown:
     secondhand_units_sold: int = 0
     food_margin_rate: Decimal | None = None
     food_units_sold: int = 0
+    secondhand_order_count: int = 0  # 有二手的交易筆數
+    catalog_order_count: int = 0
+    food_order_count: int = 0
 
 
 def _margin_rate(margin: Decimal, known_cost_revenue: Decimal) -> Decimal | None:
@@ -2633,6 +2636,9 @@ class SalesService:
             secondhand_units_sold=comp.secondhand_units,
             food_margin_rate=_margin_rate(menu_margin, comp.menu_known_revenue),
             food_units_sold=comp.menu_units,
+            secondhand_order_count=comp.secondhand_orders,
+            catalog_order_count=comp.catalog_orders,
+            food_order_count=comp.menu_orders,
             payment_fee_total=comp.payment_fee_total,
             net_margin=gross_margin - comp.payment_fee_total,
             payment_methods=payment_methods,

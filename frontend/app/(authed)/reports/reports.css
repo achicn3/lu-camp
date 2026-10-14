@@ -259,3 +259,8 @@
 .rpt-minor-cards .rpt-stat dd {
   font-size: var(--text-md);
 }
+
+/* 第一層卡片一樣高（交易筆數多兩行小字也不會比別張大）。 */
+.rpt-dashboard-cards.rpt-top-cards {
+  align-items: stretch;
+}

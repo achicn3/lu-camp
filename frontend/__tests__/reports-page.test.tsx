@@ -39,6 +39,9 @@ const DAILY_SUMMARY_DATA = {
   food_margin: "0",
   food_margin_rate: null,
   food_units_sold: 40,
+  secondhand_order_count: 6,
+  catalog_order_count: 10,
+  food_order_count: 25,
   net_sales_ex_tax: "90476",
   tax: "4524",
   total_cash_out: "30000",
@@ -734,8 +737,9 @@ describe("ReportsPage", () => {
     expect(screen.getByText("95,000")).toBeTruthy();
     // gross_margin
     expect(screen.getByText("45,000")).toBeTruthy();
-    // transaction_count（第一層寫「50 筆」）
-    expect(screen.getByText("50 筆")).toBeTruthy();
+    // transaction_count；下方小字有客單價與全部件數（9＋17＋40）
+    expect(screen.getByText("50")).toBeTruthy();
+    expect(screen.getByText("全部共 66 件")).toBeTruthy();
     // avg_ticket
     expect(screen.getByText("2,400")).toBeTruthy();
     // 今日營運三層（店主 2026-10-15）：第一層有當日現金收入與支出
@@ -746,17 +750,18 @@ describe("ReportsPage", () => {
     const secondhand = screen.getByRole("region", { name: "二手營收" });
     expect(within(secondhand).getByText("62,000")).toBeTruthy();
     expect(secondhand.textContent).toContain("38.0%");
-    expect(secondhand.textContent).toContain("售出 9 件");
+    expect(secondhand.textContent).toContain("共 6 筆 · 售出 9 件 · 平均每筆 1.5 件");
+    expect(screen.getByText("詳細內容")).toBeTruthy();
     expect(secondhand.textContent).toContain("含寄售抽成 $15,000");
     const catalog = screen.getByRole("region", { name: "一般商品營收" });
     expect(within(catalog).getByText("12,000")).toBeTruthy();
     expect(catalog.textContent).toContain("4,300");
-    expect(catalog.textContent).toContain("售出 17 件");
+    expect(catalog.textContent).toContain("共 10 筆 · 售出 17 件 · 平均每筆 1.7 件");
     expect(catalog.textContent).toContain("其中 $1,800 沒填進價，未算毛利");
     const food = screen.getByRole("region", { name: "餐飲營收" });
     expect(within(food).getByText("21,000")).toBeTruthy();
     expect(food.textContent).toContain("—"); // 毛利率分母 0
-    expect(food.textContent).toContain("40 份");
+    expect(food.textContent).toContain("共 25 筆 · 40 份 · 平均每筆 1.6 份");
     // 露營用品總營收不再出現在今日營運
     expect(screen.queryByText("露營用品總營收")).toBeNull();
   });

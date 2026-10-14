@@ -6876,6 +6876,11 @@ export interface components {
             /** Catalog Margin Rate */
             catalog_margin_rate?: string | null;
             /**
+             * Catalog Order Count
+             * @default 0
+             */
+            catalog_order_count: number;
+            /**
              * Catalog Revenue
              * @default 0
              */
@@ -6912,6 +6917,11 @@ export interface components {
             food_margin: string;
             /** Food Margin Rate */
             food_margin_rate?: string | null;
+            /**
+             * Food Order Count
+             * @default 0
+             */
+            food_order_count: number;
             /** Food Revenue */
             food_revenue: string;
             /**
@@ -6943,6 +6953,11 @@ export interface components {
             secondhand_margin: string;
             /** Secondhand Margin Rate */
             secondhand_margin_rate?: string | null;
+            /**
+             * Secondhand Order Count
+             * @default 0
+             */
+            secondhand_order_count: number;
             /** Secondhand Revenue */
             secondhand_revenue: string;
             /**
@@ -11043,6 +11058,11 @@ export interface components {
             /** Catalog Margin Rate */
             catalog_margin_rate?: string | null;
             /**
+             * Catalog Order Count
+             * @default 0
+             */
+            catalog_order_count: number;
+            /**
              * Catalog Revenue
              * @default 0
              */
@@ -11086,6 +11106,11 @@ export interface components {
             food_margin: string;
             /** Food Margin Rate */
             food_margin_rate?: string | null;
+            /**
+             * Food Order Count
+             * @default 0
+             */
+            food_order_count: number;
             /** Food Revenue */
             food_revenue: string;
             /**
@@ -11166,6 +11191,11 @@ export interface components {
             secondhand_margin: string;
             /** Secondhand Margin Rate */
             secondhand_margin_rate?: string | null;
+            /**
+             * Secondhand Order Count
+             * @default 0
+             */
+            secondhand_order_count: number;
             /** Secondhand Revenue */
             secondhand_revenue: string;
             /**

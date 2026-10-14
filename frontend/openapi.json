@@ -6091,6 +6091,11 @@
             ],
             "title": "Catalog Margin Rate"
           },
+          "catalog_order_count": {
+            "default": 0,
+            "title": "Catalog Order Count",
+            "type": "integer"
+          },
           "catalog_revenue": {
             "default": "0",
             "title": "Catalog Revenue",
@@ -6146,6 +6151,11 @@
               }
             ],
             "title": "Food Margin Rate"
+          },
+          "food_order_count": {
+            "default": 0,
+            "title": "Food Order Count",
+            "type": "integer"
           },
           "food_revenue": {
             "title": "Food Revenue",
@@ -6207,6 +6217,11 @@
               }
             ],
             "title": "Secondhand Margin Rate"
+          },
+          "secondhand_order_count": {
+            "default": 0,
+            "title": "Secondhand Order Count",
+            "type": "integer"
           },
           "secondhand_revenue": {
             "title": "Secondhand Revenue",
@@ -17178,6 +17193,11 @@
             ],
             "title": "Catalog Margin Rate"
           },
+          "catalog_order_count": {
+            "default": 0,
+            "title": "Catalog Order Count",
+            "type": "integer"
+          },
           "catalog_revenue": {
             "default": "0",
             "title": "Catalog Revenue",
@@ -17232,6 +17252,11 @@
               }
             ],
             "title": "Food Margin Rate"
+          },
+          "food_order_count": {
+            "default": 0,
+            "title": "Food Order Count",
+            "type": "integer"
           },
           "food_revenue": {
             "title": "Food Revenue",
@@ -17352,6 +17377,11 @@
               }
             ],
             "title": "Secondhand Margin Rate"
+          },
+          "secondhand_order_count": {
+            "default": 0,
+            "title": "Secondhand Order Count",
+            "type": "integer"
           },
           "secondhand_revenue": {
             "title": "Secondhand Revenue",
