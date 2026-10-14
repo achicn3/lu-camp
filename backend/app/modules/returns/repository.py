@@ -36,6 +36,9 @@ class ReturnsMarginAdjustments:
     catalog_cogs: Decimal = Decimal(0)  # 缺成本自有序號（unknown 桶）
     # 退回的一般商品件數（有無成本都算；報表的「一般商品售出件數」要扣掉）。
     catalog_units: int = 0
+    # 退回的二手件數（序號品、自有散裝）與餐點份數，報表的件數要扣掉。
+    secondhand_units: int = 0
+    menu_units: int = 0
     # 餐點退款（docs/47）：與正向口徑同桶——有填成本的認毛利、沒填的在「成本未知」。
     menu_known_revenue: Decimal = Decimal(0)
     menu_cogs: Decimal = Decimal(0)
@@ -255,7 +258,7 @@ class ReturnsRepository:
         o_bulk_rev = o_bulk_cogs = Decimal(0)
         c_ser_rev = c_bulk_rev = cat_rev = nocost_rev = Decimal(0)
         cat_known_rev = cat_cogs = Decimal(0)
-        cat_units = 0
+        cat_units = secondhand_units = menu_units = 0
         menu_known_rev = menu_cogs = menu_unknown_rev = Decimal(0)
         _zero = ReturnsMarginAdjustments(
             owned_serialized_revenue=Decimal(0),
@@ -380,6 +383,7 @@ class ReturnsRepository:
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
         for line, rqty, refund in rows:
             if line.line_type == SaleLineType.MENU:
+                menu_units += rqty
                 if line.cost_snapshot is None:
                     menu_unknown_rev += refund
                 else:
@@ -399,6 +403,7 @@ class ReturnsRepository:
                     c_bulk_rev += refund
                 else:
                     o_bulk_rev += refund
+                    secondhand_units += rqty
                     if line.id in basket_allocations and line.id not in cogs_done:
                         cogs_done.add(line.id)
                         prior = prior_returned.get(line.id, 0)
@@ -415,6 +420,7 @@ class ReturnsRepository:
                             cost * Decimal(prior) / tq
                         )
             elif line.line_type == SaleLineType.SERIALIZED:
+                secondhand_units += rqty
                 item = items.get(line.serialized_item_id or 0)
                 if item is not None and item.ownership_type == OwnershipType.CONSIGNMENT:
                     c_ser_rev += refund
@@ -441,6 +447,8 @@ class ReturnsRepository:
             catalog_known_revenue=cat_known_rev,
             catalog_cogs=cat_cogs,
             catalog_units=cat_units,
+            secondhand_units=secondhand_units,
+            menu_units=menu_units,
             menu_known_revenue=menu_known_rev,
             menu_cogs=menu_cogs,
             menu_unknown_revenue=menu_unknown_rev,

@@ -492,3 +492,88 @@ async def test_catalog_return_nets_revenue_units_and_margin(
     assert body["catalog_units_sold"] == 1
     assert body["catalog_margin"] == "40"
     assert body["secondhand_revenue"] == "0"
+
+
+async def test_each_kind_has_margin_rate_and_units(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """今日營運第二層：二手／一般商品／餐飲各自的毛利、毛利率、件數（店主 2026-10-15）。"""
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    lot = await _add_bulk(db_session, store_id, cost="1000", total_qty=3, unit_price="500")
+    costed = await _add_costed_catalog(db_session, store_id, sku="C-1", price="100", cost="60")
+    no_cost = await _add_costed_catalog(db_session, store_id, sku="C-2", price="50", cost=None)
+    latte = await _add_menu(db_session, store_id, name="拿鐵", price="150", cost="45")
+    cake = await _add_menu(db_session, store_id, name="蛋糕", price="180")
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+            {"line_type": "BULK_LOT", "bulk_lot_id": lot, "qty": 1},
+            {"line_type": "CATALOG", "catalog_product_id": costed, "qty": 2},
+            {"line_type": "CATALOG", "catalog_product_id": no_cost, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": latte, "qty": 2},
+            {"line_type": "MENU", "menu_item_id": cake, "qty": 1},
+        ],
+        key="kinds1",
+    )
+
+    body = await _margin(client, mgr)
+    # 二手：序號 500−300 ＋ 散裝 500−333
+    assert body["secondhand_revenue"] == "1000"
+    assert body["secondhand_margin"] == "367"
+    assert body["secondhand_margin_rate"] == "0.3670"
+    assert body["secondhand_units_sold"] == 2
+    # 一般商品：毛利率只看有進價的（80 ÷ 200），沒進價的 50 另外列
+    assert body["catalog_margin_rate"] == "0.4000"
+    assert body["catalog_unknown_cost_revenue"] == "50"
+    # 餐飲：210 ÷ 300（蛋糕沒填成本，不進分母）；份數 3
+    assert body["food_margin_rate"] == "0.7000"
+    assert body["food_units_sold"] == 3
+
+
+async def test_secondhand_margin_includes_commission_and_units_net_returns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, consignor, _clerk_id = await _seed(db_session)
+    await _add_consignment_serialized(
+        db_session, store_id, consignor, code="CON-1", price="1050", commission_pct=50
+    )
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    latte = await _add_menu(db_session, store_id, name="拿鐵", price="150", cost="45")
+    sale = await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "SERIALIZED", "item_code": "CON-1"},
+            {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+            {"line_type": "MENU", "menu_item_id": latte, "qty": 2},
+        ],
+        key="kinds2",
+    )
+    lines = sale["lines"]
+    assert isinstance(lines, list)
+    own_line = next(x for x in lines if x["description"] == "自有序號品")
+    menu_line = next(x for x in lines if x["line_type"] == "MENU")
+    resp = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "退買斷一件、拿鐵一杯",
+            "lines": [
+                {"sale_line_id": own_line["id"], "qty": 1},
+                {"sale_line_id": menu_line["id"], "qty": 1},
+            ],
+        },
+        headers=_auth(clerk, idem="kinds2-return"),
+    )
+    assert resp.status_code == 201, resp.text
+
+    body = await _margin(client, mgr)
+    commission = body["consignment_commission_income"]
+    assert body["secondhand_revenue"] == commission
+    assert body["secondhand_margin"] == commission  # 抽成全是毛利
+    assert body["secondhand_margin_rate"] == "1.0000"
+    assert body["secondhand_units_sold"] == 1  # 寄售那件；買斷的退掉了
+    assert body["food_units_sold"] == 1

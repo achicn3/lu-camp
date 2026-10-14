@@ -170,6 +170,14 @@ class SalesMarginReport(BaseModel):
     catalog_revenue: NTDAmount = Decimal(0)
     catalog_margin: NTDAmount = Decimal(0)  # 只算有進價（成本快照）的一般商品
     catalog_units_sold: int = 0
+    # 今日營運第二層（店主 2026-10-15）：各類毛利率只看有成本的營收；分母 0 → null。
+    catalog_margin_rate: RateOpt = None
+    catalog_unknown_cost_revenue: NTDAmount = Decimal(0)  # 沒填進價、未算毛利的一般商品營收
+    secondhand_margin: NTDAmount = Decimal(0)  # 買斷＋散裝＋寄售抽成
+    secondhand_margin_rate: RateOpt = None
+    secondhand_units_sold: int = 0
+    food_margin_rate: RateOpt = None
+    food_units_sold: int = 0
     cash_received: NTDAmount = Field(description="現金淨收款（銷售收現減退現）")
     store_credit_redeemed: NTDAmount = Field(description="購物金淨收款（購物金兌付減退回購物金）")
     transaction_count: int
@@ -218,7 +226,16 @@ class DailySummaryReport(BaseModel):
     catalog_revenue: NTDAmount = Decimal(0)
     catalog_margin: NTDAmount = Decimal(0)  # 只算有進價（成本快照）的一般商品
     catalog_units_sold: int = 0
+    # 今日營運第二層（店主 2026-10-15）：各類毛利率只看有成本的營收；分母 0 → null。
+    catalog_margin_rate: RateOpt = None
+    catalog_unknown_cost_revenue: NTDAmount = Decimal(0)  # 沒填進價、未算毛利的一般商品營收
+    secondhand_margin: NTDAmount = Decimal(0)  # 買斷＋散裝＋寄售抽成
+    secondhand_margin_rate: RateOpt = None
+    secondhand_units_sold: int = 0
+    food_margin_rate: RateOpt = None
+    food_units_sold: int = 0
     # 現金/支出面（與 R1 同源）
+    food_margin: NTDAmount = Decimal(0)  # 只認有填成本的餐飲，已扣損耗
     cash_sales_in: NTDAmount
     acquisition_void_in: NTDAmount
     buyout_out: NTDAmount

@@ -294,3 +294,22 @@ async def test_daily_summary_splits_catalog_from_secondhand(
     assert summary["catalog_revenue"] == "300"
     assert summary["catalog_margin"] == "120"
     assert summary["catalog_units_sold"] == 3
+
+
+async def test_daily_summary_has_per_kind_margin_and_units(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, _consignor = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    await _sell_serialized(client, clerk, "OWN-1", key="kinds")
+    summary = await _summary(client, mgr, await _day(db_session, store_id))
+
+    assert summary["secondhand_margin"] == "200"
+    assert summary["secondhand_margin_rate"] == "0.4000"
+    assert summary["secondhand_units_sold"] == 1
+    assert summary["consignment_commission_income"] == "0"
+    assert summary["catalog_margin_rate"] is None  # 沒賣一般商品
+    assert summary["catalog_unknown_cost_revenue"] == "0"
+    assert summary["food_margin"] == "0"
+    assert summary["food_margin_rate"] is None
+    assert summary["food_units_sold"] == 0

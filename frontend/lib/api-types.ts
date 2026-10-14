@@ -6873,6 +6873,8 @@ export interface components {
              * @default 0
              */
             catalog_margin: string;
+            /** Catalog Margin Rate */
+            catalog_margin_rate?: string | null;
             /**
              * Catalog Revenue
              * @default 0
@@ -6883,6 +6885,11 @@ export interface components {
              * @default 0
              */
             catalog_units_sold: number;
+            /**
+             * Catalog Unknown Cost Revenue
+             * @default 0
+             */
+            catalog_unknown_cost_revenue: string;
             /** Cogs */
             cogs: string;
             /** Consignment Commission Income */
@@ -6898,8 +6905,20 @@ export interface components {
             date: string;
             /** Expected Cash */
             expected_cash: string;
+            /**
+             * Food Margin
+             * @default 0
+             */
+            food_margin: string;
+            /** Food Margin Rate */
+            food_margin_rate?: string | null;
             /** Food Revenue */
             food_revenue: string;
+            /**
+             * Food Units Sold
+             * @default 0
+             */
+            food_units_sold: number;
             /**
              * Generated At
              * Format: date-time
@@ -6917,8 +6936,20 @@ export interface components {
             net_sales_ex_tax: string;
             /** Recognized Revenue */
             recognized_revenue: string;
+            /**
+             * Secondhand Margin
+             * @default 0
+             */
+            secondhand_margin: string;
+            /** Secondhand Margin Rate */
+            secondhand_margin_rate?: string | null;
             /** Secondhand Revenue */
             secondhand_revenue: string;
+            /**
+             * Secondhand Units Sold
+             * @default 0
+             */
+            secondhand_units_sold: number;
             /** Store Credit Issued */
             store_credit_issued: string;
             /** Store Credit Redeemed */
@@ -11009,6 +11040,8 @@ export interface components {
              * @default 0
              */
             catalog_margin: string;
+            /** Catalog Margin Rate */
+            catalog_margin_rate?: string | null;
             /**
              * Catalog Revenue
              * @default 0
@@ -11019,6 +11052,11 @@ export interface components {
              * @default 0
              */
             catalog_units_sold: number;
+            /**
+             * Catalog Unknown Cost Revenue
+             * @default 0
+             */
+            catalog_unknown_cost_revenue: string;
             /** Consignment Commission Income */
             consignment_commission_income: string;
             /**
@@ -11046,8 +11084,15 @@ export interface components {
              * @default 0
              */
             food_margin: string;
+            /** Food Margin Rate */
+            food_margin_rate?: string | null;
             /** Food Revenue */
             food_revenue: string;
+            /**
+             * Food Units Sold
+             * @default 0
+             */
+            food_units_sold: number;
             /**
              * Food Waste Breakdown
              * @default []
@@ -11114,8 +11159,20 @@ export interface components {
             payment_methods: components["schemas"]["PaymentMethodTotal"][];
             /** Recognized Revenue */
             recognized_revenue: string;
+            /**
+             * Secondhand Margin
+             * @default 0
+             */
+            secondhand_margin: string;
+            /** Secondhand Margin Rate */
+            secondhand_margin_rate?: string | null;
             /** Secondhand Revenue */
             secondhand_revenue: string;
+            /**
+             * Secondhand Units Sold
+             * @default 0
+             */
+            secondhand_units_sold: number;
             /**
              * Store Credit Redeemed
              * @description 購物金淨收款（購物金兌付減退回購物金）

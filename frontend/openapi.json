@@ -6080,6 +6080,17 @@
             "title": "Catalog Margin",
             "type": "string"
           },
+          "catalog_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Margin Rate"
+          },
           "catalog_revenue": {
             "default": "0",
             "title": "Catalog Revenue",
@@ -6089,6 +6100,11 @@
             "default": 0,
             "title": "Catalog Units Sold",
             "type": "integer"
+          },
+          "catalog_unknown_cost_revenue": {
+            "default": "0",
+            "title": "Catalog Unknown Cost Revenue",
+            "type": "string"
           },
           "cogs": {
             "title": "Cogs",
@@ -6115,9 +6131,30 @@
             "title": "Expected Cash",
             "type": "string"
           },
+          "food_margin": {
+            "default": "0",
+            "title": "Food Margin",
+            "type": "string"
+          },
+          "food_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Food Margin Rate"
+          },
           "food_revenue": {
             "title": "Food Revenue",
             "type": "string"
+          },
+          "food_units_sold": {
+            "default": 0,
+            "title": "Food Units Sold",
+            "type": "integer"
           },
           "generated_at": {
             "format": "date-time",
@@ -6155,9 +6192,30 @@
             "title": "Recognized Revenue",
             "type": "string"
           },
+          "secondhand_margin": {
+            "default": "0",
+            "title": "Secondhand Margin",
+            "type": "string"
+          },
+          "secondhand_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhand Margin Rate"
+          },
           "secondhand_revenue": {
             "title": "Secondhand Revenue",
             "type": "string"
+          },
+          "secondhand_units_sold": {
+            "default": 0,
+            "title": "Secondhand Units Sold",
+            "type": "integer"
           },
           "store_credit_issued": {
             "title": "Store Credit Issued",
@@ -17109,6 +17167,17 @@
             "title": "Catalog Margin",
             "type": "string"
           },
+          "catalog_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Margin Rate"
+          },
           "catalog_revenue": {
             "default": "0",
             "title": "Catalog Revenue",
@@ -17118,6 +17187,11 @@
             "default": 0,
             "title": "Catalog Units Sold",
             "type": "integer"
+          },
+          "catalog_unknown_cost_revenue": {
+            "default": "0",
+            "title": "Catalog Unknown Cost Revenue",
+            "type": "string"
           },
           "consignment_commission_income": {
             "title": "Consignment Commission Income",
@@ -17148,9 +17222,25 @@
             "title": "Food Margin",
             "type": "string"
           },
+          "food_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Food Margin Rate"
+          },
           "food_revenue": {
             "title": "Food Revenue",
             "type": "string"
+          },
+          "food_units_sold": {
+            "default": 0,
+            "title": "Food Units Sold",
+            "type": "integer"
           },
           "food_waste_breakdown": {
             "default": [],
@@ -17247,9 +17337,30 @@
             "title": "Recognized Revenue",
             "type": "string"
           },
+          "secondhand_margin": {
+            "default": "0",
+            "title": "Secondhand Margin",
+            "type": "string"
+          },
+          "secondhand_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhand Margin Rate"
+          },
           "secondhand_revenue": {
             "title": "Secondhand Revenue",
             "type": "string"
+          },
+          "secondhand_units_sold": {
+            "default": 0,
+            "title": "Secondhand Units Sold",
+            "type": "integer"
           },
           "store_credit_redeemed": {
             "description": "購物金淨收款（購物金兌付減退回購物金）",

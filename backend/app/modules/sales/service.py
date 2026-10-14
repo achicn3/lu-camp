@@ -234,6 +234,20 @@ class MarginBreakdown:
     # 一般商品毛利只算有成本快照的（沒填進價的不假造毛利，同 gross_margin 口徑）。
     catalog_margin: Decimal = Decimal(0)
     catalog_units_sold: int = 0
+    catalog_margin_rate: Decimal | None = None
+    catalog_unknown_cost_revenue: Decimal = Decimal(0)  # 沒填進價、不算毛利的一般商品營收
+    secondhand_margin: Decimal = Decimal(0)  # 買斷＋散裝＋寄售抽成
+    secondhand_margin_rate: Decimal | None = None
+    secondhand_units_sold: int = 0
+    food_margin_rate: Decimal | None = None
+    food_units_sold: int = 0
+
+
+def _margin_rate(margin: Decimal, known_cost_revenue: Decimal) -> Decimal | None:
+    """毛利率＝毛利 ÷ 有成本的營收（四位小數）；分母 0 → None（畫面顯示「—」）。"""
+    if known_cost_revenue <= 0:
+        return None
+    return (margin / known_cost_revenue).quantize(Decimal("0.0001"))
 
 
 @dataclass(frozen=True)
@@ -2532,6 +2546,8 @@ class SalesService:
             catalog_known_revenue=comp.catalog_known_revenue - adj.catalog_known_revenue,
             catalog_cogs=comp.catalog_cogs - adj.catalog_cogs,
             catalog_units=comp.catalog_units - adj.catalog_units,
+            secondhand_units=comp.secondhand_units - adj.secondhand_units,
+            menu_units=comp.menu_units - adj.menu_units,
             unknown_cost_revenue=comp.unknown_cost_revenue
             - adj.catalog_revenue
             - adj.no_cost_serialized_revenue
@@ -2580,11 +2596,11 @@ class SalesService:
             + comp.menu_known_revenue
             + commission
         )
-        rate: Decimal | None = (
-            (gross_margin / known_cost_revenue).quantize(Decimal("0.0001"))
-            if known_cost_revenue > 0
-            else None
-        )
+        rate = _margin_rate(gross_margin, known_cost_revenue)
+        # 今日營運第二層（店主 2026-10-15）：二手＝買斷序號＋自有散裝＋寄售抽成，毛利率分母只算
+        # 有成本的營收（同 gross_margin_rate 口徑）；一般商品、餐飲同理只看有填成本的。
+        secondhand_margin = owned_margin + bulk_margin + commission
+        secondhand_known = comp.owned_serialized_revenue + comp.owned_bulk_revenue + commission
         payment_methods = _net_payment_methods(comp.payment_methods, refund_tenders)
         return MarginBreakdown(
             gross_turnover=gross_turnover,
@@ -2610,6 +2626,13 @@ class SalesService:
             catalog_revenue=catalog_revenue,
             catalog_margin=catalog_margin,
             catalog_units_sold=comp.catalog_units,
+            catalog_margin_rate=_margin_rate(catalog_margin, comp.catalog_known_revenue),
+            catalog_unknown_cost_revenue=comp.catalog_revenue,
+            secondhand_margin=secondhand_margin,
+            secondhand_margin_rate=_margin_rate(secondhand_margin, secondhand_known),
+            secondhand_units_sold=comp.secondhand_units,
+            food_margin_rate=_margin_rate(menu_margin, comp.menu_known_revenue),
+            food_units_sold=comp.menu_units,
             payment_fee_total=comp.payment_fee_total,
             net_margin=gross_margin - comp.payment_fee_total,
             payment_methods=payment_methods,

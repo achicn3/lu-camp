@@ -196,3 +196,66 @@
   background: rgba(44, 110, 143, 0.12);
   color: var(--info);
 }
+
+/* 今日營運三層（店主 2026-10-15）：今天整體 → 各類細看 → 對帳與其他。 */
+.rpt-layer-h {
+  margin: var(--sp-5) 0 var(--sp-2);
+  font-size: var(--text-md);
+  color: var(--ink);
+}
+.rpt-layer-h:first-of-type {
+  margin-top: 0;
+}
+.rpt-kind-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.rpt-kind-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+}
+.rpt-kind-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-md);
+}
+.rpt-kind-card dl {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.rpt-kind-card dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.rpt-kind-card dt {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.rpt-kind-card dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.rpt-kind-card-count {
+  margin: var(--sp-2) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.rpt-kind-card-note {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.rpt-minor-cards .rpt-stat dd {
+  font-size: var(--text-md);
+}

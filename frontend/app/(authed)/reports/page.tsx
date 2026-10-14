@@ -127,10 +127,12 @@ const TIP_GROSS_TURNOVER =
 const TIP_RECOGNIZED_REVENUE =
   "真正屬於店家的收入。自有商品算全額；寄售品只算抽成（其餘要付給寄售人）。" +
   "例：賣出寄售品 1,000 元、抽成 50% → 認列營收只有 500。" +
+  "二手＋一般商品＋餐飲三類加起來就是認列營收；和營業額的差額是要付給寄售人的錢。" +
   "注意這是「收入」不是「利潤」——還沒扣掉收購成本，要看賺賠請看毛利。";
 // 店主 2026-10-14：露營用品總營收（＝認列營收 − 餐飲）＝ 二手 ＋ 一般商品，各自分開看。
-const TIP_CAMPING_GOODS_REVENUE = "認列營收中扣掉餐飲的部分：二手和一般商品加起來。";
 const TIP_SECONDHAND_REVENUE = "只算二手：買斷的二手、散裝，加上寄售品的抽成。不含一般商品。";
+const TIP_CASH_IN = "當天賣東西收到的現金（不含刷卡、行動支付、購物金）。";
+const TIP_CASH_OUT = "當天從抽屜付出去的現金：收購付現與寄售付款。";
 const TIP_CATALOG_REVENUE =
   "進貨來賣的一般商品（全新品）。毛利只算有填進價的商品；沒填進價的不知道成本，不算毛利。";
 const TIP_FOOD_REVENUE = "認列營收中屬於餐飲（內用）的部分。";
@@ -138,6 +140,49 @@ const TIP_OUTSTANDING =
   "已發出但客人還沒用掉的購物金總額——這是店家欠客人的金額（負債），日後客人消費時會用掉。";
 
 // -- Shared sub-components --
+
+/** 今日營運第二層：一類一張卡，營收、毛利（毛利率）、件數格式一致，方便三類並排比較。 */
+function KindCard({
+  title,
+  tip,
+  revenue,
+  margin,
+  rate,
+  count,
+  note,
+}: {
+  title: string;
+  tip: string;
+  revenue: string;
+  margin: string;
+  rate: string | null | undefined;
+  count: string;
+  note: ReactNode;
+}) {
+  return (
+    <section className="rpt-kind-card" aria-label={`${title}營收`}>
+      <h4 className="rpt-kind-card-title">
+        {title}
+        <InfoTip text={tip} />
+      </h4>
+      <dl>
+        <div>
+          <dt>營收</dt>
+          <dd><MoneyText value={revenue} /></dd>
+        </div>
+        <div>
+          <dt>毛利</dt>
+          <dd>
+            <MoneyText value={margin} />
+            <span className="rpt-rate">{rate ? formatRate(rate) : "—"}</span>
+          </dd>
+        </div>
+      </dl>
+      <p className="rpt-kind-card-count">{count}</p>
+      {note !== null && <p className="rpt-kind-card-note">{note}</p>}
+    </section>
+  );
+}
 
 function MoneyText({ value }: { value: string | null | undefined }) {
   if (value === null || value === undefined) return <span className="money">N/A</span>;
@@ -364,6 +409,8 @@ function DashboardPanel() {
         </label>
       </div>
 
+      {/* 今日營運三層（店主 2026-10-15）：先一眼看整天、再細看各類、對帳數字放最下面。 */}
+      <h3 className="rpt-layer-h">今天整體</h3>
       <dl className="rpt-summary rpt-dashboard-cards">
         <div className="rpt-stat rpt-stat-hero">
           <dt>
@@ -371,44 +418,6 @@ function DashboardPanel() {
             <InfoTip text={TIP_GROSS_TURNOVER} />
           </dt>
           <dd><MoneyText value={report.gross_turnover} /></dd>
-        </div>
-        <div className="rpt-stat rpt-stat-hero">
-          <dt>
-            認列營收
-            <InfoTip text={TIP_RECOGNIZED_REVENUE} />
-          </dt>
-          <dd><MoneyText value={report.recognized_revenue} /></dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>
-            露營用品總營收
-            <InfoTip text={TIP_CAMPING_GOODS_REVENUE} />
-          </dt>
-          <dd><MoneyText value={report.camping_goods_revenue} /></dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>
-            二手營收
-            <InfoTip text={TIP_SECONDHAND_REVENUE} />
-          </dt>
-          <dd><MoneyText value={report.secondhand_revenue} /></dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>
-            一般商品營收
-            <InfoTip text={TIP_CATALOG_REVENUE} />
-          </dt>
-          <dd><MoneyText value={report.catalog_revenue} /></dd>
-          <dd className="rpt-stat-sub">
-            毛利 $<MoneyText value={report.catalog_margin} /> · 售出 {report.catalog_units_sold} 件
-          </dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>
-            餐飲營收
-            <InfoTip text={TIP_FOOD_REVENUE} />
-          </dt>
-          <dd><MoneyText value={report.food_revenue} /></dd>
         </div>
         <div className="rpt-stat rpt-stat-hero">
           <dt>毛利</dt>
@@ -419,17 +428,73 @@ function DashboardPanel() {
             )}
           </dd>
         </div>
-        <div className="rpt-stat">
-          <dt>當日現金支出</dt>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>交易筆數</dt>
+          <dd className="money">{report.transaction_count} 筆</dd>
+          <dd className="rpt-stat-sub">
+            客單價 {report.avg_ticket === null ? "—" : <>$<MoneyText value={report.avg_ticket} /></>}
+          </dd>
+        </div>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>
+            當日現金收入
+            <InfoTip text={TIP_CASH_IN} />
+          </dt>
+          <dd><MoneyText value={report.cash_sales_in} /></dd>
+        </div>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>
+            當日現金支出
+            <InfoTip text={TIP_CASH_OUT} />
+          </dt>
           <dd><MoneyText value={report.total_cash_out} /></dd>
         </div>
+      </dl>
+
+      <h3 className="rpt-layer-h">各類細看</h3>
+      <div className="rpt-kind-cards">
+        <KindCard
+          title="二手"
+          tip={TIP_SECONDHAND_REVENUE}
+          revenue={report.secondhand_revenue}
+          margin={report.secondhand_margin}
+          rate={report.secondhand_margin_rate}
+          count={`售出 ${report.secondhand_units_sold} 件`}
+          note={
+            parseNtd(report.consignment_commission_income) ? (
+              <>含寄售抽成 $<MoneyText value={report.consignment_commission_income} /></>
+            ) : null
+          }
+        />
+        <KindCard
+          title="一般商品"
+          tip={TIP_CATALOG_REVENUE}
+          revenue={report.catalog_revenue}
+          margin={report.catalog_margin}
+          rate={report.catalog_margin_rate}
+          count={`售出 ${report.catalog_units_sold} 件`}
+          note={
+            parseNtd(report.catalog_unknown_cost_revenue) ? (
+              <>其中 $<MoneyText value={report.catalog_unknown_cost_revenue} /> 沒填進價，未算毛利</>
+            ) : null
+          }
+        />
+        <KindCard
+          title="餐飲"
+          tip={TIP_FOOD_REVENUE}
+          revenue={report.food_revenue}
+          margin={report.food_margin}
+          rate={report.food_margin_rate}
+          count={`${report.food_units_sold} 份`}
+          note={null}
+        />
+      </div>
+
+      <h3 className="rpt-layer-h">對帳與其他</h3>
+      <dl className="rpt-summary rpt-dashboard-cards rpt-minor-cards">
         <div className="rpt-stat">
-          <dt>客單價</dt>
-          <dd><MoneyText value={report.avg_ticket} /></dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>交易筆數</dt>
-          <dd className="money">{report.transaction_count}</dd>
+          <dt>現金差異</dt>
+          <dd><MoneyText value={report.cash_variance} /></dd>
         </div>
         <div className="rpt-stat">
           <dt>送出的購物金</dt>
@@ -440,8 +505,11 @@ function DashboardPanel() {
           <dd><MoneyText value={report.store_credit_redeemed} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>現金差異</dt>
-          <dd><MoneyText value={report.cash_variance} /></dd>
+          <dt>
+            認列營收
+            <InfoTip text={TIP_RECOGNIZED_REVENUE} />
+          </dt>
+          <dd><MoneyText value={report.recognized_revenue} /></dd>
         </div>
       </dl>
 

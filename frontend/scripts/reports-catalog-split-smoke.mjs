@@ -141,30 +141,45 @@ try {
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForSelector(".rpt-dashboard-cards");
 
-  const card = (label) =>
-    page.locator(".rpt-stat", { has: page.locator(`dt:text-is("${label}")`) });
-  const camping =
-    (await card("露營用品總營收").locator("dd").first().textContent()) ?? "";
-  const secondhand =
-    (await card("二手營收").locator("dd").first().textContent()) ?? "";
-  const catalogCard = card("一般商品營收");
-  const catalog = (await catalogCard.locator("dd").first().textContent()) ?? "";
   const num = (t) => Number(t.replace(/[^\d-]/g, ""));
   ok(
-    "儀表板有露營用品總營收／二手營收／一般商品營收三張卡",
-    camping !== "" && secondhand !== "" && catalog !== "",
+    "第一層：當日現金收入／支出",
+    (await page.locator("dt", { hasText: "當日現金收入" }).count()) === 1 &&
+      (await page.locator("dt", { hasText: "當日現金支出" }).count()) === 1,
+  );
+  const kind = (name) => page.getByRole("region", { name: `${name}營收` });
+  const revenueOf = async (name) =>
+    num((await kind(name).locator("dd").first().textContent()) ?? "");
+  const secondhandText = (await kind("二手").textContent()) ?? "";
+  const catalogText = (await kind("一般商品").textContent()) ?? "";
+  ok(
+    "第二層：二手、一般商品、餐飲三張卡",
+    (await kind("餐飲").count()) === 1 &&
+      secondhandText !== "" &&
+      catalogText !== "",
+  );
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+  }).format(new Date());
+  const api = await call(token, "GET", `/reports/daily-summary?date=${today}`);
+  const pct = (r) => (r === null ? "—" : `${(Number(r) * 100).toFixed(1)}%`);
+  ok(
+    "二手卡：營收、毛利率、件數與後端一致",
+    (await revenueOf("二手")) === Number(api.secondhand_revenue) &&
+      secondhandText.includes(pct(api.secondhand_margin_rate)) &&
+      secondhandText.includes(`售出 ${api.secondhand_units_sold} 件`),
+    secondhandText,
   );
   ok(
-    "露營用品總營收＝二手＋一般商品",
-    num(camping) === num(secondhand) + num(catalog),
-    `${camping} = ${secondhand} + ${catalog}`,
+    "一般商品卡：營收、件數與後端一致、提醒沒填進價",
+    (await revenueOf("一般商品")) === Number(api.catalog_revenue) &&
+      catalogText.includes(`售出 ${api.catalog_units_sold} 件`) &&
+      catalogText.includes("沒填進價"),
+    catalogText,
   );
-  ok("一般商品營收至少含這次的 2 件營燈", num(catalog) >= 1180, catalog);
-  const sub = (await catalogCard.locator(".rpt-stat-sub").textContent()) ?? "";
   ok(
-    "一般商品卡附毛利與售出件數",
-    /毛利 \$[\d,-]+ · 售出 \d+ 件/.test(sub),
-    sub,
+    "露營用品總營收不在今日營運",
+    (await page.getByText("露營用品總營收").count()) === 0,
   );
   await page.screenshot({ path: join(SHOTS, "01-dashboard.png") });
 

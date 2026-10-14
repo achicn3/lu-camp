@@ -31,6 +31,14 @@ const DAILY_SUMMARY_DATA = {
   catalog_revenue: "12000",
   catalog_margin: "4300",
   catalog_units_sold: 17,
+  catalog_margin_rate: "0.4100",
+  catalog_unknown_cost_revenue: "1800",
+  secondhand_margin: "23560",
+  secondhand_margin_rate: "0.3800",
+  secondhand_units_sold: 9,
+  food_margin: "0",
+  food_margin_rate: null,
+  food_units_sold: 40,
   net_sales_ex_tax: "90476",
   tax: "4524",
   total_cash_out: "30000",
@@ -726,19 +734,31 @@ describe("ReportsPage", () => {
     expect(screen.getByText("95,000")).toBeTruthy();
     // gross_margin
     expect(screen.getByText("45,000")).toBeTruthy();
-    // transaction_count
-    expect(screen.getByText("50")).toBeTruthy();
+    // transaction_count（第一層寫「50 筆」）
+    expect(screen.getByText("50 筆")).toBeTruthy();
     // avg_ticket
     expect(screen.getByText("2,400")).toBeTruthy();
-    // 露營用品總營收＝二手＋一般商品；二手只算二手；一般商品另列營收／毛利／件數（店主 2026-10-14）
-    expect(screen.getByText("露營用品總營收")).toBeTruthy();
-    expect(screen.getByText("74,000")).toBeTruthy(); // camping_goods_revenue
-    expect(screen.getByText("62,000")).toBeTruthy(); // secondhand_revenue
-    expect(screen.getByText("21,000")).toBeTruthy(); // food_revenue
-    const catalogCard = screen.getByText("一般商品營收").closest(".rpt-stat") as HTMLElement;
-    expect(within(catalogCard).getByText("12,000")).toBeTruthy();
-    expect(catalogCard.textContent).toContain("毛利 $4,300");
-    expect(catalogCard.textContent).toContain("售出 17 件");
+    // 今日營運三層（店主 2026-10-15）：第一層有當日現金收入與支出
+    expect(screen.getByText("當日現金收入")).toBeTruthy();
+    expect(screen.getByText("100,000")).toBeTruthy(); // cash_sales_in
+    expect(screen.getByText("30,000")).toBeTruthy(); // total_cash_out
+    // 第二層：二手／一般商品／餐飲各一張，營收＋毛利（毛利率）＋件數
+    const secondhand = screen.getByRole("region", { name: "二手營收" });
+    expect(within(secondhand).getByText("62,000")).toBeTruthy();
+    expect(secondhand.textContent).toContain("38.0%");
+    expect(secondhand.textContent).toContain("售出 9 件");
+    expect(secondhand.textContent).toContain("含寄售抽成 $15,000");
+    const catalog = screen.getByRole("region", { name: "一般商品營收" });
+    expect(within(catalog).getByText("12,000")).toBeTruthy();
+    expect(catalog.textContent).toContain("4,300");
+    expect(catalog.textContent).toContain("售出 17 件");
+    expect(catalog.textContent).toContain("其中 $1,800 沒填進價，未算毛利");
+    const food = screen.getByRole("region", { name: "餐飲營收" });
+    expect(within(food).getByText("21,000")).toBeTruthy();
+    expect(food.textContent).toContain("—"); // 毛利率分母 0
+    expect(food.textContent).toContain("40 份");
+    // 露營用品總營收不再出現在今日營運
+    expect(screen.queryByText("露營用品總營收")).toBeNull();
   });
 
   it("trends tab shows data table and has granularity selector", async () => {

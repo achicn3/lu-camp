@@ -107,6 +107,9 @@ class SalesMarginComponents:
     catalog_known_revenue: Decimal = Decimal(0)
     catalog_cogs: Decimal = Decimal(0)
     catalog_units: int = 0  # 一般商品售出件數（有無成本都算）
+    # 二手售出件數（序號品每件 1、自有散裝依件數；寄售散裝沒有認列營收，不算）與餐飲份數。
+    secondhand_units: int = 0
+    menu_units: int = 0
     # 有填成本的餐飲品項（menu_items.unit_cost → 成交快照）：營收與成本認列進毛利。
     # menu_known_revenue 是 menu_revenue 的子集，**不要再加一次進營業額**。
     menu_known_revenue: Decimal = Decimal(0)
@@ -1181,7 +1184,9 @@ class SalesRepository:
                 SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
+        secondhand_units = 0
         for ownership, cost, net_amount in serialized:
+            secondhand_units += 1
             if ownership == OwnershipType.CONSIGNMENT:
                 consignment_serialized_revenue += net_amount
             elif cost is not None:  # 自有且有成本 → 認列營收與成本
@@ -1218,6 +1223,7 @@ class SalesRepository:
                 consignment_bulk_revenue += net_amount
                 continue
             owned_bulk_revenue += net_amount
+            secondhand_units += qty
             if cost_snapshot is not None:
                 owned_bulk_cogs += cost_snapshot
             elif total_qty and total_qty > 0:
@@ -1290,6 +1296,7 @@ class SalesRepository:
                         0,
                     ),
                     func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
+                    func.coalesce(func.sum(SaleLine.qty), 0),
                 )
                 .join(Sale, SaleLine.sale_id == Sale.id)
                 .where(
@@ -1305,6 +1312,7 @@ class SalesRepository:
         menu_unknown_revenue = Decimal(menu_row[0])
         menu_known_revenue = Decimal(menu_row[1])
         menu_cogs = Decimal(menu_row[2])
+        menu_units = int(menu_row[3])
         menu_revenue = menu_unknown_revenue + menu_known_revenue
 
         tender_rows = list(
@@ -1401,6 +1409,8 @@ class SalesRepository:
             catalog_known_revenue=catalog_known_revenue,
             catalog_cogs=catalog_cogs,
             catalog_units=catalog_units,
+            secondhand_units=secondhand_units,
+            menu_units=menu_units,
             menu_revenue=menu_revenue,
             menu_known_revenue=menu_known_revenue,
             menu_cogs=menu_cogs,
