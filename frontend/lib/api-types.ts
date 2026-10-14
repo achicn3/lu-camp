@@ -8322,6 +8322,10 @@ export interface components {
             estimated_on: string;
             /** Expected Listed Price */
             expected_listed_price?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Product Model Name */
+            product_model_name?: string | null;
             /** Reference Price */
             reference_price?: string | null;
             /** Short Name */

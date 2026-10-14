@@ -104,3 +104,22 @@ export function batchIdFromSlip(input: string): number | null {
   const id = Number(match[1]);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
+
+interface NamedOption {
+  id: number;
+  name: string;
+}
+
+/** 型號旁的「品名」（店主 2026-10-15）：用目前的品名當型號——同品牌已有同名型號（不分大小寫）
+ * 就選它，沒有才建立，免得同一個型號建兩次。`search`／`create` 已限定在選好的品牌底下。 */
+export async function modelFromName(
+  name: string,
+  api: { search: (q: string) => Promise<NamedOption[]>; create: (name: string) => Promise<NamedOption> },
+): Promise<NamedOption> {
+  const wanted = name.trim();
+  if (wanted === "") throw new Error("請先填品名");
+  const existing = (await api.search(wanted)).find(
+    (option) => option.name.trim().toLowerCase() === wanted.toLowerCase(),
+  );
+  return existing ?? (await api.create(wanted));
+}

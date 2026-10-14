@@ -689,6 +689,16 @@ class InventoryService:
         """指定品牌 id 的名稱對照（經營洞察依實際出現的 id 取名）。"""
         return await self._repo.brand_names(store_id, ids)
 
+    async def product_model_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定型號 id 的名稱對照。"""
+        return await self._repo.product_model_names(store_id, ids)
+
+    async def acquisition_ids_for_models(
+        self, store_id: int, model_ids: list[int], *, limit: int
+    ) -> list[int]:
+        """掛了這些型號的序號品來自哪些收購單（新的在前；排隊收購的簡稱建議用）。"""
+        return await self._repo.acquisition_ids_for_models(store_id, model_ids, limit=limit)
+
     async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
         """指定類型 id 的名稱對照（經營洞察用）。"""
         return await self._repo.category_names(store_id, ids)

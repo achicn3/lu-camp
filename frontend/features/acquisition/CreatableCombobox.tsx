@@ -1,7 +1,7 @@
 "use client";
 // F6 通用「查無即建」combobox（品牌/分類/型號共用）：debounce 即查、既有選項＋「建立『輸入』」、
 // 點外關閉、Enter 選唯一/建立、Escape 關閉。型別由呼叫端以生成型別約束（傳入 search/create 閉包）。
-import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 export interface ComboOption {
   id: number;
@@ -17,6 +17,7 @@ export function CreatableCombobox({
   disabled = false,
   selectedId = null,
   selectedName = null,
+  labelAction,
 }: {
   label: string;
   onChange: (option: ComboOption | null) => void;
@@ -28,6 +29,8 @@ export function CreatableCombobox({
   selectedId?: number | null;
   /** 已存過的選項名稱（例：待整理上架帶回之前選的品牌）；給了才顯示成已選標籤。 */
   selectedName?: string | null;
+  /** 標題列最右側的小按鈕（例：待整理上架型號旁的「品名」）。 */
+  labelAction?: ReactNode;
 }) {
   const [text, setText] = useState("");
   // 已選項目單獨記錄：選定後改以「標籤」呈現，與「還在打字」外觀明確區隔。
@@ -145,9 +148,12 @@ export function CreatableCombobox({
 
   return (
     <div className="combo" ref={ref}>
-      <label className="field-label" htmlFor={fieldId}>
-        {label}
-      </label>
+      <div className="combo-label-row">
+        <label className="field-label" htmlFor={fieldId}>
+          {label}
+        </label>
+        {labelAction}
+      </div>
       {selected !== null ? (
         <div className="combo-chip" data-testid="combo-selected">
           <span className="combo-chip-check" aria-hidden>

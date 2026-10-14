@@ -9733,6 +9733,28 @@
             ],
             "title": "Expected Listed Price"
           },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          },
+          "product_model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Name"
+          },
           "reference_price": {
             "anyOf": [
               {

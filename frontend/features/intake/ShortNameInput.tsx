@@ -86,6 +86,18 @@ function EstimateLine({ suggestion }: { suggestion: ShortNameSuggestion }) {
   );
 }
 
+/** 上架時選的型號：「上架為 Snow Peak FD 椅」——有型號就一定帶品牌（同型號名可能不同品牌）。 */
+function ListedAs({ suggestion }: { suggestion: ShortNameSuggestion }) {
+  if (!suggestion.product_model_name) return null;
+  const brand = suggestion.brand_name ? `${suggestion.brand_name} ` : "";
+  return (
+    <span className="sn-listed">
+      上架為 {brand}
+      {suggestion.product_model_name}
+    </span>
+  );
+}
+
 function When({ suggestion }: { suggestion: ShortNameSuggestion }) {
   return (
     <span className="sn-when">
@@ -213,7 +225,7 @@ export function ShortNameInput({
           {options.map((option, i) => (
             <button
               type="button"
-              key={`${option.short_name}-${option.brand_id ?? "none"}`}
+              key={`${option.short_name}-${option.brand_id ?? "none"}-${option.product_model_id ?? "none"}`}
               role="option"
               aria-selected={i === active}
               className={`sn-option${i === active ? " sn-option--active" : ""}`}
@@ -223,6 +235,7 @@ export function ShortNameInput({
               <span className="sn-head">
                 <span className="sn-name">{option.short_name}</span>
                 {showBrand &&
+                  !option.product_model_name &&
                   (option.brand_name ? (
                     <span className="sn-brand">{option.brand_name}</span>
                   ) : (
@@ -230,6 +243,7 @@ export function ShortNameInput({
                   ))}
                 <When suggestion={option} />
               </span>
+              <ListedAs suggestion={option} />
               <EstimateLine suggestion={option} />
             </button>
           ))}
@@ -238,9 +252,13 @@ export function ShortNameInput({
       {shownPick !== null && !menuOpen && (
         <div className="sn-last" aria-label="上次估價">
           <span className="sn-last-title">
-            上次估價{shownPick.brand_name ? `（${shownPick.brand_name}）` : ""}
+            上次估價
+            {shownPick.brand_name && !shownPick.product_model_name
+              ? `（${shownPick.brand_name}）`
+              : ""}
             <When suggestion={shownPick} />
           </span>
+          <ListedAs suggestion={shownPick} />
           <EstimateLine suggestion={shownPick} />
           {onApply && (
             <button

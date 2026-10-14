@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { batchIdFromSlip, draftFrom, editFor, missingOf } from "@/features/intake/listing";
+import { batchIdFromSlip, draftFrom, editFor, missingOf, modelFromName } from "@/features/intake/listing";
 import type { components } from "@/lib/api-types";
 
 type Item = components["schemas"]["IntakeItemRead"];
@@ -105,5 +105,29 @@ describe("掃收件單條碼", () => {
     expect(batchIdFromSlip("A032")).toBeNull();
     expect(batchIdFromSlip("IN000000")).toBeNull();
     expect(batchIdFromSlip("")).toBeNull();
+  });
+});
+
+describe("型號旁的「品名」：用目前的品名當型號（店主 2026-10-15）", () => {
+  it("同品牌已有同名型號就直接選它，不重複建立", async () => {
+    const search = vi.fn().mockResolvedValue([
+      { id: 3, name: "焚火台 M" },
+      { id: 4, name: "焚火台 M Pro" },
+    ]);
+    const create = vi.fn();
+    expect(await modelFromName(" 焚火台 m ", { search, create })).toEqual({ id: 3, name: "焚火台 M" });
+    expect(search).toHaveBeenCalledWith("焚火台 m");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("沒有同名的就用品名建立新型號", async () => {
+    const search = vi.fn().mockResolvedValue([{ id: 4, name: "焚火台 M Pro" }]);
+    const create = vi.fn().mockResolvedValue({ id: 9, name: "焚火台 M" });
+    expect(await modelFromName("焚火台 M", { search, create })).toEqual({ id: 9, name: "焚火台 M" });
+    expect(create).toHaveBeenCalledWith("焚火台 M");
+  });
+
+  it("品名是空的就不做", async () => {
+    await expect(modelFromName("  ", { search: vi.fn(), create: vi.fn() })).rejects.toThrow("請先填品名");
   });
 });

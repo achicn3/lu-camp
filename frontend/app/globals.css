@@ -6809,3 +6809,20 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   margin-top: 4px;
   padding: 4px 16px;
 }
+.sn-listed {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+/* 下拉欄位的標題列：標題靠左、小按鈕靠右（例：待整理上架型號旁的「品名」）。 */
+.combo-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.combo-label-action {
+  min-height: 28px;
+  padding: 2px 10px;
+  font-size: 12px;
+}

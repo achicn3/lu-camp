@@ -26,6 +26,8 @@ function suggestion(
     short_name: "黑色折疊椅",
     brand_id: 1,
     brand_name: "Coleman",
+    product_model_id: null,
+    product_model_name: null,
     times: 2,
     estimated_on: "2026-10-03",
     acquisition_type: "BUYOUT",
@@ -165,6 +167,36 @@ describe("商品簡稱建議", () => {
     expect((screen.getByLabelText("商品簡稱") as HTMLInputElement).value).toBe(
       "新東西",
     );
+  });
+});
+
+describe("上架時選的型號（店主 2026-10-15）", () => {
+  it("有型號就寫「上架為 品牌 型號」，只有一筆也一樣帶品牌", async () => {
+    renderForm(
+      vi.fn().mockResolvedValue([
+        suggestion({ brand_name: "Snow Peak", product_model_id: 9, product_model_name: "FD 椅" }),
+      ]),
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "FD");
+    const [option] = await menuOptions();
+    expect(option.textContent).toContain("上架為 Snow Peak FD 椅");
+    await user.click(option);
+    expect(screen.getByLabelText("上次估價").textContent).toContain("上架為 Snow Peak FD 椅");
+  });
+
+  it("帶入時連型號一起帶", async () => {
+    const onSubmit = renderForm(
+      vi.fn().mockResolvedValue([
+        suggestion({ brand_name: "Snow Peak", product_model_id: 9, product_model_name: "FD 椅" }),
+      ]),
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "FD");
+    await user.click((await menuOptions())[0]);
+    await user.click(screen.getByRole("button", { name: "帶入" }));
+    await user.click(screen.getByRole("button", { name: "存這一件" }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ brand_id: 1, product_model_id: 9 }));
   });
 });
 

@@ -4,6 +4,7 @@
 後端只驗金額合法與欄位一致，不重算建議價——成交價本來就可由店員改（裁示 5）。
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -831,37 +832,88 @@ class IntakeService:
     async def short_name_suggestions(
         self, store_id: int, query: str, *, exclude_line_id: int | None = None
     ) -> list[IntakeShortNameSuggestion]:
-        """估價時打過、含 `query` 的商品簡稱（店主 2026-10-14）：同名不同品牌分開列，附最近一次
-        有估價的原價／預計售價／收購價。開頭就符合的排前面，其餘依最近估的先列。"""
+        """估價時打簡稱的建議（店主 2026-10-14／15）：簡稱含 `query`、或上架時選的型號含
+        `query` 的以前估價。同名但品牌／型號不同分開列，附最近一次有估價的價格。
+
+        快速估價沒取名（「第 N 件」）但上架有選型號的，用型號名稱當簡稱。開頭就符合的排前面，
+        其餘依最近估的先列。
+        """
         if not query:
             return []
-        lines = await self._repo.search_lines(
+        named = await self._repo.search_lines(
             store_id,
             query,
             exclude_name_pattern=_PREFILL_NAME_PATTERN,
             exclude_line_id=exclude_line_id,
             limit=_SUGGESTION_SCAN,
         )
-        brands = await self._line_brands(store_id, lines)
-        groups: dict[tuple[str, int | None], list[IntakeLine]] = {}
+        inventory = InventoryService(self._session)
+        models = await inventory.list_product_models(store_id, q=query, limit=_SUGGESTION_SCAN)
+        model_ids = {m.id for m in models}
+        model_batches = await self._repo.batch_ids_for_acquisitions(
+            store_id,
+            await inventory.acquisition_ids_for_models(
+                store_id, list(model_ids), limit=_SUGGESTION_SCAN
+            ),
+        )
+        recent_batches = list(  # 新的在前；dict 保留順序
+            dict.fromkeys([line.batch_id for line in named if self._accepted(line)] + model_batches)
+        )[:_SUGGESTION_BRAND_BATCHES]
+        listed = await self._listed_as(store_id, recent_batches)
+        by_id = {line.id: line for line in named}
+        for line, _brand, model in listed.values():
+            if model in model_ids and line.id != exclude_line_id:
+                by_id.setdefault(line.id, line)
+        lines = sorted(by_id.values(), key=lambda ln: (ln.created_at, ln.id), reverse=True)
+
+        def details(line: IntakeLine) -> tuple[int | None, int | None]:
+            _l, brand, model = listed.get(line.id, (line, None, None))
+            return (line.brand_id or brand, line.product_model_id or model)
+
+        model_names = await inventory.product_model_names(
+            store_id, [m for ln in lines if (m := details(ln)[1]) is not None]
+        )
+
+        def shown_name(line: IntakeLine) -> str:
+            model = details(line)[1]
+            if re.fullmatch(_PREFILL_NAME_PATTERN, line.short_name) and model is not None:
+                return model_names.get(model, line.short_name)
+            return line.short_name
+
+        groups: dict[tuple[str, int | None, int | None], list[IntakeLine]] = {}
         for line in lines:  # 新的在前
-            groups.setdefault((line.short_name, brands.get(line.id)), []).append(line)
-        brand_names = await InventoryService(self._session).brand_names(
-            store_id, [b for _, b in groups if b is not None]
+            groups.setdefault((shown_name(line), *details(line)), []).append(line)
+        brand_names = await inventory.brand_names(
+            store_id, [b for _, b, _m in groups if b is not None]
         )
         needle = query.casefold()
-        ordered = sorted(
-            groups.items(),
-            key=lambda kv: not kv[0][0].casefold().startswith(needle),
-        )  # 穩定排序：同一組內保持新的在前
+
+        def starts(key: tuple[str, int | None, int | None]) -> bool:
+            name, _brand, model = key
+            texts = [name, model_names.get(model, "") if model is not None else ""]
+            return any(t.casefold().startswith(needle) for t in texts)
+
+        ordered = sorted(groups.items(), key=lambda kv: not starts(kv[0]))  # 穩定排序
         return [
-            self._suggestion(name, brand_id, brand_names.get(brand_id) if brand_id else None, group)
-            for (name, brand_id), group in ordered[:_SUGGESTION_LIMIT]
+            self._suggestion(
+                name,
+                brand_id,
+                brand_names.get(brand_id) if brand_id else None,
+                model_id,
+                model_names.get(model_id) if model_id else None,
+                group,
+            )
+            for (name, brand_id, model_id), group in ordered[:_SUGGESTION_LIMIT]
         ]
 
     @staticmethod
     def _suggestion(
-        name: str, brand_id: int | None, brand_name: str | None, group: list[IntakeLine]
+        name: str,
+        brand_id: int | None,
+        brand_name: str | None,
+        model_id: int | None,
+        model_name: str | None,
+        group: list[IntakeLine],
     ) -> IntakeShortNameSuggestion:
         def has_price(line: IntakeLine) -> bool:
             return any(
@@ -874,6 +926,8 @@ class IntakeService:
             short_name=name,
             brand_id=brand_id,
             brand_name=brand_name,
+            product_model_id=model_id,
+            product_model_name=model_name,
             times=len(group),
             estimated_on=store_date(shown.created_at),
             acquisition_type=shown.acquisition_type,
@@ -884,16 +938,14 @@ class IntakeService:
             bulk_piece_count=shown.bulk_piece_count,
         )
 
-    async def _line_brands(self, store_id: int, lines: list[IntakeLine]) -> dict[int, int]:
-        """每列的品牌：列上有帶就用；否則看那一列付款時建出的商品（品牌多半上架時才補）。"""
-        brands = {line.id: line.brand_id for line in lines if line.brand_id is not None}
-        batch_ids = list(  # lines 新的在前；dict 保留順序 → 取最近的幾批
-            dict.fromkeys(
-                line.batch_id for line in lines if line.brand_id is None and self._accepted(line)
-            )
-        )[:_SUGGESTION_BRAND_BATCHES]
+    async def _listed_as(
+        self, store_id: int, batch_ids: list[int]
+    ) -> dict[int, tuple[IntakeLine, int | None, int | None]]:
+        """這幾批每一列付款後建出的商品，上架時補的品牌與型號：列 id → (列, 品牌, 型號)。
+
+        每批各查（一次查全部會撞到件數上限，被截掉的批次會對錯列）；同一列多件取第一個有填的。
+        """
         acquisitions = await self._repo.acquisition_ids_for(store_id, batch_ids)
-        # 每批各查：一次查全部會撞到件數上限，被截掉的批次會對錯列。
         items_by_batch = {
             batch_id: await self._inventory_items(store_id, acqs, include_gone=True)
             for batch_id, acqs in acquisitions.items()
@@ -902,18 +954,19 @@ class IntakeService:
         lines_by_batch: dict[int, list[IntakeLine]] = {}
         for line in all_lines:
             lines_by_batch.setdefault(line.batch_id, []).append(line)
-        item_brand: dict[tuple[int, int], int] = {}  # (批次, 第幾列) → 品牌
+        out: dict[int, tuple[IntakeLine, int | None, int | None]] = {}
         for batch_id, batch_items in items_by_batch.items():
-            line_nos = self._line_numbers(lines_by_batch.get(batch_id, []), batch_items)
+            batch_lines = lines_by_batch.get(batch_id, [])
+            line_of = {line.line_no: line for line in batch_lines}
+            line_nos = self._line_numbers(batch_lines, batch_items)
             for item in batch_items:
-                line_no = line_nos.get((self._kind(item), item.id))
-                if line_no is not None and item.brand_id is not None:
-                    item_brand.setdefault((batch_id, line_no), item.brand_id)
-        for line in lines:
-            brand = item_brand.get((line.batch_id, line.line_no))
-            if line.id not in brands and brand is not None:
-                brands[line.id] = brand
-        return brands
+                source = line_of.get(line_nos.get((self._kind(item), item.id), -1))
+                if source is None:
+                    continue
+                model = item.product_model_id if isinstance(item, SerializedItem) else None
+                _l, brand0, model0 = out.get(source.id, (source, None, None))
+                out[source.id] = (source, brand0 or item.brand_id, model0 or model)
+        return out
 
     @classmethod
     def _line_numbers(

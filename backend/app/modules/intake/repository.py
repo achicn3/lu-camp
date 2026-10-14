@@ -125,6 +125,23 @@ class IntakeRepository:
         )
         return {int(lot_id): int(total) for lot_id, total in rows if lot_id is not None}
 
+    async def batch_ids_for_acquisitions(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> list[int]:
+        """這些收購單是哪幾批付款時成立的（新的批次在前；不是排隊收購來的不列）。"""
+        if not acquisition_ids:
+            return []
+        stmt = (
+            select(IntakeBatchAcquisition.batch_id)
+            .where(
+                IntakeBatchAcquisition.store_id == store_id,
+                IntakeBatchAcquisition.acquisition_id.in_(acquisition_ids),
+            )
+            .group_by(IntakeBatchAcquisition.batch_id)
+            .order_by(IntakeBatchAcquisition.batch_id.desc())
+        )
+        return [int(b) for b in (await self._session.scalars(stmt)).all()]
+
     async def acquisition_ids_for(
         self, store_id: int, batch_ids: list[int]
     ) -> dict[int, list[int]]:

@@ -14,6 +14,7 @@ import {
   draftFrom,
   editFor,
   missingOf,
+  modelFromName,
   printListedLabels,
   retailPriceOf,
 } from "@/features/intake/listing";
@@ -97,6 +98,40 @@ function GroupCard({
   const missing = missingOf(shared);
   const code = multi ? `第 ${first.line_no ?? "?"} 列` : first.code;
   const retailInvalid = shared.retailPrice.trim() !== "" && retailPriceOf(shared.retailPrice) === null;
+  const [usingName, setUsingName] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+
+  function searchModels(q: string): Promise<ComboOption[]> {
+    return api
+      .GET("/api/v1/product-models", {
+        params: { query: { q, brand_id: shared.brandId ?? undefined } },
+      })
+      .then(({ data }) => (data ?? []).map((m) => ({ id: m.id, name: m.name })));
+  }
+
+  function createModel(name: string): Promise<ComboOption> {
+    if (shared.brandId === null) return Promise.reject(new Error("請先選擇品牌"));
+    return api
+      .POST("/api/v1/product-models", { body: { brand_id: shared.brandId, name } })
+      .then(({ data, error }) => {
+        if (!data) throw new Error(detail(error) ?? "建立型號失敗");
+        return { id: data.id, name: data.name };
+      });
+  }
+
+  /** 型號旁的「品名」：用目前的品名（多半是估價時的簡稱）當型號，品名跟著變成型號名稱。 */
+  async function applyNameAsModel() {
+    setUsingName(true);
+    setModelError(null);
+    try {
+      const model = await modelFromName(shared.name, { search: searchModels, create: createModel });
+      onChangeAll({ modelId: model.id, modelName: model.name, name: model.name });
+    } catch (err) {
+      setModelError(err instanceof Error ? err.message : "建立型號失敗");
+    } finally {
+      setUsingName(false);
+    }
+  }
 
   const gradeField = (item: Item) => (
     <GradeSelect
@@ -195,22 +230,19 @@ function GroupCard({
         {serialized && (
           <CreatableCombobox
             label="型號"
-            search={(q) =>
-              api
-                .GET("/api/v1/product-models", {
-                  params: { query: { q, brand_id: shared.brandId ?? undefined } },
-                })
-                .then(({ data }) => (data ?? []).map((m) => ({ id: m.id, name: m.name })))
+            search={searchModels}
+            create={createModel}
+            labelAction={
+              <button
+                type="button"
+                className="btn-ghost combo-label-action"
+                disabled={shared.brandId === null || shared.name.trim() === "" || usingName}
+                title={shared.brandId === null ? "先選品牌" : "用目前的品名當型號"}
+                onClick={() => void applyNameAsModel()}
+              >
+                品名
+              </button>
             }
-            create={(name) => {
-              if (shared.brandId === null) return Promise.reject(new Error("請先選擇品牌"));
-              return api
-                .POST("/api/v1/product-models", { body: { brand_id: shared.brandId, name } })
-                .then(({ data, error }) => {
-                  if (!data) throw new Error(detail(error) ?? "建立型號失敗");
-                  return { id: data.id, name: data.name };
-                });
-            }}
             placeholder={shared.brandId === null ? "先選品牌" : "選擇或新增型號"}
             disabled={shared.brandId === null}
             selectedId={shared.modelId}
@@ -224,6 +256,9 @@ function GroupCard({
               })
             }
           />
+        )}
+        {serialized && modelError !== null && (
+          <p role="alert" className="form-error intake-model-error">{modelError}</p>
         )}
         <CreatableCombobox
           label="分類"

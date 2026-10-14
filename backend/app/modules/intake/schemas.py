@@ -272,6 +272,9 @@ class IntakeShortNameSuggestion(BaseModel):
     brand_id: int | None = None
     brand_name: str | None = None
     """估價列上帶的品牌，或那一列建出的商品上架時補的品牌；都沒有＝None。"""
+    product_model_id: int | None = None
+    product_model_name: str | None = None
+    """上架時選的型號（有型號就一定看得到品牌，型號掛在品牌底下）。"""
     times: int
     """估過幾次。"""
     estimated_on: date

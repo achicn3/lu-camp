@@ -174,3 +174,72 @@ async def test_like_wildcards_are_matched_literally(
     assert await _suggest(client, ctx, "%") == []
     assert await _suggest(client, ctx, "_") == []
     assert await _suggest(client, ctx, "  ") == []
+
+
+async def _listed_as(
+    client: httpx.AsyncClient, ctx: Ctx, batch_id: int, brand_id: int, model_name: str
+) -> int:
+    """付款後在上架時補品牌與型號（型號名稱建在該品牌底下）。"""
+    model = await client.post(
+        "/api/v1/product-models",
+        json={"brand_id": brand_id, "name": model_name},
+        headers=ctx.auth,
+    )
+    assert model.status_code in (200, 201), model.text
+    item = (await client.get(f"{PATH}/{batch_id}/items", headers=ctx.auth)).json()[0]
+    resp = await client.post(
+        f"{PATH}/{batch_id}/listing",
+        json={
+            "items": [
+                {
+                    "kind": "SERIALIZED",
+                    "id": item["id"],
+                    "brand_id": brand_id,
+                    "product_model_id": model.json()["id"],
+                }
+            ]
+        },
+        headers=ctx.auth,
+    )
+    assert resp.status_code == 200, resp.text
+    return int(model.json()["id"])
+
+
+async def test_listed_model_is_searchable_and_shows_brand(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """打上架時選的型號也找得到（店主 2026-10-15），而且一定帶品牌。"""
+    ctx = await _ctx(db_session, client)
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    batch = await _confirmed_batch(client, ctx, [_line(short_name="黑椅子", qty=1)], [1])
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    model_id = await _listed_as(client, ctx, batch["id"], snow_peak, "FD 椅")
+
+    rows = await _suggest(client, ctx, "FD")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["short_name"] == "黑椅子"
+    assert row["product_model_id"] == model_id
+    assert row["product_model_name"] == "FD 椅"
+    assert row["brand_name"] == "Snow Peak"
+    assert row["deal_cost"] == "250"
+    # 打簡稱也一樣帶出型號
+    assert (await _suggest(client, ctx, "黑椅"))[0]["product_model_name"] == "FD 椅"
+
+
+async def test_unnamed_line_listed_as_model_uses_model_name(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """快速估價沒取簡稱（「第 N 件」）、上架時選了型號：建議用型號名稱當簡稱。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    batch = await _confirmed_batch(client, ctx, [_line(short_name="第 1 件", qty=1)], [1])
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    await _listed_as(client, ctx, batch["id"], coleman, "焚火台 M")
+
+    rows = await _suggest(client, ctx, "焚火")
+
+    assert [(r["short_name"], r["brand_name"], r["product_model_name"]) for r in rows] == [
+        ("焚火台 M", "Coleman", "焚火台 M")
+    ]

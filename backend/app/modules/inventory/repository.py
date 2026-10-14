@@ -305,6 +305,34 @@ class InventoryRepository:
         stmt = select(Brand.id, Brand.name).where(Brand.store_id == store_id, Brand.id.in_(ids))
         return {int(i): n for i, n in (await self._session.execute(stmt)).all()}
 
+    async def product_model_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定型號 id 的名稱對照。"""
+        if not ids:
+            return {}
+        stmt = select(ProductModel.id, ProductModel.name).where(
+            ProductModel.store_id == store_id, ProductModel.id.in_(ids)
+        )
+        return {int(i): n for i, n in (await self._session.execute(stmt)).all()}
+
+    async def acquisition_ids_for_models(
+        self, store_id: int, model_ids: list[int], *, limit: int
+    ) -> list[int]:
+        """掛了這些型號的序號品來自哪些收購單（新的收購在前）。"""
+        if not model_ids:
+            return []
+        stmt = (
+            select(SerializedItem.acquisition_id)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.product_model_id.in_(model_ids),
+                SerializedItem.acquisition_id.is_not(None),
+            )
+            .group_by(SerializedItem.acquisition_id)
+            .order_by(SerializedItem.acquisition_id.desc())
+            .limit(limit)
+        )
+        return [a for a in (await self._session.scalars(stmt)).all() if a is not None]
+
     async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
         """指定類型 id 的名稱對照（經營洞察用，同上）。"""
         if not ids:
