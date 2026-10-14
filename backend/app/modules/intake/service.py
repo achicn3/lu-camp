@@ -92,6 +92,8 @@ _PREFILL_NAME_PATTERN = r"^第 [0-9]+ 件$"
 # 簡稱建議：最多翻最近幾列估價、回幾筆。
 _SUGGESTION_SCAN = 200
 _SUGGESTION_LIMIT = 8
+# 品牌要從付款後建出的商品推回：每批各查一次，只查最近這幾批（建議最多 8 筆，夠用）。
+_SUGGESTION_BRAND_BATCHES = 20
 OPEN_STATUSES = [
     IntakeBatchStatus.PENDING_ESTIMATE,
     IntakeBatchStatus.ESTIMATING,
@@ -884,15 +886,17 @@ class IntakeService:
     async def _line_brands(self, store_id: int, lines: list[IntakeLine]) -> dict[int, int]:
         """每列的品牌：列上有帶就用；否則看那一列付款時建出的商品（品牌多半上架時才補）。"""
         brands = {line.id: line.brand_id for line in lines if line.brand_id is not None}
-        batch_ids = list(
-            {line.batch_id for line in lines if line.brand_id is None and self._accepted(line)}
-        )
+        batch_ids = list(  # lines 新的在前；dict 保留順序 → 取最近的幾批
+            dict.fromkeys(
+                line.batch_id for line in lines if line.brand_id is None and self._accepted(line)
+            )
+        )[:_SUGGESTION_BRAND_BATCHES]
         acquisitions = await self._repo.acquisition_ids_for(store_id, batch_ids)
-        batch_of = {acq: batch for batch, acqs in acquisitions.items() for acq in acqs}
-        items = await self._inventory_items(store_id, list(batch_of), include_gone=True)
-        items_by_batch: dict[int, list[SerializedItem | BulkLot]] = {}
-        for item in items:
-            items_by_batch.setdefault(batch_of[item.acquisition_id or 0], []).append(item)
+        # 每批各查：一次查全部會撞到件數上限，被截掉的批次會對錯列。
+        items_by_batch = {
+            batch_id: await self._inventory_items(store_id, acqs, include_gone=True)
+            for batch_id, acqs in acquisitions.items()
+        }
         all_lines = await self._repo.lines_for(store_id, list(items_by_batch))
         lines_by_batch: dict[int, list[IntakeLine]] = {}
         for line in all_lines:

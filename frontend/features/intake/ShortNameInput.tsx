@@ -198,6 +198,7 @@ export function ShortNameInput({
           setOpen(true);
         }}
         onKeyDown={onKeyDown}
+        onBlur={() => setOpen(false)}
       />
       {menuOpen && (
         <div
