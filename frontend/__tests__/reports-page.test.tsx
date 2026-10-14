@@ -521,6 +521,7 @@ describe("ReportsPage", () => {
     expect(screen.getByText("在庫 > 90 天件數")).toBeTruthy();
     expect(screen.getByText("寄售抽成")).toBeTruthy();
     expect(screen.getByText("15,500")).toBeTruthy(); // revenue_mix.catalog
+    expect(screen.getByText("有庫存的一般商品品項")).toBeTruthy();
     // 切到類型維度
     await userEvent.click(screen.getByRole("button", { name: "類型" }));
     const tent = (await screen.findByText("帳篷")).closest("tr") as HTMLElement;

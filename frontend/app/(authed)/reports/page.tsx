@@ -619,7 +619,7 @@ function InsightsPanel() {
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.catalog_in_stock}</span>
-              <span className="rpt-insight-cap">有量一般商品</span>
+              <span className="rpt-insight-cap">有庫存的一般商品品項</span>
             </div>
           </div>
 
