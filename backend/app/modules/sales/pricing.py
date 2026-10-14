@@ -113,9 +113,7 @@ def _guard_remaining(key: str, remaining: Decimal, discount: Decimal) -> None:
     if discount > remaining:
         raise InvalidDiscount(f"折扣金額超過該商品可折金額（剩餘 {remaining} 元）")
     if remaining - discount <= 0:
-        raise InvalidDiscount(
-            "折扣後金額為 0：免費請改用贈品，這樣才統計得到贈品的數量與成本"
-        )
+        raise InvalidDiscount("折扣後金額為 0：免費請改用贈品，這樣才統計得到贈品的數量與成本")
     assert key  # 僅為訊息可讀性保留參數
 
 
@@ -220,9 +218,7 @@ def apply_discounts(
         if amount > base:
             raise InvalidDiscount(f"折扣金額超過可折扣商品總額（{base} 元）")
         if base - amount <= 0:
-            raise InvalidDiscount(
-                "折扣後金額為 0：免費請改用贈品，這樣才統計得到贈品的數量與成本"
-            )
+            raise InvalidDiscount("折扣後金額為 0：免費請改用贈品，這樣才統計得到贈品的數量與成本")
 
         allocations = _allocate_largest_remainder(amount, [(k, remaining[k]) for k in eligible])
 

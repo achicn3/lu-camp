@@ -31,6 +31,7 @@ from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.returns.refund import line_refund_amount, refund_entitlement
 from app.modules.returns.repository import (
     GiftReturnQuantity,
+    MenuItemRefund,
     ReturnsMarginAdjustments,
     ReturnsRepository,
 )
@@ -499,6 +500,12 @@ class ReturnsService:
     ) -> dict[int, tuple[Decimal, int]]:
         """期間內各銷售的退款金額與筆數（申報月報的紙本待調整用）。"""
         return await self._repo.period_refunds_by_sale(store_id, date_from, date_to)
+
+    async def menu_refunds_by_item(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[int, MenuItemRefund]:
+        """期間（依退款日）各餐飲品項的退款（餐飲品項報表扣回用，read-only）。"""
+        return await self._repo.menu_refunds_by_item(store_id, date_from, date_to)
 
     async def refunds_by_sale(
         self, store_id: int, sale_ids: list[int]

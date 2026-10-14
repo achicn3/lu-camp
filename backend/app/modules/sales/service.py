@@ -87,7 +87,7 @@ from app.modules.sales.pricing import (
     PricingLine,
     apply_discounts,
 )
-from app.modules.sales.repository import SalesRepository
+from app.modules.sales.repository import MenuItemSales, SalesRepository
 from app.modules.settings.models import StoreSettings
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
@@ -2713,6 +2713,12 @@ class SalesService:
     ]:
         """期間售出散裝的洞察原始列（經營洞察把散裝納入品牌/類型排行；Codex P2）。"""
         return await self._repo.bulk_sold_rows(store_id, date_from, date_to)
+
+    async def menu_item_sales(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[MenuItemSales]:
+        """期間各餐飲品項的銷售（餐飲品項報表用；未扣退款，退款另由 returns 取）。"""
+        return await self._repo.menu_item_sales(store_id, date_from, date_to)
 
     async def catalog_sold_rows(
         self, store_id: int, date_from: datetime, date_to: datetime

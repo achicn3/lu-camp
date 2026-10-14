@@ -41,11 +41,7 @@ async def ensure_default_reasons(session: AsyncSession, store_id: int) -> int:
         (DiscountReason, DEFAULT_DISCOUNT_REASONS),
     ):
         existing = set(
-            (
-                await session.scalars(
-                    select(model.code).where(model.store_id == store_id)
-                )
-            ).all()
+            (await session.scalars(select(model.code).where(model.store_id == store_id))).all()
         )
         for order, (code, name, requires_note) in enumerate(rows):
             if code in existing:

@@ -730,3 +730,65 @@ class InvoiceRegisterReport(BaseModel):
     # 稽核時間（紙本不排 F0501）；兩者都要求曾經配號。
     voided_from_earlier_periods: list[InvoiceRegisterRow]
     totals: InvoiceRegisterTotals
+
+
+class MenuItemRankRow(BaseModel):
+    """餐飲品項報表的一列（店主 2026-10-15）：份數與營收已扣期間內的退款。"""
+
+    menu_item_id: int
+    name: str
+    category_name: str | None = None
+    rank: int
+    """依份數排名（同份數比營收）。"""
+    units: int
+    revenue: NTDAmount
+    margin: NTDAmountOpt = None
+    """只算有填成本的部分；完全沒填成本 → null（不假造毛利）。未扣損耗。"""
+    margin_rate: RateOpt = None
+    revenue_share: RateOpt = None
+    """佔期間餐飲營收的比例。"""
+    order_count: int
+    """有點這個品項的交易筆數。"""
+    prev_units: int
+    prev_rank: int | None = None
+    """上一期的排名；上一期沒賣 → null。"""
+
+
+class MenuCategoryRow(BaseModel):
+    category_name: str
+    units: int
+    revenue: NTDAmount
+    revenue_share: RateOpt = None
+
+
+class MenuItemUnsold(BaseModel):
+    menu_item_id: int
+    name: str
+    category_name: str | None = None
+
+
+class MenuItemsSummary(BaseModel):
+    """期間餐飲總覽（與今日營運的餐飲卡同源：margin_breakdown）。毛利已扣損耗。"""
+
+    units: int
+    revenue: NTDAmount
+    margin: NTDAmount
+    margin_rate: RateOpt = None
+    order_count: int
+    prev_units: int
+    prev_revenue: NTDAmount
+
+
+class MenuItemsReport(BaseModel):
+    """餐飲品項報表：期間排名、和上一期（緊接在前、同樣長）比、分類小計、沒賣出的品項。"""
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    prev_from: datetime
+    summary: MenuItemsSummary
+    rows: list[MenuItemRankRow]
+    categories: list[MenuCategoryRow]
+    not_sold: list[MenuItemUnsold]
+    """目前上架中、這段期間一份都沒賣出的品項。"""

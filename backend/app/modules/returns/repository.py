@@ -59,6 +59,16 @@ class GiftReturnQuantity:
     period_qty: int
 
 
+@dataclass(frozen=True)
+class MenuItemRefund:
+    """一個餐飲品項在期間內的退款（依退款日）：份數、退款額、要沖回的成本。"""
+
+    qty: int
+    refund: Decimal
+    known_cost_refund: Decimal  # 有成本快照的那幾行的退款額
+    cost: Decimal
+
+
 class ReturnsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -456,6 +466,42 @@ class ReturnsRepository:
             menu_refund_waste_cost=waste_cost,
             menu_refund_waste_unknown_qty=waste_unknown_qty,
         )
+
+    async def menu_refunds_by_item(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[int, MenuItemRefund]:
+        """期間（依退款日）各餐飲品項的退款；口徑同 margin_adjustments 的餐點分支。"""
+        rows = await self._session.execute(
+            select(SaleLine, ReturnLine.qty, ReturnLine.refund_amount)
+            .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
+            .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                CustomerReturn.store_id == store_id,
+                CustomerReturn.created_at >= date_from,
+                CustomerReturn.created_at < date_to,
+                Sale.status != SaleStatus.VOIDED,
+                SaleLine.line_type == SaleLineType.MENU,
+                SaleLine.line_kind != SaleLineKind.GIFT,
+                SaleLine.menu_item_id.is_not(None),
+            )
+        )
+        acc: dict[int, list[Decimal | int]] = {}
+        for line, rqty, refund in rows:
+            entry = acc.setdefault(line.menu_item_id, [0, Decimal(0), Decimal(0), Decimal(0)])
+            entry[0] = int(entry[0]) + int(rqty)
+            entry[1] = Decimal(entry[1]) + Decimal(refund)
+            if line.cost_snapshot is not None:
+                entry[2] = Decimal(entry[2]) + Decimal(refund)
+                entry[3] = Decimal(entry[3]) + round_ntd(
+                    line.cost_snapshot * Decimal(rqty) / Decimal(line.qty)
+                )
+        return {
+            item_id: MenuItemRefund(
+                qty=int(q), refund=Decimal(r), known_cost_refund=Decimal(k), cost=Decimal(c)
+            )
+            for item_id, (q, r, k, c) in acc.items()
+        }
 
     async def refunds_by_sale(
         self, store_id: int, sale_ids: list[int]

@@ -26,6 +26,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
+from app.modules.menu.service import MenuService
 from app.modules.purchasing.service import PurchasingService
 from app.modules.reports.aging import BUCKET_KEYS as INVENTORY_BUCKET_KEYS
 from app.modules.reports.aging import _bucket_for_age
@@ -64,6 +65,11 @@ from app.modules.reports.schemas import (
     InvoiceRegisterTotals,
     LiabilityReport,
     MemberBalanceRow,
+    MenuCategoryRow,
+    MenuItemRankRow,
+    MenuItemsReport,
+    MenuItemsSummary,
+    MenuItemUnsold,
     PaymentMethodTotal,
     ReconciliationReport,
     SalesMarginReport,
@@ -161,6 +167,27 @@ class _NormRow:
     kind: GoodsKind = GoodsKind.SECONDHAND
 
 
+@dataclass
+class _MenuItemTotal:
+    """餐飲品項報表：一個品項在期間內的淨額（銷售扣退款）。"""
+
+    description: str
+    units: int
+    revenue: Decimal
+    known_revenue: Decimal
+    cost: Decimal
+    orders: int
+
+
+def _ranked(totals: dict[int, _MenuItemTotal]) -> list[int]:
+    """依份數排（同份數比營收、再比 id，排名穩定）。"""
+    return sorted(totals, key=lambda k: (-totals[k].units, -totals[k].revenue, k))
+
+
+def _share(part: Decimal, whole: Decimal) -> Decimal | None:
+    return (part / whole).quantize(Decimal("0.0001")) if whole > 0 else None
+
+
 MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
 
 
@@ -203,6 +230,7 @@ class ReportsService:
         self._users = UserService(session)
         self._einvoice = EInvoiceService(session)
         self._purchasing = PurchasingService(session)
+        self._menu = MenuService(session)
 
     async def consignment_payables(
         self, store_id: int, *, status_filter: str
@@ -1164,6 +1192,119 @@ class ReportsService:
             )
             cursor = nxt
         return out
+
+    async def menu_items(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> MenuItemsReport:
+        """餐飲品項報表（店主 2026-10-15）：期間哪個品項賣得好、排名、和上一期比、哪些沒賣出。
+
+        份數／營收扣期間內（依退款日）的退款；毛利只算有成本快照的部分（未扣損耗——損耗
+        不分品項，只在總覽扣）。上一期＝緊接在前、同樣長的期間。
+        """
+        prev_from = date_from - (date_to - date_from)
+        current = await self._menu_item_totals(store_id, date_from, date_to)
+        previous = await self._menu_item_totals(store_id, prev_from, date_from)
+        items = {i.id: i for i in await self._menu.list_items(store_id, include_unavailable=True)}
+        categories = {c.id: c.name for c in await self._menu.list_categories(store_id)}
+
+        def category_of(item_id: int) -> str | None:
+            item = items.get(item_id)
+            return (
+                None
+                if item is None or item.category_id is None
+                else categories.get(item.category_id)
+            )
+
+        prev_ranks = {item_id: n for n, item_id in enumerate(_ranked(previous), start=1)}
+        total = sum((t.revenue for t in current.values()), Decimal(0))
+        rows: list[MenuItemRankRow] = []
+        for rank, item_id in enumerate(_ranked(current), start=1):
+            t = current[item_id]
+            item = items.get(item_id)
+            margin = t.known_revenue - t.cost if t.known_revenue > 0 else None
+            rows.append(
+                MenuItemRankRow(
+                    menu_item_id=item_id,
+                    name=item.name if item is not None else t.description,
+                    category_name=category_of(item_id),
+                    rank=rank,
+                    units=t.units,
+                    revenue=t.revenue,
+                    margin=margin,
+                    margin_rate=_share(margin, t.known_revenue) if margin is not None else None,
+                    revenue_share=_share(t.revenue, total),
+                    order_count=t.orders,
+                    prev_units=previous[item_id].units if item_id in previous else 0,
+                    prev_rank=prev_ranks.get(item_id),
+                )
+            )
+        by_category: dict[str, list[int | Decimal]] = {}
+        for row in rows:
+            acc = by_category.setdefault(row.category_name or "未分類", [0, Decimal(0)])
+            acc[0] = int(acc[0]) + row.units
+            acc[1] = Decimal(acc[1]) + row.revenue
+        category_rows = sorted(
+            (
+                MenuCategoryRow(
+                    category_name=name,
+                    units=int(units),
+                    revenue=Decimal(revenue),
+                    revenue_share=_share(Decimal(revenue), total),
+                )
+                for name, (units, revenue) in by_category.items()
+            ),
+            key=lambda r: r.revenue,
+            reverse=True,
+        )
+        not_sold = [
+            MenuItemUnsold(menu_item_id=i.id, name=i.name, category_name=category_of(i.id))
+            for i in sorted(items.values(), key=lambda i: (i.sort_order, i.id))
+            if i.is_available and i.id not in current
+        ]
+        now_bd = await self._sales.margin_breakdown(
+            store_id, date_from, date_to, include_payment_and_gift_details=False
+        )
+        prev_bd = await self._sales.margin_breakdown(
+            store_id, prev_from, date_from, include_payment_and_gift_details=False
+        )
+        return MenuItemsReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            prev_from=prev_from,
+            summary=MenuItemsSummary(
+                units=now_bd.food_units_sold,
+                revenue=now_bd.food_revenue,
+                margin=now_bd.food_margin,
+                margin_rate=now_bd.food_margin_rate,
+                order_count=now_bd.food_order_count,
+                prev_units=prev_bd.food_units_sold,
+                prev_revenue=prev_bd.food_revenue,
+            ),
+            rows=rows,
+            categories=category_rows,
+            not_sold=not_sold,
+        )
+
+    async def _menu_item_totals(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[int, _MenuItemTotal]:
+        """各品項期間淨額（銷售扣同期退款）；淨份數 ≤ 0 且淨營收 ≤ 0 的不列。"""
+        sales = await self._sales.menu_item_sales(store_id, date_from, date_to)
+        refunds = await self._returns.menu_refunds_by_item(store_id, date_from, date_to)
+        totals: dict[int, _MenuItemTotal] = {}
+        for s in sales:
+            r = refunds.get(s.menu_item_id)
+            totals[s.menu_item_id] = _MenuItemTotal(
+                description=s.description,
+                units=s.qty - (r.qty if r else 0),
+                revenue=s.revenue - (r.refund if r else Decimal(0)),
+                known_revenue=s.known_cost_revenue - (r.known_cost_refund if r else Decimal(0)),
+                cost=s.cost - (r.cost if r else Decimal(0)),
+                orders=s.order_count,
+            )
+        return {k: v for k, v in totals.items() if v.units > 0 or v.revenue > 0}
 
     async def dine_in_report(
         self,

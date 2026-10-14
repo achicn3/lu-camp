@@ -77,6 +77,19 @@ _CatalogSoldRowDB = tuple[int | None, int | None, int, Decimal, Decimal | None]
 
 
 @dataclass(frozen=True)
+class MenuItemSales:
+    """一個餐飲品項在期間內的銷售（未作廢、不含贈品；未扣退款）。"""
+
+    menu_item_id: int
+    description: str  # 成交當下的品名快照（品項被刪時的備用名稱）
+    qty: int
+    revenue: Decimal
+    known_cost_revenue: Decimal  # 有成本快照的那幾行的營收
+    cost: Decimal
+    order_count: int
+
+
+@dataclass(frozen=True)
 class SalesMarginComponents:
     """期間銷售毛利的原始組成（未作廢、唯讀；不含寄售抽成——由 service 經 consignment 取）。
 
@@ -726,6 +739,46 @@ class SalesRepository:
             )
         )
         return [tuple(r) for r in rows]
+
+    async def menu_item_sales(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[MenuItemSales]:
+        """期間（未作廢）各餐飲品項的份數／營收／成本／筆數；贈品不算（同 margin_components）。"""
+        has_cost = SaleLine.cost_snapshot.is_not(None)
+        rows = await self._session.execute(
+            select(
+                SaleLine.menu_item_id,
+                func.max(SaleLine.description),
+                func.coalesce(func.sum(SaleLine.qty), 0),
+                func.coalesce(func.sum(SaleLine.net_amount), 0),
+                func.coalesce(func.sum(case((has_cost, SaleLine.net_amount), else_=0)), 0),
+                func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
+                func.count(func.distinct(Sale.id)),
+            )
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_type == SaleLineType.MENU,
+                SaleLine.line_kind != SaleLineKind.GIFT,
+                SaleLine.menu_item_id.is_not(None),
+            )
+            .group_by(SaleLine.menu_item_id)
+        )
+        return [
+            MenuItemSales(
+                menu_item_id=int(item_id),
+                description=str(desc),
+                qty=int(qty),
+                revenue=Decimal(revenue),
+                known_cost_revenue=Decimal(known),
+                cost=Decimal(cost),
+                order_count=int(orders),
+            )
+            for item_id, desc, qty, revenue, known, cost, orders in rows
+        ]
 
     async def _orders_by_kind(
         self, store_id: int, date_from: datetime, date_to: datetime

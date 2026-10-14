@@ -29,6 +29,7 @@ from app.modules.reports.schemas import (
     InsightsReport,
     InventoryValueReport,
     InvoiceRegisterReport,
+    MenuItemsReport,
     SalesMarginReport,
     TrendsReport,
 )
@@ -945,6 +946,81 @@ async def campaign_performance(
                 str(r.not_applied_count),
             ]
             for r in report.rows
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get("/menu-items", response_model=MenuItemsReport, operation_id="menuItemsReport")
+async def menu_items(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> MenuItemsReport | Response:
+    """餐飲品項報表（店主 2026-10-15）：期間品項排名、和上一期比、分類小計、沒賣出的品項。
+
+    半開區間 [from, to)；to<=from → 422。上一期＝緊接在前、同樣長的期間。
+    份數與營收扣期間內（依退款日）的退款；品項毛利只算有填成本的部分、未扣損耗。
+    """
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    report = await ReportsService(session).menu_items(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
+    if fmt == "json":
+        return report
+    s = report.summary
+    exp = TabularExport(
+        sheet="餐飲品項",
+        filename_stem=f"menu-items-{report.store_id}",
+        meta=[
+            ("店別", str(report.store_id)),
+            ("起", store_datetime_iso(report.date_from)),
+            ("迄", store_datetime_iso(report.date_to)),
+            ("份數", str(s.units)),
+            ("餐飲營收", format_ntd(s.revenue)),
+            ("筆數", str(s.order_count)),
+            ("上一期份數", str(s.prev_units)),
+            ("上一期營收", format_ntd(s.prev_revenue)),
+            ("品項毛利口徑", "只算有填成本的部分、未扣損耗"),
+        ],
+        headers=[
+            "排名",
+            "品項",
+            "分類",
+            "份數",
+            "營收",
+            "營收佔比",
+            "毛利",
+            "毛利率",
+            "筆數",
+            "上一期份數",
+            "上一期排名",
+        ],
+        rows=[
+            [
+                str(r.rank),
+                r.name,
+                r.category_name or "",
+                str(r.units),
+                format_ntd(r.revenue),
+                "" if r.revenue_share is None else format_rate(r.revenue_share),
+                "" if r.margin is None else format_ntd(r.margin),
+                "" if r.margin_rate is None else format_rate(r.margin_rate),
+                str(r.order_count),
+                str(r.prev_units),
+                "" if r.prev_rank is None else str(r.prev_rank),
+            ]
+            for r in report.rows
+        ]
+        + [[""] * 11]
+        + [
+            ["沒賣出的品項", u.name, u.category_name or "", "", "", "", "", "", "", "", ""]
+            for u in report.not_sold
         ],
     )
     return export_response(exp, fmt)
