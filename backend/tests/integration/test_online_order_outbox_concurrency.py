@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.time import utc_now
@@ -103,5 +103,10 @@ async def test_cash_expiry_skips_order_locked_by_checkout_then_cancels_once() ->
                 delete(OnlineOrderOutbox).where(OnlineOrderOutbox.store_id == store.id)
             )
             await cleanup.execute(delete(OnlineOrder).where(OnlineOrder.store_id == store.id))
-            # Audit log is append-only; its store lives until the isolated test DB is dropped.
+            # 自動取消會寫稽核；先刪稽核再刪門市，不讓多一間門市留給後面的測試
+            # （test_setup_new_store／test_seed_dev_store 假設庫裡沒有別的門市）。
+            await cleanup.execute(
+                text("DELETE FROM audit_log WHERE store_id = :sid"), {"sid": store.id}
+            )
+            await cleanup.execute(delete(Store).where(Store.id == store.id))
             await cleanup.commit()
