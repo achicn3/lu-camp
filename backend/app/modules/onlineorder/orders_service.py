@@ -830,11 +830,6 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
     mode = str(raw["service_mode"])
     if mode not in ("DINE_IN", "TAKEOUT"):
         raise ValueError("bad service mode")
-    note = raw.get("note")
-    # Legacy cloud notes may contain NUL or unpaired UTF-16 surrogates. PostgreSQL
-    # rejects these, aborting the pull transaction and blocking every later order.
-    # Keep valid text and acknowledge the order normally so it leaves the queue.
-    clean_note = re.sub(r"[\x00\ud800-\udfff]", "", str(note))[:200] if note else None
     party_size = raw.get("party_size")
     if party_size is not None and (type(party_size) is not int or not 1 <= party_size <= 50):
         raise ValueError("bad party size")
@@ -858,7 +853,6 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
         linepay_transaction_id=paid[1] if paid else None,
         invoice_carrier=invoice[0],
         invoice_tax_id=invoice[1],
-        note=clean_note or None,
         lines=lines,
         remote_created_at=datetime.fromisoformat(str(raw["created_at"]).replace("Z", "+00:00")),
         sync_status=OnlineOrderSync.IMPORTED,

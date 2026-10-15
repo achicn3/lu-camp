@@ -71,7 +71,6 @@ function order(
         table_code: TABLE,
         payment_method: "CASH",
         turnstile_token: "tok",
-        note: "",
         lines: [{ item_id: 5, option_ids: [], qty: 2 }],
         ...body,
       }),
@@ -177,7 +176,6 @@ describe("送單", () => {
   });
 
   it.each([
-    ["備註超過 60 字", { note: "字".repeat(61) }],
     ["付款方式不對", { payment_method: "BITCOIN" }],
     ["沒有冪等鍵", { idempotency_key: "" }],
     ["沒有 Turnstile", { turnstile_token: "" }],
@@ -187,41 +185,35 @@ describe("送單", () => {
   });
 
   it("body 超過 16 KB：413", async () => {
-    expect((await order({ note: "x".repeat(17 * 1024) })).status).toBe(413);
+    expect((await order({ padding: "x".repeat(17 * 1024) })).status).toBe(413);
   });
 });
 
-describe("舊訂單備註相容", () => {
-  it("舊訂單帶原備註重試仍取回同一單，不會重建", async () => {
+// 備註已從線上點餐整個移除（店主 2026-10-15）：客人頁不送、雲端不存、不回傳、不帶給 POS。
+describe("沒有備註", () => {
+  it("舊版客人頁帶空備註重送：指紋不變，取回同一單", async () => {
     const key = crypto.randomUUID();
-    const first = await (await order({ idempotency_key: key })).json() as { token: string };
-    const fingerprint = await sha256Hex(JSON.stringify([
-      TABLE, "CASH", "少冰", [{ item_id: 5, option_ids: [], qty: 2 }], { carrier: null, tax_id: null },
-    ]));
-    await env.DB.prepare("UPDATE orders SET note = ?, fingerprint = ? WHERE idem_key = ?")
-      .bind("少冰", fingerprint, key).run();
-    const retry = await order({ idempotency_key: key, note: "少冰" });
+    const first = await order({ idempotency_key: key, note: "" });
+    expect(first.status).toBe(201);
+    const retry = await order({ idempotency_key: key });
     expect(retry.status).toBe(200);
-    expect(await retry.json()).toMatchObject({ token: first.token });
+    expect(await retry.json()).toMatchObject({ token: ((await first.json()) as { token: string }).token });
     expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 1 });
   });
-});
 
-describe("惡意備註不能毒化 POS 同步", () => {
-  it.each(["少\u0000冰", "\u0000", "少\ud800冰", "少\udfff冰"])("拒絕 PostgreSQL 無法保存的備註 %j", async (note) => {
-    const resp = await order({ note });
-    expect(resp.status).toBe(422);
-    expect(await resp.json()).toEqual({ error: "invalid_request" });
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 0 });
-  });
-
-  it.each(["少冰", "少冰☕😀\n謝謝", "<script>alert(1)</script>"])("新的自由備註 %j 一律拒收", async (note) => {
-    const resp = await order({ note });
-    expect(resp.status).toBe(422);
-    expect(await resp.json()).toEqual({ error: "notes_not_allowed" });
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM orders").first()).toEqual({ n: 0 });
+  it.each(["少冰", "少\u0000冰", "<script>alert(1)</script>"])("帶了備註 %j 也不存、不回傳、POS 拉不到", async (note) => {
+    const created = await order({ note });
+    expect(created.status).toBe(201);
+    const { token } = await created.json() as { token: string };
+    const view = await (await exports.default.fetch(new Request(`https://order.test/api/orders/${token}`))).json();
+    expect(view).not.toHaveProperty("note");
+    const columns = await env.DB.prepare("SELECT name FROM pragma_table_info('orders')").all<{ name: string }>();
+    expect(columns.results.map((c) => c.name)).not.toContain("note");
+    const pull = await (await integration("GET", "/integration/orders")).json() as { orders: Record<string, unknown>[] };
+    expect(pull.orders[0]).not.toHaveProperty("note");
   });
 });
+
 
 describe("接單狀態", () => {
   it("POS 太久沒來拉單（超過 2 分鐘）：視為暫停，請至櫃台", async () => {

@@ -51,7 +51,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   // 卡住沒成立的已付款單（例如價格不符等店員處理）再多，也擋不住新單進來（Codex O5 第四輪）。
   const columns =
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-    "note, party_size, add_on, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
+    "party_size, add_on, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
   type PulledRow = Record<string, unknown> & {
     id: string;
     created_at: number;

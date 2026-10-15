@@ -51,7 +51,7 @@ try {
   await guest.goto(ORDER,{waitUntil:"networkidle"});
   await guest.getByText("目前非營業時間，可先看看菜單。",{exact:true}).waitFor();
   await guest.screenshot({path:`${SHOTS}/02-closed-mobile.png`});
-  const blocked=await fetch(`${ORDER}/api/orders`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idempotency_key:randomUUID(),table_code:null,payment_method:"CASH",note:"",turnstile_token:"XXXX.DUMMY.TOKEN.XXXX",lines:[{item_id:item.id,option_ids:[],qty:1}]})});
+  const blocked=await fetch(`${ORDER}/api/orders`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idempotency_key:randomUUID(),table_code:null,payment_method:"CASH",turnstile_token:"XXXX.DUMMY.TOKEN.XXXX",lines:[{item_id:item.id,option_ids:[],qty:1}]})});
   assert.equal(blocked.status,503);
   await page.getByLabel("依營業時間接單").uncheck();
   await page.getByRole("button",{name:"儲存營業時間",exact:true}).click();await page.getByText(/已儲存，請按/).waitFor();

@@ -398,7 +398,6 @@ export function OnlineOrdersPanel({
                       {order.add_on && (
                         <p className="online-order-add-on">客人選了加點，沒檢查本桌低消，請現場確認是不是同桌加點。</p>
                       )}
-                      {order.note && <p className="online-order-note">備註：{order.note}</p>}
                       {order.attention != null && order.sync_status === "IMPORTED" && (
                         <p className="form-error">{order.attention}</p>
                       )}

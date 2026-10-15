@@ -46,7 +46,6 @@ class OnlineOrderRead(BaseModel):
     service_mode: str
     total: NTDOut
     payment_method: str
-    note: str | None
     lines: list[OnlineOrderLineRead]
     created_at: datetime
     """客人送單的時間。"""
@@ -75,7 +74,6 @@ class OnlineOrderRead(BaseModel):
             service_mode=row.service_mode,
             total=row.total,
             payment_method=row.payment_method,
-            note=row.note,
             lines=[OnlineOrderLineRead.model_validate(line) for line in row.lines],
             created_at=row.remote_created_at,
             sync_status=row.sync_status,
@@ -144,7 +142,6 @@ class OnlineCartRead(BaseModel):
     order_id: int
     service_mode: str
     table_no: str | None
-    note: str | None
     lines: list[OnlineCartLineRead]
     online_total: NTDOut
     total: NTDOut
@@ -156,7 +153,6 @@ class OnlineCartRead(BaseModel):
             order_id=order.id,
             service_mode=order.service_mode,
             table_no=order.table_label if order.service_mode == "DINE_IN" else None,
-            note=order.note,
             lines=[
                 OnlineCartLineRead(
                     line_no=line.line_no,

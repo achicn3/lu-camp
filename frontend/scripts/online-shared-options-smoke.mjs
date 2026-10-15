@@ -91,7 +91,7 @@ try {
     await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
     const order = await until(async () => (await api("GET", "/online-orders")).orders.find(o => o.lines.some(l => l.item_id === item.id)));
     cleanup.push(order.id);
-    assert.equal(order.note, null);
+    assert.ok(!("note" in order));
     assert.equal(order.total, "320");
     assert.equal(order.lines.length, 2);
     assert.deepEqual(order.lines[0].option_ids, [required.options[0].id, optional.options[0].id]);

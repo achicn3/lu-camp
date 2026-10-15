@@ -48,7 +48,6 @@ function order(id: number, extra: Partial<Order> = {}): Order {
     service_mode: "DINE_IN",
     total: "300",
     payment_method: "CASH",
-    note: null,
     lines: [
       { line_no: 1, item_id: 5, name: "拿鐵（燕麥奶）", option_ids: [9], unit_price: 150, qty: 2, line_total: 300, limited: false },
     ],
@@ -86,7 +85,6 @@ function cart(extra: Partial<Cart> = {}): Cart {
     order_id: 1,
     service_mode: "DINE_IN",
     table_no: "A1",
-    note: null,
     lines: [
       { line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
     ],
@@ -129,7 +127,7 @@ describe("POS 線上訂單", () => {
     stubFetch(() =>
       json(
         overview([
-          order(1, { note: "少冰" }),
+          order(1),
           order(3, { hold_status: "REJECTED", reject_reason: "「戚風」今天已售完", table_label: null, service_mode: "TAKEOUT" }),
         ]),
       ),
@@ -142,7 +140,7 @@ describe("POS 線上訂單", () => {
     expect(first.textContent).toMatch(/拿鐵（燕麥奶） ×2/);
     expect(first.textContent).toMatch(/\$300/);
     expect(first.textContent).toMatch(/待付款/);
-    expect(first.textContent).toMatch(/少冰/);
+    expect(first.textContent).not.toMatch(/備註/); // 備註已從線上點餐整個移除（店主 2026-10-15）
     const rejected = within(dialog).getByRole("listitem", { name: /外帶/ });
     expect(rejected.textContent).toMatch(/庫存不足.*戚風/);
     expect(within(rejected).queryByRole("button", { name: "帶入結帳" })).toBeNull();

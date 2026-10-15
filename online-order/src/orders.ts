@@ -11,7 +11,6 @@ import { TABLE_CODE, type TableMinimum, parseMinimum } from "./tables";
 import { withinHours } from "./hours";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
-const NOTE_MAX = 60;
 const PARTY_MAX = 50;
 const POS_STALE_MS = 2 * 60 * 1000;
 const RATE_PER_MINUTE = 5;
@@ -37,7 +36,6 @@ interface OrderRequest {
   payment_method: "CASH" | "LINE_PAY";
   invoice: { carrier: string | null; tax_id: string | null };
   turnstile_token: string;
-  note: string;
   party_size: number | null;
   /** 客人勾了「我是加點」：不檢查本桌低消（店主 2026-10-15）。 */
   add_on: boolean;
@@ -73,11 +71,6 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   if (typeof o.turnstile_token !== "string" || o.turnstile_token === "" || o.turnstile_token.length > 2048) {
     return null;
   }
-  const note = o.note ?? "";
-  if (typeof note !== "string" || [...note].length > NOTE_MAX) return null;
-  // PostgreSQL cannot store NUL or lone UTF-16 surrogates. Reject before D1
-  // accepts an order that would poison the POS import queue; emoji stay valid.
-  if (/[\u0000\uD800-\uDFFF]/u.test(note)) return null;
   const party = o.party_size ?? null;
   if (party !== null && (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > PARTY_MAX)) {
     return null;
@@ -113,7 +106,6 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
     payment_method: o.payment_method,
     invoice,
     turnstile_token: o.turnstile_token,
-    note: note.trim(),
     party_size: party as number | null,
     add_on: addOn,
     lines,
@@ -256,8 +248,9 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(
       // 人數、加點只在有填／有勾時才加進去：舊版客人頁（沒有這些欄位）重送時指紋不變。
+      // 第三格原本是備註（2026-10-15 已整個移除、一律是空字串）：保留空位，改版前送出的單重送時指紋才對得上。
       JSON.stringify([
-        body.table_code, body.payment_method, body.note, body.lines, body.invoice,
+        body.table_code, body.payment_method, "", body.lines, body.invoice,
         ...(body.party_size === null ? [] : [body.party_size]),
         ...(body.add_on ? [{ add_on: true }] : []),
       ]),
@@ -270,7 +263,6 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     if (prior.fingerprint !== fingerprint) return error("idempotency_conflict", 409);
     return json({ token, status: customerStatus(prior), total: prior.total });
   }
-  if (body.note !== "") return error("notes_not_allowed", 422);
   // 暫停只擋新的單：已經成立的單（回應遺失後重送）要拿得回來，否則客人查不到自己的單（Codex O4 第一輪）。
   if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
@@ -312,8 +304,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     env.DB.prepare(
       "INSERT INTO orders (id, store_id, token_hash, idem_key, fingerprint, device_id, ip_hash, table_code, " +
         "table_label, service_mode, menu_version, total, payment_method, payment_status, sync_status, " +
-        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id, party_size, add_on) " +
-        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ?, ?, ? WHERE " +
+        "hold_status, created_at, updated_at, invoice_carrier, invoice_tax_id, party_size, add_on) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ?, ? WHERE " +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND device_id = ?) < ? AND ` +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND ip_hash = ?) < ? AND ` +
         `(? IS NULL OR (SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND table_code = ?) < ?) AND ` +
@@ -334,7 +326,6 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       priced.total,
       body.payment_method,
       holdStatus,
-      body.note || null,
       now,
       now,
       body.invoice.carrier,
@@ -429,7 +420,7 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
     "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
-      "linepay_result, linepay_attempt, refunded_amount, note, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
+      "linepay_result, linepay_attempt, refunded_amount, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
     .first<{
@@ -444,7 +435,6 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       linepay_result: string | null;
       linepay_attempt: number;
       refunded_amount: number;
-      note: string | null;
       created_at: number;
     }>();
   if (row === null) return error("not_found", 404);
@@ -460,7 +450,6 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       table_label: row.table_label,
       service_mode: row.service_mode,
       total: row.total,
-      note: row.note,
       created_at: new Date(row.created_at).toISOString(),
       // 帶回家商品要到櫃檯領：AWAITING＝付了錢還沒拿、HANDED_OVER＝已領取（docs/63 §13）。
       fulfillment: row.fulfillment,

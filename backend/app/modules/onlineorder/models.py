@@ -310,7 +310,6 @@ class OnlineOrder(Base, TimestampMixin):
     party_size: Mapped[int | None] = mapped_column(Integer)
     add_on: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
     """客人自己勾「我是加點」、免檢查本桌低消；是不是真的加點由店員現場判斷。"""
-    note: Mapped[str | None] = mapped_column(String(200))
     lines: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     remote_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     sync_status: Mapped[str] = mapped_column(String(10))

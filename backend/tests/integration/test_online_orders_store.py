@@ -209,7 +209,6 @@ def _order(
         "payment_method": "CASH",
         "payment_status": "UNPAID",
         "hold_status": hold,
-        "note": "少冰",
         "created_at": utc_now().isoformat(),
         "lines": lines,
     }
@@ -276,7 +275,7 @@ async def test_pull_imports_once_and_reports_imported(db_session: AsyncSession, 
     assert len(rows) == 1
     row = rows[0]
     assert (row.sync_status, row.hold_status, row.payment_status) == ("IMPORTED", "NONE", "UNPAID")
-    assert (row.table_label, row.total, row.note) == ("A1", Decimal(150), "少冰")
+    assert (row.table_label, row.total) == ("A1", Decimal(150))
 
 
 async def test_limited_line_is_reserved_by_consuming_daily_stock(
@@ -665,23 +664,25 @@ async def test_bad_orders_are_skipped_and_good_ones_still_import(
     ]
 
 
-@pytest.mark.parametrize(
-    ("note", "expected"),
-    [("少\x00冰☕\n謝謝", "少冰☕\n謝謝"), ("\x00", None), ("少\ud800冰", "少冰")],
-)
-async def test_customer_note_cannot_poison_pos_import_queue(
-    db_session: AsyncSession, ctx: Ctx, note: str, expected: str | None
+@pytest.mark.parametrize("note", ["少冰", "少\x00冰☕\n謝謝", "\x00", "少\ud800冰"])
+async def test_legacy_cloud_note_is_ignored(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx, note: str
 ) -> None:
-    """Legacy cloud orders containing NUL must not abort the entire PostgreSQL pull."""
-    poisoned = {**_order(_rid(201), [_line(1, ctx.latte, "拿鐵", 150)]), "note": note}
+    """備註已從線上點餐整個移除（店主 2026-10-15）：還沒升級的雲端送來的備註一律不收、不顯示，
+    含 NUL 的也不會卡住整批匯入。"""
+    legacy = {**_order(_rid(201), [_line(1, ctx.latte, "拿鐵", 150)]), "note": note}
     good = _order(_rid(202), [_line(1, ctx.latte, "拿鐵", 150)])
-    ctx.worker.orders = [poisoned, good]
+    ctx.worker.orders = [legacy, good]
     svc = _svc(db_session, ctx)
 
     result = await svc.pull_once(ctx.store_id)
     assert result.imported == 2
-    assert (await _order_row(db_session, _rid(201))).note == expected
-    assert (await _order_row(db_session, _rid(202))).note == "少冰"
+    assert not hasattr(OnlineOrder, "note")
+    listed = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
+    assert all("note" not in order for order in listed["orders"])
+    row = await _order_row(db_session, _rid(201))
+    cart = (await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))).json()
+    assert "note" not in cart
     await svc.flush_outbox(ctx.store_id)
     assert ctx.worker.reports == [
         (_rid(201), {"sync_status": "IMPORTED"}),

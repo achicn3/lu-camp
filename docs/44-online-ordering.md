@@ -231,7 +231,8 @@ menu_item_option_groups  品項 ↔ 群組（多對多＋排序）：一個群�
 ### 4.2 客人端畫面
 
 1. 掃碼 → 菜單（分類、照片、價格、售完灰掉）。不用登入、不用 App。
-2. 選品項 → 選項 → 數量 → 購物車（可加備註，限 60 字）。
+2. 選品項 → 選項 → 數量 → 購物車。**沒有備註**（店主 2026-10-15 裁示從線上點餐整個移除：客人頁不送、雲端不存、不帶給 POS；
+   2026-10-13 起已先拒收有內容的備註）。舊版客人頁送來的 `note` 一律忽略；冪等指紋原本備註那格固定為空字串，改版前送出的單重送仍對得上。
 3. 選擇付款：**LINE Pay（現在付）**或**現金（到櫃台付）**。
 4. 選填發票資訊：手機載具／統編／捐贈碼（只驗格式，和 POS 一致）。不填＝印紙本。
 5. 送出 → 訂單頁（網址帶訂單專屬權杖，可加入書籤；重新整理不會重送）。
@@ -434,7 +435,7 @@ menu_snapshots(store_id, version, json, published_at)              -- 保留最�
 tables(store_id, code, label, service_mode, active, rotated_at)
 orders(id[ULID], store_id, token_hash, idem_key UNIQUE(store_id,idem_key), table_label, service_mode,
        menu_version, total, payment_method, payment_status, sync_status, invoice_carrier/buyer_id/donate_code,
-       note, created_at, updated_at, row_version)
+       created_at, updated_at, row_version)          -- note 欄已移除（D1 0012，2026-10-15）
 order_lines(order_id, menu_item_id, name, options_json, unit_price, qty, line_total)
 linepay_payments(order_id UNIQUE, transaction_id TEXT, status, amount, request_at, confirmed_at, raw)
 order_events(id, order_id, kind, from, to, source, at)
@@ -481,7 +482,7 @@ POS 端（Postgres）新增 `online_orders`（遠端 ID 唯一、狀態、明細
 | T5 | 偽造付款成功（亂打 confirm 網址） | confirm 網址上的參數一律不信任：Worker 以自己存的 orderId 查單，向 LINE Pay 呼叫 confirm／check，只有 LINE Pay 回成功才算付款 |
 | T6 | 偷看別人的訂單 | 訂單權杖 128 位元隨機、只存雜湊；沒有可遞增猜的編號 API；回應不含其他客人資料、不含載具全碼 |
 | T7 | 偽造 POS 整合請求（假裝店內拉單、亂改狀態） | HMAC 簽章＋時間戳（±5 分）＋nonce 防重放（D1 存 10 分鐘）；整合 secret 只在 Worker secrets／backend `.env`；正式與測試不同 secret |
-| T8 | XSS／注入 | 備註與所有字串只當純文字渲染；嚴格 CSP、`X-Frame-Options: DENY`；D1 一律參數化查詢；請求 JSON 以 schema 驗證，body 上限 16 KB |
+| T8 | XSS／注入 | 沒有客人自由輸入的文字欄位（備註已移除）；所有字串只當純文字渲染；嚴格 CSP、`X-Frame-Options: DENY`；D1 一律參數化查詢；請求 JSON 以 schema 驗證，body 上限 16 KB |
 | T9 | 打爆免費額度讓服務停擺（每日 10 萬次請求） | 靜態資產不計額度；POS 顯示用量、70% 提醒；額度用完＝線上點餐停、櫃台照常營業（POS 完全不受影響）；必要時升級 US$5/月。綁正式網域後加開 WAF 速率限制規則（免費 1 條、依 IP、10 秒區間）與 Bot Fight Mode |
 | T10 | 上傳惡意圖片 | 只有店內 POS 的 MANAGER 能上傳；檢查格式與大小；**一律重新編碼**成 WebP（丟掉原檔的任何夾帶內容與 EXIF） |
 | T11 | 外洩密鑰 | secret 不進前端、不進 repo、不進 log；log 不記權杖、載具、統編 |
@@ -513,7 +514,7 @@ POS 補查不受此限制。若先收到未授權確認，後續真正授權可�
 ### 8.4 資安測試（staging 必跑，結果寫進驗收紀錄）
 
 灌單腳本（無 Turnstile、重放 Turnstile token、超過各項上限）、竄改價格／選項、偽造 confirm、
-猜訂單權杖、偽造／重放 HMAC、超大 body、XSS 備註、保留洗光甜點——每項都要看到被擋下、
+猜訂單權杖、偽造／重放 HMAC、超大 body、硬塞 XSS 備註（應被忽略）、保留洗光甜點——每項都要看到被擋下、
 POS 清單沒被灌爆。
 
 ### 8.5 其他

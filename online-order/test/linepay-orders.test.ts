@@ -84,7 +84,7 @@ async function place(extra: object = {}, lines = [{ item_id: 5, option_ids: [], 
     headers: { "Content-Type": "application/json", "CF-Connecting-IP": `10.5.0.${++ip}` },
     body: JSON.stringify({
       idempotency_key: crypto.randomUUID(), table_code: null, payment_method: "LINE_PAY",
-      turnstile_token: "tok", note: "", lines, ...extra,
+      turnstile_token: "tok", lines, ...extra,
     }),
   }));
   return { status: resp.status, body: (await resp.json()) as { token: string; status: string; error?: string } };

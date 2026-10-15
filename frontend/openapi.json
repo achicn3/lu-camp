@@ -13476,17 +13476,6 @@
             "title": "Lines",
             "type": "array"
           },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
           "online_total": {
             "title": "Online Total",
             "type": "string"
@@ -13519,7 +13508,6 @@
           "order_id",
           "service_mode",
           "table_no",
-          "note",
           "lines",
           "online_total",
           "total"
@@ -13749,17 +13737,6 @@
             "title": "Lines",
             "type": "array"
           },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
           "party_size": {
             "anyOf": [
               {
@@ -13836,7 +13813,6 @@
           "service_mode",
           "total",
           "payment_method",
-          "note",
           "lines",
           "created_at",
           "sync_status",

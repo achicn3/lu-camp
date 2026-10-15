@@ -1346,7 +1346,6 @@ export default function PosPage() {
   const [onlineOrder, setOnlineOrder] = useState<{
     id: number;
     label: string;
-    note: string | null;
   } | null>(null);
   // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
   const [linePayKey, setLinePayKey] = useState("");
@@ -1521,7 +1520,6 @@ export default function PosPage() {
               id: restoredOnline,
               label:
                 payload?.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${payload?.table_no ?? ""}`,
-              note: null,
             },
       );
       setSignTaskId(cart.active_signature_task_id ?? null);
@@ -2542,7 +2540,6 @@ export default function PosPage() {
     setOnlineOrder({
       id: cart.order_id,
       label: cart.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${cart.table_no ?? ""}`,
-      note: cart.note,
     });
   }
 
@@ -2766,7 +2763,6 @@ export default function PosPage() {
       {onlineOrder && (
         <p className="pos-online-banner" role="status">
           正在結線上單（{onlineOrder.label}）：收完錢這張線上單會自動標已付款。
-          {onlineOrder.note && <strong>客人備註：{onlineOrder.note}</strong>}
           <button type="button" className="btn-ghost" onClick={cancelOnlineLoad}>
             取消帶入
           </button>

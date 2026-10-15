@@ -75,7 +75,7 @@ describe("拉單與交貨", () => {
       headers: { "Content-Type": "application/json", "CF-Connecting-IP": "10.9.0.1" },
       body: JSON.stringify({
         idempotency_key: crypto.randomUUID(), table_code: null, payment_method: "CASH",
-        turnstile_token: "tok", note: "", lines: [{ catalog_product_id: 41, qty: 1 }],
+        turnstile_token: "tok", lines: [{ catalog_product_id: 41, qty: 1 }],
       }),
     }));
     expect(placed.status).toBe(201);

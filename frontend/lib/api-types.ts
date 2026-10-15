@@ -9644,8 +9644,6 @@ export interface components {
         OnlineCartRead: {
             /** Lines */
             lines: components["schemas"]["OnlineCartLineRead"][];
-            /** Note */
-            note: string | null;
             /** Online Total */
             online_total: string;
             /** Order Id */
@@ -9739,8 +9737,6 @@ export interface components {
             linepay_paid: boolean;
             /** Lines */
             lines: components["schemas"]["OnlineOrderLineRead"][];
-            /** Note */
-            note: string | null;
             /** Party Size */
             party_size?: number | null;
             /** Payment Method */

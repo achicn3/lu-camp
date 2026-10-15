@@ -30,7 +30,7 @@ const TAX_ID = /^\d{8}$/;
 interface OrderLine { name: string; qty: number; line_total: number; take_home?: boolean }
 interface OrderView {
   status: string; table_label: string | null; service_mode: string;
-  total: number; note: string | null; created_at: string; lines: OrderLine[];
+  total: number; created_at: string; lines: OrderLine[];
   /** 帶回家商品交貨（docs/63 §13）；舊版雲端沒有這欄。 */
   fulfillment?: "NONE" | "AWAITING" | "HANDED_OVER";
   payment_method?: PayMethod;
@@ -44,7 +44,7 @@ interface OrderView {
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
   idempotency_key: string; table_code: string | null; payment_method: PayMethod; invoice?: InvoiceInput;
-  note: string; lines: CartLine[]; blocked?: boolean; party_size?: number | null; add_on?: boolean;
+  lines: CartLine[]; blocked?: boolean; party_size?: number | null; add_on?: boolean;
 }
 interface TurnstileApi {
   render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string;
@@ -116,7 +116,7 @@ function readDraft(): Draft | null {
     const draft = value as Partial<Draft>;
     return typeof draft.idempotency_key === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(draft.idempotency_key) &&
       (draft.table_code === null || typeof draft.table_code === "string") && (draft.payment_method === "CASH" || draft.payment_method === "LINE_PAY") &&
-      typeof draft.note === "string" && Array.isArray(draft.lines) ? draft as Draft : null;
+      Array.isArray(draft.lines) ? draft as Draft : null;
   } catch { return null; }
 }
 async function getJson<T>(url: string): Promise<{ status: number; body: T | null }> {
@@ -727,7 +727,7 @@ async function challenge(): Promise<string> {
 }
 function newDraft(): Draft {
   return { idempotency_key: crypto.randomUUID(), table_code: tableCode, payment_method: "CASH",
-    note: "", lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }),
+    lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }),
     party_size: tableMinimum?.mode === "per_person_item" ? readParty() : null };
 }
 async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput = { carrier: null, tax_id: null }): Promise<void> {
@@ -759,13 +759,13 @@ async function submitDraft(draft: Draft): Promise<void> {
     body.querySelector(".message")!.textContent = "正在送出訂單…";
     const resp = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ idempotency_key: draft.idempotency_key, table_code: draft.table_code,
-        payment_method: draft.payment_method, note: draft.note, lines: draft.lines, turnstile_token: token,
+        payment_method: draft.payment_method, lines: draft.lines, turnstile_token: token,
         ...(draft.party_size ? { party_size: draft.party_size } : {}),
         ...(draft.add_on ? { add_on: true } : {}),
         ...(draft.payment_method === "LINE_PAY" && draft.invoice ? { invoice: draft.invoice } : {}) }) });
     if (resp.ok) {
       const created = await resp.json() as OrderCreated;
-      localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(CART_KEY); sessionStorage.removeItem("lk_note");
+      localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(CART_KEY);
       sessionStorage.removeItem(ADD_ON_KEY); // 下一張單由客人重新選，不沿用這次的加點
       cart = []; renderFooter(); history.pushState(null, "", `/order/${created.token}`);
       // LINE Pay：不用等保留的單直接去付款；要等 POS 確認限量的，留在訂單頁等「前往付款」。
@@ -904,7 +904,6 @@ async function refreshOrder(): Promise<void> {
     body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   }
   body.append(el("p", "cart-total", `合計 ${money(view.total)}`));
-  if (view.note) body.append(el("p", "", `備註：${view.note}`));
   const canPay = view.payment_method === "LINE_PAY" && (view.status === "UNPAID" || view.status === "PENDING") &&
     view.linepay_result !== "EXPIRED";
   if (canPay && activeOrder !== null) {

@@ -35,11 +35,11 @@ async function until(fn, label) {
 }
 let client = 0;
 const run = randomUUID().slice(0, 6);
-function submit(item, note = "", extra = {}) {
+function submit(item, extra = {}) {
   return fetch(`${ORDER}/api/orders`, {
     method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": `10.${parseInt(run.slice(0, 2), 16)}.0.${++client}` },
     body: JSON.stringify({ idempotency_key: randomUUID(), table_code: null,
-      payment_method: "CASH", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX", note,
+      payment_method: "CASH", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX",
       lines: [{ item_id: item, option_ids: [], qty: 1 }], ...extra }),
   });
 }
@@ -57,29 +57,17 @@ await api("PUT", "/online-orders/accepting", { accepting: true });
 await until(async () => (await (await fetch(`${ORDER}/api/status`)).json()).accepting, "POS heartbeat");
 let browser;
 try {
-  for (const note of ["bad\u0000note", "bad\ud800note"]) {
-    const res = await submit(item.id, note);
-    assert.equal(res.status, 422);
-    assert.equal((await res.json()).error, "invalid_request");
-  }
-  findings.push("NUL and lone surrogate rejected by real Worker before POS import");
-
   for (const qty of [-1, 0, 0.5, 11]) {
-    const res = await submit(item.id, "", { lines: [{ item_id: item.id, option_ids: [], qty }] });
+    const res = await submit(item.id, { lines: [{ item_id: item.id, option_ids: [], qty }] });
     assert.equal(res.status, 422);
     assert.equal((await res.json()).error, "invalid_qty");
   }
   findings.push("Negative, zero, fractional and excessive quantities rejected");
 
   const xss = `<img src=x onerror="window.__security_xss=1"> ${run}`;
-  const sqlNote = `'; DROP TABLE online_orders; -- ${run}`;
-  for (const note of ["少冰", xss, sqlNote]) {
-    const rejected = await submit(item.id, note);
-    assert.equal(rejected.status, 422);
-    assert.equal((await rejected.json()).error, "notes_not_allowed");
-  }
-  findings.push("Normal, XSS and SQL notes rejected before order creation");
-  const response = await submit(item.id, "", {
+  // 備註已從線上點餐整個移除（店主 2026-10-15）：硬塞的 XSS／NUL 備註一律不收、不存、不帶給 POS。
+  const response = await submit(item.id, {
+    note: `${xss}\u0000'; DROP TABLE online_orders; --`,
     total: 1, payment_status: "PAID", linepay_transaction_id: "1",
     lines: [{ item_id: item.id, option_ids: [], qty: 1, unit_price: 1 }],
   });
@@ -98,12 +86,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.goto(`${ORDER}/order/${created.token}`, { waitUntil: "networkidle" });
   await page.getByText("合計 $150").waitFor();
-  assert.equal(pos.note, null);
+  assert.ok(!("note" in pos), "POS never receives a note");
   assert.equal(await page.getByText(xss, { exact: true }).count(), 0);
   assert.equal(await page.evaluate(() => window.__security_xss), undefined);
   assert.equal(await page.locator('img[onerror]').count(), 0);
   await page.screenshot({ path: `${SHOTS}/guest-no-note.png`, fullPage: true });
-  findings.push("Note-free guest order renders correctly; rejected XSS never reaches POS");
+  findings.push("Injected XSS/NUL/SQL note ignored: order still valid, guest page and POS never see it");
 
   const attempts = await Promise.all([submit(scarce.id), submit(scarce.id)]);
   for (const res of attempts) assert.equal(res.status, 201);
