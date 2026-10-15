@@ -143,6 +143,9 @@ class StoreSettings(Base, TimestampMixin):
     # 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）與是否自動列印出餐單。
     # 清單放 JSONB 而非另立 tables 表——現階段桌號沒有任何附加屬性（座位數/區域/狀態），
     # 建表是過度建模；settings 每店一列，多分店天然隔離（§4）。
+    dine_in_minimums: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
     dine_in_tables: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

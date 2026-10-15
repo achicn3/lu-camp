@@ -208,6 +208,15 @@ menu_item_option_groups  品項 ↔ 群組（多對多＋排序）：一個群�
   `https://<host>/t/<tableCode>`。可在設定頁「重發」某桌的碼，舊碼即失效。
 - 也提供一個不綁桌的「外帶」碼（`service_mode = TAKEOUT`）。
 - 桌位碼**不是身分證明**：只決定桌號，不能用來查任何訂單。
+- **桌號低消**（店主 2026-10-14）：每個內用桌號可各自設定，`settings.dine_in_minimums`
+  （以桌號為鍵；沒設＝不限制），隨桌位碼發佈到 D1 `tables.minimum`。兩種規則：
+  - 整筆最低金額 `{"mode": "amount", "amount": 300}`：伺服器重算後的訂單總額未達即拒收，回 `422 minimum_not_met` 與 `missing_amount`。
+  - 每人至少一份 `{"mode": "per_person_item"}`：客人須填用餐人數（1–50，`party_size`），餐飲主品項份數合計
+    ≥ 人數；加購選項掛在品項上不另算，帶回家商品不算。沒填人數 `422 party_size_required`，份數不足回 `missing_items`。
+  - 每張單各自檢查，不跨單累計；外帶不設低消。已成立訂單的冪等重送不再檢查（規則改了也拿得回原單）。
+    `party_size` 有填才納入冪等指紋，舊版客人頁的重送指紋不變。
+  - 客人頁在合計下方顯示規則與「還差多少」並停用送出鈕；POS 線上訂單以「桌號 A1・3 位」顯示人數。
+  - 改完低消要再按「發佈到線上點餐」才會生效（同桌號清單）。驗收：`frontend/scripts/online-table-minimum-smoke.mjs`。
 
 ### 4.2 客人端畫面
 

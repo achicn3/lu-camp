@@ -9476,6 +9476,8 @@ export interface components {
             lines: components["schemas"]["OnlineOrderLineRead"][];
             /** Note */
             note: string | null;
+            /** Party Size */
+            party_size?: number | null;
             /** Payment Method */
             payment_method: string;
             /** Payment Status */
@@ -11258,6 +11260,10 @@ export interface components {
             default_commission_pct: number;
             /** Default Margin Pct */
             default_margin_pct: number;
+            /** Dine In Minimums */
+            dine_in_minimums?: {
+                [key: string]: components["schemas"]["TableAmountMinimum-Output"] | components["schemas"]["TablePersonMinimum"];
+            };
             /** Dine In Tables */
             dine_in_tables: string[];
             /** Einvoice Enabled */
@@ -11322,6 +11328,10 @@ export interface components {
             default_commission_pct?: number | null;
             /** Default Margin Pct */
             default_margin_pct?: number | null;
+            /** Dine In Minimums */
+            dine_in_minimums?: {
+                [key: string]: components["schemas"]["TableAmountMinimum-Input"] | components["schemas"]["TablePersonMinimum"];
+            } | null;
             /** Dine In Tables */
             dine_in_tables?: string[] | null;
             /** Einvoice Enabled */
@@ -11795,6 +11805,34 @@ export interface components {
             name?: string | null;
             /** Tax Id */
             tax_id?: string | null;
+        };
+        /** TableAmountMinimum */
+        "TableAmountMinimum-Input": {
+            /** Amount */
+            amount: number | string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "amount";
+        };
+        /** TableAmountMinimum */
+        "TableAmountMinimum-Output": {
+            /** Amount */
+            amount: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "amount";
+        };
+        /** TablePersonMinimum */
+        TablePersonMinimum: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "per_person_item";
         };
         /**
          * TenderType

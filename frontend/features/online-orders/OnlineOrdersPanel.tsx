@@ -107,7 +107,9 @@ function minutesSince(iso: string): number {
 }
 
 function placeLabel(order: Order): string {
-  return order.service_mode === "TAKEOUT" ? "外帶" : `桌號 ${order.table_label ?? "—"}`;
+  if (order.service_mode === "TAKEOUT") return "外帶";
+  const party = order.party_size ? `・${order.party_size} 位` : "";
+  return `桌號 ${order.table_label ?? "—"}${party}`;
 }
 
 export function OnlineOrdersPanel({

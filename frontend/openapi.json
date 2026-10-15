@@ -13238,6 +13238,17 @@
             ],
             "title": "Note"
           },
+          "party_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Party Size"
+          },
           "payment_method": {
             "title": "Payment Method",
             "type": "string"
@@ -17859,6 +17870,27 @@
             "title": "Default Margin Pct",
             "type": "integer"
           },
+          "dine_in_minimums": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "amount": "#/components/schemas/TableAmountMinimum-Output",
+                  "per_person_item": "#/components/schemas/TablePersonMinimum"
+                },
+                "propertyName": "mode"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/TableAmountMinimum-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/TablePersonMinimum"
+                }
+              ]
+            },
+            "title": "Dine In Minimums",
+            "type": "object"
+          },
           "dine_in_tables": {
             "items": {
               "type": "string"
@@ -18070,6 +18102,34 @@
               }
             ],
             "title": "Default Margin Pct"
+          },
+          "dine_in_minimums": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "discriminator": {
+                    "mapping": {
+                      "amount": "#/components/schemas/TableAmountMinimum-Input",
+                      "per_person_item": "#/components/schemas/TablePersonMinimum"
+                    },
+                    "propertyName": "mode"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TableAmountMinimum-Input"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TablePersonMinimum"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dine In Minimums"
           },
           "dine_in_tables": {
             "anyOf": [
@@ -19664,6 +19724,71 @@
           }
         },
         "title": "SupplierUpdate",
+        "type": "object"
+      },
+      "TableAmountMinimum-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 9999999.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,7}|(?=[\\d.]{1,8}0*$)\\d{0,7}\\.\\d{0,0}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "mode": {
+            "const": "amount",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "amount"
+        ],
+        "title": "TableAmountMinimum",
+        "type": "object"
+      },
+      "TableAmountMinimum-Output": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "mode": {
+            "const": "amount",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "amount"
+        ],
+        "title": "TableAmountMinimum",
+        "type": "object"
+      },
+      "TablePersonMinimum": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "const": "per_person_item",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "TablePersonMinimum",
         "type": "object"
       },
       "TenderType": {

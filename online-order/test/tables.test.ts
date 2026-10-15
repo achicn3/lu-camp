@@ -24,7 +24,7 @@ describe("桌位碼", () => {
     ).toBe(200);
     const resp = await get(`/api/tables/${CODE_A}`);
     expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({ label: "A3", service_mode: "DINE_IN" });
+    expect(await resp.json()).toEqual({ label: "A3", service_mode: "DINE_IN", minimum: null });
   });
 
   it("重發後舊碼失效", async () => {
@@ -72,6 +72,35 @@ describe("桌位碼", () => {
       "/integration/tables",
       JSON.stringify({ tables: [{ code: CODE_A, label: "A1", service_mode: "DINE_IN" }] }),
     );
+    expect(resp.status).toBe(422);
+  });
+
+  it("低消規則隨桌號發佈，客人查桌名時一併拿到", async () => {
+    const tables = [
+      { code: CODE_A, label: "A3", service_mode: "DINE_IN", minimum: { mode: "amount", amount: 300 } },
+      { code: CODE_TAKEOUT, label: "B1", service_mode: "DINE_IN", minimum: { mode: "per_person_item" } },
+    ];
+    expect((await publish(tables)).status).toBe(200);
+    expect(await (await get(`/api/tables/${CODE_A}`)).json()).toMatchObject({ minimum: { mode: "amount", amount: 300 } });
+    expect(await (await get(`/api/tables/${CODE_TAKEOUT}`)).json()).toMatchObject({ minimum: { mode: "per_person_item" } });
+  });
+
+  it.each([
+    { mode: "amount", amount: 0 },
+    { mode: "amount", amount: 1.5 },
+    { mode: "amount", amount: "300" },
+    { mode: "amount" },
+    { mode: "per_person_item", amount: 100 },
+    { mode: "other" },
+  ])("無效的低消規則整份拒收：%o", async (minimum) => {
+    const resp = await publish([{ code: CODE_A, label: "A3", service_mode: "DINE_IN", minimum }]);
+    expect(resp.status).toBe(422);
+  });
+
+  it("外帶不能設低消", async () => {
+    const resp = await publish([
+      { code: CODE_TAKEOUT, label: "外帶", service_mode: "TAKEOUT", minimum: { mode: "amount", amount: 100 } },
+    ]);
     expect(resp.status).toBe(422);
   });
 });

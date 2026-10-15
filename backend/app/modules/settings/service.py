@@ -41,7 +41,11 @@ from app.modules.settings.online_hours import OnlineHours
 from app.modules.settings.repository import SettingsRepository
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.store.service import StoreService
-from app.shared.exceptions import EInvoiceActivationNotReady, InvalidPremiumRate
+from app.shared.exceptions import (
+    EInvoiceActivationNotReady,
+    InvalidPremiumRate,
+    InvalidTableMinimum,
+)
 
 
 def _jsonable(value: Any) -> Any:
@@ -80,6 +84,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         backup_offpeak_hour=DEFAULT_BACKUP_OFFPEAK_HOUR,
         # 餐飲內用（docs/35）：暫態預設同上理；清單複製一份，避免共用模組層 list。
         dine_in_tables=list(DEFAULT_DINE_IN_TABLES),
+        dine_in_minimums={},
         print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
         auto_print_acquisition_labels=DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
     )
@@ -123,6 +128,20 @@ class StoreSettingsService:
 
         # exclude_none：明確傳 null 視為「不更動」（這些設定欄皆不可為 NULL；Codex P2 防 500）。
         changes = patch.model_dump(exclude_unset=True, exclude_none=True)
+        tables = set(changes.get("dine_in_tables", settings.dine_in_tables)) - {"外帶"}
+        if "dine_in_minimums" in changes:
+            if set(changes["dine_in_minimums"]) - tables:
+                raise InvalidTableMinimum("低消只能設定在現有的內用桌號，請先新增桌號")
+            # JSONB 存不了 Decimal：金額已驗為正整數元，存成整數。
+            changes["dine_in_minimums"] = {
+                label: {**rule, "amount": int(rule["amount"])} if "amount" in rule else rule
+                for label, rule in changes["dine_in_minimums"].items()
+            }
+        elif "dine_in_tables" in changes:
+            changes["dine_in_minimums"] = {
+                label: rule for label, rule in settings.dine_in_minimums.items() if label in tables
+            }
+
         # 電子發票啟用閘門（docs/24）：Amego App Key 與店家統編（賣方識別）都須就緒，
         # 否則每筆銷售建永遠無法上送的 PENDING 發票、佇列堆積。關閉（False）不受限。
         if changes.get("einvoice_enabled") is True:

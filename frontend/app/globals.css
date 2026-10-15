@@ -3942,6 +3942,19 @@ td > .menu-row-actions {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+.dinein-minimum {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.dinein-minimum select,
+.dinein-minimum input {
+  min-height: 36px;
+  padding: 0 var(--sp-1);
+}
+.dinein-minimum input {
+  width: 6em;
+}
 .dinein-table-add {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

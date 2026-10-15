@@ -1547,3 +1547,19 @@ async def test_payment_alerts_sync_to_pos_and_clear_on_next_pull(
     cleared = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
     assert cleared["payment_alerts"] == []
     assert cleared["payment_alert_count"] == 0
+
+
+async def test_party_size_is_imported_and_bad_values_skip_the_order(
+    db_session: AsyncSession, ctx: Ctx
+) -> None:
+    lines = [_line(1, ctx.latte, "拿鐵", 150)]
+    ctx.worker.orders = [
+        {**_order(_rid(301), lines), "party_size": 3},
+        {**_order(_rid(302), lines), "party_size": 0},
+        {**_order(_rid(303), lines), "party_size": True},
+        _order(_rid(304), lines),
+    ]
+    result = await _svc(db_session, ctx).pull_once(ctx.store_id)
+    assert result.imported == 2
+    assert (await _order_row(db_session, _rid(301))).party_size == 3
+    assert (await _order_row(db_session, _rid(304))).party_size is None

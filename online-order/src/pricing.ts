@@ -166,3 +166,25 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
     needsHold: lines.some((l) => l.limited),
   };
 }
+
+/** 桌號低消：整筆至少多少元，或每位客人至少一份主品項。null＝不限制。 */
+export type TableMinimum = { mode: "amount"; amount: number } | { mode: "per_person_item" };
+
+/**
+ * 桌號低消（2026-10-14 店主）：每張單各自檢查，不跨單累計。
+ * 「每人至少一份」只數餐飲主品項的份數；加購選項掛在品項上、帶回家商品不算。
+ */
+export function minimumShortfall(
+  minimum: TableMinimum | null,
+  total: number,
+  lines: { item_id?: number; qty: number }[],
+  partySize: number | null,
+): { missing_amount: number } | { missing_items: number } | null {
+  if (minimum === null) return null;
+  if (minimum.mode === "amount") {
+    return total < minimum.amount ? { missing_amount: minimum.amount - total } : null;
+  }
+  const items = lines.reduce((n, l) => n + (l.item_id === undefined ? 0 : l.qty), 0);
+  const people = partySize ?? 0;
+  return items < people ? { missing_items: people - items } : null;
+}

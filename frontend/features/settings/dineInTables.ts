@@ -33,3 +33,73 @@ export function removeTable(tables: string[], table: string): string[] {
 export function sameTables(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((table, i) => table === b[i]);
 }
+
+// ── 桌號低消（2026-10-14 店主）：每桌可選「整筆最低金額」或「每人至少一份」；沒設＝不限制。
+// 規則由雲端點餐在送單時檢查；改完要到「餐飲菜單 → 線上發布」重新發佈才會生效。
+
+export const MAX_MINIMUM_AMOUNT = 9_999_999;
+
+export type MinimumMode = "none" | "amount" | "per_person_item";
+
+/** 編輯中的一桌：金額先保留輸入字串，送出時才驗證。 */
+export interface MinimumDraft {
+  mode: MinimumMode;
+  amount: string;
+}
+
+export type MinimumRule = { mode: "amount"; amount: string } | { mode: "per_person_item" };
+
+export type MinimumRules = Record<string, MinimumRule>;
+
+/** 設定讀回 → 每一桌的編輯狀態（沒設的桌號為「不設低消」）。 */
+export function minimumDrafts(
+  tables: string[],
+  rules: Record<string, { mode: string; amount?: string }> | undefined,
+): Record<string, MinimumDraft> {
+  return Object.fromEntries(
+    tables.map((table) => {
+      const rule = rules?.[table];
+      if (rule?.mode === "amount") return [table, { mode: "amount", amount: rule.amount ?? "" }];
+      if (rule?.mode === "per_person_item") return [table, { mode: "per_person_item", amount: "" }];
+      return [table, { mode: "none", amount: "" }];
+    }),
+  );
+}
+
+/** 組成要送出的規則；只含目前清單裡、有設低消的桌號。金額不對回第一個錯誤。 */
+export function buildMinimums(
+  tables: string[],
+  drafts: Record<string, MinimumDraft>,
+): { minimums: MinimumRules; error: string | null } {
+  const minimums: MinimumRules = {};
+  for (const table of tables) {
+    const draft = drafts[table];
+    if (draft === undefined || draft.mode === "none") continue;
+    if (draft.mode === "per_person_item") {
+      minimums[table] = { mode: "per_person_item" };
+      continue;
+    }
+    const amount = draft.amount.trim();
+    if (!/^\d+$/.test(amount) || Number(amount) < 1 || Number(amount) > MAX_MINIMUM_AMOUNT) {
+      return { minimums: {}, error: `桌號 ${table} 的最低金額請填 1 以上的整數元` };
+    }
+    minimums[table] = { mode: "amount", amount: String(Number(amount)) };
+  }
+  return { minimums, error: null };
+}
+
+/** 兩份規則是否相同（金額以數值比對）。 */
+export function sameMinimums(
+  a: Record<string, { mode: string; amount?: string }> | undefined,
+  b: Record<string, { mode: string; amount?: string }> | undefined,
+): boolean {
+  const left = a ?? {};
+  const right = b ?? {};
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => {
+    const x = left[key];
+    const y = right[key];
+    if (x === undefined || y === undefined) return x === y;
+    return x.mode === y.mode && Number(x.amount ?? 0) === Number(y.amount ?? 0);
+  });
+}

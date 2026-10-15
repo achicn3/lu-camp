@@ -32,6 +32,7 @@ UI_TEXT = (
     "以位保共具功囉如就常往待扣拿改本條機留票端等紙統編能補間雲頭；"
     "也幫幾知符第答道題人氣員店愛著走近"
     "非營業分鐘逾自"
+    "低填客寫差滿理達需"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 

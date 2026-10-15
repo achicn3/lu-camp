@@ -645,3 +645,7 @@ class OnlineOrderNotFound(DomainError):
 
 class OnlineOrderConflict(DomainError):
     """線上訂單目前的狀態不能做這件事（已結帳、已取消、庫存不足被拒…）；訊息可直接給店員看。"""
+
+
+class InvalidTableMinimum(DomainError):
+    """A minimum rule refers to an unavailable dine-in table."""

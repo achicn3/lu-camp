@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, itemSoldOut, menuTabs, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import { greeting, itemBadge, itemSoldOut, menuTabs, minimumBlock, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -178,5 +178,26 @@ describe("人氣標籤（M2b）", () => {
     expect(presentationBadges({ ...item, popularity: 3 }, now)).toEqual(["人氣推薦"]);
     const featured = { ...item, popularity: 2, presentation: { ...presentation, is_new: true } };
     expect(presentationBadges(featured, now)).toEqual(["人氣推薦", "新品"]);
+  });
+});
+
+describe("桌號低消提示", () => {
+  const latte = { item_id: 5, option_ids: [], qty: 1 };
+  it("沒設低消：不顯示、不擋", () => {
+    expect(minimumNotice(null)).toBeNull();
+    expect(minimumBlock(null, 0, [], null)).toBeNull();
+  });
+  it("最低金額：說明規則，未達顯示還差多少", () => {
+    expect(minimumNotice({ mode: "amount", amount: 300 })).toBe("本桌低消 $300，每張訂單需滿 $300 才能送出。");
+    expect(minimumBlock({ mode: "amount", amount: 300 }, 250, [latte], null)).toBe("本桌低消 $300，還差 $50。");
+    expect(minimumBlock({ mode: "amount", amount: 300 }, 300, [latte], null)).toBeNull();
+  });
+  it("每人至少一份：先填人數，份數不足顯示還差幾份；帶回家商品不算", () => {
+    const rule = { mode: "per_person_item" } as const;
+    expect(minimumNotice(rule)).toBe("本桌每位客人至少點一份餐點，請填寫用餐人數。");
+    expect(minimumBlock(rule, 150, [latte], null)).toBe("請先填寫用餐人數。");
+    const takeHome = { catalog_product_id: 9, qty: 2 };
+    expect(minimumBlock(rule, 150, [latte, takeHome], 3)).toBe("3 位用餐，至少需點 3 份餐點，還差 2 份。");
+    expect(minimumBlock(rule, 450, [{ ...latte, qty: 3 }], 3)).toBeNull();
   });
 });

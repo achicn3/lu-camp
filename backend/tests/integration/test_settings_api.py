@@ -225,3 +225,52 @@ async def test_invalid_online_hours_rejected(
         json={"online_order_hours": {"enabled": True, "days": days}},
     )
     assert result.status_code == 422
+
+
+async def test_table_minimums_roundtrip_and_removed_table_cleanup(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    rules = {"A1": {"mode": "amount", "amount": "300"}, "A2": {"mode": "per_person_item"}}
+    response = await client.patch(
+        "/api/v1/settings",
+        headers=_auth(token),
+        json={
+            "dine_in_tables": ["A1", "A2", "A3"],
+            "dine_in_minimums": rules,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["dine_in_minimums"] == rules
+    await client.patch(
+        "/api/v1/settings", headers=_auth(token), json={"dine_in_tables": ["A2", "A3"]}
+    )
+    result = await client.get("/api/v1/settings", headers=_auth(token))
+    assert result.json()["dine_in_minimums"] == {"A2": {"mode": "per_person_item"}}
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"mode": "amount", "amount": 0},
+        {"mode": "amount", "amount": -1},
+        {"mode": "amount", "amount": 1.5},
+        {"mode": "amount", "amount": True},
+        {"mode": "amount"},
+        {"mode": "per_person_item", "amount": 100},
+        {"mode": "unknown"},
+    ],
+)
+async def test_table_minimums_reject_invalid_rules(
+    client: httpx.AsyncClient, db_session: AsyncSession, rule: dict[str, object]
+) -> None:
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    result = await client.patch(
+        "/api/v1/settings",
+        headers=_auth(token),
+        json={
+            "dine_in_tables": ["A1"],
+            "dine_in_minimums": {"A1": rule},
+        },
+    )
+    assert result.status_code == 422

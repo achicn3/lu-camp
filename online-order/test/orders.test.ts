@@ -360,3 +360,41 @@ it("營業時段不能覆蓋店員暫停；錯誤時段不能發佈", async () =
     ...MENU, version:4, hours:{enabled:true,days:[{opens:"25:00",closes:"09:00"},...Array(6).fill(null)]},
   }))).status).toBe(422);
 });
+
+async function minimumTable(minimum: object) {
+  expect((await integration("PUT", "/integration/tables", JSON.stringify({revision:2, tables:[
+    {code:TABLE,label:"A3",service_mode:"DINE_IN",minimum},
+  ]}))).status).toBe(200);
+}
+it("指定桌最低金額由伺服器計價，未達不建單；外帶不受影響", async () => {
+  await minimumTable({mode:"amount",amount:350});
+  const denied=await order({total:99999});
+  expect(denied.status).toBe(422);
+  expect(await denied.json()).toMatchObject({error:"minimum_not_met",missing_amount:50});
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM orders").first("n")).toBe(0);
+  expect((await order({lines:[{item_id:5,option_ids:[],qty:3}]})).status).toBe(201);
+  expect((await order({table_code:null})).status).toBe(201);
+});
+it("每人至少一份：缺人數拒收、份數不足顯示缺額、人數同步 POS", async () => {
+  await minimumTable({mode:"per_person_item"});
+  expect((await order()).status).toBe(422);
+  const denied=await order({party_size:3});
+  expect(await denied.json()).toMatchObject({error:"minimum_not_met",missing_items:1});
+  const response=await order({party_size:3,lines:[{item_id:5,option_ids:[],qty:3}]});
+  expect(response.status).toBe(201);
+  const pull=await (await integration("GET","/integration/orders")).json() as {orders:{party_size:number}[]};
+  expect(pull.orders[0]?.party_size).toBe(3);
+});
+it.each([0,-1,1.5,51,"2",true])("拒絕無效用餐人數 %s", async party_size => {
+  expect((await order({party_size})).status).toBe(422);
+});
+it("人數納入冪等指紋；規則更動不阻擋已成立訂單重試", async () => {
+  await minimumTable({mode:"per_person_item"});
+  const request={party_size:2,idempotency_key:crypto.randomUUID()};
+  expect((await order(request)).status).toBe(201);
+  await integration("PUT","/integration/tables",JSON.stringify({revision:3,tables:[
+    {code:TABLE,label:"A3",service_mode:"DINE_IN",minimum:{mode:"amount",amount:999}},
+  ]}));
+  expect((await order(request)).status).toBe(200);
+  expect((await order({...request,party_size:1})).status).toBe(409);
+});

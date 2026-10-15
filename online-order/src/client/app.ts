@@ -3,10 +3,10 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
 import {
   BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
-  menuTabs, OTHER_TAB, PICKS_TAB, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  menuTabs, minimumBlock, minimumNotice, OTHER_TAB, PICKS_TAB, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
-import { isRetailLine } from "../pricing";
+import { isRetailLine, type TableMinimum } from "../pricing";
 import {
   UPSELL_ROLES, type MenuItemView, type MenuRetailView, type MenuSnapshot, type TableView, type UpsellRole,
 } from "./types";
@@ -22,6 +22,8 @@ interface StoreStatus { accepting: boolean; within_hours?: boolean; turnstile_si
 type PayMethod = "CASH" | "LINE_PAY";
 interface InvoiceInput { carrier: string | null; tax_id: string | null }
 const PAY_KEY = "lk_pay_v1";
+const PARTY_KEY = "lk_party_v1";
+const PARTY_MAX = 50;
 const MOBILE_CARRIER = /^\/[0-9A-Z.+-]{7}$/;
 const TAX_ID = /^\d{8}$/;
 interface OrderLine { name: string; qty: number; line_total: number; take_home?: boolean }
@@ -39,7 +41,7 @@ interface OrderView {
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
   idempotency_key: string; table_code: string | null; payment_method: PayMethod; invoice?: InvoiceInput;
-  note: string; lines: CartLine[]; blocked?: boolean;
+  note: string; lines: CartLine[]; blocked?: boolean; party_size?: number | null;
 }
 interface TurnstileApi {
   render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string;
@@ -49,6 +51,8 @@ declare global { interface Window { turnstile?: TurnstileApi; onTurnstileReady?:
 
 let menu: MenuSnapshot | null = null;
 let tableCode: string | null = null;
+/** 這桌的低消（2026-10-14 店主）；外帶或沒設＝null。 */
+let tableMinimum: TableMinimum | null = null;
 let cart: CartLine[] = [];
 let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
@@ -429,6 +433,31 @@ function renderQuiz(snapshot: MenuSnapshot): void {
   });
   body.replaceChildren(...rows, again);
 }
+function readParty(): number | null {
+  const value = Number(sessionStorage.getItem(PARTY_KEY));
+  return Number.isInteger(value) && value >= 1 && value <= PARTY_MAX ? value : null;
+}
+/** 低消說明＋（每人一份的桌）用餐人數；人數一改就重算能不能送出。 */
+function minimumField(onChange: () => void): HTMLElement | null {
+  const notice = minimumNotice(tableMinimum);
+  if (notice === null) return null;
+  const box = el("div", "minimum-box");
+  box.append(el("p", "", notice));
+  if (tableMinimum?.mode === "per_person_item") {
+    const label = el("label", "party-field", "用餐人數");
+    const input = el("input") as HTMLInputElement;
+    input.id = "party-size"; input.type = "number"; input.inputMode = "numeric";
+    input.min = "1"; input.max = String(PARTY_MAX); input.value = String(readParty() ?? "");
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      if (Number.isInteger(value) && value >= 1 && value <= PARTY_MAX) sessionStorage.setItem(PARTY_KEY, String(value));
+      else sessionStorage.removeItem(PARTY_KEY);
+      onChange();
+    });
+    label.append(input); box.append(label);
+  }
+  return box;
+}
 function renderFooter(): void {
   const footer = $("footer"); footer.replaceChildren();
   const qty = cart.reduce((sum, line) => sum + line.qty, 0);
@@ -485,6 +514,12 @@ function renderCart(): void {
     row.append(info, controls); body.append(row);
   });
   body.append(el("p", "cart-total", `合計 ${money(priced.total)}`));
+  const shortfall = el("p", "field-error minimum-shortfall");
+  const blocked = (): string | null => minimumBlock(tableMinimum, priced.total, priced.lines, readParty());
+  // 低消緊接在合計下面：客人一眼看到還差多少，不必捲到付款方式下面找。
+  let refreshMinimum = (): void => undefined;
+  const minimum = minimumField(() => refreshMinimum());
+  if (minimum) body.append(minimum, shortfall);
   const upsell = upsellBlock();
   if (upsell) body.append(upsell);
   const payment = paymentChoice();
@@ -492,11 +527,18 @@ function renderCart(): void {
   body.append(el("p", "take-home-note", "現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。"));
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
+    const reason = blocked();
+    if (reason !== null) { showMessage(reason); return; }
     const invoice = payment.invoice();
     if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
     void startCheckout(payment.method(), invoice);
   });
   payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單"; });
+  refreshMinimum = (): void => {
+    const reason = blocked();
+    shortfall.textContent = reason ?? ""; shortfall.hidden = reason === null; submit.disabled = reason !== null;
+  };
+  refreshMinimum();
   body.append(submit);
   showScreen("cart");
 }
@@ -657,7 +699,8 @@ async function challenge(): Promise<string> {
 }
 function newDraft(): Draft {
   return { idempotency_key: crypto.randomUUID(), table_code: tableCode, payment_method: "CASH",
-    note: "", lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }) };
+    note: "", lines: cart.map((line) => isRetailLine(line) ? { ...line } : { ...line, option_ids: [...line.option_ids] }),
+    party_size: tableMinimum?.mode === "per_person_item" ? readParty() : null };
 }
 async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput = { carrier: null, tax_id: null }): Promise<void> {
   if (menu === null || checkoutStarting || submitting) return;
@@ -687,6 +730,7 @@ async function submitDraft(draft: Draft): Promise<void> {
     const resp = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ idempotency_key: draft.idempotency_key, table_code: draft.table_code,
         payment_method: draft.payment_method, note: draft.note, lines: draft.lines, turnstile_token: token,
+        ...(draft.party_size ? { party_size: draft.party_size } : {}),
         ...(draft.payment_method === "LINE_PAY" && draft.invoice ? { invoice: draft.invoice } : {}) }) });
     if (resp.ok) {
       const created = await resp.json() as OrderCreated;
@@ -696,14 +740,16 @@ async function submitDraft(draft: Draft): Promise<void> {
       if (draft.payment_method === "LINE_PAY" && created.status !== "HOLD_REQUESTED" && await goLinePay(created.token)) return;
       await openOrder(created.token); return;
     }
-    const result = await resp.json() as { error?: string };
+    const result = await resp.json() as { error?: string; missing_amount?: number; missing_items?: number };
     if (resp.status === 409) {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, blocked: true }));
       renderCart(); showMessage("訂單識別碼有衝突。請到櫃台確認，暫時不要重新送單。");
     } else if (resp.status === 422 || resp.status === 403 || resp.status === 404) {
       localStorage.removeItem(DRAFT_KEY);
       renderCart();
-      showMessage(result.error === "sold_out" ? "品項已售完，請更新菜單後再選。" :
+      showMessage(result.error === "minimum_not_met" ? minimumRejected(result) :
+        result.error === "party_size_required" ? "這桌需要填寫用餐人數，請重新整理頁面後再送出。" :
+        result.error === "sold_out" ? "品項已售完，請更新菜單後再選。" :
         result.error === "challenge_failed" ? "驗證未通過，請重新送出。" : "訂單內容有變，請重新確認後送出。");
     } else {
       renderCart(); showMessage("尚未確認訂單是否成立。請按「重試確認訂單」，不要重新選品項送單。");
@@ -711,6 +757,12 @@ async function submitDraft(draft: Draft): Promise<void> {
   } catch {
     renderCart(); showMessage("連線中斷，尚未確認訂單是否成立。請按「重試確認訂單」。");
   } finally { submitting = false; challengeToken = ""; }
+}
+/** 雲端以最新的低消規則擋下（店家剛改規則時，畫面上的規則可能較舊）。 */
+function minimumRejected(result: { missing_amount?: number; missing_items?: number }): string {
+  if (typeof result.missing_amount === "number") return `未達本桌低消，還差 ${money(result.missing_amount)}。`;
+  if (typeof result.missing_items === "number") return `每位客人至少一份餐點，還差 ${result.missing_items} 份。`;
+  return "未達本桌低消，請再加點後送出。";
 }
 /** 向雲端要 LINE Pay 付款連結並跳過去；失敗回 false（留在訂單頁顯示原因）。 */
 async function goLinePay(token: string): Promise<boolean> {
@@ -893,6 +945,7 @@ async function main(): Promise<void> {
   if (tableResult !== null) {
     if (tableResult.body) {
       $("table").textContent = tableResult.body.service_mode === "TAKEOUT" ? "外帶" : `桌 ${tableResult.body.label}`;
+      tableMinimum = tableResult.body.service_mode === "DINE_IN" ? tableResult.body.minimum ?? null : null;
       $("table").hidden = false;
     } else if (tableResult.status === 404) { showMessage("這個 QR 已經失效了，請洽櫃台。"); return; }
   }

@@ -448,3 +448,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 /* 掃碼直接進完整菜單（2026-10-10）：分頁下的一句說明；「不知道喝什麼？」是問候語下的小按鈕。 */
 .tab-note { margin: 4px 0 8px; font-family: var(--ui); font-size: 13px; color: var(--soft); }
 .quiz-entry { flex: 0 1 auto; }
+/* 桌號低消（2026-10-14） */
+.minimum-box { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 6px; color: var(--gold); font-size: 15px; }
+.minimum-box p { margin: 0; }
+.party-field { display: flex; align-items: center; gap: 12px; margin-top: 10px; color: var(--ink); }
+.party-field input { width: 96px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #151719; color: var(--ink); font: inherit; font-size: 16px; text-align: center; }
+.minimum-shortfall { margin: 8px 0; }
+.action:disabled { opacity: .45; cursor: not-allowed; }

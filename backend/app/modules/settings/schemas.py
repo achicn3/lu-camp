@@ -14,6 +14,7 @@ from app.core.money import format_ntd, format_rate
 from app.modules.settings.defaults import MAX_DINE_IN_TABLE_LENGTH, MAX_DINE_IN_TABLES
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
 from app.modules.settings.online_hours import OnlineHours
+from app.modules.settings.table_minimums import TableMinimum
 
 RateOut = Annotated[Decimal, PlainSerializer(format_rate, return_type=str)]
 RateOutOpt = Annotated[
@@ -56,6 +57,7 @@ class SettingsRead(BaseModel):
     backup_offpeak_hour: int
     # 餐飲內用（docs/35）
     dine_in_tables: list[str]
+    dine_in_minimums: dict[str, TableMinimum] = Field(default_factory=dict)
     print_kitchen_ticket: bool
     auto_print_acquisition_labels: bool
     online_order_hours: OnlineHours = Field(default_factory=OnlineHours)
@@ -107,6 +109,7 @@ class SettingsUpdateRequest(BaseModel):
     backup_offpeak_hour: Annotated[int, Field(ge=0, le=23)] | None = None
     # 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）與出餐單開關。
     dine_in_tables: list[str] | None = None
+    dine_in_minimums: dict[str, TableMinimum] | None = None
     online_order_hours: OnlineHours | None = None
     print_kitchen_ticket: bool | None = None
     auto_print_acquisition_labels: bool | None = None

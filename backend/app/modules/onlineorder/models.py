@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -306,6 +307,7 @@ class OnlineOrder(Base, TimestampMixin):
     menu_version: Mapped[int] = mapped_column(BigInteger)
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     payment_method: Mapped[str] = mapped_column(String(10))
+    party_size: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String(200))
     lines: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     remote_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

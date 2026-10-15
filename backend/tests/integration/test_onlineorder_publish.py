@@ -705,3 +705,36 @@ async def test_published_hours_follow_saved_settings(
     response = await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
     assert response.status_code == 200, response.text
     assert worker.menu()["hours"] == hours
+
+
+async def test_publish_pushes_each_dine_in_tables_minimum_rule(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, mgr = await _seed(db_session)
+    await _menu(client, mgr)
+    rules = {"A1": {"mode": "amount", "amount": "300"}, "A2": {"mode": "per_person_item"}}
+    resp = await client.patch(
+        "/api/v1/settings", json={"dine_in_minimums": rules}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+    await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+    minimums = {t["label"]: t["minimum"] for t in worker.tables()}
+    assert minimums == {
+        "A1": {"mode": "amount", "amount": 300},
+        "A2": {"mode": "per_person_item"},
+        "外帶": None,
+    }
+
+
+async def test_minimum_on_unknown_table_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    _, mgr = await _seed(db_session)
+    await _menu(client, mgr)
+    resp = await client.patch(
+        "/api/v1/settings",
+        json={"dine_in_minimums": {"Z9": {"mode": "per_person_item"}}},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422
+    assert "桌號" in resp.json()["detail"]

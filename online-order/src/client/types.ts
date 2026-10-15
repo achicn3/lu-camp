@@ -1,4 +1,6 @@
 // 菜單快照的形狀（店內 backend app/modules/onlineorder/snapshot.py 產生）。
+import type { TableMinimum } from "../pricing";
+
 export interface OnlineHours {
   enabled: boolean;
   days: ({ opens: string; closes: string } | null)[];
@@ -110,4 +112,6 @@ export interface MenuQuizView {
 export interface TableView {
   label: string;
   service_mode: "DINE_IN" | "TAKEOUT";
+  /** 桌號低消；舊版雲端沒有這欄。 */
+  minimum?: TableMinimum | null;
 }

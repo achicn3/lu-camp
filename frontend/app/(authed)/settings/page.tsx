@@ -9,7 +9,12 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from
 
 import {
   addTable,
+  buildMinimums,
+  type MinimumDraft,
+  type MinimumMode,
+  minimumDrafts,
   removeTable,
+  sameMinimums,
   sameTables,
 } from "@/features/settings/dineInTables";
 import { clampRate, formatPct, parseRateInput, ratePercentValue } from "@/features/settings/helpers";
@@ -141,6 +146,50 @@ function MobilePaymentCard({
   );
 }
 
+// 店員取名「外帶」的桌號會被當成外帶（線上點餐不會有低消）。
+const TAKEOUT_LABEL = "外帶";
+
+const MINIMUM_OPTIONS: { value: MinimumMode; label: string }[] = [
+  { value: "none", label: "不設低消" },
+  { value: "amount", label: "整筆最低金額" },
+  { value: "per_person_item", label: "每人至少一份" },
+];
+
+function MinimumControl({
+  table,
+  draft,
+  onChange,
+}: {
+  table: string;
+  draft: MinimumDraft;
+  onChange: (draft: MinimumDraft) => void;
+}) {
+  return (
+    <span className="dinein-minimum">
+      <select
+        aria-label={`${table} 低消`}
+        value={draft.mode}
+        onChange={(e) => onChange({ ...draft, mode: e.target.value as MinimumMode })}
+      >
+        {MINIMUM_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {draft.mode === "amount" && (
+        <input
+          aria-label={`${table} 最低金額`}
+          inputMode="numeric"
+          placeholder="例如 300"
+          value={draft.amount}
+          onChange={(e) => onChange({ ...draft, amount: e.target.value })}
+        />
+      )}
+    </span>
+  );
+}
+
 function DineInCard({
   settings,
   onSaved,
@@ -151,6 +200,9 @@ function DineInCard({
   // 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）＋出餐單開關。
   // 清單空＝尚未維護，此時 POS 不讓選內用（fail closed，不讓店員自由打字繞過）。
   const [tables, setTables] = useState<string[]>(settings.dine_in_tables);
+  const [minimums, setMinimums] = useState<Record<string, MinimumDraft>>(() =>
+    minimumDrafts(settings.dine_in_tables, settings.dine_in_minimums),
+  );
   const [draft, setDraft] = useState("");
   const [printTicket, setPrintTicket] = useState(settings.print_kitchen_ticket);
   const [error, setError] = useState<string | null>(null);
@@ -188,6 +240,17 @@ function DineInCard({
     setSuccess(false);
     const body: components["schemas"]["SettingsUpdateRequest"] = {};
     if (!sameTables(tables, settings.dine_in_tables)) body.dine_in_tables = tables;
+    const built = buildMinimums(
+      tables.filter((table) => table !== TAKEOUT_LABEL),
+      minimums,
+    );
+    if (built.error !== null) {
+      setError(built.error);
+      return;
+    }
+    if (!sameMinimums(built.minimums, settings.dine_in_minimums)) {
+      body.dine_in_minimums = built.minimums;
+    }
     if (printTicket !== settings.print_kitchen_ticket) body.print_kitchen_ticket = printTicket;
     if (Object.keys(body).length === 0) {
       setSuccess(true);
@@ -208,6 +271,16 @@ function DineInCard({
             {tables.map((table) => (
               <li key={table}>
                 <span>{table}</span>
+                {table !== TAKEOUT_LABEL && (
+                  <MinimumControl
+                    table={table}
+                    draft={minimums[table] ?? { mode: "none", amount: "" }}
+                    onChange={(draft) => {
+                      setSuccess(false);
+                      setMinimums({ ...minimums, [table]: draft });
+                    }}
+                  />
+                )}
                 <button
                   type="button"
                   className="btn-ghost"
@@ -242,6 +315,11 @@ function DineInCard({
         </div>
         <span className="hint">
           這裡的排列順序就是 POS 上按鈕的順序。移除桌號只影響之後能選的桌號，已經結帳的交易不受影響。
+        </span>
+        <span className="hint">
+          {"低消只限制客人掃桌上 QR 線上點餐：未達時不能送單，畫面會告訴客人還差多少。" +
+            "「每人至少一份」會請客人填用餐人數，每人至少點一份餐點（加購選項不另算一份）。" +
+            "改完低消請到「餐飲菜單 → 線上發布」按「發佈到線上點餐」才會生效。"}
         </span>
       </div>
       <label className="field field-toggle">

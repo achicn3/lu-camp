@@ -4,14 +4,15 @@
 // 價格一律依雲端目前生效的菜單重算；各項「未付款單上限」與建單在同一句 SQL 裡判斷（D1 依序寫入），
 // 同時湧進來的請求也不會超過上限。
 import { error, hex, json, sha256Hex } from "./http";
-import { type OrderLineInput, priceOrder } from "./pricing";
+import { type OrderLineInput, minimumShortfall, priceOrder } from "./pricing";
 import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
-import { TABLE_CODE } from "./tables";
+import { TABLE_CODE, type TableMinimum, parseMinimum } from "./tables";
 import { withinHours } from "./hours";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
 const NOTE_MAX = 60;
+const PARTY_MAX = 50;
 const POS_STALE_MS = 2 * 60 * 1000;
 const RATE_PER_MINUTE = 5;
 const FLOOD_WINDOW_MS = 5 * 60 * 1000;
@@ -37,6 +38,7 @@ interface OrderRequest {
   invoice: { carrier: string | null; tax_id: string | null };
   turnstile_token: string;
   note: string;
+  party_size: number | null;
   lines: OrderLineInput[];
 }
 
@@ -74,6 +76,10 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   // PostgreSQL cannot store NUL or lone UTF-16 surrogates. Reject before D1
   // accepts an order that would poison the POS import queue; emoji stay valid.
   if (/[\u0000\uD800-\uDFFF]/u.test(note)) return null;
+  const party = o.party_size ?? null;
+  if (party !== null && (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > PARTY_MAX)) {
+    return null;
+  }
   if (!Array.isArray(o.lines)) return null;
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {
@@ -102,6 +108,7 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
     invoice,
     turnstile_token: o.turnstile_token,
     note: note.trim(),
+    party_size: party as number | null,
     lines,
   };
 }
@@ -241,7 +248,11 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
 
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(
-      JSON.stringify([body.table_code, body.payment_method, body.note, body.lines, body.invoice]),
+      // 人數只在有填時才加進去：舊版客人頁（沒有人數）重送時指紋不變。
+      JSON.stringify([
+        body.table_code, body.payment_method, body.note, body.lines, body.invoice,
+        ...(body.party_size === null ? [] : [body.party_size]),
+      ]),
     ),
   );
   const token = await orderToken(env, storeId, body.idempotency_key);
@@ -260,20 +271,27 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
 
   let tableLabel: string | null = null;
   let serviceMode = "TAKEOUT";
+  let minimum: TableMinimum | null = null;
   if (body.table_code !== null) {
     if (!TABLE_CODE.test(body.table_code)) return error("table_not_found", 404);
-    const table = await env.DB.prepare("SELECT label, service_mode FROM tables WHERE store_id = ? AND code = ?")
+    const table = await env.DB.prepare(
+      "SELECT label, service_mode, minimum FROM tables WHERE store_id = ? AND code = ?",
+    )
       .bind(storeId, body.table_code)
-      .first<{ label: string; service_mode: string }>();
+      .first<{ label: string; service_mode: string; minimum: string | null }>();
     if (table === null) return error("table_not_found", 404);
     tableLabel = table.label;
     serviceMode = table.service_mode;
+    minimum = parseMinimum(table.minimum);
   }
+  if (minimum?.mode === "per_person_item" && body.party_size === null) return error("party_size_required", 422);
 
   const menu = await currentEffectiveMenu(env, storeId);
   if (menu === null) return error("menu_not_published", 503);
   const priced = priceOrder(menu, body.lines);
   if (!priced.ok) return json({ error: priced.reason, item_id: priced.item_id ?? null }, 422);
+  const shortfall = minimumShortfall(minimum, priced.total, priced.lines, body.party_size);
+  if (shortfall !== null) return json({ error: "minimum_not_met", ...shortfall }, 422);
 
   const deviceId = deviceFrom(req) ?? base64url(crypto.getRandomValues(new Uint8Array(16)).buffer);
   const orderId = hex(crypto.getRandomValues(new Uint8Array(16)).buffer);
@@ -284,8 +302,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     env.DB.prepare(
       "INSERT INTO orders (id, store_id, token_hash, idem_key, fingerprint, device_id, ip_hash, table_code, " +
         "table_label, service_mode, menu_version, total, payment_method, payment_status, sync_status, " +
-        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id) " +
-        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ? WHERE " +
+        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id, party_size) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ?, ? WHERE " +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND device_id = ?) < ? AND ` +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND ip_hash = ?) < ? AND ` +
         `(? IS NULL OR (SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND table_code = ?) < ?) AND ` +
@@ -311,6 +329,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       now,
       body.invoice.carrier,
       body.invoice.tax_id,
+      body.party_size,
       storeId,
       deviceId,
       LIMITS.device,

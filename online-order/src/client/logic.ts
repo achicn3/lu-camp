@@ -2,7 +2,7 @@
 import type {
   MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
 } from "./types";
-import { isRetailLine } from "../pricing";
+import { isRetailLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
@@ -282,4 +282,23 @@ export function quizResult(menu: MenuSnapshot, answers: number[]): QuizRef[] {
     .sort((a, b) => b.score - a.score || a.order - b.order)
     .slice(0, QUIZ_PICKS)
     .map((entry) => entry.ref);
+}
+
+/** 桌號低消的說明（顯示在購物車）；沒設＝null。 */
+export function minimumNotice(minimum: TableMinimum | null): string | null {
+  if (minimum === null) return null;
+  return minimum.mode === "amount"
+    ? `本桌低消 ${money(minimum.amount)}，每張訂單需滿 ${money(minimum.amount)} 才能送出。`
+    : "本桌每位客人至少點一份餐點，請填寫用餐人數。";
+}
+
+/** 還不能送出的原因（還差多少）；可以送＝null。與雲端送單檢查用同一支計算。 */
+export function minimumBlock(
+  minimum: TableMinimum | null, total: number, lines: { item_id?: number; qty: number }[], partySize: number | null,
+): string | null {
+  if (minimum?.mode === "per_person_item" && partySize === null) return "請先填寫用餐人數。";
+  const shortfall = minimumShortfall(minimum, total, lines, partySize);
+  if (shortfall === null || minimum === null) return null;
+  if ("missing_amount" in shortfall) return `本桌低消 ${money(total + shortfall.missing_amount)}，還差 ${money(shortfall.missing_amount)}。`;
+  return `${partySize} 位用餐，至少需點 ${partySize} 份餐點，還差 ${shortfall.missing_items} 份。`;
 }

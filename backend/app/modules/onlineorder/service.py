@@ -117,13 +117,21 @@ class OnlineOrderService:
         return result
 
     async def _push_tables(self, client: OnlineOrderClient, tables: list[OnlineTableCode]) -> None:
+        settings = await StoreSettingsService(self._session).get_effective_settings(client.store_id)
+        rules = settings.dine_in_minimums
         # revision＝推送當下的毫秒時間：雲端只收比上次新的，晚到的舊推送不能把停用的碼推回去。
         await client.put_json(
             "/integration/tables",
             {
                 "revision": time.time_ns() // 1_000_000,
                 "tables": [
-                    {"code": t.code, "label": t.label, "service_mode": t.service_mode}
+                    {
+                        "code": t.code,
+                        "label": t.label,
+                        "service_mode": t.service_mode,
+                        # 桌號低消（設定存的金額已是整數元）；外帶不設低消。
+                        "minimum": rules.get(t.label) if t.service_mode == "DINE_IN" else None,
+                    }
                     for t in tables
                 ],
             },

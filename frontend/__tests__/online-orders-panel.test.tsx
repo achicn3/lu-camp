@@ -147,6 +147,14 @@ describe("POS 線上訂單", () => {
     expect(within(rejected).queryByRole("button", { name: "帶入結帳" })).toBeNull();
   });
 
+  it("有填用餐人數的桌：桌號旁顯示幾位（每人至少一份的低消桌）", async () => {
+    stubFetch(() => json(overview([order(1, { party_size: 3 })])));
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    expect(screen.getByRole("listitem", { name: /桌號 A1・3 位/ })).toBeTruthy();
+  });
+
   it("帶入結帳：價格沒變直接帶入", async () => {
     stubFetch((url) => (url.endsWith("/cart") ? json(cart()) : json(overview([order(1)]))));
     const onLoad = vi.fn();

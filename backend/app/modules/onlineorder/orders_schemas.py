@@ -38,6 +38,7 @@ class HandoverItemRead(BaseModel):
 
 class OnlineOrderRead(BaseModel):
     id: int
+    party_size: int | None = None
     remote_id: str
     table_label: str | None
     service_mode: str
@@ -66,6 +67,7 @@ class OnlineOrderRead(BaseModel):
         return cls(
             id=row.id,
             remote_id=row.remote_id,
+            party_size=row.party_size,
             table_label=row.table_label,
             service_mode=row.service_mode,
             total=row.total,

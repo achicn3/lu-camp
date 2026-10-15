@@ -73,6 +73,7 @@
 - [MacBook 正式機：升級到 2026-10-10 版（收購購物金「改成付現」）](./79-macbook-upgrade-convert-payout-to-cash.md)
 - [MacBook 正式機：升級到 2026-10-10 版（收購「改撥款方式」：購物金 ↔ 現金）](./80-macbook-upgrade-change-payout.md)
 - [MacBook 正式機：升級到 2026-10-10 版（販售籃可選現有散裝、組合價可只有一樣）](./81-macbook-upgrade-basket-from-existing-and-single-bundle.md)
+- [MacBook 正式機：升級到 2026-10-14 版（桌號低消、「不知道點什麼？」）](./83-macbook-upgrade-table-minimums.md)
 
 ## 評估與後續實作
 

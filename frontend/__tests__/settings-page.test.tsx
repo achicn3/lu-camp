@@ -312,6 +312,47 @@ describe("/settings", () => {
     expect(parsed).not.toHaveProperty("premium_rate");
   });
 
+  it("桌號低消：每桌各自設定，只送低消這一欄", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json(SETTINGS);
+      }
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    await userEvent.selectOptions(await screen.findByLabelText("A1 低消"), "amount");
+    await userEvent.type(screen.getByLabelText("A1 最低金額"), "300");
+    await userEvent.selectOptions(screen.getByLabelText("A2 低消"), "per_person_item");
+    await userEvent.click(screen.getByRole("button", { name: "儲存餐飲內用設定" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(JSON.parse(bodies[0])).toEqual({
+      dine_in_minimums: { A1: { mode: "amount", amount: "300" }, A2: { mode: "per_person_item" } },
+    });
+  });
+
+  it("桌號低消：金額沒填不送出、直接提示", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") bodies.push(String(init.body));
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    await userEvent.selectOptions(await screen.findByLabelText("A1 低消"), "amount");
+    await userEvent.click(screen.getByRole("button", { name: "儲存餐飲內用設定" }));
+    expect(await screen.findByText(/A1.*最低金額/)).toBeTruthy();
+    expect(bodies).toHaveLength(0);
+  });
+
   it("可關掉「收購送出後自動印標籤」，只送這一欄", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];

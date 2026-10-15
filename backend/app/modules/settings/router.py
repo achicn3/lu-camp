@@ -18,7 +18,11 @@ from app.modules.settings.schemas import (
 )
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import UserRole
-from app.shared.exceptions import EInvoiceActivationNotReady, InvalidPremiumRate
+from app.shared.exceptions import (
+    EInvoiceActivationNotReady,
+    InvalidPremiumRate,
+    InvalidTableMinimum,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -41,7 +45,7 @@ async def update_settings(
         settings = await StoreSettingsService(session).update_settings(
             user.store_id, actor_user_id=user.id, patch=payload
         )
-    except InvalidPremiumRate as exc:
+    except (InvalidPremiumRate, InvalidTableMinimum) as exc:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
