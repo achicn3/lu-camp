@@ -302,3 +302,16 @@ export function minimumBlock(
   if ("missing_amount" in shortfall) return `本桌低消 ${money(total + shortfall.missing_amount)}，還差 ${money(shortfall.missing_amount)}。`;
   return `${partySize} 位用餐，至少需點 ${partySize} 份餐點，還差 ${shortfall.missing_items} 份。`;
 }
+
+/**
+ * 送單前的低消關卡＋加點（店主 2026-10-15）：沒達低消才讓客人選「我是加點」，勾了就不擋；
+ * 是不是真的加點由店員現場判斷。已達低消時不帶加點（之前勾過也一樣），POS 才不會亂標。
+ */
+export function minimumGate(
+  minimum: TableMinimum | null, total: number, lines: { item_id?: number; qty: number }[],
+  partySize: number | null, addOnChecked: boolean,
+): { block: string | null; offerAddOn: boolean; addOn: boolean } {
+  const block = minimumBlock(minimum, total, lines, partySize);
+  const addOn = block !== null && addOnChecked;
+  return { block: addOn ? null : block, offerAddOn: block !== null, addOn };
+}

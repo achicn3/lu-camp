@@ -39,6 +39,8 @@ class HandoverItemRead(BaseModel):
 class OnlineOrderRead(BaseModel):
     id: int
     party_size: int | None = None
+    add_on: bool = False
+    """客人自稱加點、沒檢查本桌低消：請店員現場確認。"""
     remote_id: str
     table_label: str | None
     service_mode: str
@@ -68,6 +70,7 @@ class OnlineOrderRead(BaseModel):
             id=row.id,
             remote_id=row.remote_id,
             party_size=row.party_size,
+            add_on=row.add_on,
             table_label=row.table_label,
             service_mode=row.service_mode,
             total=row.total,

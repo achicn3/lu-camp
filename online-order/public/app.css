@@ -454,4 +454,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .party-field { display: flex; align-items: center; gap: 12px; margin-top: 10px; color: var(--ink); }
 .party-field input { width: 96px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #151719; color: var(--ink); font: inherit; font-size: 16px; text-align: center; }
 .minimum-shortfall { margin: 8px 0; }
+.add-on-field { margin: 8px 0; }
+.add-on-field[hidden] { display: none; }
+.add-on-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); font-size: 15px; }
+.add-on-choice input { width: 20px; height: 20px; margin: 0; accent-color: var(--gold); }
+.add-on-hint { margin: 2px 0 0 30px; color: var(--soft); font-size: 13px; }
+.add-on-hint[hidden] { display: none; }
 .action:disabled { opacity: .45; cursor: not-allowed; }

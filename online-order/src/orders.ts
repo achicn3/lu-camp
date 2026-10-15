@@ -39,6 +39,8 @@ interface OrderRequest {
   turnstile_token: string;
   note: string;
   party_size: number | null;
+  /** 客人勾了「我是加點」：不檢查本桌低消（店主 2026-10-15）。 */
+  add_on: boolean;
   lines: OrderLineInput[];
 }
 
@@ -80,6 +82,10 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   if (party !== null && (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > PARTY_MAX)) {
     return null;
   }
+  const addOn = o.add_on ?? false;
+  if (o.add_on === null || typeof addOn !== "boolean") return null;
+  // 加點是同桌已經點過再追加；外帶沒有桌、也沒有低消可免。
+  if (addOn && o.table_code === null) return null;
   if (!Array.isArray(o.lines)) return null;
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {
@@ -109,6 +115,7 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
     turnstile_token: o.turnstile_token,
     note: note.trim(),
     party_size: party as number | null,
+    add_on: addOn,
     lines,
   };
 }
@@ -248,10 +255,11 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
 
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(
-      // 人數只在有填時才加進去：舊版客人頁（沒有人數）重送時指紋不變。
+      // 人數、加點只在有填／有勾時才加進去：舊版客人頁（沒有這些欄位）重送時指紋不變。
       JSON.stringify([
         body.table_code, body.payment_method, body.note, body.lines, body.invoice,
         ...(body.party_size === null ? [] : [body.party_size]),
+        ...(body.add_on ? [{ add_on: true }] : []),
       ]),
     ),
   );
@@ -284,6 +292,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     serviceMode = table.service_mode;
     minimum = parseMinimum(table.minimum);
   }
+  // 加點不檢查低消：是不是真的加點由店員現場判斷（店主 2026-10-15）。
+  if (body.add_on) minimum = null;
   if (minimum?.mode === "per_person_item" && body.party_size === null) return error("party_size_required", 422);
 
   const menu = await currentEffectiveMenu(env, storeId);
@@ -302,8 +312,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     env.DB.prepare(
       "INSERT INTO orders (id, store_id, token_hash, idem_key, fingerprint, device_id, ip_hash, table_code, " +
         "table_label, service_mode, menu_version, total, payment_method, payment_status, sync_status, " +
-        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id, party_size) " +
-        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ?, ? WHERE " +
+        "hold_status, note, created_at, updated_at, invoice_carrier, invoice_tax_id, party_size, add_on) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNPAID', 'NEW', ?, ?, ?, ?, ?, ?, ?, ? WHERE " +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND device_id = ?) < ? AND ` +
         `(SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND ip_hash = ?) < ? AND ` +
         `(? IS NULL OR (SELECT count(*) FROM orders WHERE store_id = ? AND ${OPEN_UNPAID} AND table_code = ?) < ?) AND ` +
@@ -330,6 +340,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       body.invoice.carrier,
       body.invoice.tax_id,
       body.party_size,
+      body.add_on ? 1 : 0,
       storeId,
       deviceId,
       LIMITS.device,

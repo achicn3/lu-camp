@@ -398,3 +398,40 @@ it("人數納入冪等指紋；規則更動不阻擋已成立訂單重試", asyn
   expect((await order(request)).status).toBe(200);
   expect((await order({...request,party_size:1})).status).toBe(409);
 });
+
+// 加點（店主 2026-10-15）：客人自己勾「我是加點」就不檢查低消，真假由店員現場判斷；標記帶給 POS。
+it("加點不檢查整筆低消，標記同步 POS", async () => {
+  await minimumTable({mode:"amount",amount:350});
+  const response=await order({add_on:true});
+  expect(response.status).toBe(201);
+  const pull=await (await integration("GET","/integration/orders")).json() as {orders:{add_on:boolean}[]};
+  expect(pull.orders[0]?.add_on).toBe(true);
+});
+it("加點不用填人數、也不檢查每人一份", async () => {
+  await minimumTable({mode:"per_person_item"});
+  expect((await order({add_on:true})).status).toBe(201);
+  expect((await order({add_on:true,party_size:4})).status).toBe(201);
+});
+it("沒勾加點照樣擋；一般單同步 POS 時加點為 false", async () => {
+  await minimumTable({mode:"amount",amount:350});
+  expect((await order({add_on:false})).status).toBe(422);
+  expect((await order({lines:[{item_id:5,option_ids:[],qty:3}]})).status).toBe(201);
+  const pull=await (await integration("GET","/integration/orders")).json() as {orders:{add_on:boolean}[]};
+  expect(pull.orders[0]?.add_on).toBe(false);
+});
+it.each(["true",1,null])("拒絕無效的加點標記 %s", async add_on => {
+  expect((await order({add_on})).status).toBe(422);
+});
+it("外帶不能標加點", async () => {
+  expect((await order({table_code:null,add_on:true})).status).toBe(422);
+});
+it("加點納入冪等指紋；沒勾加點的舊版重送指紋不變", async () => {
+  await minimumTable({mode:"amount",amount:350});
+  const key=crypto.randomUUID();
+  expect((await order({idempotency_key:key,add_on:true})).status).toBe(201);
+  expect((await order({idempotency_key:key,add_on:true})).status).toBe(200);
+  expect((await order({idempotency_key:key})).status).toBe(409);
+  const plain={idempotency_key:crypto.randomUUID(),lines:[{item_id:5,option_ids:[],qty:3}]};
+  expect((await order(plain)).status).toBe(201);
+  expect((await order({...plain,add_on:false})).status).toBe(200);
+});

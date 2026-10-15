@@ -6513,6 +6513,11 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   margin: 0;
   color: var(--ink-soft);
 }
+.online-order-add-on {
+  margin: 0;
+  font-weight: 600;
+  color: var(--warn);
+}
 .online-order-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1563,3 +1563,24 @@ async def test_party_size_is_imported_and_bad_values_skip_the_order(
     assert result.imported == 2
     assert (await _order_row(db_session, _rid(301))).party_size == 3
     assert (await _order_row(db_session, _rid(304))).party_size is None
+
+
+async def test_add_on_flag_is_imported_and_shown_to_staff(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    # 加點（店主 2026-10-15）：客人勾了「我是加點」就不檢查低消，POS 要標出來讓店員現場判斷。
+    lines = [_line(1, ctx.latte, "拿鐵", 150)]
+    ctx.worker.orders = [
+        {**_order(_rid(311), lines), "add_on": True},
+        {**_order(_rid(312), lines), "add_on": 1},
+        {**_order(_rid(313), lines), "add_on": False},
+        _order(_rid(314), lines),
+    ]
+    result = await _svc(db_session, ctx).pull_once(ctx.store_id)
+    assert result.imported == 3
+    assert (await _order_row(db_session, _rid(311))).add_on is True
+    assert (await _order_row(db_session, _rid(313))).add_on is False
+    assert (await _order_row(db_session, _rid(314))).add_on is False
+    listed = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
+    flags = {o["remote_id"]: o["add_on"] for o in listed["orders"]}
+    assert flags[_rid(311)] is True and flags[_rid(314)] is False

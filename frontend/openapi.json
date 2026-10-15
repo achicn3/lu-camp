@@ -13691,6 +13691,11 @@
       },
       "OnlineOrderRead": {
         "properties": {
+          "add_on": {
+            "default": false,
+            "title": "Add On",
+            "type": "boolean"
+          },
           "attention": {
             "anyOf": [
               {

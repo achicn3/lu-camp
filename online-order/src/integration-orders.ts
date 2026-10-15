@@ -51,7 +51,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   // 卡住沒成立的已付款單（例如價格不符等店員處理）再多，也擋不住新單進來（Codex O5 第四輪）。
   const columns =
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-    "note, party_size, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
+    "note, party_size, add_on, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
   type PulledRow = Record<string, unknown> & {
     id: string;
     created_at: number;
@@ -62,6 +62,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
     linepay_attempt: number;
     invoice_carrier: string | null;
     invoice_tax_id: string | null;
+    add_on: number;
   };
   const [fresh, paid] = await env.DB.batch<PulledRow>([
     env.DB.prepare(`${columns}WHERE store_id = ? AND sync_status = 'NEW' ORDER BY created_at, id LIMIT ?`)
@@ -101,9 +102,10 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
     within_hours: await withinHours(env, storeId, now),
     ...(await paymentAlerts(env, storeId, now)),
     server_time: new Date(now).toISOString(),
-    orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, ...o }) => ({
+    orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, add_on, ...o }) => ({
       ...o,
       created_at: new Date(o.created_at).toISOString(),
+      add_on: add_on === 1,
       // LINE Pay 已付款：交易號（字串）與金額，POS 據此成立銷售、不再扣款（O5b）。
       ...(o.payment_method === "LINE_PAY" && o.payment_status === "PAID" && linepay_transaction_id !== null
         ? {

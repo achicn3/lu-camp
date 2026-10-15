@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, itemSoldOut, menuTabs, minimumBlock, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import { greeting, itemBadge, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -199,5 +199,23 @@ describe("桌號低消提示", () => {
     const takeHome = { catalog_product_id: 9, qty: 2 };
     expect(minimumBlock(rule, 150, [latte, takeHome], 3)).toBe("3 位用餐，至少需點 3 份餐點，還差 2 份。");
     expect(minimumBlock(rule, 450, [{ ...latte, qty: 3 }], 3)).toBeNull();
+  });
+});
+
+describe("加點（店主 2026-10-15）", () => {
+  const latte = { item_id: 5, option_ids: [], qty: 1 };
+  const amount = { mode: "amount", amount: 300 } as const;
+  it("沒達低消才讓客人選加點；勾了就不擋、送出時帶加點", () => {
+    expect(minimumGate(amount, 250, [latte], null, false)).toEqual({ block: "本桌低消 $300，還差 $50。", offerAddOn: true, addOn: false });
+    expect(minimumGate(amount, 250, [latte], null, true)).toEqual({ block: null, offerAddOn: true, addOn: true });
+  });
+  it("已達低消、外帶或沒設低消：不出現加點，也不帶加點（之前勾過也一樣）", () => {
+    expect(minimumGate(amount, 300, [latte], null, true)).toEqual({ block: null, offerAddOn: false, addOn: false });
+    expect(minimumGate(null, 50, [latte], null, true)).toEqual({ block: null, offerAddOn: false, addOn: false });
+  });
+  it("每人一份的桌：沒填人數也能選加點", () => {
+    const rule = { mode: "per_person_item" } as const;
+    expect(minimumGate(rule, 150, [latte], null, false)).toEqual({ block: "請先填寫用餐人數。", offerAddOn: true, addOn: false });
+    expect(minimumGate(rule, 150, [latte], null, true)).toEqual({ block: null, offerAddOn: true, addOn: true });
   });
 });

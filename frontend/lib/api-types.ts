@@ -9715,6 +9715,11 @@ export interface components {
         };
         /** OnlineOrderRead */
         OnlineOrderRead: {
+            /**
+             * Add On
+             * @default false
+             */
+            add_on: boolean;
             /** Attention */
             attention: string | null;
             /**

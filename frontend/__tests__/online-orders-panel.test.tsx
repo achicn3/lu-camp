@@ -155,6 +155,16 @@ describe("POS 線上訂單", () => {
     expect(screen.getByRole("listitem", { name: /桌號 A1・3 位/ })).toBeTruthy();
   });
 
+  it("客人勾了加點：桌號旁標「加點」並提醒店員確認低消", async () => {
+    stubFetch(() => json(overview([order(1, { add_on: true }), order(2)])));
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    const addOn = screen.getByRole("listitem", { name: /桌號 A1・加點/ });
+    expect(addOn.textContent).toContain("客人選了加點，沒檢查本桌低消，請現場確認是不是同桌加點。");
+    expect(screen.getAllByText(/請現場確認是不是同桌加點/)).toHaveLength(1);
+  });
+
   it("帶入結帳：價格沒變直接帶入", async () => {
     stubFetch((url) => (url.endsWith("/cart") ? json(cart()) : json(overview([order(1)]))));
     const onLoad = vi.fn();

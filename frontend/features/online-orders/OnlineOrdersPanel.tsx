@@ -109,7 +109,7 @@ function minutesSince(iso: string): number {
 function placeLabel(order: Order): string {
   if (order.service_mode === "TAKEOUT") return "外帶";
   const party = order.party_size ? `・${order.party_size} 位` : "";
-  return `桌號 ${order.table_label ?? "—"}${party}`;
+  return `桌號 ${order.table_label ?? "—"}${party}${order.add_on ? "・加點" : ""}`;
 }
 
 export function OnlineOrdersPanel({
@@ -395,6 +395,9 @@ export function OnlineOrdersPanel({
                           </li>
                         ))}
                       </ul>
+                      {order.add_on && (
+                        <p className="online-order-add-on">客人選了加點，沒檢查本桌低消，請現場確認是不是同桌加點。</p>
+                      )}
                       {order.note && <p className="online-order-note">備註：{order.note}</p>}
                       {order.attention != null && order.sync_status === "IMPORTED" && (
                         <p className="form-error">{order.attention}</p>

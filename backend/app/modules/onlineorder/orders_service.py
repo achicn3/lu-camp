@@ -838,6 +838,9 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
     party_size = raw.get("party_size")
     if party_size is not None and (type(party_size) is not int or not 1 <= party_size <= 50):
         raise ValueError("bad party size")
+    add_on = raw.get("add_on", False)
+    if type(add_on) is not bool:
+        raise ValueError("bad add-on flag")
     table = raw.get("table_label")
     paid = _paid_linepay(raw)
     invoice = _invoice(raw)
@@ -846,6 +849,7 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
         remote_id=str(raw["id"]),
         table_label=str(table)[:20] if table else None,
         party_size=party_size,
+        add_on=add_on,
         service_mode=mode,
         menu_version=int(raw["menu_version"]),
         total=Decimal(int(raw["total"])),

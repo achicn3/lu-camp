@@ -34,6 +34,7 @@ UI_TEXT = (
     "非營業分鐘逾自"
     "低填客寫差滿理達需"
     "使次法"
+    "場沿由"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 

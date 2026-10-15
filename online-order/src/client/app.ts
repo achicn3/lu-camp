@@ -3,7 +3,7 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
 import {
   BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
-  menuTabs, minimumBlock, minimumNotice, OTHER_TAB, PICKS_TAB, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine, type TableMinimum } from "../pricing";
@@ -23,6 +23,7 @@ type PayMethod = "CASH" | "LINE_PAY";
 interface InvoiceInput { carrier: string | null; tax_id: string | null }
 const PAY_KEY = "lk_pay_v1";
 const PARTY_KEY = "lk_party_v1";
+const ADD_ON_KEY = "lk_add_on_v1";
 const PARTY_MAX = 50;
 const MOBILE_CARRIER = /^\/[0-9A-Z.+-]{7}$/;
 const TAX_ID = /^\d{8}$/;
@@ -43,7 +44,7 @@ interface OrderView {
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
   idempotency_key: string; table_code: string | null; payment_method: PayMethod; invoice?: InvoiceInput;
-  note: string; lines: CartLine[]; blocked?: boolean; party_size?: number | null;
+  note: string; lines: CartLine[]; blocked?: boolean; party_size?: number | null; add_on?: boolean;
 }
 interface TurnstileApi {
   render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string;
@@ -443,6 +444,24 @@ function readParty(): number | null {
   const value = Number(sessionStorage.getItem(PARTY_KEY));
   return Number.isInteger(value) && value >= 1 && value <= PARTY_MAX ? value : null;
 }
+function readAddOn(): boolean { return sessionStorage.getItem(ADD_ON_KEY) === "1"; }
+/** 「我是加點」：沒達低消才出現，勾了就不擋（店主 2026-10-15）；真假由店員現場判斷。 */
+function addOnField(onChange: () => void): HTMLElement {
+  const box = el("div", "add-on-field");
+  const label = el("label", "add-on-choice");
+  const input = el("input") as HTMLInputElement;
+  input.id = "add-on"; input.type = "checkbox"; input.checked = readAddOn();
+  const hint = el("p", "add-on-hint", "加點不用達低消，店員會在現場確認。");
+  hint.hidden = !input.checked;
+  input.addEventListener("change", () => {
+    if (input.checked) sessionStorage.setItem(ADD_ON_KEY, "1"); else sessionStorage.removeItem(ADD_ON_KEY);
+    hint.hidden = !input.checked;
+    onChange();
+  });
+  label.append(input, el("span", "", "我是加點（同桌已經點過）"));
+  box.append(label, hint);
+  return box;
+}
 /** 低消說明＋（每人一份的桌）用餐人數；人數一改就重算能不能送出。 */
 function minimumField(onChange: () => void): HTMLElement | null {
   const notice = minimumNotice(tableMinimum);
@@ -521,11 +540,12 @@ function renderCart(): void {
   });
   body.append(el("p", "cart-total", `合計 ${money(priced.total)}`));
   const shortfall = el("p", "field-error minimum-shortfall");
-  const blocked = (): string | null => minimumBlock(tableMinimum, priced.total, priced.lines, readParty());
+  const gate = () => minimumGate(tableMinimum, priced.total, priced.lines, readParty(), readAddOn());
   // 低消緊接在合計下面：客人一眼看到還差多少，不必捲到付款方式下面找。
   let refreshMinimum = (): void => undefined;
   const minimum = minimumField(() => refreshMinimum());
-  if (minimum) body.append(minimum, shortfall);
+  const addOn = addOnField(() => refreshMinimum());
+  if (minimum) body.append(minimum, shortfall, addOn);
   const upsell = upsellBlock();
   if (upsell) body.append(upsell);
   const payment = paymentChoice();
@@ -533,7 +553,7 @@ function renderCart(): void {
   body.append(el("p", "take-home-note", "現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。"));
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
-    const reason = blocked();
+    const reason = gate().block;
     if (reason !== null) { showMessage(reason); return; }
     const invoice = payment.invoice();
     if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
@@ -541,8 +561,9 @@ function renderCart(): void {
   });
   payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單"; });
   refreshMinimum = (): void => {
-    const reason = blocked();
-    shortfall.textContent = reason ?? ""; shortfall.hidden = reason === null; submit.disabled = reason !== null;
+    const { block, offerAddOn } = gate();
+    shortfall.textContent = block ?? ""; shortfall.hidden = block === null; submit.disabled = block !== null;
+    addOn.hidden = !offerAddOn;
   };
   refreshMinimum();
   body.append(submit);
@@ -719,7 +740,9 @@ async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput =
   if (!status?.accepting) { showMessage(status?.within_hours === false ? "目前非營業時間，可先看看菜單。" : "目前暫停接單，請到櫃台點餐。"); return; }
   if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃台點餐。"); return; }
   if (method === "LINE_PAY" && !status.linepay) { showMessage("LINE Pay 暫時不能用，請改用現金。"); return; }
-  const draft = { ...newDraft(), payment_method: method, invoice };
+  // 加點以送出當下的購物車重算：已達低消就不帶，POS 才不會把一般單標成加點。
+  const addOn = minimumGate(tableMinimum, priced.total, priced.lines, readParty(), readAddOn()).addOn;
+  const draft = { ...newDraft(), payment_method: method, invoice, ...(addOn ? { add_on: true } : {}) };
   localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   await submitDraft(draft);
   } finally { checkoutStarting = false; }
@@ -738,10 +761,12 @@ async function submitDraft(draft: Draft): Promise<void> {
       body: JSON.stringify({ idempotency_key: draft.idempotency_key, table_code: draft.table_code,
         payment_method: draft.payment_method, note: draft.note, lines: draft.lines, turnstile_token: token,
         ...(draft.party_size ? { party_size: draft.party_size } : {}),
+        ...(draft.add_on ? { add_on: true } : {}),
         ...(draft.payment_method === "LINE_PAY" && draft.invoice ? { invoice: draft.invoice } : {}) }) });
     if (resp.ok) {
       const created = await resp.json() as OrderCreated;
       localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(CART_KEY); sessionStorage.removeItem("lk_note");
+      sessionStorage.removeItem(ADD_ON_KEY); // 下一張單由客人重新選，不沿用這次的加點
       cart = []; renderFooter(); history.pushState(null, "", `/order/${created.token}`);
       // LINE Pay：不用等保留的單直接去付款；要等 POS 確認限量的，留在訂單頁等「前往付款」。
       if (draft.payment_method === "LINE_PAY" && created.status !== "HOLD_REQUESTED" && await goLinePay(created.token)) return;
