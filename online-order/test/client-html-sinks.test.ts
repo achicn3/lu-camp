@@ -2,7 +2,13 @@
 // （brew.ts svg()：程式裡寫死的圖形字串，不含任何店家或客人輸入）。新增 HTML 寫入點要先過審。
 import { describe, expect, it } from "vitest";
 
-const sources = import.meta.glob("../src/client/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+// vite 的 import.meta.glob（測試時由 vite 展開）；只宣告這裡用到的形狀。
+declare global {
+  interface ImportMeta {
+    glob(pattern: string, options: { query: "?raw"; import: "default"; eager: true }): Record<string, string>;
+  }
+}
+const sources = import.meta.glob("../src/client/**/*.ts", { query: "?raw", import: "default", eager: true });
 const SINK = /\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML\s*\(|document\.write\s*\(/g;
 
 describe("客人頁不把字串當 HTML 塞進頁面", () => {
