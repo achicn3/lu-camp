@@ -1,4 +1,4 @@
-// 購物車付款方式（店主 2026-10-16）：兩個單選——「櫃台結帳」預設選好；LINE Pay 還沒開通時反灰不能選、寫「即將開放」。
+// 購物車付款方式（店主 2026-10-16）：兩個單選——「櫃檯結帳」預設選好；LINE Pay 還沒開通時反灰不能選、寫「即將開放」。
 // 唯讀：只連本機 Worker（沒設 LINE Pay），不送單。
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -21,7 +21,7 @@ try {
     await page.locator("#detail-add").click();
   }
   await page.getByRole("button", { name: /購物車 \d+ 份/ }).click();
-  const counter = page.getByRole("radio", { name: /櫃台結帳/ });
+  const counter = page.getByRole("radio", { name: /櫃檯結帳/ });
   const linePay = page.getByRole("radio", { name: /LINE Pay/ });
   assert.ok(await counter.isChecked(), "counter checkout is selected");
   assert.ok(await linePay.isDisabled(), "LINE Pay cannot be selected yet");

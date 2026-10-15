@@ -110,7 +110,7 @@ try {
     }
     menuHttpStatus = 200; currentMenu = menu; validTable = false;
     await page.goto(`${ORDER}/t/${"b".repeat(16)}`, { waitUntil: "networkidle" });
-    await page.getByText("這個 QR 已經失效了，請洽櫃台。", { exact: true }).waitFor();
+    await page.getByText("這個 QR 已經失效了，請洽櫃檯。", { exact: true }).waitFor();
     await check(page, "invalid-qr", width, capture);
     await page.close();
   }

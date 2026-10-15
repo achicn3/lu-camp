@@ -133,7 +133,7 @@ try {
   const order = await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.lines.some((line) => line.catalog_product_id === product.id)), "POS 拉到單");
   await waitFor(async () => (await must("GET", "/online-orders")).orders.find((o) => o.id === order.id && o.hold_status === "HELD"), "保留成功");
   ok("拉單即保留：庫存 3 → 2", (await onHand(product.id)) === 2);
-  await guest.getByText("請到櫃台付現金").waitFor({ timeout: 20000 });
+  await guest.getByText("請到櫃檯付現金").waitFor({ timeout: 20000 });
   ok("客人訂單頁也提醒到櫃檯領取", (await guest.locator("#order-body").innerText()).includes("帶著走的商品請到櫃檯領取"));
 
   // ④ POS 帶入結帳、收現

@@ -409,7 +409,7 @@ function renderMenu(snapshot: MenuSnapshot): void {
   $("tab-note").textContent = note ?? ""; $("tab-note").hidden = note === undefined;
   const list = $("list");
   list.replaceChildren(...(current ? tabContent(snapshot, current) : []));
-  if (!list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
+  if (!list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃檯點餐。"));
   $("shortcuts").replaceChildren(...(snapshot.quiz ? [button("不知道點什麼？", () => startQuiz(), "shortcut quiz-entry")] : []));
   renderQuiz(snapshot);
 }
@@ -525,7 +525,7 @@ function renderCart(): void {
   const draft = readDraft();
   if (draft !== null) {
     body.append(el("p", "message", draft.blocked
-      ? "這筆訂單的識別碼有衝突。請到櫃台確認，暫時不要重新送單。"
+      ? "這筆訂單的識別碼有衝突。請到櫃檯確認，暫時不要重新送單。"
       : "上一筆訂單的結果尚未確認。請用同一筆資料重試，避免重複送單。"));
     if (!draft.blocked) body.append(button("重試確認訂單", () => void submitDraft(draft)));
     showScreen("cart"); return;
@@ -600,7 +600,7 @@ function renderCart(): void {
   body.append(submit);
   showScreen("cart");
 }
-/** 付款方式（docs/44 §4.4.2）：兩個單選——櫃台結帳、LINE Pay。店家還沒開 LINE Pay 時 LINE Pay 反灰、寫「即將開放」
+/** 付款方式（docs/44 §4.4.2）：兩個單選——櫃檯結帳、LINE Pay。店家還沒開 LINE Pay 時 LINE Pay 反灰、寫「即將開放」
  *  （店主 2026-10-16）；LINE Pay 可填手機條碼或統編，沒填印紙本。 */
 function paymentChoice(): {
   node: HTMLElement; method: () => PayMethod; invoice: () => InvoiceInput | null; onChange: (fn: () => void) => void;
@@ -625,7 +625,7 @@ function paymentChoice(): {
   const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind);
   extra.append(kindLabel, code);
   const options = [
-    ["CASH", "櫃台結帳", "到櫃台付款後才會製作", true],
+    ["CASH", "櫃檯結帳", "到櫃檯付款後才會製作", true],
     ["LINE_PAY", "LINE Pay", linePayOpen ? "現在付，付好就開始製作" : "即將開放", linePayOpen],
   ] as const;
   for (const [value, label, hint, enabled] of options) {
@@ -772,8 +772,8 @@ async function startCheckout(method: PayMethod = "CASH", invoice: InvoiceInput =
   const priced = checkCart(menu, cart);
   if (!priced.ok) { showMessage(cartError(new Error(priced.reason))); return; }
   const live = await getJson<StoreStatus>("/api/status"); status = live.body;
-  if (!status?.accepting) { showMessage(status?.within_hours === false ? "目前非營業時間，可先看看菜單。" : "目前暫停接單，請到櫃台點餐。"); return; }
-  if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃台點餐。"); return; }
+  if (!status?.accepting) { showMessage(status?.within_hours === false ? "目前非營業時間，可先看看菜單。" : "目前暫停接單，請到櫃檯點餐。"); return; }
+  if (!status.turnstile_site_key) { showMessage("驗證服務尚未設定，請到櫃檯點餐。"); return; }
   if (method === "LINE_PAY" && !status.linepay) { showMessage("LINE Pay 暫時不能用，請改用現金。"); return; }
   // 加點以送出當下的購物車重算：已達低消就不帶，POS 才不會把一般單標成加點。
   const addOn = minimumGate(tableMinimum, priced.total, priced.lines, readParty(), readAddOn()).addOn;
@@ -810,7 +810,7 @@ async function submitDraft(draft: Draft): Promise<void> {
     const result = await resp.json() as { error?: string; missing_amount?: number; missing_items?: number };
     if (resp.status === 409) {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, blocked: true }));
-      renderCart(); showMessage("訂單識別碼有衝突。請到櫃台確認，暫時不要重新送單。");
+      renderCart(); showMessage("訂單識別碼有衝突。請到櫃檯確認，暫時不要重新送單。");
     } else if (resp.status === 422 || resp.status === 403 || resp.status === 404) {
       localStorage.removeItem(DRAFT_KEY);
       renderCart();
@@ -897,9 +897,9 @@ function linePayState(view: OrderView): string | null {
     case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項，確認後就能用 LINE Pay 付款。";
     case "UNPAID":
       if (view.linepay_result === "EXPIRED") return "保留時間已過、沒有扣款。請回菜單重新點。";
-      if (view.linepay_result === "CANCELLED") return "LINE Pay 付款已取消，沒有扣款。可以重新付款，或到櫃台付現金。";
-      if (view.linepay_result === "FAILED") return "LINE Pay 付款沒有成功，沒有扣款。可以重新付款，或到櫃台付現金。";
-      return "訂單已收到，請用 LINE Pay 付款，或到櫃台付現金。";
+      if (view.linepay_result === "CANCELLED") return "LINE Pay 付款已取消，沒有扣款。可以重新付款，或到櫃檯付現金。";
+      if (view.linepay_result === "FAILED") return "LINE Pay 付款沒有成功，沒有扣款。可以重新付款，或到櫃檯付現金。";
+      return "訂單已收到，請用 LINE Pay 付款，或到櫃檯付現金。";
     case "PAID": return "LINE Pay 已付款，開始製作囉。";
     default: return null;
   }
@@ -915,8 +915,8 @@ function orderState(view: OrderView): string {
   if (linePay !== null) return linePay;
   switch (view.status) {
     case "HOLD_REQUESTED": return "訂單已收到，正在確認限量品項。請稍候。";
-    case "HELD": return "訂單已確認。請到櫃台付現金，付款後才會製作。";
-    case "UNPAID": return "訂單已收到。請在送出後 10 分鐘內到櫃台結帳，逾時自動取消；付款後才會製作。";
+    case "HELD": return "訂單已確認。請到櫃檯付現金，付款後才會製作。";
+    case "UNPAID": return "訂單已收到。請在送出後 10 分鐘內到櫃檯結帳，逾時自動取消；付款後才會製作。";
     case "PAID": return "已付款，謝謝你。";
     case "REJECTED": return "份數不足，這張訂單未成立。請回菜單重新選。";
     case "CANCELLED": return "這張訂單已取消。";
@@ -1062,11 +1062,11 @@ async function main(): Promise<void> {
       $("table").textContent = tableResult.body.service_mode === "TAKEOUT" ? "外帶" : `桌 ${tableResult.body.label}`;
       tableMinimum = tableResult.body.service_mode === "DINE_IN" ? tableResult.body.minimum ?? null : null;
       $("table").hidden = false;
-    } else if (tableResult.status === 404) { showMessage("這個 QR 已經失效了，請洽櫃台。"); return; }
+    } else if (tableResult.status === 404) { showMessage("這個 QR 已經失效了，請洽櫃檯。"); return; }
   }
   if (menuResult.body === null) {
     if (orderToken) { await openOrder(orderToken); return; }
-    showMessage(menuResult.status === 404 ? "菜單準備中，請洽櫃台點餐。" : "連不上網路，請稍後再試或至櫃台點餐。"); return;
+    showMessage(menuResult.status === 404 ? "菜單準備中，請洽櫃檯點餐。" : "連不上網路，請稍後再試或至櫃檯點餐。"); return;
   }
   menu = menuResult.body; void loadHandFont(menu.font);
   cart = readCart(); renderMenu(menu); renderFooter();

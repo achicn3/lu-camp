@@ -216,7 +216,7 @@ describe("沒有備註", () => {
 
 
 describe("接單狀態", () => {
-  it("POS 太久沒來拉單（超過 2 分鐘）：視為暫停，請至櫃台", async () => {
+  it("POS 太久沒來拉單（超過 2 分鐘）：視為暫停，請至櫃檯", async () => {
     await open(3 * 60 * 1000);
     const resp = await order();
     expect(resp.status).toBe(503);
