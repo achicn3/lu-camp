@@ -388,3 +388,59 @@ it("付款逾時獨立提醒，打烊不把手動開關變成暫停", async () =
   expect(screen.getByText(/2026101300000000001/)).toBeTruthy();
   expect(screen.queryByRole("button", {name:"帶入結帳"})).toBeNull();
 });
+
+// 上線前資安（docs/44 §8.4）：雲端或 D1 被竄改時，送進 POS 的每個文字欄位都只能當純文字顯示。
+describe("惡意字串不會在 POS 執行", () => {
+  const XSS = `<img src=x onerror="window.__posXss=1"><script>window.__posXss=2</script>`;
+  const injected = () => document.querySelectorAll("img[onerror], script, iframe, [onload]").length;
+
+  it("清單、付款提醒、暫停原因、連線錯誤、匯入異常、拒單原因、交貨品項：全部原樣顯示文字", async () => {
+    stubFetch(() =>
+      json(
+        overview(
+          [
+            order(1, {
+              table_label: XSS,
+              lines: [{ line_no: 1, item_id: 5, name: XSS, option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false }],
+              linepay_paid: true, payment_method: "LINE_PAY", attention: XSS,
+            }),
+            order(2, { hold_status: "REJECTED", reject_reason: XSS }),
+            order(3, {
+              payment_status: "PAID", sync_status: "SETTLED", sale_id: 7, fulfillment_status: "AWAITING",
+              handover_items: [{ catalog_product_id: 41, name: XSS, qty: 1 }],
+            }),
+          ],
+          {
+            accepting: false, paused_reason: XSS, last_pull_error: XSS, payment_alert_count: 1,
+            payment_alerts: [{ id: "a".repeat(32), table_label: XSS, service_mode: "DINE_IN", total: "150",
+              status: "CONFIRMING", transaction_id: "1", started_at: new Date(Date.now() - 660000).toISOString() }],
+          },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    const dialog = screen.getByRole("dialog", { name: "線上訂單" });
+    // 每處都以字面文字出現（7 處：桌號、品名、匯入異常、拒單原因、交貨品項、暫停原因、連線錯誤、付款提醒桌號）
+    expect(dialog.textContent!.split("window.__posXss=1").length - 1).toBeGreaterThanOrEqual(7);
+    expect(injected()).toBe(0);
+    expect((window as unknown as { __posXss?: number }).__posXss).toBeUndefined();
+  });
+
+  it("帶入結帳的價格變動視窗：品名原樣顯示文字", async () => {
+    const changed = cart({
+      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [], experience_id: null, qty: 1, description: XSS, online_unit_price: "150", unit_price: "160" }],
+      total: "160",
+    });
+    stubFetch((url) => (url.endsWith("/cart") ? json(changed) : json(overview([order(1)]))));
+    const user = userEvent.setup();
+    wrap(<OnlineOrdersPanel cartEmpty onLoad={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /線上訂單/ }));
+    await user.click(screen.getByRole("button", { name: "帶入結帳" }));
+    const alert = await screen.findByRole("alertdialog", { name: /價格有變動/ });
+    expect(alert.textContent).toContain(XSS);
+    expect(injected()).toBe(0);
+    expect((window as unknown as { __posXss?: number }).__posXss).toBeUndefined();
+  });
+});
