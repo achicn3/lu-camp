@@ -901,7 +901,7 @@ function MenuItemsPanel({ mode }: { mode: "day" | "range" }) {
 
           <h3 className="rpt-layer-h">品項排名</h3>
           {rows.length === 0 ? (
-            <p className="hint">這段期間沒有賣出餐飲。</p>
+            <p className="hint">{mode === "day" ? "這一天" : "這段期間"}沒有賣出餐飲。</p>
           ) : (
             <div className="inv-table-wrap">
               <table className="inv-table rpt-insight-table" aria-label="餐飲品項排名">
@@ -983,7 +983,7 @@ function MenuItemsPanel({ mode }: { mode: "day" | "range" }) {
             </>
           )}
 
-          <h3 className="rpt-layer-h">這段期間沒賣出的品項</h3>
+          <h3 className="rpt-layer-h">{mode === "day" ? "這一天" : "這段期間"}沒賣出的品項</h3>
           {report.not_sold.length === 0 ? (
             <p className="hint">上架中的品項都有賣出。</p>
           ) : (
