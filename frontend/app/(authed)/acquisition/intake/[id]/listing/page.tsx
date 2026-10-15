@@ -223,6 +223,9 @@ function GroupCard({
           placeholder="選擇或新增品牌"
           selectedId={shared.brandId}
           selectedName={shared.brandName}
+          // 按「品名」建型號的那一下先鎖住品牌：回來的型號掛在原本的品牌底下，
+          // 中途換品牌會配錯、存檔被擋（Codex P2）。
+          disabled={usingName}
           onChange={(o) =>
             onChangeAll({ brandId: o?.id ?? null, brandName: o?.name ?? null, modelId: null, modelName: null })
           }
