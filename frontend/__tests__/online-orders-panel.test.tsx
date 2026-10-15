@@ -42,6 +42,7 @@ function wrap(node: ReactNode) {
 function order(id: number, extra: Partial<Order> = {}): Order {
   return {
     id,
+    add_on: false,
     remote_id: id.toString(16).padStart(32, "0"),
     table_label: "A1",
     service_mode: "DINE_IN",
