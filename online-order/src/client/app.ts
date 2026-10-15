@@ -581,7 +581,7 @@ function renderCart(): void {
   if (upsell) body.append(upsell);
   const payment = paymentChoice();
   body.append(payment.node);
-  body.append(el("p", "take-home-note", "現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。"));
+  body.append(el("p", "take-home-note", "櫃檯結帳訂單請在送出後 10 分鐘內結帳，逾時將自動取消。"));
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
   const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出訂單", () => {
     const reason = gate().block;

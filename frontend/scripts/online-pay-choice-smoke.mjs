@@ -27,6 +27,7 @@ try {
   assert.ok(await linePay.isDisabled(), "LINE Pay cannot be selected yet");
   assert.ok(!(await linePay.isChecked()));
   await page.locator(".pay-methods").getByText("即將開放").waitFor();
+  await page.getByText("櫃檯結帳訂單請在送出後 10 分鐘內結帳，逾時將自動取消。", { exact: true }).waitFor({ timeout: 3000 });
   await linePay.click({ force: true });
   assert.ok(await counter.isChecked(), "tapping the greyed LINE Pay keeps counter checkout");
   assert.ok(await page.getByRole("button", { name: "送出訂單", exact: true }).isVisible());
