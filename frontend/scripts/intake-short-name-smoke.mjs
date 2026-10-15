@@ -1,7 +1,8 @@
 // 排隊收購「詳細」的商品簡稱建議（店主 2026-10-14）。
 // 先用 API 在另一批估兩次同名商品（Coleman 收 250、Snow Peak 收 300，品牌帶在估價列上）→
 // 新報到 1 件 → 「詳細」打簡稱一部分 → 清單列出兩筆、各帶品牌與上次估的原價／預計售價／收購價 →
-// 點 Snow Peak 那筆 → 簡稱帶入、下方留著「上次估價」→ 按「帶入」填上次的價格 → 存檔，後端簡稱／收購價／品牌正確。
+// 點 Snow Peak 那筆 → 簡稱帶入、下方留著「上次估價」→ 按「帶入」填上次的價格（當場存、列上收購價跟著變）
+// → 存檔，後端簡稱／收購價／品牌正確。打品牌也找得到（10-15）。
 // 需 backend + frontend 已起、已 seed（dev-manager）。
 // 執行：SMOKE_BASE=http://localhost:3000 SMOKE_API_BASE=http://localhost:8000 node scripts/intake-short-name-smoke.mjs
 import { mkdirSync } from "node:fs";
@@ -90,10 +91,22 @@ try {
   await page.getByRole("button", { name: "1 號 詳細" }).click();
   const form = page.getByRole("form", { name: /修改第 1 列/ });
   const input = form.getByLabel("商品簡稱");
+  const menu = form.getByRole("listbox", { name: "以前估過的商品" });
+  // 打品牌也找得到（店主 2026-10-15）：只有一筆也寫出品牌
+  await input.fill("");
+  await input.pressSequentially(`oleman-${RUN}`, { delay: 30 });
+  await menu.waitFor({ timeout: 8000 });
+  const byBrand = await menu.getByRole("option").allTextContents();
+  ok(
+    "打品牌找得到、寫出品牌",
+    byBrand.length === 1 && byBrand[0].includes(NAME) && byBrand[0].includes(`Coleman-${RUN}`),
+    byBrand.join(" | "),
+  );
+  await page.screenshot({ path: join(SHOTS, "00-brand-search.png") });
+
   await input.fill("");
   await input.pressSequentially(`椅${RUN}`, { delay: 30 });
-  const menu = form.getByRole("listbox", { name: "以前估過的商品" });
-  await menu.waitFor({ timeout: 8000 });
+  await menu.getByRole("option").nth(1).waitFor({ timeout: 8000 });
   const options = menu.getByRole("option");
   ok("打簡稱一部分就列出以前估過的", (await options.count()) === 2, String(await options.count()));
   const texts = await options.allTextContents();
@@ -124,6 +137,11 @@ try {
   ok("帶入：5 折", (await form.getByRole("button", { name: "5折" }).getAttribute("aria-pressed")) === "true");
   ok("帶入：預計售價 500", (await form.getByLabel("預計售價／件").inputValue()) === "500");
   ok("帶入：收購價 300（Snow Peak 那次）", (await form.getByLabel("收購價／件").inputValue()) === "300");
+  // 帶入當場存：類型按鈕旁的收購價跟著變、詳細不收起（店主 2026-10-15）
+  const rowPrice = page.getByLabel("1 號 收購價", { exact: true });
+  await page.waitForFunction((el) => el?.value === "300", await rowPrice.elementHandle(), { timeout: 8000 });
+  ok("帶入後列上收購價也是 300", (await rowPrice.inputValue()) === "300");
+  ok("帶入後詳細還開著", await form.isVisible());
   await page.screenshot({ path: join(SHOTS, "03-applied.png") });
 
   await form.getByRole("button", { name: "儲存詳細" }).click();

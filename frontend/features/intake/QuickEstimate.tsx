@@ -224,18 +224,30 @@ function PriceRow({
   const name = displayName(line);
   const kind = kindOf(line);
 
+  async function save(fields: LineFields) {
+    const { data, error: apiErr } = await api.PATCH("/api/v1/intake-batches/{batch_id}/lines/{line_id}", {
+      params: { path: { batch_id: batchId, line_id: line.id } },
+      body: fields,
+    });
+    if (!data) throw new Error(detail(apiErr) ?? "儲存失敗");
+    return data;
+  }
+
   const patch = useMutation({
-    mutationFn: async (fields: LineFields) => {
-      const { data, error: apiErr } = await api.PATCH("/api/v1/intake-batches/{batch_id}/lines/{line_id}", {
-        params: { path: { batch_id: batchId, line_id: line.id } },
-        body: fields,
-      });
-      if (!data) throw new Error(detail(apiErr) ?? "儲存失敗");
-      return data;
-    },
+    mutationFn: save,
     onSuccess: () => {
       setError(null);
       setOpen(false);
+      onSaved();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  // 「詳細」按「帶入」當場存：列上的收購價、上面的合計馬上跟著變；詳細不收起，可以接著改。
+  const apply = useMutation({
+    mutationFn: save,
+    onSuccess: () => {
+      setError(null);
       onSaved();
     },
     onError: (e: Error) => setError(e.message),
@@ -372,9 +384,10 @@ function PriceRow({
           rates={rates}
           defaultCommissionPct={defaultCommissionPct}
           submitLabel="儲存詳細"
-          busy={patch.isPending}
+          busy={patch.isPending || apply.isPending}
           quick
           onSubmit={(fields) => patch.mutate(fields)}
+          onApplied={(fields) => apply.mutate(fields)}
           onCancel={() => setOpen(false)}
         />
       )}

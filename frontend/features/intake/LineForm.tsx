@@ -37,6 +37,7 @@ export function LineForm({
   onCancel,
   quick = false,
   searchShortNames,
+  onApplied,
 }: {
   initial?: Line;
   rates: PricingRates;
@@ -51,6 +52,8 @@ export function LineForm({
   quick?: boolean;
   /** 測試用：商品簡稱建議的查詢；預設查後端。 */
   searchShortNames?: (query: string) => Promise<ShortNameSuggestion[]>;
+  /** 按了「帶入」：帶進表單的那些欄位。快速估價拿去當場存，列上的收購價才會跟著變（店主 2026-10-15）。 */
+  onApplied?: (fields: LineFields) => void;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
   const [qty, setQty] = useState(String(initial?.qty ?? 1));
@@ -103,18 +106,33 @@ export function LineForm({
    * 收購價），只帶原價。 */
   function applyPrevious(previous: ShortNameSuggestion) {
     setApplied(previous);
-    if (previous.reference_price != null) setReference(previous.reference_price);
-    if (previous.acquisition_type !== effectiveType) return;
-    if (previous.discount_pct != null) {
-      const next = pctToDiscount(previous.discount_pct);
-      setDiscount(next);
-      setCustomDiscount(!QUICK_DISCOUNTS.includes(next));
+    const fields: LineFields = {
+      short_name: previous.short_name,
+      brand_id: previous.brand_id ?? null,
+      product_model_id: previous.product_model_id ?? null,
+    };
+    if (previous.reference_price != null) {
+      setReference(previous.reference_price);
+      fields.reference_price = previous.reference_price;
     }
-    if (previous.expected_listed_price != null) setListed(previous.expected_listed_price);
-    if (showDealCost && previous.deal_cost != null) {
-      setDealCost(previous.deal_cost);
-      setDealTouched(true);
+    if (previous.acquisition_type === effectiveType) {
+      if (previous.discount_pct != null) {
+        const next = pctToDiscount(previous.discount_pct);
+        setDiscount(next);
+        setCustomDiscount(!QUICK_DISCOUNTS.includes(next));
+        fields.discount_pct = previous.discount_pct;
+      }
+      if (previous.expected_listed_price != null) {
+        setListed(previous.expected_listed_price);
+        fields.expected_listed_price = previous.expected_listed_price;
+      }
+      if (showDealCost && previous.deal_cost != null) {
+        setDealCost(previous.deal_cost);
+        setDealTouched(true);
+        fields.deal_cost = previous.deal_cost;
+      }
     }
+    onApplied?.(fields);
   }
 
   function applyPricing(nextReference: string, nextDiscount: string) {

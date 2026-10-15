@@ -170,6 +170,88 @@ describe("快速估價", () => {
     );
   });
 
+  it("「詳細」按「帶入」：當場存好，列上的收購價跟著變，詳細不收起（店主 2026-10-15）", async () => {
+    const calls = stubFetch((url) =>
+      url.includes("short-name-suggestions")
+        ? json([
+            {
+              short_name: "焚火台",
+              brand_id: 3,
+              brand_name: "Snow Peak",
+              product_model_id: null,
+              product_model_name: null,
+              times: 1,
+              estimated_on: "2026-10-01",
+              acquisition_type: "BUYOUT",
+              reference_price: "3000",
+              discount_pct: 50,
+              expected_listed_price: "1500",
+              deal_cost: "777",
+              bulk_piece_count: null,
+            },
+          ])
+        : null,
+    );
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("商品簡稱"), "焚火");
+    await user.click(await within(form).findByRole("option", { name: /焚火台/ }));
+    await user.click(within(form).getByRole("button", { name: "帶入" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+        short_name: "焚火台",
+        brand_id: 3,
+        product_model_id: null,
+        reference_price: "3000",
+        discount_pct: 50,
+        expected_listed_price: "1500",
+        deal_cost: "777",
+      }),
+    );
+    expect(screen.getByRole("form", { name: /修改第 1 列/ })).toBeTruthy();
+  });
+
+  it("「帶入」上次類型不同：只存簡稱、品牌與原價，不存收購價", async () => {
+    const calls = stubFetch((url) =>
+      url.includes("short-name-suggestions")
+        ? json([
+            {
+              short_name: "焚火台",
+              brand_id: null,
+              brand_name: null,
+              product_model_id: null,
+              product_model_name: null,
+              times: 1,
+              estimated_on: "2026-10-01",
+              acquisition_type: "CONSIGNMENT",
+              reference_price: "3000",
+              discount_pct: 60,
+              expected_listed_price: "1800",
+              deal_cost: null,
+              bulk_piece_count: null,
+            },
+          ])
+        : null,
+    );
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("商品簡稱"), "焚火");
+    await user.click(await within(form).findByRole("option", { name: /焚火台/ }));
+    await user.click(within(form).getByRole("button", { name: "帶入" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+        short_name: "焚火台",
+        brand_id: null,
+        product_model_id: null,
+        reference_price: "3000",
+      }),
+    );
+  });
+
   it("「詳細」：按折數一律照新折數重算、蓋掉已填的收購價（同收購頁，店主 2026-10-04）", async () => {
     const calls = stubFetch();
     const user = userEvent.setup();
