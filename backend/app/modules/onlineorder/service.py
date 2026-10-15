@@ -61,6 +61,7 @@ class OnlineOrderStatus:
     last_version: int | None
     last_published_at: datetime | None
     tables: list[TableLink]
+    store_name: str
 
 
 def _new_code() -> str:
@@ -278,7 +279,9 @@ class OnlineOrderService:
         client = self._client_for(store_id)
         base = client.base_url if client is not None else ""
         tables = await self._repo.active_tables(store_id)
+        store = await StoreService(self._session).get_receipt_header(store_id)
         return OnlineOrderStatus(
+            store_name=store.name,
             configured=client is not None,
             last_version=latest.version if latest else None,
             last_published_at=latest.published_at if latest else None,

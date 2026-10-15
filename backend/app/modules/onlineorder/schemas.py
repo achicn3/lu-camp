@@ -24,6 +24,8 @@ class OnlineOrderStatusRead(BaseModel):
     last_version: int | None
     last_published_at: datetime | None
     tables: list[OnlineTableRead]
+    store_name: str
+    """店名（印在桌號 QR 卡片上，與線上菜單同一個名字）。"""
 
     @classmethod
     def from_status(cls, s: OnlineOrderStatus) -> "OnlineOrderStatusRead":
@@ -32,6 +34,7 @@ class OnlineOrderStatusRead(BaseModel):
             last_version=s.last_version,
             last_published_at=s.last_published_at,
             tables=[OnlineTableRead.from_link(t) for t in s.tables],
+            store_name=s.store_name,
         )
 
 

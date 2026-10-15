@@ -52,6 +52,24 @@ afterEach(() => {
 });
 
 describe("線上點餐區塊", () => {
+  it("列印桌號 QR：整批一個入口，每桌也能只印自己（店主 2026-10-15）", async () => {
+    stubFetch(() => json(STATUS));
+    wrap(<OnlinePublishPanel />);
+    const all = await screen.findByRole("link", { name: "列印桌號 QR" });
+    expect(all.getAttribute("href")).toBe("/menu/table-qr");
+    expect(screen.getByRole("link", { name: "A1 列印 QR" }).getAttribute("href")).toBe("/menu/table-qr?table=A1");
+    expect(screen.getByRole("link", { name: "外帶 列印 QR" }).getAttribute("href")).toBe(
+      `/menu/table-qr?table=${encodeURIComponent("外帶")}`,
+    );
+  });
+
+  it("沒設定雲端網址：不給列印入口", async () => {
+    stubFetch(() => json({ ...STATUS, configured: false }));
+    wrap(<OnlinePublishPanel />);
+    await screen.findByText(/尚未設定線上點餐的雲端網址與密鑰/);
+    expect(screen.queryByRole("link", { name: /列印/ })).toBeNull();
+  });
+
   it("顯示上次發佈時間與各桌網址", async () => {
     stubFetch(() => json(STATUS));
     wrap(<OnlinePublishPanel />);

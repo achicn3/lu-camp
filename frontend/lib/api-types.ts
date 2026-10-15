@@ -9770,6 +9770,8 @@ export interface components {
             last_published_at: string | null;
             /** Last Version */
             last_version: number | null;
+            /** Store Name */
+            store_name: string;
             /** Tables */
             tables: components["schemas"]["OnlineTableRead"][];
         };

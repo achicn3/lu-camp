@@ -206,6 +206,11 @@ menu_item_option_groups  品項 ↔ 群組（多對多＋排序）：一個群�
 
 - 桌位沿用 `settings.dine_in_tables`（docs/35），每桌另產生**不可猜的桌位碼**：
   `https://<host>/t/<tableCode>`。可在設定頁「重發」某桌的碼，舊碼即失效。
+- **桌號 QR 一鍵列印**（店主 2026-10-15）：菜單頁「線上點餐」→「列印桌號 QR」（`/menu/table-qr`），每桌一張卡
+  （店名、桌號、QR、「手機掃描，直接點餐」、小字網址），勾選要印的桌後按列印；A4 直式一頁六張（95×92mm，虛線裁切）。
+  重發某桌後在該列按「列印 QR」只先勾那一桌。QR 在瀏覽器端以 `qrcode-generator`（容錯 M）產生，不經雲端；
+  店名取自 `GET /online-order/status` 的 `store_name`（與線上菜單同名）。沒設定雲端網址不給列印；還沒發佈過會提醒先發佈。
+  驗收：`frontend/scripts/online-table-qr-print-smoke.mjs`（從畫面像素解回 QR 網址並開成客人頁）。
 - 也提供一個不綁桌的「外帶」碼（`service_mode = TAKEOUT`）。
 - 桌位碼**不是身分證明**：只決定桌號，不能用來查任何訂單。
 - **桌號低消**（店主 2026-10-14）：每個內用桌號可各自設定，`settings.dine_in_minimums`

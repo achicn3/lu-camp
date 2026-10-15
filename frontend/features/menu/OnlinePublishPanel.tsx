@@ -2,6 +2,7 @@
 // 菜單頁「線上點餐」區塊（docs/44 §3.5、§4.1；O3b）：把目前菜單發佈到客人掃碼的線上點餐，
 // 列出各桌 QR 網址，可單桌重發（舊 QR 立刻失效）。MANAGER 專用（菜單頁本身已擋）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
@@ -65,7 +66,7 @@ export function OnlinePublishPanel() {
     onSuccess: (data) => {
       setRotating(null);
       setError(null);
-      setNotice(`${data.label} 的 QR 已重發，舊的 QR 已失效，請重印這一桌。`);
+      setNotice(`${data.label} 的 QR 已重發，舊的 QR 已失效，請按「列印 QR」重印這一桌。`);
       refresh();
     },
     onError: (err: Error) => {
@@ -111,6 +112,11 @@ export function OnlinePublishPanel() {
           {error}
         </p>
       )}
+      {s !== undefined && configured && s.tables.length > 0 && (
+        <Link href="/menu/table-qr" className="btn-ghost online-publish-print">
+          列印桌號 QR
+        </Link>
+      )}
       {s !== undefined && s.tables.length > 0 && (
         <details className="online-publish-tables">
         <summary>客人掃碼的網址與重發 QR（{s.tables.length} 個）</summary>
@@ -129,6 +135,15 @@ export function OnlinePublishPanel() {
                   <td>{t.label}</td>
                   <td className="online-publish-url">{t.url}</td>
                   <td>
+                    {configured && (
+                      <Link
+                        href={`/menu/table-qr?table=${encodeURIComponent(t.label)}`}
+                        className="btn-ghost"
+                        aria-label={`${t.label} 列印 QR`}
+                      >
+                        列印 QR
+                      </Link>
+                    )}
                     <button
                       type="button"
                       className="btn-ghost"

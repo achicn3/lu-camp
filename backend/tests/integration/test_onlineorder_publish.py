@@ -252,6 +252,8 @@ async def test_status_lists_table_urls(
     urls = {t["label"]: t["url"] for t in status["tables"]}
     code = {t["label"]: t["code"] for t in worker.tables()}["A1"]
     assert urls["A1"] == f"{BASE}/t/{code}"
+    # 桌號 QR 列印卡片上印店名（與線上菜單同一個名字）。
+    assert status["store_name"] == "露坑"
 
 
 async def test_remote_failure_reports_error_and_records_nothing(

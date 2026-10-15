@@ -6831,3 +6831,44 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   padding: 2px 10px;
   font-size: 12px;
 }
+
+/* 桌號 QR 一鍵列印（店主 2026-10-15）：A4 直式一頁六張（2×3），虛線是裁切線；列印時只留卡片。 */
+.online-publish-print { display: inline-block; margin-left: var(--sp-2); }
+.table-qr-toolbar { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.table-qr-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); border: 1px solid var(--line, #ddd); border-radius: 8px; padding: var(--sp-2) var(--sp-3); }
+.table-qr-picks label { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.table-qr-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.table-qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 95mm), 95mm)); gap: 0; justify-content: start; }
+.table-qr-card {
+  box-sizing: border-box;
+  width: 95mm;
+  max-width: 100%;
+  height: 92mm;
+  padding: 6mm;
+  border: 1px dashed #999;
+  background: #fff;
+  color: #111;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  break-inside: avoid;
+}
+.table-qr-store { margin: 0; font-size: 12pt; letter-spacing: 0.2em; }
+.table-qr-title { margin: 1mm 0 2mm; font-size: 22pt; line-height: 1.1; }
+.table-qr-code { width: 52mm; height: 52mm; }
+.table-qr-hint { margin: 2mm 0 0; font-size: 12pt; font-weight: 600; }
+.table-qr-url { margin: 1mm 0 0; font-size: 6.5pt; color: #666; word-break: break-all; }
+/* 具名頁面：A4 版面只套在 QR 卡片，不影響其他頁的列印。 */
+@page table-qr { size: A4 portrait; margin: 10mm; }
+@media print {
+  .table-qr-sheet { page: table-qr; }
+  body:has(.table-qr-page) { background: #fff; }
+  body:has(.table-qr-page) .app-header,
+  .table-qr-page .pur-back,
+  .table-qr-page .page-title,
+  .table-qr-toolbar { display: none !important; }
+  body:has(.table-qr-page) .app-main { padding: 0; margin: 0; max-width: none; }
+  .table-qr-sheet { grid-template-columns: repeat(2, 95mm); }
+}

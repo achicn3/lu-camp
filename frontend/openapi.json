@@ -13881,6 +13881,10 @@
             ],
             "title": "Last Version"
           },
+          "store_name": {
+            "title": "Store Name",
+            "type": "string"
+          },
           "tables": {
             "items": {
               "$ref": "#/components/schemas/OnlineTableRead"
@@ -13893,7 +13897,8 @@
           "configured",
           "last_version",
           "last_published_at",
-          "tables"
+          "tables",
+          "store_name"
         ],
         "title": "OnlineOrderStatusRead",
         "type": "object"
