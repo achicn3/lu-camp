@@ -32,7 +32,7 @@ def _enum_col(enum_cls: type) -> Enum:
 
 
 class IntakeBatch(Base, TimestampMixin):
-    """一位客人帶來的一批商品。ticket_no 是同店同一台北營業日內的流水號（畫面顯示 A001）。"""
+    """一位客人帶來的一批商品。ticket_no 是同店同一台北營業日內的流水號（前面加當天字母）。"""
 
     __tablename__ = "intake_batches"
     __table_args__ = (

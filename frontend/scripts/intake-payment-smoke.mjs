@@ -203,7 +203,7 @@ try {
       printed.consignments?.length === 1 &&
       printed.consignments[0].name === "帳篷" &&
       printed.consignments[0].listed_price === "6000" &&
-      /排隊收購 A\d{3}，收購單 #\d+、#\d+、#\d+/.test(printed.reference) &&
+      /排隊收購 [A-Z]\d{3}，收購單 #\d+、#\d+、#\d+/.test(printed.reference) &&
       printed.signature_png_base64.length > 100,
     JSON.stringify({ ...printed, signature_png_base64: "…" }),
   );

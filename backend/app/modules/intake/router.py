@@ -135,7 +135,7 @@ async def _read_batch(session: AsyncSession, store_id: int, batch_id: int) -> In
 async def create_intake_batch(
     payload: IntakeBatchCreateRequest, session: SessionDep, user: AuthDep
 ) -> IntakeBatchRead:
-    """報到收件：建立批次、配當日 A 編號（同店同日從 A001 起）。"""
+    """報到收件：建立批次、配當日編號（字母每天換，同店同日從 001 起）。"""
     async with _write(session):
         batch = await IntakeService(session).create_batch(
             user.store_id,

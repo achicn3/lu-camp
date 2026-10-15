@@ -83,8 +83,8 @@ try {
   await page.waitForURL((url) => !url.search.includes("print="), { timeout: 5_000 }).catch(() => {});
   ok("印完把 ?print=new 拿掉（重新整理不會再印）", !page.url().includes("print="), page.url());
   const title = await page.locator("h1").innerText();
-  ok("報到後直接進估價頁、有 A 編號", /A\d{3}/.test(title) && title.includes(SELLER), title);
-  const label = /A\d{3}/.exec(title)?.[0];
+  ok("報到後直接進估價頁、有當日編號", /[A-Z]\d{3}/.test(title) && title.includes(SELLER), title);
+  const label = /[A-Z]\d{3}/.exec(title)?.[0];
   const first = prints[0];
   ok(
     "收件單送收據機、印兩份、號碼與條碼正確",

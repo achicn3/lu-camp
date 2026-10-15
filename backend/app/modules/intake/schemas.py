@@ -293,7 +293,7 @@ class IntakeBatchRead(BaseModel):
     ticket_date: date
     ticket_no: int
     ticket_label: str
-    """畫面與收件單顯示的當日號碼（A001）。"""
+    """畫面與收件單顯示的當日號碼：字母每天換（P012）。"""
     slip_code: str
     """收件單條碼內容（永久唯一，掃了直接打開這一批）。"""
     contact_id: int

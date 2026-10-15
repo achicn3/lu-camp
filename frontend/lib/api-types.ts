@@ -2010,7 +2010,7 @@ export interface paths {
         put?: never;
         /**
          * Create Intake Batch
-         * @description 報到收件：建立批次、配當日 A 編號（同店同日從 A001 起）。
+         * @description 報到收件：建立批次、配當日編號（字母每天換，同店同日從 001 起）。
          */
         post: operations["createIntakeBatch"];
         delete?: never;

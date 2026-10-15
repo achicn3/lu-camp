@@ -5,7 +5,7 @@
 """
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -19,7 +19,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
-from app.modules.intake.service import IntakeService
+from app.modules.intake.service import IntakeService, ticket_label
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
@@ -83,16 +83,17 @@ def _line(**overrides: object) -> dict[str, object]:
     return base
 
 
-# ── 報到：當日 A 編號 ─────────────────────────────────────────────────
+# ── 報到：當日編號（字母每天換） ─────────────────────────────────────────────────
 
 
-async def test_create_batch_gets_daily_a_number(
+async def test_create_batch_gets_daily_number(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     _store_id, contact_id, auth = await _store(db_session)
     first = await _batch(client, contact_id, auth)
     second = await _batch(client, contact_id, auth)
-    assert (first["ticket_label"], second["ticket_label"]) == ("A001", "A002")
+    letter = ticket_label(date.fromisoformat(first["ticket_date"]), 1)[0]
+    assert (first["ticket_label"], second["ticket_label"]) == (f"{letter}001", f"{letter}002")
     assert first["status"] == "PENDING_ESTIMATE"
     assert first["declared_item_count"] == 3
     assert first["contact_name"] == "王小明"
