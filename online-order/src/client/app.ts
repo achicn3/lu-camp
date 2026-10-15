@@ -600,16 +600,14 @@ function renderCart(): void {
   body.append(submit);
   showScreen("cart");
 }
-/** 付款方式（docs/44 §4.4.2）：店家有開 LINE Pay 才能選；LINE Pay 可填手機條碼或統編，沒填印紙本。 */
+/** 付款方式（docs/44 §4.4.2）：兩個單選——櫃台結帳、LINE Pay。店家還沒開 LINE Pay 時 LINE Pay 反灰、寫「即將開放」
+ *  （店主 2026-10-16）；LINE Pay 可填手機條碼或統編，沒填印紙本。 */
 function paymentChoice(): {
   node: HTMLElement; method: () => PayMethod; invoice: () => InvoiceInput | null; onChange: (fn: () => void) => void;
 } {
   const box = el("div", "pay-choice");
-  if (!status?.linepay) {
-    box.append(el("p", "payment-note", "付款方式：現金 · 到櫃台付款後才會製作。"));
-    return { node: box, method: () => "CASH", invoice: () => ({ carrier: null, tax_id: null }), onChange: () => undefined };
-  }
-  let method: PayMethod = sessionStorage.getItem(PAY_KEY) === "LINE_PAY" ? "LINE_PAY" : "CASH";
+  const linePayOpen = status?.linepay === true;
+  let method: PayMethod = linePayOpen && sessionStorage.getItem(PAY_KEY) === "LINE_PAY" ? "LINE_PAY" : "CASH";
   const listeners: (() => void)[] = [];
   const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
   const extra = el("div", "invoice-fields");
@@ -626,10 +624,14 @@ function paymentChoice(): {
   });
   const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind);
   extra.append(kindLabel, code);
-  for (const [value, label, hint] of [["CASH", "現金", "到櫃台付款後才會製作"], ["LINE_PAY", "LINE Pay", "現在付，付好就開始製作"]] as const) {
-    const option = el("label", "pay-option");
+  const options = [
+    ["CASH", "櫃台結帳", "到櫃台付款後才會製作", true],
+    ["LINE_PAY", "LINE Pay", linePayOpen ? "現在付，付好就開始製作" : "即將開放", linePayOpen],
+  ] as const;
+  for (const [value, label, hint, enabled] of options) {
+    const option = el("label", enabled ? "pay-option" : "pay-option pay-option-off");
     const radio = el("input") as HTMLInputElement; radio.type = "radio"; radio.name = "pay-method"; radio.value = value;
-    radio.checked = method === value;
+    radio.checked = method === value; radio.disabled = !enabled;
     radio.addEventListener("change", () => {
       method = value; sessionStorage.setItem(PAY_KEY, value); extra.hidden = value !== "LINE_PAY";
       listeners.forEach((fn) => fn());

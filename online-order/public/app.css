@@ -163,7 +163,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .cart-total { margin: 22px 0; padding-top: 14px; border-top: 1px solid var(--gold); color: var(--gold); font-size: 22px; line-height: 1.5; font-variant-numeric: tabular-nums; text-align: right; }
 .note-label { display: grid; gap: 8px; margin: 26px 0 8px; }
 .note-label textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); resize: vertical; }
-.payment-note { color: var(--soft); }
 .turnstile { margin: 16px 0; }
 .field-error { color: #f4aaa2; }
 .order-state { margin: 20px 0; padding: 20px; border-left: 2px solid var(--gold); background: var(--photo); font-size: 23px; }
@@ -439,6 +438,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .pay-option input { margin: 4px 0 0; width: 18px; height: 18px; accent-color: var(--gold); }
 .pay-option span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pay-option small { color: var(--soft); font-size: 13px; }
+/* 還沒開放的付款方式：反灰、不能選（店主 2026-10-16）。 */
+.pay-option-off { opacity: .45; cursor: not-allowed; }
+.pay-option-off small { color: var(--gold); }
 .invoice-fields { margin-top: 8px; }
 .invoice-fields select, .invoice-fields input { width: 100%; min-height: 44px; margin-top: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: #151719; color: var(--ink); font: inherit; font-size: 16px; }
 
