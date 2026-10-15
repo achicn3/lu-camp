@@ -832,11 +832,12 @@ class IntakeService:
     async def short_name_suggestions(
         self, store_id: int, query: str, *, exclude_line_id: int | None = None
     ) -> list[IntakeShortNameSuggestion]:
-        """估價時打簡稱的建議（店主 2026-10-14／15）：簡稱含 `query`、或上架時選的型號含
-        `query` 的以前估價。同名但品牌／型號不同分開列，附最近一次有估價的價格。
+        """估價時打簡稱的建議（店主 2026-10-14／15）：簡稱、型號或品牌含 `query` 的以前估價
+        （型號、品牌以上架時選的為準，沒上架過看估價列上的）。同名但品牌／型號不同分開列，
+        附最近一次有估價的價格。
 
-        快速估價沒取名（「第 N 件」）但上架有選型號的，用型號名稱當簡稱。開頭就符合的排前面，
-        其餘依最近估的先列。
+        快速估價沒取名（「第 N 件」）但上架有選型號的，用型號名稱當簡稱；連型號也沒有就不列。
+        開頭就符合的排前面，其餘依最近估的先列。
         """
         if not query:
             return []
@@ -850,21 +851,28 @@ class IntakeService:
         inventory = InventoryService(self._session)
         models = await inventory.list_product_models(store_id, q=query, limit=_SUGGESTION_SCAN)
         model_ids = {m.id for m in models}
+        brands = await inventory.list_brands(store_id, q=query, limit=_SUGGESTION_SCAN)
+        brand_ids = {b.id for b in brands}
+        branded = await self._repo.lines_with_brands(
+            store_id, list(brand_ids), exclude_line_id=exclude_line_id, limit=_SUGGESTION_SCAN
+        )
         model_batches = await self._repo.batch_ids_for_acquisitions(
             store_id,
             await inventory.acquisition_ids_for_models(
                 store_id, list(model_ids), limit=_SUGGESTION_SCAN
             ),
         )
+        brand_batches = await self._repo.batch_ids_for_acquisitions(
+            store_id,
+            await inventory.acquisition_ids_for_brands(
+                store_id, list(brand_ids), limit=_SUGGESTION_SCAN
+            ),
+        )
+        estimated = [line.batch_id for line in [*named, *branded] if self._accepted(line)]
         recent_batches = list(  # 新的在前；dict 保留順序
-            dict.fromkeys([line.batch_id for line in named if self._accepted(line)] + model_batches)
+            dict.fromkeys(estimated + model_batches + brand_batches)
         )[:_SUGGESTION_BRAND_BATCHES]
         listed = await self._listed_as(store_id, recent_batches)
-        by_id = {line.id: line for line in named}
-        for line, _brand, model in listed.values():
-            if model in model_ids and line.id != exclude_line_id:
-                by_id.setdefault(line.id, line)
-        lines = sorted(by_id.values(), key=lambda ln: (ln.created_at, ln.id), reverse=True)
 
         def details(line: IntakeLine) -> tuple[int | None, int | None]:
             # 上架時補過品牌／型號就整組用上架的（店員可能改了品牌）；不能和估價列的混搭，
@@ -873,6 +881,15 @@ class IntakeService:
             if brand is not None or model is not None:
                 return (brand, model)
             return (line.brand_id, line.product_model_id)
+
+        by_id = {line.id: line for line in named}
+        # 型號、品牌比對的是顯示出來的那一組：上架改了品牌，打舊品牌就不該找到。
+        candidates = [*branded, *(line for line, _b, _m in listed.values())]
+        for line in candidates:
+            brand, model = details(line)
+            if line.id != exclude_line_id and (model in model_ids or brand in brand_ids):
+                by_id.setdefault(line.id, line)
+        lines = sorted(by_id.values(), key=lambda ln: (ln.created_at, ln.id), reverse=True)
 
         model_names = await inventory.product_model_names(
             store_id, [m for ln in lines if (m := details(ln)[1]) is not None]
@@ -886,15 +903,22 @@ class IntakeService:
 
         groups: dict[tuple[str, int | None, int | None], list[IntakeLine]] = {}
         for line in lines:  # 新的在前
-            groups.setdefault((shown_name(line), *details(line)), []).append(line)
+            name = shown_name(line)
+            if re.fullmatch(_PREFILL_NAME_PATTERN, name):  # 沒取名也沒型號：沒有名字可建議
+                continue
+            groups.setdefault((name, *details(line)), []).append(line)
         brand_names = await inventory.brand_names(
             store_id, [b for _, b, _m in groups if b is not None]
         )
         needle = query.casefold()
 
         def starts(key: tuple[str, int | None, int | None]) -> bool:
-            name, _brand, model = key
-            texts = [name, model_names.get(model, "") if model is not None else ""]
+            name, brand, model = key
+            texts = [
+                name,
+                model_names.get(model, "") if model is not None else "",
+                brand_names.get(brand, "") if brand is not None else "",
+            ]
             return any(t.casefold().startswith(needle) for t in texts)
 
         ordered = sorted(groups.items(), key=lambda kv: not starts(kv[0]))  # 穩定排序

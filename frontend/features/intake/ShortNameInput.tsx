@@ -168,7 +168,11 @@ export function ShortNameInput({
   }, []);
 
   // 只有簡稱分不出是哪一款：兩筆以上就列品牌（店主 2026-10-14）。
-  const showBrand = options.length >= 2;
+  // 打品牌找到的只有一筆也要寫品牌，不然看不出為什麼列出來（店主 2026-10-15）。
+  const needle = query.toLowerCase();
+  const showBrand = (option: ShortNameSuggestion) =>
+    options.length >= 2 ||
+    (option.brand_name ?? "").toLowerCase().includes(needle);
   const menuOpen = open && query !== "" && options.length > 0;
   const shownPick =
     picked !== null && picked.short_name === value ? picked : null;
@@ -234,7 +238,7 @@ export function ShortNameInput({
             >
               <span className="sn-head">
                 <span className="sn-name">{option.short_name}</span>
-                {showBrand &&
+                {showBrand(option) &&
                   !option.product_model_name &&
                   (option.brand_name ? (
                     <span className="sn-brand">{option.brand_name}</span>

@@ -83,6 +83,25 @@ class IntakeRepository:
         stmt = stmt.order_by(IntakeLine.created_at.desc(), IntakeLine.id.desc()).limit(limit)
         return list((await self._session.scalars(stmt)).all())
 
+    async def lines_with_brands(
+        self,
+        store_id: int,
+        brand_ids: list[int],
+        *,
+        exclude_line_id: int | None,
+        limit: int,
+    ) -> list[IntakeLine]:
+        """估價時就選了這些品牌的估價列，新的在前。"""
+        if not brand_ids:
+            return []
+        stmt = select(IntakeLine).where(
+            IntakeLine.store_id == store_id, IntakeLine.brand_id.in_(brand_ids)
+        )
+        if exclude_line_id is not None:
+            stmt = stmt.where(IntakeLine.id != exclude_line_id)
+        stmt = stmt.order_by(IntakeLine.created_at.desc(), IntakeLine.id.desc()).limit(limit)
+        return list((await self._session.scalars(stmt)).all())
+
     async def get_line(self, store_id: int, batch_id: int, line_id: int) -> IntakeLine | None:
         stmt = select(IntakeLine).where(
             IntakeLine.id == line_id,

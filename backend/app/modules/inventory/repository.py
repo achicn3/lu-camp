@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, Numeric, and_, case, delete, func, or_, select, update
+from sqlalchemy import CursorResult, Numeric, and_, case, delete, func, or_, select, union, update
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +65,7 @@ class InventoryRepository:
     async def list_brands(self, store_id: int, *, q: str | None, limit: int) -> list[Brand]:
         stmt = select(Brand).where(Brand.store_id == store_id)
         if q:
-            stmt = stmt.where(Brand.name.ilike(f"%{q}%"))
+            stmt = stmt.where(Brand.name.icontains(q, autoescape=True))
         stmt = stmt.order_by(Brand.name).limit(limit)
         return list((await self._session.scalars(stmt)).all())
 
@@ -332,6 +332,26 @@ class InventoryRepository:
             .order_by(SerializedItem.acquisition_id.desc())
             .limit(limit)
         )
+        return [a for a in (await self._session.scalars(stmt)).all() if a is not None]
+
+    async def acquisition_ids_for_brands(
+        self, store_id: int, brand_ids: list[int], *, limit: int
+    ) -> list[int]:
+        """掛了這些品牌的序號品與散裝堆來自哪些收購單（新的收購在前）。"""
+        if not brand_ids:
+            return []
+        serialized = select(SerializedItem.acquisition_id.label("acquisition_id")).where(
+            SerializedItem.store_id == store_id,
+            SerializedItem.brand_id.in_(brand_ids),
+            SerializedItem.acquisition_id.is_not(None),
+        )
+        lots = select(BulkLot.acquisition_id.label("acquisition_id")).where(
+            BulkLot.store_id == store_id,
+            BulkLot.brand_id.in_(brand_ids),
+            BulkLot.acquisition_id.is_not(None),
+        )
+        both = union(serialized, lots).subquery()
+        stmt = select(both.c.acquisition_id).order_by(both.c.acquisition_id.desc()).limit(limit)
         return [a for a in (await self._session.scalars(stmt)).all() if a is not None]
 
     async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:

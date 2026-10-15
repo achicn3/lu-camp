@@ -699,6 +699,12 @@ class InventoryService:
         """掛了這些型號的序號品來自哪些收購單（新的在前；排隊收購的簡稱建議用）。"""
         return await self._repo.acquisition_ids_for_models(store_id, model_ids, limit=limit)
 
+    async def acquisition_ids_for_brands(
+        self, store_id: int, brand_ids: list[int], *, limit: int
+    ) -> list[int]:
+        """掛了這些品牌的商品來自哪些收購單（新的在前；排隊收購的簡稱建議用）。"""
+        return await self._repo.acquisition_ids_for_brands(store_id, brand_ids, limit=limit)
+
     async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
         """指定類型 id 的名稱對照（經營洞察用）。"""
         return await self._repo.category_names(store_id, ids)

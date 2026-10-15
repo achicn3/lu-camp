@@ -100,6 +100,16 @@ describe("商品簡稱建議", () => {
     );
   });
 
+  it("打品牌找到的：只有一筆也寫出品牌（店主 2026-10-15）", async () => {
+    const search = vi.fn().mockResolvedValue([suggestion()]);
+    renderForm(search);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("商品簡稱"), "cole");
+
+    const [option] = await menuOptions();
+    expect(within(option).getByText("Coleman")).toBeTruthy();
+  });
+
   it("兩筆以上就列品牌；沒品牌的寫「沒填品牌」", async () => {
     const search = vi
       .fn()

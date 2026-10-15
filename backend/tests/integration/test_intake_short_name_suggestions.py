@@ -312,3 +312,91 @@ async def test_model_search_matches_percent_and_underscore_literally(
     assert [r["product_model_name"] for r in await _suggest(client, ctx, "50%")] == ["50% 營燈"]
     assert [r["product_model_name"] for r in await _suggest(client, ctx, "%")] == ["50% 營燈"]
     assert await _suggest(client, ctx, "_") == []
+
+
+async def test_brand_on_the_estimate_is_searchable(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """打品牌也找得到以前估的（店主 2026-10-15）：估價列上就選了品牌。"""
+    ctx = await _ctx(db_session, client)
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    batch_id = await _batch(client, ctx)
+    await _add(client, ctx, batch_id, short_name="折疊椅", brand_id=snow_peak, deal_cost="300")
+    await _add(client, ctx, batch_id, short_name="帳篷")
+
+    rows = await _suggest(client, ctx, "snow")
+
+    assert [(r["short_name"], r["brand_name"], r["deal_cost"]) for r in rows] == [
+        ("折疊椅", "Snow Peak", "300")
+    ]
+
+
+async def test_brand_given_at_listing_is_searchable(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """品牌多半是上架時才補：打品牌一樣找得到那一列。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    batch = await _confirmed_batch(client, ctx, [_line(short_name="營燈", qty=1)], [1])
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    item = (await client.get(f"{PATH}/{batch['id']}/items", headers=ctx.auth)).json()[0]
+    resp = await client.post(
+        f"{PATH}/{batch['id']}/listing",
+        json={"items": [{"kind": "SERIALIZED", "id": item["id"], "brand_id": coleman}]},
+        headers=ctx.auth,
+    )
+    assert resp.status_code == 200, resp.text
+
+    rows = await _suggest(client, ctx, "Cole")
+
+    assert [(r["short_name"], r["brand_name"]) for r in rows] == [("營燈", "Coleman")]
+
+
+async def test_brand_changed_at_listing_is_found_by_the_new_brand_only(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """估價選 Coleman、上架改成 Snow Peak：建議顯示 Snow Peak，打 Coleman 就不該出現。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    batch = await _confirmed_batch(
+        client, ctx, [_line(short_name="營燈", qty=1, brand_id=coleman)], [1]
+    )
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    await _listed_as(client, ctx, batch["id"], snow_peak, "GL 營燈")
+
+    assert await _suggest(client, ctx, "Coleman") == []
+    assert [r["brand_name"] for r in await _suggest(client, ctx, "Snow")] == ["Snow Peak"]
+
+
+async def test_brand_search_skips_unnamed_lines_without_model(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """快速估價沒取名、上架只補品牌沒選型號：沒有名字可以建議，不列「第 N 件」。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    batch = await _confirmed_batch(client, ctx, [_line(short_name="第 1 件", qty=1)], [1])
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    item = (await client.get(f"{PATH}/{batch['id']}/items", headers=ctx.auth)).json()[0]
+    resp = await client.post(
+        f"{PATH}/{batch['id']}/listing",
+        json={"items": [{"kind": "SERIALIZED", "id": item["id"], "brand_id": coleman}]},
+        headers=ctx.auth,
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert await _suggest(client, ctx, "Coleman") == []
+
+
+async def test_brand_search_matches_percent_and_underscore_literally(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    ctx = await _ctx(db_session, client)
+    odd = await _brand(db_session, ctx, "100%_Camp")
+    plain = await _brand(db_session, ctx, "Camp X")
+    batch_id = await _batch(client, ctx)
+    await _add(client, ctx, batch_id, short_name="睡袋", brand_id=odd)
+    await _add(client, ctx, batch_id, short_name="睡墊", brand_id=plain)
+
+    assert [r["short_name"] for r in await _suggest(client, ctx, "%_")] == ["睡袋"]
+    assert await _suggest(client, ctx, "0_C") == []
