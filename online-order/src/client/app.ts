@@ -35,6 +35,8 @@ interface OrderView {
   payment_method?: PayMethod;
   /** LINE Pay 上一次沒付成的原因。 */
   linepay_result?: "CANCELLED" | "FAILED" | "EXPIRED" | null;
+  /** 重新付款要先過人機驗證（舊版雲端沒有這欄）。 */
+  repay_challenge?: boolean;
   /** 店內作廢／退貨後累計退了多少（舊版雲端沒有這欄）。 */
   refunded_amount?: number;
 }
@@ -774,10 +776,14 @@ function startPayment(token: string, challengeToken?: string): Promise<Response>
     body: challengeToken === undefined ? undefined : JSON.stringify({ turnstile_token: challengeToken }),
   });
 }
-async function goLinePay(token: string): Promise<boolean> {
+async function goLinePay(token: string, needsChallenge = false): Promise<boolean> {
   try {
-    let resp = await startPayment(token);
-    // 重新付款要重新驗證（建單時那次已經用掉）：就地驗證後再送一次。
+    // 重新付款要重新驗證（建單時那次已經用掉）：訂單頁說要驗證就先驗證、只送一次，
+    // 不先空送一次去試——每次送出都算同網路每分鐘的付款名額（Codex 審查）。
+    if (needsChallenge) showMessage("請完成安全驗證，再前往 LINE Pay。");
+    let resp = await startPayment(token, needsChallenge ? await challenge() : undefined);
+    if (needsChallenge) clearMessage();
+    // 畫面上的狀態較舊（例如另一個分頁剛取消過）：雲端仍要求驗證，就地驗證後再送一次。
     if (resp.status === 403 && (await resp.clone().json() as { error?: string }).error === "challenge_required") {
       showMessage("請完成安全驗證，再前往 LINE Pay。");
       resp = await startPayment(token, await challenge());
@@ -864,7 +870,9 @@ async function refreshOrder(): Promise<void> {
     view.linepay_result !== "EXPIRED";
   if (canPay && activeOrder !== null) {
     const token = activeOrder;
-    body.append(button(view.status === "PENDING" ? "前往 LINE Pay 付款" : "用 LINE Pay 付款", () => void goLinePay(token)));
+    // 付款中（PENDING）沿用原連結、不用驗證；之前付過又取消／失敗的才要先驗證。
+    body.append(button(view.status === "PENDING" ? "前往 LINE Pay 付款" : "用 LINE Pay 付款",
+      () => void goLinePay(token, view.status !== "PENDING" && view.repay_challenge === true)));
   }
   body.append(el("p", "order-hint", "可儲存此頁網址，稍後查看付款狀態。"));
   if (view.status === "REJECTED" || view.status === "CANCELLED")

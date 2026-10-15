@@ -72,6 +72,9 @@ try {
   guest.on("response", (r) => {
     if (/\/api\/orders\/[^/]+\/linepay$/.test(new URL(r.url()).pathname)) starts.push(r.status());
   });
+  // 名額依整分鐘計：離下一分鐘太近就先等，整段流程才會落在同一分鐘、真的壓到名額邊界。
+  const sec = new Date().getSeconds();
+  if (sec > 30) await new Promise((resolve) => setTimeout(resolve, (61 - sec) * 1000));
   await guest.goto(ORDER);
   await guest.locator(".item").filter({ hasText: "拿鐵" }).first().locator(".item-add").click();
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
@@ -85,13 +88,20 @@ try {
   await guest.screenshot({ path: `${SHOTS}/01-cancelled.png` });
   assert.deepEqual(starts, [200]);
 
-  // 重新付款：雲端先要求驗證（403），客人頁就地驗證後重送成功
+  // 同網路再用掉 3 個付款名額（共 4 個；每分鐘 5 個）：亂打的付款請求一樣會被計數
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`${ORDER}/api/orders/${"x".repeat(43)}/linepay`, { method: "POST" });
+    assert.equal(r.status, 404);
+  }
+  // 重新付款：訂單頁說要驗證 → 先驗證、只送一次 → 用最後一個名額就成功（Codex 審查：不可空送一次去試）
   await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();
   await guest.waitForURL(new RegExp(`127\\.0\\.0\\.1:${FAKE_PORT}/pay/\\d+$`), { timeout: 90000 });
-  assert.deepEqual(starts, [200, 403, 200], `start responses: ${starts}`);
+  assert.deepEqual(starts, [200, 200], `start responses: ${starts}`);
   assert.equal(txs.size, 2, "re-pay opens exactly one new LINE Pay transaction");
   await guest.screenshot({ path: `${SHOTS}/02-repay-page.png` });
-  console.log("PASS first pay without extra challenge → cancel → re-pay 403 challenge_required → widget → 200 → 2nd tx");
+  const sixth = await fetch(`${ORDER}/api/orders/${"x".repeat(43)}/linepay`, { method: "POST" });
+  assert.equal(sixth.status, 429, "quota really was at its 5-per-minute boundary");
+  console.log("PASS first pay → cancel → 4/5 payment slots used → re-pay verifies first, one request, 200 → 2nd tx; 6th → 429");
 } finally {
   await browser.close();
   fake.close();

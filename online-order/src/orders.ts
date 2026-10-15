@@ -418,7 +418,7 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
     "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
-      "linepay_result, refunded_amount, note, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
+      "linepay_result, linepay_attempt, refunded_amount, note, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
     .first<{
@@ -431,6 +431,7 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       fulfillment: string;
       payment_method: string;
       linepay_result: string | null;
+      linepay_attempt: number;
       refunded_amount: number;
       note: string | null;
       created_at: number;
@@ -455,6 +456,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       payment_method: row.payment_method,
       // LINE Pay 上一次沒付成的原因（CANCELLED／FAILED／EXPIRED）；客人可以重付。
       linepay_result: row.linepay_result,
+      // 重新付款要先過人機驗證（付款端點會再檢查）：客人頁據此先驗證再送，不必空送一次佔用付款名額。
+      repay_challenge: row.linepay_attempt > 0,
       // 店內作廢／退貨後退了多少（status 為 PARTIALLY_REFUNDED／REFUNDED 時才有意義）。
       refunded_amount: row.refunded_amount,
       lines: lines.results.map(({ take_home, ...line }) => ({ ...line, take_home: take_home === 1 })),

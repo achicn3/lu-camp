@@ -364,6 +364,21 @@ describe("付款端點防濫用（docs/44 §8.4）", () => {
     expect(fake.confirmCalls).toBe(0);
   });
 
+  it("訂單頁告訴客人頁重新付款要先驗證：同網路已用 4 個名額，照指示先驗證再送，只用 1 個名額就成功（Codex 審查）", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { body } = await place();
+    expect(await view(body.token)).toMatchObject({ repay_challenge: false });
+    expect((await paymentPost(body.token)).status).toBe(200);
+    expect((await paymentPost(body.token, "/cancel")).status).toBe(200);
+    expect(await view(body.token)).toMatchObject({ repay_challenge: true });
+    const other = await place();
+    for (let i = 0; i < 3; i++) expect((await paymentPost(other.body.token)).status).toBe(200);
+    // 客人頁的做法：先看訂單頁要不要驗證，要的話先拿驗證再送一次（不先空送一次去試）
+    expect((await paymentPost(body.token, "", "10.99.0.1", REPAY)).status).toBe(200);
+    expect(fake.txs.size).toBe(3);
+    expect((await paymentPost(other.body.token)).status).toBe(429);
+  });
+
   it("偽造成功回呼及金額不能把未授權交易變成已付款", async () => {
     const { body } = await place();
     expect((await paymentPost(body.token)).status).toBe(200);
