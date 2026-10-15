@@ -74,6 +74,8 @@ let widgetId: string | null = null;
 let challengeToken = "";
 let submitting = false;
 let checkoutStarting = false;
+/** 正在前往 LINE Pay（驗證中或等付款連結）：付款鈕鎖住，輪詢重畫也不解鎖（Codex 審查）。 */
+let payStarting = false;
 let turnstilePromise: Promise<void> | null = null;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -776,7 +778,15 @@ function startPayment(token: string, challengeToken?: string): Promise<Response>
     body: challengeToken === undefined ? undefined : JSON.stringify({ turnstile_token: challengeToken }),
   });
 }
+function syncPayButton(): void {
+  const pay = document.querySelector<HTMLButtonElement>("#order-body .pay-linepay");
+  if (pay) pay.disabled = payStarting;
+}
 async function goLinePay(token: string, needsChallenge = false): Promise<boolean> {
+  // 等驗證時連按、或輪詢重畫出新按鈕再按，都只走一次：每次送出都佔全店共用的付款名額。
+  if (payStarting) return false;
+  payStarting = true; syncPayButton();
+  let leaving = false;
   try {
     // 重新付款要重新驗證（建單時那次已經用掉）：訂單頁說要驗證就先驗證、只送一次，
     // 不先空送一次去試——每次送出都算同網路每分鐘的付款名額（Codex 審查）。
@@ -799,11 +809,15 @@ async function goLinePay(token: string, needsChallenge = false): Promise<boolean
     }
     const { payment_url } = await resp.json() as { payment_url: string };
     location.assign(payment_url);
+    leaving = true;
     return true;
   } catch (reason) {
     showMessage(reason instanceof Error && reason.message === "challenge_unavailable"
       ? "安全驗證暫時無法使用，請稍後再試或到櫃檯付現金。" : "連線中斷，請稍後再試。");
     return false;
+  } finally {
+    // 已經在跳往 LINE Pay 就維持鎖住，跳轉前的輪詢重畫不會再開放按鈕。
+    if (!leaving) { payStarting = false; syncPayButton(); }
   }
 }
 /** 從 LINE Pay 導回訂單頁：付好了就請款、取消就記取消，然後把網址上的參數拿掉。 */
@@ -871,8 +885,10 @@ async function refreshOrder(): Promise<void> {
   if (canPay && activeOrder !== null) {
     const token = activeOrder;
     // 付款中（PENDING）沿用原連結、不用驗證；之前付過又取消／失敗的才要先驗證。
-    body.append(button(view.status === "PENDING" ? "前往 LINE Pay 付款" : "用 LINE Pay 付款",
-      () => void goLinePay(token, view.status !== "PENDING" && view.repay_challenge === true)));
+    const pay = button(view.status === "PENDING" ? "前往 LINE Pay 付款" : "用 LINE Pay 付款",
+      () => void goLinePay(token, view.status !== "PENDING" && view.repay_challenge === true), "action pay-linepay");
+    pay.disabled = payStarting;
+    body.append(pay);
   }
   body.append(el("p", "order-hint", "可儲存此頁網址，稍後查看付款狀態。"));
   if (view.status === "REJECTED" || view.status === "CANCELLED")
@@ -930,6 +946,12 @@ async function openOrder(token: string): Promise<void> {
 async function main(): Promise<void> {
   $("greeting").textContent = greeting(new Date());
   $("sheet-close").addEventListener("click", closeDetail);
+  // 從 LINE Pay 按上一頁回來，瀏覽器可能直接還原跳轉前的頁面：付款鈕要解鎖、狀態重新查。
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    payStarting = false; syncPayButton();
+    if (activeOrder !== null) void refreshOrder();
+  });
   $("sheet").addEventListener("click", (event) => { if (event.target === event.currentTarget) closeDetail(); });
   document.addEventListener("keydown", (event) => {
     if ($("sheet").hidden) return;

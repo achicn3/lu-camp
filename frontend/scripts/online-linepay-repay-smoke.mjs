@@ -68,13 +68,24 @@ await integration("GET", "/integration/orders");
 const browser = await chromium.launch();
 try {
   const guest = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  // 換成假的 Turnstile 小工具：發 Cloudflare 測試金鑰收的假 token（雲端照樣向 siteverify 驗證），
+  // 設了 window.__challengeDelay 就延後發——模擬驗證慢的手機，讓客人有時間在等驗證時連按（Codex 審查第二輪）。
+  await guest.route(/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js/, (route) => route.fulfill({
+    contentType: "text/javascript",
+    body: `(() => {
+      let opts = null;
+      const issue = () => setTimeout(() => opts.callback("XXXX.DUMMY.TOKEN.XXXX"), window.__challengeDelay ?? 300);
+      window.turnstile = { render(el, o) { opts = o; issue(); return "w1"; }, reset() { issue(); } };
+      window.onTurnstileReady?.();
+    })();`,
+  }));
   const starts = [];
   guest.on("response", (r) => {
     if (/\/api\/orders\/[^/]+\/linepay$/.test(new URL(r.url()).pathname)) starts.push(r.status());
   });
-  // 名額依整分鐘計：離下一分鐘太近就先等，整段流程才會落在同一分鐘、真的壓到名額邊界。
-  const sec = new Date().getSeconds();
-  if (sec > 30) await new Promise((resolve) => setTimeout(resolve, (61 - sec) * 1000));
+  // 名額依整分鐘計：一律等到下一分鐘開頭，整段流程才會落在同一分鐘、真的壓到名額邊界，
+  // 也不會吃到上一次執行在同一分鐘用掉的名額。
+  await new Promise((resolve) => setTimeout(resolve, (61 - new Date().getSeconds()) * 1000));
   await guest.goto(ORDER);
   await guest.locator(".item").filter({ hasText: "拿鐵" }).first().locator(".item-add").click();
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
@@ -93,15 +104,25 @@ try {
     const r = await fetch(`${ORDER}/api/orders/${"x".repeat(43)}/linepay`, { method: "POST" });
     assert.equal(r.status, 404);
   }
-  // 重新付款：訂單頁說要驗證 → 先驗證、只送一次 → 用最後一個名額就成功（Codex 審查：不可空送一次去試）
-  await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();
+  // 重新付款：訂單頁說要驗證 → 先驗證、只送一次 → 用最後一個名額就成功（Codex 審查：不可空送一次去試）。
+  // 驗證要 7 秒：等待中連按、訂單頁輪詢（5 秒）重畫後再按，都不可多送付款請求（Codex 審查第二輪）。
+  await guest.evaluate(() => { window.__challengeDelay = 7000; });
+  const repay = guest.getByRole("button", { name: "用 LINE Pay 付款" });
+  await repay.click();
+  await repay.click({ force: true, timeout: 2000 }).catch(() => {});
+  await guest.waitForTimeout(5500);
+  assert.ok(await repay.isDisabled(), "re-pay button stays disabled while verification is pending, even after the poll redraw");
+  await guest.screenshot({ path: `${SHOTS}/02a-repay-verifying.png` });
+  await repay.click({ force: true, timeout: 2000 }).catch(() => {});
   await guest.waitForURL(new RegExp(`127\\.0\\.0\\.1:${FAKE_PORT}/pay/\\d+$`), { timeout: 90000 });
   assert.deepEqual(starts, [200, 200], `start responses: ${starts}`);
   assert.equal(txs.size, 2, "re-pay opens exactly one new LINE Pay transaction");
+  await guest.waitForTimeout(1500); // 連按若多送了，晚到的請求會在這段時間出現
+  assert.deepEqual(starts, [200, 200], `no extra start requests after navigation: ${starts}`);
   await guest.screenshot({ path: `${SHOTS}/02-repay-page.png` });
   const sixth = await fetch(`${ORDER}/api/orders/${"x".repeat(43)}/linepay`, { method: "POST" });
   assert.equal(sixth.status, 429, "quota really was at its 5-per-minute boundary");
-  console.log("PASS first pay → cancel → 4/5 payment slots used → re-pay verifies first, one request, 200 → 2nd tx; 6th → 429");
+  console.log("PASS first pay → cancel → 4/5 payment slots used → re-pay verifies first (7s, clicked 3×, poll redraw), one request, 200 → 2nd tx; 6th → 429");
 } finally {
   await browser.close();
   fake.close();
