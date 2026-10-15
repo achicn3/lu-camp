@@ -27,6 +27,21 @@ const TYPE_OPTIONS: { value: AcqType; label: string }[] = [
 const TYPE_LABEL: Record<AcqType, string> = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝" };
 const QUICK_DISCOUNTS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
+/** 只留跟打開時不一樣的欄位；品牌、型號是一組，有一個變就一起送（Codex P2）。 */
+function changedOnly(fields: LineFields, opened: Line | undefined): LineFields {
+  if (opened === undefined) return fields;
+  const before = opened as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== (before[key] ?? null)) out[key] = value;
+  }
+  if ("brand_id" in out || "product_model_id" in out) {
+    out.brand_id = fields.brand_id ?? null;
+    out.product_model_id = fields.product_model_id ?? null;
+  }
+  return out as LineFields;
+}
+
 export function LineForm({
   initial,
   rates,
@@ -79,6 +94,9 @@ export function LineForm({
   const [error, setError] = useState<string | null>(null);
   // 按「帶入」用的那筆以前的估價：簡稱沒改掉，送出時連品牌一起帶（上架時自動帶入）。
   const [applied, setApplied] = useState<ShortNameSuggestion | null>(null);
+  // 打開表單時這一列的樣子：快速估價存檔只送跟它不一樣的欄位，另一台裝置剛改的才不會被這裡沒動過的
+  // 舊值蓋回去（店主 2026-10-16）。
+  const [opened] = useState(initial);
 
   // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
   const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
@@ -169,7 +187,7 @@ export function LineForm({
     if (isConsignment && commission.trim() === "") return setError("寄售要填抽成 %");
     const inferred = grade === "" ? estimate.inferredGrade : grade;
     if (quick) {
-      onSubmit({
+      onSubmit(changedOnly({
         short_name: shortName.trim(),
         reference_price: money(reference),
         discount_pct: pct,
@@ -182,10 +200,10 @@ export function LineForm({
         ...quickGrade(),
         ...(appliedPair ?? {}),
         note: note.trim() || null,
-      });
+      }, opened));
       return;
     }
-    onSubmit({
+    onSubmit(changedOnly({
       short_name: shortName.trim(),
       qty: count,
       acquisition_type: type,
@@ -202,7 +220,7 @@ export function LineForm({
         product_model_id: initial?.product_model_id ?? null,
       }),
       note: note.trim() || null,
-    });
+    }, opened));
   }
 
   const subtotal = (parseNtd(dealCost) ?? 0) * (parseNtd(qty) ?? 0);

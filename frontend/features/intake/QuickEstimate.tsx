@@ -237,6 +237,7 @@ function PriceRow({
     mutationFn: save,
     onSuccess: () => {
       setError(null);
+      setApplyFailed(false);
       setOpen(false);
       onSaved();
     },
@@ -244,14 +245,27 @@ function PriceRow({
   });
 
   // 「詳細」按「帶入」當場存：列上的收購價、上面的合計馬上跟著變；詳細不收起，可以接著改。
+  const [applyFailed, setApplyFailed] = useState(false);
   const apply = useMutation({
     mutationFn: save,
     onSuccess: () => {
       setError(null);
+      setApplyFailed(false);
       onSaved();
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setApplyFailed(true);
+      setError(e.message);
+    },
   });
+  // 帶入的價格存檔中或沒存進去：跟列上的價格一樣擋住「估完」，不會用舊價格成交（Codex P2）。
+  // 之後「儲存詳細」存好、或收起詳細放棄，才放行。
+  const applyKey = `${line.id}:apply`;
+  const applyUnsaved = apply.isPending || applyFailed;
+  useEffect(() => {
+    onUnsavedChange(applyKey, applyUnsaved);
+  }, [applyKey, applyUnsaved, onUnsavedChange]);
+  useEffect(() => () => onUnsavedChange(applyKey, false), [applyKey, onUnsavedChange]);
 
   const remove = useMutation({
     mutationFn: async () => {
@@ -279,7 +293,10 @@ function PriceRow({
           className="btn-ghost intake-quick-toggle"
           aria-expanded={open}
           aria-label={`${label} 詳細`}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            if (open) setApplyFailed(false);
+            setOpen(!open);
+          }}
         >
           {open ? "收起" : "詳細"}
         </button>
@@ -388,7 +405,10 @@ function PriceRow({
           quick
           onSubmit={(fields) => patch.mutate(fields)}
           onApplied={(fields) => apply.mutate(fields)}
-          onCancel={() => setOpen(false)}
+          onCancel={() => {
+            setOpen(false);
+            setApplyFailed(false);
+          }}
         />
       )}
     </li>

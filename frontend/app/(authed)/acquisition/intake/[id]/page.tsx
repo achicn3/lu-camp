@@ -29,6 +29,7 @@ type Disposition = components["schemas"]["IntakeDisposition"];
 const TYPE_LABEL = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝" } as const;
 const EDITABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING", "AWAITING_CONFIRM"]);
 const DELETABLE = new Set(["PENDING_ESTIMATE", "ESTIMATING"]);
+const ESTIMATE_REFRESH_MS = 5000;
 const PAID_STATUSES = new Set(["PAID", "PARTIALLY_LISTED", "LISTED"]);
 
 function stillEstimatingStatus(status: string): boolean {
@@ -183,6 +184,8 @@ function IntakeBatchContent() {
       return data;
     },
     enabled: Number.isFinite(batchId),
+    // 估價中兩台裝置可能同時開著同一位客人：定時抓最新的，另一台改的才看得到（店主 2026-10-16）。
+    refetchInterval: (q) => (EDITABLE.has(q.state.data?.status ?? "") ? ESTIMATE_REFRESH_MS : false),
   });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["intake-batch", batchId] });

@@ -458,6 +458,67 @@ describe("快速估價", () => {
     ]);
   });
 
+  it("「帶入」存檔中或失敗：不能估完；之後「儲存詳細」存好才放行（Codex P2）", async () => {
+    let fail = true;
+    stubFetch((url, method) => {
+      if (url.includes("short-name-suggestions"))
+        return json([
+          {
+            short_name: "焚火台",
+            brand_id: null,
+            brand_name: null,
+            product_model_id: null,
+            product_model_name: null,
+            times: 1,
+            estimated_on: "2026-10-01",
+            acquisition_type: "BUYOUT",
+            reference_price: "3000",
+            discount_pct: 50,
+            expected_listed_price: "1500",
+            deal_cost: "777",
+            bulk_piece_count: null,
+          },
+        ]);
+      if (method === "PATCH") return fail ? json({ detail: "網路斷了" }, 500) : json({});
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate batch={batch([line(1, { deal_cost: "100" })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />,
+    );
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("商品簡稱"), "焚火");
+    await user.click(await within(form).findByRole("option", { name: /焚火台/ }));
+    await user.click(within(form).getByRole("button", { name: "帶入" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("網路斷了");
+    const ready = screen.getByRole("button", { name: "估完，給客人確認" }) as HTMLButtonElement;
+    expect(ready.disabled).toBe(true);
+    fail = false;
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() => expect(ready.disabled).toBe(false));
+  });
+
+  it("「儲存詳細」只送這次有動的欄位，不蓋掉另一台剛改的（店主 2026-10-16）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    wrap(
+      <QuickEstimate
+        batch={batch([line(1, { short_name: "營燈", reference_price: "1000", deal_cost: "100", note: null })])}
+        rates={RATES}
+        defaultCommissionPct={50}
+        onChanged={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("配件／特殊狀況"), "缺收納袋");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ note: "缺收納袋" }),
+    );
+  });
+
   it("改了還沒按 Enter／沒離開欄位：不能估完", async () => {
     stubFetch();
     const user = userEvent.setup();
