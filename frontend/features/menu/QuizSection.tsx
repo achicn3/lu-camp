@@ -1,5 +1,5 @@
 "use client";
-// 「不知道喝什麼」引導推薦的摘要（菜單 →「線上發布」分頁；docs/63 §2 M2a）。設定在獨立頁 /menu/quiz。
+// 「不知道點什麼」引導推薦的摘要（菜單 →「線上發布」分頁；docs/63 §2 M2a）。設定在獨立頁 /menu/quiz。
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
@@ -30,7 +30,7 @@ export function QuizSection() {
     <section className="card menu-experiences" aria-labelledby="menu-quiz-title">
       <div className="menu-experiences-head">
         <div>
-          <h2 id="menu-quiz-title">不知道喝什麼？（引導推薦）</h2>
+          <h2 id="menu-quiz-title">不知道點什麼？（引導推薦）</h2>
           <p className="hint">客人回答 1–3 題，系統從你勾的品項挑一個最推薦、再給兩個備選。改完到上方按「發佈到線上點餐」。</p>
         </div>
         <Link href="/menu/quiz" className="btn-primary">設定問答</Link>

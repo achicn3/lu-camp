@@ -1,5 +1,5 @@
 "use client";
-// /menu/quiz 「不知道喝什麼」引導推薦設定（docs/63 §2 M2a）：載入題目、菜單品項與體驗卡，存好或取消回「線上發布」。
+// /menu/quiz 「不知道點什麼」引導推薦設定（docs/63 §2 M2a）：載入題目、菜單品項與體驗卡，存好或取消回「線上發布」。
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -49,7 +49,7 @@ export default function MenuQuizPage() {
   return (
     <section className="exp-page">
       <Link href={BACK} className="pur-back">← 回線上發布</Link>
-      <h1 className="page-title">不知道喝什麼？（引導推薦）</h1>
+      <h1 className="page-title">不知道點什麼？（引導推薦）</h1>
       <p className="hint">
         每個答案勾「適合的品項」。客人答完，被勾到最多次的最推薦，其次兩個當備選；售完或下架的會自動略過。
       </p>

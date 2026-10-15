@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 「不知道喝什麼」引導推薦設定（docs/63 §2 M2a；店主 2026-10-09）：每個答案勾適合的品項或體驗卡。
+// 「不知道點什麼」引導推薦設定（docs/63 §2 M2a；店主 2026-10-09）：每個答案勾適合的品項或體驗卡。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -107,7 +107,7 @@ it("每個答案勾品項或體驗卡、改題目文字、打開顯示，存檔�
   const first = screen.getByRole("group", { name: "第 1 題答案 1" });
   expect(within(first).getByText("拿鐵")).toBeTruthy();
   expect(within(first).getByText("手沖體驗：蜜桃手沖體驗")).toBeTruthy();
-  await user.click(screen.getByLabelText("在客人頁顯示「不知道喝什麼？」"));
+  await user.click(screen.getByLabelText("在客人頁顯示「不知道點什麼？」"));
   await user.click(screen.getByRole("button", { name: "儲存" }));
 
   await waitFor(() => expect(done).toHaveBeenCalled());
@@ -153,6 +153,6 @@ it("題數 1–3、答案 2–4；文字空白不能存", async () => {
 it("打開顯示但一個品項都沒勾：提醒客人頁不會出現", async () => {
   mountForm();
   const user = userEvent.setup();
-  await user.click(screen.getByLabelText("在客人頁顯示「不知道喝什麼？」"));
+  await user.click(screen.getByLabelText("在客人頁顯示「不知道點什麼？」"));
   expect(screen.getByText(/還沒勾任何品項/)).toBeTruthy();
 });

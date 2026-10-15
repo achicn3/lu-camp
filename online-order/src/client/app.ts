@@ -54,7 +54,7 @@ let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
 /** 目前打開的分頁（null＝預設第一個，通常是店員推薦）。 */
 let activeTab: string | null = null;
-/** 問答區是否打開（「不知道喝什麼？」按鈕）。 */
+/** 問答區是否打開（「不知道點什麼？」按鈕）。 */
 let quizOpen = false;
 let detailTrigger: HTMLElement | null = null;
 let feedbackTimer: number | null = null;
@@ -348,7 +348,7 @@ const TAB_NOTES: Record<string, string> = {
   [BREW_TAB]: "點一張卡，抽一支今天的豆子。",
   [TAKEAWAY_TAB]: "付款後請到櫃檯領取。",
 };
-/** 掃碼直接進完整菜單（店主 2026-10-10）：上方問候語＋「不知道喝什麼？」，分類列預設打開店員推薦。 */
+/** 掃碼直接進完整菜單（店主 2026-10-10）：上方問候語＋「不知道點什麼？」，分類列預設打開店員推薦。 */
 function renderMenu(snapshot: MenuSnapshot): void {
   $("hours-note").textContent = "目前非營業時間，可先看看菜單。";
   $("hours-note").hidden = status?.within_hours !== false;
@@ -368,7 +368,7 @@ function renderMenu(snapshot: MenuSnapshot): void {
   const list = $("list");
   list.replaceChildren(...(current ? tabContent(snapshot, current) : []));
   if (!list.childElementCount) list.append(el("p", "empty-state", "菜單準備中，請洽櫃台點餐。"));
-  $("shortcuts").replaceChildren(...(snapshot.quiz ? [button("不知道喝什麼？", () => startQuiz(), "shortcut quiz-entry")] : []));
+  $("shortcuts").replaceChildren(...(snapshot.quiz ? [button("不知道點什麼？", () => startQuiz(), "shortcut quiz-entry")] : []));
   renderQuiz(snapshot);
 }
 function startQuiz(): void {
@@ -387,7 +387,7 @@ function answerQuiz(answer: number | null): void {
   // 換題／出結果後把問答區頂端帶回畫面（不被上方固定列擋住）。
   $("quiz").scrollIntoView({ block: "start" });
 }
-/** 「不知道喝什麼」（docs/63 §2 M2a）：一題一題問，答完給 1 主推＋最多 2 備選；對不上就給完整菜單。 */
+/** 「不知道點什麼」（docs/63 §2 M2a）：一題一題問，答完給 1 主推＋最多 2 備選；對不上就給完整菜單。 */
 function renderQuiz(snapshot: MenuSnapshot): void {
   const quiz = snapshot.quiz;
   $("quiz").hidden = !quizOpen || quiz === undefined;

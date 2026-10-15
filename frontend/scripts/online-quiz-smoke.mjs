@@ -1,4 +1,4 @@
-// 「不知道喝什麼」引導推薦煙霧（docs/63 §2 M2a）：後台每個答案勾品項 → 發佈 → 客人手機回答三題 →
+// 「不知道點什麼」引導推薦煙霧（docs/63 §2 M2a）：後台每個答案勾品項 → 發佈 → 客人手機回答三題 →
 // 最推薦＋備選、可直接加入；重新回答換答案換推薦。結束時把問答設定還原、建的品項封存。
 // 需 backend :8114（含線上點餐設定）＋ wrangler :8799 ＋ frontend :3500。只准對隔離測試環境執行（SMOKE_ALLOW_WRITE=1）。
 import assert from "node:assert/strict";
@@ -83,11 +83,11 @@ try {
   await pick("第 2 題答案 2", names.nutty);
   await pick("第 3 題答案 1", names.fruity);
   await pick("第 3 題答案 2", names.nutty);
-  await desk.getByLabel("在客人頁顯示「不知道喝什麼？」").check();
+  await desk.getByLabel("在客人頁顯示「不知道點什麼？」").check();
   await desk.screenshot({ path: join(SHOTS, "01-admin-quiz.png"), fullPage: true });
   await desk.getByRole("button", { name: "儲存" }).click();
   await desk.waitForURL(/\/menu\?section=online$/);
-  const summary = desk.locator("section", { hasText: "不知道喝什麼？（引導推薦）" });
+  const summary = desk.locator("section", { hasText: "不知道點什麼？（引導推薦）" });
   await summary.getByText(/顯示中・3 題・勾了 3 個品項/).waitFor();
   ok("後台存好：摘要顯示中、3 題、勾了 3 個品項", true);
 
@@ -100,7 +100,7 @@ try {
   const guest = await guestCtx.newPage();
   guest.on("pageerror", (e) => errors.push(`客人頁：${e}`));
   await guest.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
-  await guest.getByRole("button", { name: "不知道喝什麼？" }).click();
+  await guest.getByRole("button", { name: "不知道點什麼？" }).click();
   const quiz = guest.locator("#quiz");
   ok("首頁入口打開問答，第 1 / 3 題", (await quiz.innerText()).includes("第 1 / 3 題"));
   await guest.screenshot({ path: join(SHOTS, "02-guest-question.png") });

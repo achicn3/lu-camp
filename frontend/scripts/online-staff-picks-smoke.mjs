@@ -1,6 +1,6 @@
 // 店員推薦＋掃碼直接進完整菜單煙霧（店主 2026-10-10）：後台「線上發布」→ 店員推薦清單加入餐飲、手沖體驗卡、
 // 帶著走商品並調順序 → 發佈 → 客人手機一進來就是「店員推薦」分頁、照排好的順序、三種卡都在；
-// 分類列：店員推薦、手沖體驗、各分類、帶著走；「不知道喝什麼？」是問候語下的小按鈕。結束時還原清單、清掉建的東西。
+// 分類列：店員推薦、手沖體驗、各分類、帶著走；「不知道點什麼？」是問候語下的小按鈕。結束時還原清單、清掉建的東西。
 // 需 backend :8114（含線上點餐設定）＋ wrangler :8799 ＋ frontend :3500。只准對隔離測試環境執行（SMOKE_ALLOW_WRITE=1）。
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -93,7 +93,7 @@ try {
   const tabs = await guest.locator("#tabs button").allTextContents();
   ok("分類列：店員推薦第一、手沖體驗第二、帶著走最後", tabs[0] === "店員推薦" && tabs[1] === "手沖體驗" && tabs.at(-1) === "帶著走", tabs.join("｜"));
   ok("一進來就打開店員推薦", (await guest.locator('#tabs button[aria-pressed="true"]').innerText()) === "店員推薦");
-  ok("問候語還在、「不知道喝什麼？」是小按鈕", (await guest.locator(".welcome-title").count()) === 1);
+  ok("問候語還在、「不知道點什麼？」是小按鈕", (await guest.locator(".welcome-title").count()) === 1);
   const listText = await guest.locator("#list").innerText();
   const order = [bean.name, latte.name, card.title].map((name) => listText.indexOf(name));
   ok("店員推薦照後台排的順序、三種東西都在", order.every((i) => i >= 0) && order[0] < order[1] && order[1] < order[2], order.join(","));

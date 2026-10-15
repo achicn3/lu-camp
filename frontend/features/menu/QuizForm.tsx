@@ -1,5 +1,5 @@
 "use client";
-// 「不知道喝什麼」引導推薦的設定（docs/63 §2 M2a；店主 2026-10-09）：1–3 題、每題 2–4 個答案，
+// 「不知道點什麼」引導推薦的設定（docs/63 §2 M2a；店主 2026-10-09）：1–3 題、每題 2–4 個答案，
 // 每個答案勾「適合的品項」（菜單品項或手沖體驗卡）。客人答完，被勾到最多次的最推薦、其次兩個備選。
 // 只引用既有品項，不填價格；下架或售完的客人頁自動略過。
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -99,7 +99,7 @@ export function QuizForm({
       <fieldset className="card exp-block" disabled={save.isPending}>
         <label className="field-toggle">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
-          在客人頁顯示「不知道喝什麼？」
+          在客人頁顯示「不知道點什麼？」
         </label>
         {active && !ticked && (
           <p className="hint">還沒勾任何品項，客人頁不會出現這個入口。</p>
