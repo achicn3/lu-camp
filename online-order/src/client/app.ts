@@ -213,6 +213,8 @@ function openDetail(item: MenuItemView): void {
       try {
         cart = addLine(menu, cart, { item_id: item.id, option_ids: optionIds, qty: Number(qty.value) });
         saveCart(); renderFooter(); closeDetail(); clearMessage();
+        // 從購物車的加點開的：當場重畫購物車（新的一行、合計、低消），不必回菜單再進來。
+        if (!$("cart-view").hidden) renderCart();
       } catch (reason) { error.textContent = cartError(reason); }
     });
     add.id = "detail-add"; add.disabled = itemSoldOut(item);
