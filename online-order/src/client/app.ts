@@ -685,6 +685,7 @@ async function challenge(): Promise<string> {
   const api = window.turnstile;
   if (typeof api?.render !== "function") throw new Error("challenge_unavailable");
   challengeToken = "";
+  const box = $("challenge-widget"); box.hidden = false;
   if (widgetId !== null) api.reset(widgetId);
   else widgetId = api.render($("challenge-widget"), {
     sitekey, callback: (token) => { challengeToken = token; },
@@ -694,8 +695,8 @@ async function challenge(): Promise<string> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const timer = window.setInterval(() => {
-      if (challengeToken) { clearInterval(timer); resolve(challengeToken); }
-      else if (Date.now() - started > 120000) { clearInterval(timer); reject(new Error("challenge_unavailable")); }
+      if (challengeToken) { clearInterval(timer); box.hidden = true; resolve(challengeToken); }
+      else if (Date.now() - started > 120000) { clearInterval(timer); box.hidden = true; reject(new Error("challenge_unavailable")); }
     }, 200);
   });
 }
@@ -767,20 +768,36 @@ function minimumRejected(result: { missing_amount?: number; missing_items?: numb
   return "未達本桌低消，請再加點後送出。";
 }
 /** 向雲端要 LINE Pay 付款連結並跳過去；失敗回 false（留在訂單頁顯示原因）。 */
+function startPayment(token: string, challengeToken?: string): Promise<Response> {
+  return fetch(`/api/orders/${token}/linepay`, {
+    method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: challengeToken === undefined ? undefined : JSON.stringify({ turnstile_token: challengeToken }),
+  });
+}
 async function goLinePay(token: string): Promise<boolean> {
   try {
-    const resp = await fetch(`/api/orders/${token}/linepay`, { method: "POST", headers: { Accept: "application/json" } });
+    let resp = await startPayment(token);
+    // 重新付款要重新驗證（建單時那次已經用掉）：就地驗證後再送一次。
+    if (resp.status === 403 && (await resp.clone().json() as { error?: string }).error === "challenge_required") {
+      showMessage("請完成安全驗證，再前往 LINE Pay。");
+      resp = await startPayment(token, await challenge());
+      clearMessage();
+    }
     if (!resp.ok) {
       const result = await resp.json() as { error?: string };
       showMessage(result.error === "hold_pending" ? "正在確認限量品項，確認後就能付款。"
-        : result.error === "hold_expired" ? "保留時間已過，請回菜單重新點。" : "暫時連不上 LINE Pay，請稍後再試或到櫃檯付現金。");
+        : result.error === "hold_expired" ? "保留時間已過，請回菜單重新點。"
+        : result.error === "challenge_failed" ? "安全驗證沒有通過，請再按一次付款。"
+        : "暫時連不上 LINE Pay，請稍後再試或到櫃檯付現金。");
       return false;
     }
     const { payment_url } = await resp.json() as { payment_url: string };
     location.assign(payment_url);
     return true;
-  } catch {
-    showMessage("連線中斷，請稍後再試。"); return false;
+  } catch (reason) {
+    showMessage(reason instanceof Error && reason.message === "challenge_unavailable"
+      ? "安全驗證暫時無法使用，請稍後再試或到櫃檯付現金。" : "連線中斷，請稍後再試。");
+    return false;
   }
 }
 /** 從 LINE Pay 導回訂單頁：付好了就請款、取消就記取消，然後把網址上的參數拿掉。 */

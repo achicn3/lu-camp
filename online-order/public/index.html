@@ -38,13 +38,14 @@
         <button id="back-menu" class="back-link" type="button">← 返回菜單</button>
         <h1 class="view-title">購物車</h1>
         <div id="cart-body"></div>
-        <div id="challenge-widget" class="turnstile" aria-label="安全驗證"></div>
       </section>
       <section id="order-view" hidden>
         <p class="eyebrow">露坑 · 訂單</p>
         <h1 class="view-title">你的訂單</h1>
         <div id="order-body"></div>
       </section>
+      <!-- 送單與重新付款共用的安全驗證；驗證時才顯示（購物車與訂單頁都要看得到）。 -->
+      <div id="challenge-widget" class="turnstile" aria-label="安全驗證" hidden></div>
     </main>
     <p id="cart-feedback" class="cart-feedback" role="status" aria-live="polite"></p>
     <footer id="footer" class="footer" hidden></footer>

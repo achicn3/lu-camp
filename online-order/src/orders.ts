@@ -182,7 +182,7 @@ export async function accepting(env: Env, storeId: number, now = Date.now()): Pr
   return now - meta.last_pos_seen_ms <= POS_STALE_MS && await withinHours(env, storeId, now);
 }
 
-async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boolean> {
+export async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boolean> {
   if (!env.TURNSTILE_SECRET) return false;
   const form = new FormData();
   form.append("secret", env.TURNSTILE_SECRET);

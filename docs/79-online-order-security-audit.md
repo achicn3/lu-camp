@@ -72,7 +72,8 @@ SMOKE_ALLOW_WRITE=1 SMOKE_API=http://127.0.0.1:8116 SMOKE_ORDER=http://127.0.0.1
 - 雲端有限度攻擊腳本：`cd online-order && node test/security-smoke.mjs`；複測 **24/24** 通過。
   部署後首次為 23/24（NUL 測試收到 422，但回應內容／標頭斷言有一項未符）；
   單項重查與整套複測均通過。首次腳本未細分斷言失敗點，原因未定位，已補細分診斷，不能據此宣稱零風險。
-- 尚未完成：付款發起重新驗 Turnstile、真 Turnstile token 過期／重放、POS DOM XSS、
+- 尚未完成：真 Turnstile token 過期／重放、POS DOM XSS、
   完整 staging 庫存保留濫用／灌單測試、正式部署設定與網路暴露面檢查。
+  （重新付款重新驗 Turnstile 已於 2026-10-15 補上，見 docs/50。）
 - 目前沒有證據能主張已取得 POS 主機執行權限、員工帳號或資料庫控制權；
   本輪證明的是未授權客人可透過訂單資料阻斷 POS 收單，以及已修補的兩項具體漏洞。

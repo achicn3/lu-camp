@@ -68,8 +68,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   const pay = /^\/api\/orders\/([^/]+)\/linepay(\/confirm|\/cancel)?$/.exec(path);
   if (pay && req.method === "POST") {
     // 維持既有空 body 相容性；任何付款副作用前先限制實際讀取量。
+    let raw: Uint8Array;
     try {
-      await readBody(req, ORDER_MAX_BYTES);
+      raw = await readBody(req, ORDER_MAX_BYTES);
     } catch (e) {
       if (e instanceof BodyTooLarge) return error("payload_too_large", 413);
       throw e;
@@ -78,7 +79,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (pay[2] === "/confirm") return confirmLinePay(env, storeId, token);
     if (pay[2] === "/cancel") return cancelLinePay(env, storeId, token);
     if (await paymentRateLimited(req, env, storeId)) return error("rate_limited", 429);
-    return startLinePay(req, env, storeId, token);
+    return startLinePay(req, env, storeId, token, raw);
   }
   if (req.method !== "GET" && req.method !== "HEAD") {
     return path.startsWith("/api/") ? error("method_not_allowed", 405) : env.ASSETS.fetch(req);

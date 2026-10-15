@@ -33,6 +33,7 @@ UI_TEXT = (
     "也幫幾知符第答道題人氣員店愛著走近"
     "非營業分鐘逾自"
     "低填客寫差滿理達需"
+    "使次法"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 

@@ -11,6 +11,8 @@ const fake = {
   next: 2026100102385323700n,
   confirmCalls: 0,
   confirmFails: false, // 模擬請款回應遺失
+  turnstileOk: true,
+  turnstileTokens: [] as string[],
 };
 
 function lineReply(body: string): Response {
@@ -21,9 +23,14 @@ beforeEach(async () => {
   fake.txs.clear();
   fake.confirmCalls = 0;
   fake.confirmFails = false;
+  fake.turnstileOk = true;
+  fake.turnstileTokens = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (url.startsWith("https://challenges.cloudflare.com/")) return Response.json({ success: true });
+    if (url.startsWith("https://challenges.cloudflare.com/")) {
+      fake.turnstileTokens.push(String((init?.body as FormData).get("response")));
+      return Response.json({ success: fake.turnstileOk });
+    }
     if (!url.startsWith("https://linepay.test/")) throw new Error(`unexpected fetch ${url}`);
     const path = new URL(url).pathname;
     if (path === "/v4/payments/request") {
@@ -82,7 +89,10 @@ async function place(extra: object = {}, lines = [{ item_id: 5, option_ids: [], 
   }));
   return { status: resp.status, body: (await resp.json()) as { token: string; status: string; error?: string } };
 }
-const post = (path: string) => exports.default.fetch(new Request(`https://order.test${path}`, { method: "POST" }));
+const post = (path: string, body?: string) =>
+  exports.default.fetch(new Request(`https://order.test${path}`, { method: "POST", body }));
+// 重新付款（之前發起過、已取消或失敗）要附新的人機驗證（docs/44 §8.4）。
+const REPAY = JSON.stringify({ turnstile_token: "repay-tok" });
 const view = async (token: string) =>
   (await (await exports.default.fetch(new Request(`https://order.test/api/orders/${token}`))).json()) as Record<string, unknown>;
 const authorize = (n = 0) => { [...fake.txs.values()][n]!.state = "authorized"; };
@@ -149,7 +159,7 @@ describe("線上 LINE Pay", () => {
     await post(`/api/orders/${body.token}/linepay`);
     expect((await post(`/api/orders/${body.token}/linepay/cancel`)).status).toBe(200);
     expect(await view(body.token)).toMatchObject({ status: "UNPAID", linepay_result: "CANCELLED" });
-    await post(`/api/orders/${body.token}/linepay`);
+    expect((await post(`/api/orders/${body.token}/linepay`, REPAY)).status).toBe(200);
     const ids = [...fake.txs.values()].map((t) => t.orderId);
     expect(new Set(ids).size).toBe(2);
   });
@@ -212,7 +222,7 @@ describe("線上 LINE Pay", () => {
       if (url.endsWith(`/requests/${oldTx}/check`)) {
         vi.mocked(fetch).mockImplementation(original);
         await post(`/api/orders/${body.token}/linepay/cancel`);
-        await post(`/api/orders/${body.token}/linepay`);
+        await post(`/api/orders/${body.token}/linepay`, REPAY);
       }
       return original(input, init);
     });
@@ -246,6 +256,52 @@ describe("線上 LINE Pay", () => {
     expect((await place({ invoice: { tax_id: "12345678" } })).status).toBe(201);
   });
 
+  it("重新付款沒附人機驗證：拒絕，不向 LINE Pay 開新交易（docs/44 §8.4）", async () => {
+    const { body } = await place();
+    await post(`/api/orders/${body.token}/linepay`);
+    await post(`/api/orders/${body.token}/linepay/cancel`);
+    const denied = await post(`/api/orders/${body.token}/linepay`);
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "challenge_required" });
+    expect(fake.txs.size).toBe(1);
+    expect(await view(body.token)).toMatchObject({ status: "UNPAID", linepay_result: "CANCELLED" });
+  });
+
+  it("重新付款的人機驗證沒過：拒絕，不開新交易；驗過才開，且用的是這次的新驗證", async () => {
+    const { body } = await place();
+    await post(`/api/orders/${body.token}/linepay`);
+    await post(`/api/orders/${body.token}/linepay/cancel`);
+    fake.turnstileOk = false;
+    const denied = await post(`/api/orders/${body.token}/linepay`, REPAY);
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "challenge_failed" });
+    expect(fake.txs.size).toBe(1);
+    fake.turnstileOk = true;
+    fake.turnstileTokens = [];
+    expect((await post(`/api/orders/${body.token}/linepay`, REPAY)).status).toBe(200);
+    expect(fake.turnstileTokens).toEqual(["repay-tok"]);
+    expect(fake.txs.size).toBe(2);
+  });
+
+  it("第一次付款與付款中再按一次：不必另外驗證（建單時已驗過）", async () => {
+    const { body } = await place();
+    fake.turnstileTokens = [];
+    expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(200);
+    expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(200);
+    expect(fake.turnstileTokens).toEqual([]);
+    expect(fake.txs.size).toBe(1);
+  });
+
+  it.each(["{", "[]", JSON.stringify({ turnstile_token: "" }), JSON.stringify({ turnstile_token: 1 })])(
+    "重新付款的驗證格式不對（%s）：當成沒附驗證", async (raw) => {
+      const { body } = await place();
+      await post(`/api/orders/${body.token}/linepay`);
+      await post(`/api/orders/${body.token}/linepay/cancel`);
+      const denied = await post(`/api/orders/${body.token}/linepay`, raw);
+      expect(denied.status).toBe(403);
+      expect(fake.txs.size).toBe(1);
+    });
+
   it("現金單不能走 LINE Pay 付款", async () => {
     const { body } = await place({ payment_method: "CASH" });
     expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(409);
@@ -263,10 +319,10 @@ describe("付款端點防濫用（docs/44 §8.4）", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { body } = await place();
     for (let i = 0; i < 5; i++) {
-      expect((await paymentPost(body.token)).status).toBe(200);
+      expect((await paymentPost(body.token, "", "10.99.0.1", i === 0 ? undefined : REPAY)).status).toBe(200);
       if (i < 4) expect((await paymentPost(body.token, "/cancel")).status).toBe(200);
     }
-    const blocked = await paymentPost(body.token);
+    const blocked = await paymentPost(body.token, "", "10.99.0.1", REPAY);
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toEqual({ error: "rate_limited" });
     expect(fake.txs.size).toBe(5);

@@ -70,7 +70,7 @@ SMOKE_ALLOW_WRITE=1 node frontend/scripts/online-shared-options-smoke.mjs
 - staging 部署 `a316aba4-782f-4bdd-8293-3e04079a83e5`，有限度腳本複測 24/24。
   backend 修補只在隔離測試環境驗證，正式 POS 未升級；本次無 migration／API 合約變更。
 - 完整結果、首次 staging 斷言失敗紀錄、付款等待取捨與未完成範圍見 [docs/79](79-online-order-security-audit.md)。
-  付款發起 Turnstile、POS DOM XSS 與完整 staging 灌單／保留濫用等仍待做。
+  POS DOM XSS 與完整 staging 灌單／保留濫用等仍待做（付款發起 Turnstile 已於 2026-10-15 補上）。
 
 ## 2026-10-12 接手：付款端點防濫用與資安驗收
 
@@ -90,8 +90,10 @@ SMOKE_ALLOW_WRITE=1 node frontend/scripts/online-shared-options-smoke.mjs
   修正後本機 HTTP Worker／隔離 D1 **22/22**；staging 在 2026-10-12 19:59（台北）複測 **22/22**。
   已部署 staging 版本 `1e8a8f04-9500-4449-812b-5fed52368877`，未部署正式環境。
   此腳本驗證最遲第六次被拒，精確門檻由固定時間的測試守護。
-- **完整 §8.4 尚未驗收完成**：付款發起仍未重新取得／驗證 Turnstile（建單時有驗，但重付沒有）；
-  需接上客人頁的新 token 流程，不能重用已消耗的建單 token。
+- **完整 §8.4 尚未驗收完成**：~~付款發起未重新驗證 Turnstile~~——2026-10-15 已補：重新付款
+  （`linepay_attempt > 0`）須附新的 Turnstile token，沒附回 403 `challenge_required`、沒過回 403 `challenge_failed`，
+  都不向 LINE Pay 開新交易；第一次付款緊接建單驗證、付款中再按沿用原連結，不另驗。客人頁收到
+  `challenge_required` 就地驗證後重送。驗收：Worker 測試＋`frontend/scripts/online-linepay-repay-smoke.mjs`（假 LINE Pay）。
   staging 使用測試金鑰，不能用來證明真 token 的失敗／過期／重放拒絕。
   有效簽章重放、價格／選項竄改、庫存保留濫用目前有本機測試，仍需隔離 staging 資料驗收；
   惡意備註尚待客人頁與 POS 真瀏覽器驗證。這些均未標示為店主接受的風險。

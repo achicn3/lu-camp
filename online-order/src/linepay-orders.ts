@@ -6,6 +6,7 @@
 // 的補查收斂；客人授權後沒回到訂單頁的單，補查看到「已授權」也會代為請款。
 import { error, json, sha256Hex } from "./http";
 import { checkPayment, confirmPayment, type LinePayConfig, linePayConfig, requestPayment } from "./linepay";
+import { verifyTurnstile } from "./orders";
 
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const RECHECK_MS = 30_000;
@@ -83,7 +84,21 @@ async function move(
   return true;
 }
 
-export async function startLinePay(req: Request, env: Env, storeId: number, token: string): Promise<Response> {
+/** 重新付款附的人機驗證權杖；沒附或格式不對＝null。 */
+function repayChallenge(raw: Uint8Array): string | null {
+  try {
+    const v: unknown = JSON.parse(new TextDecoder().decode(raw));
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+    const token = (v as { turnstile_token?: unknown }).turnstile_token;
+    return typeof token === "string" && token !== "" && token.length <= 2048 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function startLinePay(
+  req: Request, env: Env, storeId: number, token: string, raw: Uint8Array = new Uint8Array(),
+): Promise<Response> {
   const config = linePayConfig(env);
   if (config === null) return error("linepay_unavailable", 422);
   const row = await byToken(env, storeId, token);
@@ -97,6 +112,15 @@ export async function startLinePay(req: Request, env: Env, storeId: number, toke
   // 交易號會被新的蓋掉，店內記錯交易、之後退不了款（Codex O5 第一輪）。
   if (row.payment_status === "PENDING" && row.linepay_payment_url !== null) {
     return json({ payment_url: row.linepay_payment_url });
+  }
+  // 重新付款（之前發起過、已取消或失敗）要重新驗證人機（docs/44 §8.4）：建單時的驗證已經用掉，
+  // 不然拿到訂單權杖就能一直向 LINE Pay 開新交易。第一次付款緊接在建單驗證之後，不再多驗一次。
+  if (row.linepay_attempt > 0) {
+    const challenge = repayChallenge(raw);
+    if (challenge === null) return error("challenge_required", 403);
+    if (!(await verifyTurnstile(env, challenge, req.headers.get("CF-Connecting-IP") ?? ""))) {
+      return error("challenge_failed", 403);
+    }
   }
   const attempt = row.linepay_attempt + 1;
   if (!(await move(env, storeId, row, ["UNPAID"], "PENDING", {
