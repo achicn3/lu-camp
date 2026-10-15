@@ -969,7 +969,9 @@ class IntakeService:
                     continue
                 model = item.product_model_id if isinstance(item, SerializedItem) else None
                 _l, brand0, model0 = out.get(source.id, (source, None, None))
-                out[source.id] = (source, brand0 or item.brand_id, model0 or model)
+                # 品牌型號取同一件的：分開補會把不同件拼成對不起來的一組（Codex P2）。
+                if brand0 is None and model0 is None:
+                    out[source.id] = (source, item.brand_id, model)
         return out
 
     @classmethod

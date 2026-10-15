@@ -88,7 +88,8 @@ class InventoryRepository:
         if brand_id is not None:
             stmt = stmt.where(ProductModel.brand_id == brand_id)
         if q:
-            stmt = stmt.where(ProductModel.name.ilike(f"%{q}%"))
+            # 照字面比對：型號名稱真的可能有 % 或 _（店主 2026-10-15）。
+            stmt = stmt.where(ProductModel.name.icontains(q, autoescape=True))
         stmt = stmt.order_by(ProductModel.name).limit(limit)
         return list((await self._session.scalars(stmt)).all())
 

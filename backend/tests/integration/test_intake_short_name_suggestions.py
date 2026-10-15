@@ -261,3 +261,54 @@ async def test_listed_brand_and_model_replace_the_estimate_pair(
     [row] = await _suggest(client, ctx, "營燈")
 
     assert (row["brand_name"], row["product_model_name"]) == ("Snow Peak", "GL 營燈")
+
+
+async def test_brand_and_model_come_from_the_same_item(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同一列兩件、上架時填得不一樣：品牌型號要取同一件的，不能拼成 A＋B（Codex P2）。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    batch = await _confirmed_batch(client, ctx, [_line(short_name="營燈", qty=2)], [2])
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    model = await client.post(
+        "/api/v1/product-models", json={"brand_id": snow_peak, "name": "GL"}, headers=ctx.auth
+    )
+    first, second = (await client.get(f"{PATH}/{batch['id']}/items", headers=ctx.auth)).json()
+    resp = await client.post(
+        f"{PATH}/{batch['id']}/listing",
+        json={
+            "items": [
+                {"kind": "SERIALIZED", "id": first["id"], "brand_id": coleman},
+                {
+                    "kind": "SERIALIZED",
+                    "id": second["id"],
+                    "brand_id": snow_peak,
+                    "product_model_id": model.json()["id"],
+                },
+            ]
+        },
+        headers=ctx.auth,
+    )
+    assert resp.status_code == 200, resp.text
+
+    [row] = await _suggest(client, ctx, "營燈")
+
+    assert (row["brand_name"], row["product_model_name"]) == ("Coleman", None)
+
+
+async def test_model_search_matches_percent_and_underscore_literally(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """型號名稱真的可能有 % 或 _（店主 2026-10-15）：照字面比對，不當萬用字元。"""
+    ctx = await _ctx(db_session, client)
+    brand = await _brand(db_session, ctx, "Snow Peak")
+    for name, model in (("營燈甲", "50% 營燈"), ("營燈乙", "GL 營燈")):
+        batch = await _confirmed_batch(client, ctx, [_line(short_name=name, qty=1)], [1])
+        assert (await _pay(client, ctx, batch["id"])).status_code == 200
+        await _listed_as(client, ctx, batch["id"], brand, model)
+
+    assert [r["product_model_name"] for r in await _suggest(client, ctx, "50%")] == ["50% 營燈"]
+    assert [r["product_model_name"] for r in await _suggest(client, ctx, "%")] == ["50% 營燈"]
+    assert await _suggest(client, ctx, "_") == []
