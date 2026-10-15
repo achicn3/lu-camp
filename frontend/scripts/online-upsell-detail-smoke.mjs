@@ -18,6 +18,13 @@ try {
   await guest.getByText("合計 $120").waitFor();
 
   const upsell = guest.locator(".upsell-item").filter({ hasText: "拿鐵" });
+  // 點加點那一格（品名／價格）：跟菜單點品項一樣跳出說明視窗（店主 2026-10-15）
+  await upsell.getByRole("button", { name: /查看說明：拿鐵/ }).click();
+  await guest.locator("#sheet").waitFor({ state: "visible" });
+  assert.match(await guest.locator("#sheet").textContent(), /拿鐵/);
+  await guest.screenshot({ path: `${SHOTS}/upsell-detail-sheet.png` });
+  await guest.locator("#sheet-close").click();
+  await guest.locator("#sheet").waitFor({ state: "hidden" });
   await upsell.getByRole("button", { name: "選擇選項" }).click();
   const sheet = guest.locator("#sheet");
   await sheet.waitFor({ state: "visible" });

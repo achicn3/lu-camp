@@ -56,6 +56,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
+/* 左上 logo＋店名＝回首頁（店主 2026-10-15）。 */
+.bar-home { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .bar-logo { width: 30px; height: 40px; flex: none; }
 .bar-name { flex: none; display: grid; line-height: 1.2; }
 .bar-name b { font-weight: 400; font-size: 25px; letter-spacing: 0.08em; }
@@ -78,6 +80,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .message { margin: 18px 0; padding: 12px 14px; border: 1px solid var(--gold); color: var(--ink); }
 
 .tabs { display: flex; gap: 20px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: none; }
+/* 分類列黏在頁首下面（店主 2026-10-15）：點分類跳下去時貼齊頁首，往下滑也一直看得到、換分類不必往上滑。
+   --bar-h 由程式依頁首實際高度設定（含瀏海安全區）。 */
+#tabs { position: sticky; top: var(--bar-h, 72px); z-index: 4; background: var(--bg); border-bottom: 1px solid var(--line); }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
   background: none;
@@ -144,6 +149,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .back-link { margin: 18px 0 0; padding: 8px 0; border: 0; background: none; color: var(--gold); cursor: pointer; }
 .action { display: block; width: 100%; margin: 20px 0; padding: 13px 18px; border: 1px solid var(--gold); border-radius: 3px; background: var(--gold); color: var(--bg); cursor: pointer; text-align: center; }
 .action:hover { background: #dfc084; }
+/* 次要按鈕（外框）：跟主要動作（付款、送出）放一起時不搶眼。 */
+.action-secondary { background: none; color: var(--gold); }
+.upsell-detail { flex: 1; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.action-secondary:hover { background: rgba(200, 169, 106, .12); }
 .quiet-action { padding: 8px; border: 0; background: none; color: var(--gold); cursor: pointer; }
 .empty-state, .order-hint { color: var(--soft); }
 .cart-line { display: flex; justify-content: space-between; gap: 15px; padding: 14px 0; border-bottom: 1px solid var(--line); }

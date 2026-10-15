@@ -23,6 +23,8 @@ type PayMethod = "CASH" | "LINE_PAY";
 interface InvoiceInput { carrier: string | null; tax_id: string | null }
 const PAY_KEY = "lk_pay_v1";
 const PARTY_KEY = "lk_party_v1";
+/** 最近掃的桌位碼：訂單頁網址沒有桌號，回首頁時要回到同一桌（不是外帶）。 */
+const TABLE_KEY = "lk_table_v1";
 const ADD_ON_KEY = "lk_add_on_v1";
 const PARTY_MAX = 50;
 const MOBILE_CARRIER = /^\/[0-9A-Z.+-]{7}$/;
@@ -54,6 +56,8 @@ declare global { interface Window { turnstile?: TurnstileApi; onTurnstileReady?:
 
 let menu: MenuSnapshot | null = null;
 let tableCode: string | null = null;
+/** 回首頁要回的桌：訂單頁網址沒有桌號，用最近掃的那一桌。 */
+let homeTable: string | null = null;
 /** 這桌的低消（2026-10-14 店主）；外帶或沒設＝null。 */
 let tableMinimum: TableMinimum | null = null;
 let cart: CartLine[] = [];
@@ -313,7 +317,34 @@ function selectTab(key: string, push = true): void {
   activeTab = key;
   if (push) history.pushState({ menuTab: key }, "");
   if (menu) renderMenu(menu);
-  $("tabs").scrollIntoView({ block: "start" });
+  scrollToTabs();
+}
+/** 頁首實際高度（含瀏海安全區）給 CSS：分類列黏在頁首正下方。 */
+function trackBarHeight(): void {
+  const bar = document.querySelector<HTMLElement>(".bar");
+  if (!bar) return;
+  const apply = () => document.documentElement.style.setProperty("--bar-h", `${bar.offsetHeight}px`);
+  apply();
+  new ResizeObserver(apply).observe(bar);
+}
+/** 捲到分類列原本的位置、讓它貼齊頁首下緣：新分類的第一個品項就在分類列正下方（店主 2026-10-15）。
+ *  分類列黏住時自己的位置不準，改用它前一塊（問候語區）的底部算。 */
+function scrollToTabs(): void {
+  const bar = document.querySelector<HTMLElement>(".bar")?.offsetHeight ?? 0;
+  const top = $("menu-home").getBoundingClientRect().bottom + window.scrollY - bar;
+  window.scrollTo({ top: Math.max(0, top) });
+}
+/** 左上 logo／店名、訂單頁的「回到首頁」：回菜單最上方、預設分類；訂單頁回到同一桌。 */
+function goHome(): void {
+  const table = tableCode ?? homeTable;
+  const home = table ? `/t/${table}` : "/";
+  if (activeOrder !== null || ORDER_PATH.test(location.pathname)) { location.assign(home); return; }
+  closeDetail();
+  if (quizOpen) closeQuiz();
+  activeTab = null;
+  history.pushState({ menuTab: null }, "", home);
+  if (menu) renderMenu(menu);
+  showScreen("menu");
 }
 /** 分頁內容：店員推薦照店主排的順序、手沖體驗是卡片、帶著走依商品分類分組，其他就是那一類的品項。 */
 function tabContent(snapshot: MenuSnapshot, tab: MenuTab): HTMLElement[] {
@@ -422,7 +453,7 @@ function renderQuiz(snapshot: MenuSnapshot): void {
   const again = button("重新回答", startQuiz, "link-button");
   if (picks.length === 0) {
     body.replaceChildren(el("p", "quiz-empty", "今天沒有剛好符合的，看看完整菜單吧。"),
-      button("看完整菜單", () => { closeQuiz(); $("tabs").scrollIntoView({ block: "start" }); }, "action"), again);
+      button("看完整菜單", () => { closeQuiz(); scrollToTabs(); }, "action"), again);
     return;
   }
   const rows = picks.flatMap((ref, index): HTMLElement[] => {
@@ -647,8 +678,10 @@ function upsellBlock(): HTMLElement | null {
 }
 function upsellRow(pick: UpsellPick): HTMLElement {
   const row = el("div", "upsell-item");
-  const info = el("div");
   const options = pick.kind === "menu" && pick.option_groups.length > 0;
+  // 餐點那一格可以點：跟菜單點品項一樣跳出說明（店主 2026-10-15）。帶回家商品沒有說明頁。
+  const info = pick.kind === "menu" ? button("", () => openDetail(pick), "upsell-detail") : el("div");
+  if (pick.kind === "menu") info.setAttribute("aria-label", `查看說明：${pick.name}`);
   info.append(el("b", "", pick.name),
     el("span", "item-price", ` ${pick.kind === "menu" ? priceText(pick) : money(pick.unit_price)}`));
   row.append(info, button(options ? "選擇選項" : "一起帶", () => {
@@ -915,8 +948,8 @@ async function refreshOrder(): Promise<void> {
     body.append(pay);
   }
   body.append(el("p", "order-hint", "可儲存此頁網址，稍後查看付款狀態。"));
-  if (view.status === "REJECTED" || view.status === "CANCELLED")
-    body.append(button("返回菜單", () => { history.pushState(null, "", tableCode ? `/t/${tableCode}` : "/"); activeOrder = null; showScreen("menu"); }));
+  // 送單／付款後引導客人回首頁，想加點可以再點（店主 2026-10-15）。
+  body.append(button("回到首頁", goHome, "action action-secondary order-home"));
   // 付了錢但帶回家商品還沒交：繼續更新，交貨後客人頁才會變「已領取」。LINE Pay 付款中也繼續更新。
   const done = view.status === "REFUNDED" ||
     (["PAID", "REJECTED", "CANCELLED", "PARTIALLY_REFUNDED"].includes(view.status) && view.fulfillment !== "AWAITING");
@@ -970,6 +1003,8 @@ async function openOrder(token: string): Promise<void> {
 async function main(): Promise<void> {
   $("greeting").textContent = greeting(new Date());
   $("sheet-close").addEventListener("click", closeDetail);
+  $("home").addEventListener("click", goHome);
+  trackBarHeight();
   // 從 LINE Pay 按上一頁回來，瀏覽器可能直接還原跳轉前的頁面：付款鈕要解鎖、狀態重新查。
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
@@ -1008,6 +1043,11 @@ async function main(): Promise<void> {
     history.replaceState({ menuTab: activeTab, cart: history.state?.cart === true }, "");
   }
   tableCode = tableCodeFromPath(location.pathname);
+  try {
+    if (tableCode) sessionStorage.setItem(TABLE_KEY, tableCode);
+    else if (ORDER_PATH.test(location.pathname)) homeTable = tableCodeFromPath(`/t/${sessionStorage.getItem(TABLE_KEY) ?? ""}`);
+    else sessionStorage.removeItem(TABLE_KEY);
+  } catch { /* 無痕模式拿不到 sessionStorage：回首頁就回外帶 */ }
   const orderToken = ORDER_PATH.exec(location.pathname)?.[1];
   const [menuResult, tableResult, storeResult] = await Promise.all([
     getJson<MenuSnapshot>("/api/menu"),

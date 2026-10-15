@@ -35,6 +35,7 @@ UI_TEXT = (
     "低填客寫差滿理達需"
     "使次法"
     "場沿由"
+    "模痕說"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 
