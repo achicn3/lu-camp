@@ -25,5 +25,25 @@
     }
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "lu-camp-online-order-staging" }],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "env": {
+    // 正式版（2026-10-15 店主）：客人掃碼開 https://order.lukeng-camp.com。資料庫、照片、密鑰都跟測試版分開。
+    // 密鑰 INTEGRATION_SECRET、TURNSTILE_SECRET 用 `wrangler secret put --env production`；
+    // TURNSTILE_SITE_KEY 本來就會出現在客人頁上，不是密鑰。
+    "production": {
+      "name": "lu-camp-online-order",
+      "workers_dev": false,
+      "routes": [{ "pattern": "order.lukeng-camp.com", "custom_domain": true }],
+      "vars": { "STORE_ID": "1", "TURNSTILE_SITE_KEY": "0x4AAAAAAFXnnokb3jQLwNnC" },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "lu-camp-online-order-production",
+          "database_id": "66b0382d-8a16-4058-869f-54c321ec0717",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "lu-camp-online-order-production" }]
+    }
+  }
 }
