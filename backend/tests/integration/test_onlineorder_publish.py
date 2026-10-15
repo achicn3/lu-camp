@@ -94,7 +94,10 @@ async def client(db_session: AsyncSession, worker: FakeWorker) -> AsyncGenerator
 
     def _client() -> OnlineOrderClient:
         return OnlineOrderClient(
-            BASE, SECRET, store_id=_STORE["id"], transport=httpx.MockTransport(worker.handler)
+            _CLOUD["base"],
+            SECRET,
+            store_id=_STORE["id"],
+            transport=httpx.MockTransport(worker.handler),
         )
 
     app.dependency_overrides[get_session] = _override
@@ -107,6 +110,8 @@ async def client(db_session: AsyncSession, worker: FakeWorker) -> AsyncGenerator
 
 # 雲端綁定的店：_seed 建好後填入（client fixture 在請求時才讀）。
 _STORE: dict[str, int] = {"id": 0}
+# 目前接的雲端網址（換雲端的測試會改它，結束時還原）。
+_CLOUD: dict[str, str] = {"base": BASE}
 
 
 async def _seed(session: AsyncSession) -> tuple[str, str]:
@@ -740,3 +745,48 @@ async def test_minimum_on_unknown_table_is_rejected(
     )
     assert resp.status_code == 422
     assert "桌號" in resp.json()["detail"]
+
+
+async def test_switching_cloud_repushes_font_and_photos(
+    client: httpx.AsyncClient, db_session: AsyncSession, worker: FakeWorker
+) -> None:
+    """推送紀錄要分雲端記：換到另一個雲端（例如測試版換正式版）時照片、字型要重推，
+    否則新雲端上的客人頁拿不到字型與照片（2026-10-15 正式版實際踩到）。"""
+    _, mgr = await _seed(db_session)
+    await _menu(client, mgr)
+
+    def media(since: int) -> list[str]:
+        return [
+            p
+            for p in worker.paths()[since:]
+            if p.startswith(("/integration/fonts/", "/integration/photos/"))
+        ]
+
+    try:
+        assert (
+            await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+        ).status_code == 200
+        first = media(0)
+        assert len(first) == 2
+
+        _CLOUD["base"] = "https://order2.test"
+        mark = len(worker.calls)
+        assert (
+            await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+        ).status_code == 200
+        assert sorted(media(mark)) == sorted(first), "new cloud gets the font and photo again"
+
+        mark = len(worker.calls)
+        assert (
+            await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+        ).status_code == 200
+        assert media(mark) == [], "same cloud: not pushed twice"
+
+        _CLOUD["base"] = BASE
+        mark = len(worker.calls)
+        assert (
+            await client.post("/api/v1/online-order/publish", headers=_auth(mgr))
+        ).status_code == 200
+        assert media(mark) == [], "back to the first cloud: it still has them"
+    finally:
+        _CLOUD["base"] = BASE

@@ -35,22 +35,23 @@ class OnlineOrderRepository:
         self._session.add(row)
         await self._session.flush()
 
-    async def pushed(self, store_id: int, kind: str, hashes: Sequence[str]) -> set[str]:
+    async def pushed(self, store_id: int, cloud: str, kind: str, hashes: Sequence[str]) -> set[str]:
         if not hashes:
             return set()
         rows = await self._session.scalars(
             select(OnlinePushedMedia.sha256).where(
                 OnlinePushedMedia.store_id == store_id,
+                OnlinePushedMedia.cloud == cloud,
                 OnlinePushedMedia.kind == kind,
                 OnlinePushedMedia.sha256.in_(hashes),
             )
         )
         return set(rows)
 
-    async def mark_pushed(self, store_id: int, kind: str, sha256: str) -> None:
+    async def mark_pushed(self, store_id: int, cloud: str, kind: str, sha256: str) -> None:
         await self._session.execute(
             insert(OnlinePushedMedia)
-            .values(store_id=store_id, kind=kind, sha256=sha256)
+            .values(store_id=store_id, cloud=cloud, kind=kind, sha256=sha256)
             .on_conflict_do_nothing(constraint="uq_online_pushed_media")
         )
 

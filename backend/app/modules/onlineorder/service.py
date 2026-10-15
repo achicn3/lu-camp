@@ -200,16 +200,17 @@ class OnlineOrderService:
         font = await asyncio.to_thread(subset_font, snapshot_text(snapshot))
         snapshot["font"] = font.sha256
         font_pushed = False
-        if not await self._repo.pushed(store_id, FONT, [font.sha256]):
+        cloud = client.base_url
+        if not await self._repo.pushed(store_id, cloud, FONT, [font.sha256]):
             await client.put_font(font.sha256, font.content)
-            await self._repo.mark_pushed(store_id, FONT, font.sha256)
+            await self._repo.mark_pushed(store_id, cloud, FONT, font.sha256)
             font_pushed = True
 
         items = snapshot["items"]
         photos = sorted(
             {str(i["photo"]) for i in [*items, *snapshot["retail"]] if i["photo"] is not None}
         )
-        done = await self._repo.pushed(store_id, PHOTO, photos)
+        done = await self._repo.pushed(store_id, cloud, PHOTO, photos)
         menu = MenuService(self._session)
         photos_pushed = 0
         for sha in photos:
@@ -219,7 +220,7 @@ class OnlineOrderService:
             if content is None:
                 continue
             await client.put_photo(sha, content)
-            await self._repo.mark_pushed(store_id, PHOTO, sha)
+            await self._repo.mark_pushed(store_id, cloud, PHOTO, sha)
             photos_pushed += 1
 
         await self._push_tables(client, await self._sync_tables(store_id))

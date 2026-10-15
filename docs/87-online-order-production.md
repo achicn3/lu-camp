@@ -48,7 +48,7 @@
 | 2 | 正式 Turnstile 金鑰 | 店主 | ✅ 2026-10-15；widget 網域清單刪掉 localhost／127.0.0.1 ⬜ |
 | 3 | 正式 Worker／D1／R2、自訂網域、HTTPS 設定、速率限制 | 開發 | ✅ 2026-10-15 |
 | 4 | POS 惡意輸入（DOM XSS）測試 | 開發 | ✅ 分支 test/online-order-pos-xss |
-| 5 | MacBook 升級 docs/83–86 並接上正式雲端（§3） | MacBook agent＋店主 | ⬜ |
+| 5 | MacBook 升級 docs/83–88 並接上正式雲端（§3） | MacBook agent＋店主 | ⬜ |
 | 6 | 真手機掃桌號 QR，現金單走完一輪（送單→POS 帶入→結帳） | 店主 | ⬜ |
 | 7 | LINE Pay 正式收款資格與費率；取得後設定 `LINEPAY_*` 並用真手機付一筆小額再退款 | 店主 | ⬜ |
 | 8 | Cloudflare 免費額度用到 70% 時在 POS 提醒（Workers 每日 10 萬次請求、D1 讀寫） | 開發 | ⬜ 待做 |

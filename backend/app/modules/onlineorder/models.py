@@ -245,16 +245,20 @@ class OnlineTableCode(Base, TimestampMixin):
 
 
 class OnlinePushedMedia(Base, TimestampMixin):
-    """已推到雲端的照片／字型（內容雜湊）。推過就不再推；雲端本來就冪等，這只是省流量。"""
+    """已推到雲端的照片／字型（內容雜湊）。推過就不再推；雲端本來就冪等，這只是省流量。
+
+    分雲端記（`cloud`＝雲端網址）：換接另一個雲端（測試版→正式版）時要重推，新雲端上才有字型與照片。
+    """
 
     __tablename__ = "online_pushed_media"
     __table_args__ = (
-        UniqueConstraint("store_id", "kind", "sha256", name="uq_online_pushed_media"),
+        UniqueConstraint("store_id", "cloud", "kind", "sha256", name="uq_online_pushed_media"),
         CheckConstraint("kind IN ('PHOTO', 'FONT')", name="ck_online_pushed_media_kind"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    cloud: Mapped[str] = mapped_column(String(200), server_default=text("''"))
     kind: Mapped[str] = mapped_column(String(10))
     sha256: Mapped[str] = mapped_column(String(64))
 
