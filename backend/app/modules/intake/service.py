@@ -867,8 +867,12 @@ class IntakeService:
         lines = sorted(by_id.values(), key=lambda ln: (ln.created_at, ln.id), reverse=True)
 
         def details(line: IntakeLine) -> tuple[int | None, int | None]:
+            # 上架時補過品牌／型號就整組用上架的（店員可能改了品牌）；不能和估價列的混搭，
+            # 否則「帶入」會帶出對不起來的品牌型號，付款時被擋（Codex P2）。
             _l, brand, model = listed.get(line.id, (line, None, None))
-            return (line.brand_id or brand, line.product_model_id or model)
+            if brand is not None or model is not None:
+                return (brand, model)
+            return (line.brand_id, line.product_model_id)
 
         model_names = await inventory.product_model_names(
             store_id, [m for ln in lines if (m := details(ln)[1]) is not None]

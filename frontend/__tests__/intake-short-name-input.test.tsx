@@ -275,6 +275,47 @@ describe("帶入上次的內容（店主 2026-10-15）", () => {
   });
 });
 
+describe("帶入時品牌型號整組換（Codex P2）", () => {
+  const existing = {
+    id: 11, line_no: 1, short_name: "第 1 件", qty: 1, acquisition_type: "BUYOUT" as const,
+    brand_id: 5, product_model_id: 7, disposition: "PENDING" as const, accepted_qty: 0,
+    returned_to_customer: false,
+  };
+
+  function renderEdit(quick: boolean) {
+    const onSubmit = vi.fn();
+    render(
+      <LineForm
+        initial={existing}
+        quick={quick}
+        rates={RATES}
+        defaultCommissionPct={50}
+        submitLabel="存這一件"
+        busy={false}
+        onSubmit={onSubmit}
+        searchShortNames={vi.fn().mockResolvedValue([suggestion({ brand_id: 1, product_model_id: null })])}
+      />,
+    );
+    return onSubmit;
+  }
+
+  for (const quick of [false, true]) {
+    it(`${quick ? "快速估價" : "一般"}：帶入沒有型號的另一個品牌，舊型號要清掉`, async () => {
+      const onSubmit = renderEdit(quick);
+      const user = userEvent.setup();
+      const input = screen.getByLabelText("商品簡稱");
+      await user.clear(input);
+      await user.type(input, "折疊");
+      await user.click((await menuOptions())[0]);
+      await user.click(screen.getByRole("button", { name: "帶入" }));
+      await user.click(screen.getByRole("button", { name: "存這一件" }));
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ brand_id: 1, product_model_id: null }),
+      );
+    });
+  }
+});
+
 describe("上次估價的說法", () => {
   it("散裝是整堆收購價（附件數）、每件售價", () => {
     const parts = estimateParts(

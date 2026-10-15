@@ -88,9 +88,12 @@ export function LineForm({
   // 散裝在列上填的是整堆總價、寄售填寄售售價，每件建議收購價對不上。
   const showDealCost = quick ? effectiveType === "BUYOUT" : !isConsignment;
 
-  const appliedMatches = applied !== null && applied.short_name === shortName.trim();
-  const appliedBrandId = appliedMatches ? (applied.brand_id ?? null) : null;
-  const appliedModelId = appliedMatches ? (applied.product_model_id ?? null) : null;
+  // 帶入的那筆還對得上簡稱：品牌型號整組換（沒有型號＝明確清空），不能和原本的混搭，
+  // 否則品牌型號對不起來，付款時會被擋（Codex P2）。
+  const appliedPair =
+    applied !== null && applied.short_name === shortName.trim()
+      ? { brand_id: applied.brand_id ?? null, product_model_id: applied.product_model_id ?? null }
+      : null;
   const appliedTypeNote =
     applied !== null && applied.short_name === shortName.trim() && applied.acquisition_type !== effectiveType
       ? `上次是${TYPE_LABEL[applied.acquisition_type]}，只帶入原價（收購價、售價的算法不同）`
@@ -159,8 +162,7 @@ export function LineForm({
           : {}),
         ...(showDealCost && dealTouched ? { deal_cost: money(dealCost) } : {}),
         ...quickGrade(),
-        ...(appliedBrandId !== null ? { brand_id: appliedBrandId } : {}),
-        ...(appliedModelId !== null ? { product_model_id: appliedModelId } : {}),
+        ...(appliedPair ?? {}),
         note: note.trim() || null,
       });
       return;
@@ -177,8 +179,10 @@ export function LineForm({
       commission_pct: isConsignment ? Number(commission) : null,
       // 成色沒點時依折數推斷（與收購頁同一支 gradeFromDiscount，裁示 10）。
       grade: inferred,
-      brand_id: appliedBrandId ?? initial?.brand_id ?? null,
-      product_model_id: appliedModelId ?? initial?.product_model_id ?? null,
+      ...(appliedPair ?? {
+        brand_id: initial?.brand_id ?? null,
+        product_model_id: initial?.product_model_id ?? null,
+      }),
       note: note.trim() || null,
     });
   }

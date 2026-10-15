@@ -243,3 +243,21 @@ async def test_unnamed_line_listed_as_model_uses_model_name(
     assert [(r["short_name"], r["brand_name"], r["product_model_name"]) for r in rows] == [
         ("焚火台 M", "Coleman", "焚火台 M")
     ]
+
+
+async def test_listed_brand_and_model_replace_the_estimate_pair(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """估價列帶品牌 A、上架改成品牌 B＋型號 B：建議要整組用上架的，不能變成 A＋B（Codex P2）。"""
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    batch = await _confirmed_batch(
+        client, ctx, [_line(short_name="營燈", qty=1, brand_id=coleman)], [1]
+    )
+    assert (await _pay(client, ctx, batch["id"])).status_code == 200
+    await _listed_as(client, ctx, batch["id"], snow_peak, "GL 營燈")
+
+    [row] = await _suggest(client, ctx, "營燈")
+
+    assert (row["brand_name"], row["product_model_name"]) == ("Snow Peak", "GL 營燈")
