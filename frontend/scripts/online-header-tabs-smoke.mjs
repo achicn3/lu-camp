@@ -24,7 +24,7 @@ try {
   await page.locator("#tabs .tab").first().waitFor();
   // 示範菜單品項少、頁面不夠長：撐高清單，才量得到「捲動後」的位置（真菜單本來就夠長）。
   await page.evaluate(() => { document.getElementById("list").style.minHeight = "2400px"; }); // CSP 擋 <style>，用 CSSOM
-  const box = async (sel) => page.locator(sel).evaluate((n) => { const r = n.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+  const box = async (sel) => page.locator(sel).first().evaluate((n) => { const r = n.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
   const tabs = page.locator("#tabs .tab");
   const labels = await tabs.allTextContents();
   assert.ok(labels.length >= 3, `need several tabs: ${labels}`);
@@ -35,7 +35,7 @@ try {
   let bar = await box(".bar"), nav = await box("#tabs");
   assert.ok(Math.abs(nav.top - bar.bottom) <= 1, `tabs align under header: tabs.top=${nav.top} bar.bottom=${bar.bottom}`);
   const first = await box("#list > *");
-  assert.ok(first.top >= (await box("#tab-note")).top - 1 || first.top >= nav.bottom - 1, "first item is not under the tabs");
+  assert.ok(first.top >= nav.bottom - 1, `first item is not hidden under the tabs: item.top=${first.top} tabs.bottom=${nav.bottom}`);
   await page.screenshot({ path: `${SHOTS}/01-tab-aligned.png` });
 
   // 往下滑：分類列仍貼在頁首下面，直接換第三個分類，不必往上滑
@@ -49,6 +49,8 @@ try {
   assert.equal(await tabs.nth(2).getAttribute("aria-pressed"), "true");
   nav = await box("#tabs");
   assert.ok(Math.abs(nav.top - (await box(".bar")).bottom) <= 1, "after switching, tabs still aligned");
+  assert.ok((await page.locator("#list > *").count()) > 1, "this category has several items");
+  assert.ok((await box("#list > *")).top >= nav.bottom - 1, "first item of a multi-item category is below the tabs");
 
   // ② 按 logo／店名回首頁：最上方、預設分類
   const home = page.getByRole("button", { name: "回到首頁" });
