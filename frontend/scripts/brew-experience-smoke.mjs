@@ -157,7 +157,7 @@ try {
   // 送出現金單 → POS 收到：品名可辨識體驗、品項仍是原品項
   const note = `體驗-${run}`;
   await page.locator("#order-note").fill(note);
-  await page.getByRole("button", { name: "送出現金訂單" }).click();
+  await page.getByRole("button", { name: "送出訂單" }).click();
   await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
   await page.getByText("合計 $440").waitFor();
   ok("客人訂單頁顯示體驗品名", (await page.locator("#order-body").innerText()).includes(title));

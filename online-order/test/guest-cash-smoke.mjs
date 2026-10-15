@@ -83,7 +83,7 @@ try {
     await route.abort("failed"); // Simulate a lost response after Worker committed the order.
     await page.unroute("**/api/orders");
   });
-  await page.getByRole("button", { name: "送出現金訂單" }).click();
+  await page.getByRole("button", { name: "送出訂單" }).click();
   await page.getByText(/尚未確認訂單是否成立/).waitFor({ timeout: 30000 });
   await page.reload();
   await page.getByRole("button", { name: "重試確認訂單" }).waitFor();

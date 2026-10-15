@@ -43,7 +43,7 @@ try {
   await item.locator(".item-add").click();
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
   const resultPromise = guest.waitForResponse(r => r.url() === `${ORDER}/api/orders` && r.request().method() === "POST", { timeout: 90000 });
-  await guest.getByRole("button", { name: "送出現金訂單", exact: true }).click();
+  await guest.getByRole("button", { name: "送出訂單", exact: true }).click();
   const result = await resultPromise;
   assert.equal(result.status(), 201, "Real browser Turnstile must allow a new order");
   await guest.waitForURL(/\/order\//);

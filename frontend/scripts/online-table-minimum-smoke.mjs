@@ -66,7 +66,7 @@ try {
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
   await guest.getByText("本桌低消 $300，每張訂單需滿 $300 才能送出。").waitFor();
   await guest.getByText("本桌低消 $300，還差 $180。").waitFor();
-  assert.ok(await guest.getByRole("button", { name: "送出現金訂單", exact: true }).isDisabled());
+  assert.ok(await guest.getByRole("button", { name: "送出訂單", exact: true }).isDisabled());
   assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await guest.screenshot({ path: `${SHOTS}/guest-amount-short.png` });
   await guest.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
@@ -81,7 +81,7 @@ try {
   await guest.getByText("2 位用餐，至少需點 2 份餐點，還差 1 份。").waitFor();
   await guest.screenshot({ path: `${SHOTS}/guest-person-short.png` });
   await guest.locator(".cart-line").first().getByRole("button", { name: "+" }).click();
-  const submit = guest.getByRole("button", { name: "送出現金訂單", exact: true });
+  const submit = guest.getByRole("button", { name: "送出訂單", exact: true });
   assert.ok(await submit.isEnabled());
   const resultPromise = guest.waitForResponse(
     (r) => r.url() === `${ORDER}/api/orders` && r.request().method() === "POST", { timeout: 90000 },

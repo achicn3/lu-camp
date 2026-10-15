@@ -87,7 +87,7 @@ try {
     assert.equal(await page.locator(".cart-total").innerText(), "合計 $320");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.screenshot({ path: `${SHOTS}/cart-${width}.png`, fullPage: true });
-    await page.getByRole("button", { name: "送出現金訂單", exact: true }).click();
+    await page.getByRole("button", { name: "送出訂單", exact: true }).click();
     await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
     const order = await until(async () => (await api("GET", "/online-orders")).orders.find(o => o.lines.some(l => l.item_id === item.id)));
     cleanup.push(order.id);

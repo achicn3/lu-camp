@@ -126,7 +126,7 @@ try {
   const overflow = await guest.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   ok("手機不橫向捲動", overflow <= 0, `溢出 ${overflow}px`);
   assert.equal(await guest.locator("#order-note").count(), 0, "不提供自由備註");
-  await guest.getByRole("button", { name: "送出現金訂單" }).click();
+  await guest.getByRole("button", { name: "送出訂單" }).click();
   await guest.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
 
   // ③ POS 拉單：保留現量

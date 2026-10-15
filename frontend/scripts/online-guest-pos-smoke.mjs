@@ -58,7 +58,7 @@ try {
   assert.equal(await page.locator("#order-note").count(), 0, "不提供自由備註");
   assert.equal(await page.locator("#footer").isVisible(), false, "Cart footer must not cover the form");
   await page.screenshot({ path: join(SHOTS, "01-cart.png"), fullPage: true });
-  await page.getByRole("button", { name: "送出現金訂單" }).click();
+  await page.getByRole("button", { name: "送出訂單" }).click();
   await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 45000 });
   await page.getByText("合計 $150").waitFor();
   assert.equal(await page.getByRole("button", { name: /取消/ }).count(), 0, "客人送單後不能自行取消");

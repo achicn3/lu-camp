@@ -63,7 +63,7 @@ try {
   await guest.locator("#detail-add").click();
   await guest.getByRole("button",{name:/購物車 1 份/}).click();
   await guest.getByText("現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。",{exact:true}).waitFor();
-  await guest.getByRole("button",{name:"送出現金訂單",exact:true}).click();
+  await guest.getByRole("button",{name:"送出訂單",exact:true}).click();
   await guest.waitForURL(/\/order\/[A-Za-z0-9_-]+$/,{timeout:45000});
   const cash=await until(async()=>(await api("GET","/online-orders")).orders.find(o=>o.lines.some(l=>l.item_id===item.id)));
   assert.equal(cash.hold_status,"HELD");

@@ -29,7 +29,7 @@ try {
   await page.locator(".pay-methods").getByText("即將開放").waitFor();
   await linePay.click({ force: true });
   assert.ok(await counter.isChecked(), "tapping the greyed LINE Pay keeps counter checkout");
-  assert.ok(await page.getByRole("button", { name: "送出現金訂單", exact: true }).isVisible());
+  assert.ok(await page.getByRole("button", { name: "送出訂單", exact: true }).isVisible());
   await page.locator(".pay-choice").screenshot({ path: `${SHOTS}/pay-choice.png` });
   console.log("PASS counter checkout selected; LINE Pay greyed out with 即將開放");
 } finally {

@@ -97,7 +97,7 @@ try {
       await guest.locator("#detail-add").click();
     }
     await guest.getByRole("button", { name: /購物車 \d+ 份/ }).click();
-    await guest.getByRole("button", { name: "送出現金訂單", exact: true }).click();
+    await guest.getByRole("button", { name: "送出訂單", exact: true }).click();
     await guest.waitForURL(/\/order\//, { timeout: 90000 });
     const backHome = guest.locator("#order-body").getByRole("button", { name: "回到首頁" });
     await backHome.waitFor();

@@ -583,14 +583,14 @@ function renderCart(): void {
   body.append(payment.node);
   body.append(el("p", "take-home-note", "現金訂單請在送出後 10 分鐘內結帳，逾時自動取消。"));
   if (cart.some(isRetailLine)) body.append(el("p", "take-home-note", "帶著走的商品請到櫃檯領取。"));
-  const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單", () => {
+  const submit = button(payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出訂單", () => {
     const reason = gate().block;
     if (reason !== null) { showMessage(reason); return; }
     const invoice = payment.invoice();
     if (invoice === null) { showMessage("手機條碼是 / 開頭共 8 碼；統一編號是 8 位數字。"); return; }
     void startCheckout(payment.method(), invoice);
   });
-  payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出現金訂單"; });
+  payment.onChange(() => { submit.textContent = payment.method() === "LINE_PAY" ? "用 LINE Pay 付款" : "送出訂單"; });
   refreshMinimum = (): void => {
     const { block, offerAddOn } = gate();
     shortfall.textContent = block ?? ""; shortfall.hidden = block === null; submit.disabled = block !== null;

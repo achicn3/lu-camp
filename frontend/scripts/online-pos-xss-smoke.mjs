@@ -59,7 +59,7 @@ try {
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
   await guest.locator(".cart-line").getByText(XSS).waitFor();
   await clean(guest, "guest cart");
-  await guest.getByRole("button", { name: "送出現金訂單", exact: true }).click();
+  await guest.getByRole("button", { name: "送出訂單", exact: true }).click();
   await guest.waitForURL(/\/order\//, { timeout: 90000 });
   await guest.locator("#order-body").getByText(XSS, { exact: false }).waitFor();
   await clean(guest, "guest order page");
