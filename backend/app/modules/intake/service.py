@@ -6,7 +6,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -70,7 +70,10 @@ from app.shared.exceptions import IntakeBatchNotFound, IntakeConflict, InvalidIn
 # 撞號重取的上限（同叫號系統）：單店單機並發極低，超過就是異常。
 _ALLOCATION_RETRIES = 3
 _UNIQUE_VIOLATION_SQLSTATE = "23505"
-TICKET_PREFIX = "A"  # 收購用 A 字首，與餐飲叫號分開（裁示 2）
+# 號碼牌字首每天換一個字母（店主 2026-10-16；原裁示 2 固定 A）：跨日整理裝備時看號碼就分得出是哪天
+# 收的。I、O 跳過（像 1、0），24 天一輪；以 2026-10-16 為 A。仍與餐飲叫號（純數字）分開。
+TICKET_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+_TICKET_LETTER_EPOCH = date(2026, 10, 16)
 SLIP_CODE_PREFIX = "IN"  # 收件單條碼字首
 
 # 還沒簽署以前，估價列都能改（叫號議價時店員可改成交價，裁示 5）。
@@ -107,8 +110,10 @@ def _numbers(line_nos: list[int]) -> str:
     return "、".join(str(n) for n in line_nos)
 
 
-def ticket_label(ticket_no: int) -> str:
-    return f"{TICKET_PREFIX}{ticket_no:03d}"
+def ticket_label(ticket_date: date, ticket_no: int) -> str:
+    """畫面與收件單上的號碼：當天的字母＋當日第幾號（P012）。"""
+    days = (ticket_date - _TICKET_LETTER_EPOCH).days
+    return f"{TICKET_LETTERS[days % len(TICKET_LETTERS)]}{ticket_no:03d}"
 
 
 def slip_code(batch_id: int) -> str:
@@ -800,7 +805,7 @@ class IntakeService:
         rows = [
             IntakeAwaitingListingRead(
                 id=batch.id,
-                ticket_label=ticket_label(batch.ticket_no),
+                ticket_label=ticket_label(batch.ticket_date, batch.ticket_no),
                 slip_code=slip_code(batch.id),
                 contact_name=names.get(batch.contact_id, ""),
                 status=batch.status,
@@ -883,8 +888,11 @@ class IntakeService:
             return (line.brand_id, line.product_model_id)
 
         by_id = {line.id: line for line in named}
-        # 型號、品牌比對的是顯示出來的那一組：上架改了品牌，打舊品牌就不該找到。
-        candidates = [*branded, *(line for line, _b, _m in listed.values())]
+        # 型號、品牌比對的是顯示出來的那一組：上架改了品牌，打舊品牌就不該找到。上架資料只查了
+        # 最近幾批，更舊的已收購列查不到上架品牌，不拿估價時的品牌比對（Codex P2）。
+        looked_up = set(recent_batches)
+        resolved = [ln for ln in branded if not self._accepted(ln) or ln.batch_id in looked_up]
+        candidates = [*resolved, *(line for line, _b, _m in listed.values())]
         for line in candidates:
             brand, model = details(line)
             if line.id != exclude_line_id and (model in model_ids or brand in brand_ids):
@@ -1383,10 +1391,11 @@ class IntakeService:
             if isinstance(row, dict)
         ]
         numbers = "、".join(f"#{n}" for n in acquisition_ids)
+        label = ticket_label(batch.ticket_date, batch.ticket_no)
         return IntakeReceiptRead(
             store_id=store_id,
             acquisition_id=acquisition_ids[0],
-            reference=f"排隊收購 {ticket_label(batch.ticket_no)}，收購單 {numbers}",
+            reference=f"排隊收購 {label}，收購單 {numbers}",
             seller_name=str(content.get("seller_name", "")),
             items=items,
             consignments=consignments,
@@ -1470,7 +1479,7 @@ class IntakeService:
             id=batch.id,
             ticket_date=batch.ticket_date,
             ticket_no=batch.ticket_no,
-            ticket_label=ticket_label(batch.ticket_no),
+            ticket_label=ticket_label(batch.ticket_date, batch.ticket_no),
             slip_code=slip_code(batch.id),
             contact_id=batch.contact_id,
             contact_name=contact_name,

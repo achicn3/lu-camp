@@ -8,11 +8,13 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.main import create_app
+from app.modules.intake import service as intake_service
 from app.modules.inventory.models import Brand
 from tests.integration.test_intake_payment import (
     PATH,
@@ -400,3 +402,21 @@ async def test_brand_search_matches_percent_and_underscore_literally(
 
     assert [r["short_name"] for r in await _suggest(client, ctx, "%_")] == ["睡袋"]
     assert await _suggest(client, ctx, "0_C") == []
+
+
+async def test_brand_search_skips_lines_whose_listing_was_not_looked_up(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """上架資料只查最近幾批：更舊、查不到上架品牌的，不拿估價時的舊品牌比對（Codex P2）。"""
+    monkeypatch.setattr(intake_service, "_SUGGESTION_BRAND_BATCHES", 1)
+    ctx = await _ctx(db_session, client)
+    coleman = await _brand(db_session, ctx, "Coleman")
+    snow_peak = await _brand(db_session, ctx, "Snow Peak")
+    for model in ("GL 甲", "GL 乙"):
+        batch = await _confirmed_batch(
+            client, ctx, [_line(short_name="營燈", qty=1, brand_id=coleman)], [1]
+        )
+        assert (await _pay(client, ctx, batch["id"])).status_code == 200
+        await _listed_as(client, ctx, batch["id"], snow_peak, model)
+
+    assert await _suggest(client, ctx, "Coleman") == []
