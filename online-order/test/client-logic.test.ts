@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -217,5 +217,24 @@ describe("加點（店主 2026-10-15）", () => {
     const rule = { mode: "per_person_item" } as const;
     expect(minimumGate(rule, 150, [latte], null, false)).toEqual({ block: "請先填寫用餐人數。", offerAddOn: true, addOn: false });
     expect(minimumGate(rule, 150, [latte], null, true)).toEqual({ block: null, offerAddOn: true, addOn: true });
+  });
+});
+
+describe("續杯（店主 2026-10-16）", () => {
+  it("折數照台灣說法：80→8 折、85→85 折", () => {
+    expect(refillDiscountLabel(80)).toBe("8 折");
+    expect(refillDiscountLabel(85)).toBe("85 折");
+    expect(refillDiscountLabel(75)).toBe("75 折");
+  });
+  it("低消缺額不算續杯，並說明續杯不計入", () => {
+    const amount = { mode: "amount", amount: 300 } as const;
+    const lines = [
+      { item_id: 5, qty: 1, line_total: 150 },
+      { item_id: 5, qty: 2, line_total: 240, refill: true as const },
+    ];
+    expect(minimumBlock(amount, 390, lines, null)).toBe("本桌低消 $300，還差 $150（續杯不計入低消）。");
+    expect(minimumBlock({ mode: "per_person_item" }, 390, lines, 2))
+      .toBe("2 位用餐，至少需點 2 份餐點，還差 1 份（續杯不計入低消）。");
+    expect(minimumBlock(amount, 450, [{ item_id: 5, qty: 3, line_total: 450 }], null)).toBeNull();
   });
 });

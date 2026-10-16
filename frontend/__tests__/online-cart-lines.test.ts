@@ -18,6 +18,7 @@ function line(no: number, overrides: Partial<Line> = {}): Line {
     description: "手沖咖啡（蜜桃蹦蹦、冰）",
     online_unit_price: "290",
     unit_price: "290",
+    menu_refill: false,
     ...overrides,
   };
 }
@@ -80,5 +81,17 @@ describe("帶回家商品（docs/63 §13、M1d）", () => {
     expect(bean).toEqual({
       key: "C:41", lineType: "CATALOG", description: "耶加雪菲 200g", unitPrice: 450, qty: 2, catalogProductId: 41,
     });
+  });
+});
+
+describe("線上單的續杯（2026-10-16）", () => {
+  it("續杯行保留續杯、鍵與點磚的續杯相同，和同一杯的一般點分開", () => {
+    const [cup, plain] = onlineCartLines([
+      line(1, { menu_refill: true, description: "續杯・手沖咖啡", unit_price: "232" }),
+      line(2),
+    ]);
+    expect(cup).toMatchObject({ key: menuLineKey(7, [1, 3], true), menuRefill: true, unitPrice: 232 });
+    expect(plain?.key).toBe(menuLineKey(7, [1, 3]));
+    expect(plain && "menuRefill" in plain).toBe(false);
   });
 });

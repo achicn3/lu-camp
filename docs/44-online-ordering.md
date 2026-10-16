@@ -227,6 +227,17 @@ menu_item_option_groups  品項 ↔ 群組（多對多＋排序）：一個群�
     點夠低消時選項自動消失、不帶加點；送出成功後清掉，下一張單由客人重新選。外帶帶 `add_on` 一律 `422`。
     `add_on` 為 true 才納入冪等指紋。標記存 D1 `orders.add_on` 與 `online_orders.add_on`，POS 線上訂單顯示
     「桌號 A1・加點」並提醒店員現場確認。驗收：`frontend/scripts/online-add-on-smoke.mjs`。
+  - **續杯**（店主 2026-10-16）：品項勾「可續杯」（菜單管理→編輯），客人頁與 POS 點餐視窗多一個「我是續杯／續杯」勾選。
+    - 續杯單價＝（基本價＋選項加價）× 折數，**加料也打折**，一杯一杯四捨五入到元（後端 `discounted_price`、雲端 `refillPrice` 同算法）。
+      折數放設定 `menu_refill_pct`（預設 80＝八折，限 1–99，菜單管理「品項」分頁可改；改了要重新發佈線上菜單）。
+    - **勾了就算**：系統不查客人是否真的點過，由店員現場確認。品名冠「續杯・」，收據、出餐單、發票、客顯都看得到；
+      續杯與同一杯的一般點是不同明細（POS 鍵尾 `-refill`、後端 `:refill`）。不可續杯的品項帶續杯：後端 `422`、雲端 `not_refillable`。
+    - **續杯不算低消**：金額扣掉續杯行、「每人一份」也不數續杯；客人頁缺額訊息加註「（續杯不計入低消）」。
+    - 快照：可續杯品項 `refillable: true`、頂層 `refill_pct`（沒有可續杯品項時兩者都不放，形狀同舊版）。送單行 `refill: true`
+      （只收 true，不是續杯就不帶，冪等指紋才與舊版一樣）；D1 `order_lines.refill`（0013）；拉單時續杯行帶 `refill: true`，
+      POS 存在 `online_orders.lines`，帶入結帳與 LINE Pay 自動成立都照續杯價。帶回家商品不能續杯。
+    - 店內：`menu_items.refillable`、`settings.menu_refill_pct`（migration `c7f3a9d2e6b1`）；結帳明細 `menu_refill`。
+      驗收：`frontend/scripts/menu-refill-smoke.mjs`。
 
 ### 4.2 客人端畫面
 

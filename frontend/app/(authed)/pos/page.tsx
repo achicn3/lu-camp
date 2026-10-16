@@ -32,6 +32,8 @@ import {
   linesWithNotes,
   markAsGift,
   menuLineKey,
+  refillLabel,
+  refillUnitPrice,
   noteAckFingerprint,
   packCartLines,
   removeLine,
@@ -181,7 +183,7 @@ function payloadLineKey(line: components["schemas"]["StaffCartLineRead"]): strin
   if (line.line_type === "BULK_LOT") {
     return line.bulk_basket_id != null ? `K:${line.bulk_basket_id}` : `B:${line.bulk_lot_id}`;
   }
-  return menuLineKey(line.menu_item_id ?? 0, line.menu_option_ids ?? []);
+  return menuLineKey(line.menu_item_id ?? 0, line.menu_option_ids ?? [], line.menu_refill ?? false);
 }
 
 function ScanBar({
@@ -812,25 +814,41 @@ function groupHint(group: MenuOptionGroupRead): string {
 }
 
 // 加入餐飲品項：選項（docs/44 §3.2）＋數量。沒有選項群組的品項就只有數量。
+type PickedMenuLine = {
+  optionIds: number[];
+  description: string;
+  unitPrice: number;
+  qty: number;
+  refill: boolean;
+};
+
 function MenuItemDialog({
   item,
+  refillPct,
   onAdd,
   onCancel,
 }: {
   item: MenuItemRead;
-  onAdd: (line: { optionIds: number[]; description: string; unitPrice: number; qty: number }) => void;
+  /** 續杯折數（80＝八折）；設定還沒讀到為 null，就先不讓選續杯。 */
+  refillPct: number | null;
+  onAdd: (line: PickedMenuLine) => void;
   onCancel: () => void;
 }) {
   const [qty, setQty] = useState("1");
   const [chosen, setChosen] = useState<Set<number>>(new Set());
+  const [refill, setRefill] = useState(false);
+  const canRefill = item.refillable && refillPct !== null;
   const groups = item.option_groups;
   const n = Math.max(1, Math.trunc(parseNtd(qty) ?? 1));
   const pickedOptions = groups.flatMap((g) =>
     g.options.filter((o) => chosen.has(o.id)).map((o) => ({ group: g, option: o })),
   );
-  const price =
+  const fullPrice =
     (parseNtd(item.unit_price) ?? 0) +
     pickedOptions.reduce((sum, p) => sum + (parseNtd(p.option.price_delta) ?? 0), 0);
+  // 續杯（2026-10-16）：加料也打折；成交價以後端為準。
+  const price =
+    canRefill && refill && refillPct !== null ? refillUnitPrice(fullPrice, refillPct) : fullPrice;
   const missing = groups.filter(
     (g) => g.options.filter((o) => chosen.has(o.id)).length < g.min_select,
   );
@@ -852,14 +870,17 @@ function MenuItemDialog({
 
   function submit() {
     if (missing.length > 0) return;
+    const isRefill = canRefill && refill;
+    const description = menuLineDescription(
+      item.name,
+      pickedOptions.map((p) => ({ group: p.group.name, option: p.option.name })),
+    );
     onAdd({
       optionIds: pickedOptions.map((p) => p.option.id),
-      description: menuLineDescription(
-        item.name,
-        pickedOptions.map((p) => ({ group: p.group.name, option: p.option.name })),
-      ),
+      description: isRefill ? `續杯・${description}` : description,
       unitPrice: price,
       qty: n,
+      refill: isRefill,
     });
   }
 
@@ -918,6 +939,19 @@ function MenuItemDialog({
             </fieldset>
           );
         })}
+        {canRefill && refillPct !== null && (
+          <fieldset className="pos-option-group">
+            <legend>續杯</legend>
+            <label className="pos-option">
+              <input
+                type="checkbox"
+                checked={refill}
+                onChange={(e) => setRefill(e.target.checked)}
+              />
+              <span>續杯（{refillLabel(refillPct)}，加料也打折）</span>
+            </label>
+          </fieldset>
+        )}
         <p className="pos-qty-dialog-price">
           單價 <Money value={price} />
         </p>
@@ -1199,9 +1233,11 @@ function DiscountDialog({
 // 餐飲菜單磚：可售品項一格一格圓角方塊；點磚開數量彈窗。
 function MenuPanel({
   onAdd,
+  refillPct,
   disabled = false,
 }: {
   onAdd: (line: CartLine) => void;
+  refillPct: number | null;
   disabled?: boolean;
 }) {
   const [selected, setSelected] = useState<MenuItemRead | null>(null);
@@ -1226,16 +1262,17 @@ function MenuPanel({
       ? items
       : items.filter((i) => (i.category ?? NO_CATEGORY) === tab);
 
-  function add(picked: { optionIds: number[]; description: string; unitPrice: number; qty: number }) {
+  function add(picked: PickedMenuLine) {
     if (selected === null) return;
     onAdd({
-      key: menuLineKey(selected.id, picked.optionIds),
+      key: menuLineKey(selected.id, picked.optionIds, picked.refill),
       lineType: "MENU",
       description: picked.description,
       unitPrice: picked.unitPrice,
       qty: picked.qty,
       menuItemId: selected.id,
       ...(picked.optionIds.length > 0 ? { menuOptionIds: picked.optionIds } : {}),
+      ...(picked.refill ? { menuRefill: true } : {}),
     });
     setSelected(null);
   }
@@ -1299,7 +1336,12 @@ function MenuPanel({
         })}
       </div>
       {selected !== null && (
-        <MenuItemDialog item={selected} onAdd={add} onCancel={() => setSelected(null)} />
+        <MenuItemDialog
+          item={selected}
+          refillPct={refillPct}
+          onAdd={add}
+          onCancel={() => setSelected(null)}
+        />
       )}
     </div>
   );
@@ -1471,6 +1513,7 @@ export default function PosPage() {
               ...(line.menu_option_ids && line.menu_option_ids.length > 0
                 ? { menuOptionIds: line.menu_option_ids }
                 : {}),
+              ...(line.menu_refill ? { menuRefill: true } : {}),
               lineKind: gift ? "GIFT" : "NORMAL",
               giftReasonId: line.gift_reason_id ?? undefined,
               giftNote: line.gift_note ?? undefined,
@@ -3052,7 +3095,11 @@ export default function PosPage() {
               </table>
             </div>
           )}
-          <MenuPanel onAdd={addToCart} disabled={cartMutationLocked} />
+          <MenuPanel
+            onAdd={addToCart}
+            refillPct={settings.data?.menu_refill_pct ?? null}
+            disabled={cartMutationLocked}
+          />
         </div>
         {giftTargetKey !== null && (
           <GiftDialog

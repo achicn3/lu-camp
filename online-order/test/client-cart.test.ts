@@ -46,3 +46,14 @@ describe("guest cart with experiences", () => {
     expect(cart).toEqual([hotPlain, { ...hotExp, qty: 2 }]);
   });
 });
+
+describe("guest cart with refills", () => {
+  const refillMenu: MenuSnapshot = { ...menu, refill_pct: 80, items: [{ ...menu.items[0]!, remaining: null, refillable: true }] };
+  it("keeps a refill apart from the same drink ordered normally and merges refills", () => {
+    const hot: CartLine = { item_id: 1, option_ids: [5], qty: 1 };
+    const refill: CartLine = { ...hot, refill: true };
+    const cart = addLine(refillMenu, addLine(refillMenu, [hot], refill), refill);
+    expect(cart).toEqual([hot, { ...refill, qty: 2 }]);
+    expect(checkCart(refillMenu, cart)).toMatchObject({ ok: true, total: 100 + 80 * 2 });
+  });
+});

@@ -38,6 +38,8 @@ class MenuItemCreateRequest(BaseModel):
     category: str | None = Field(default=None, max_length=50)
     description: str | None = Field(default=None, max_length=500)
     sort_order: int = 0
+    # 可續杯（2026-10-16）：客人可點續杯、照設定折數算。
+    refillable: bool = False
 
     @field_validator("unit_price")
     @classmethod
@@ -73,6 +75,7 @@ class MenuItemUpdateRequest(BaseModel):
     is_available: bool | None = None
     # 每日限量開關（管理者）；份數本身由店員在開店檢查／POS 調整。
     daily_limited: bool | None = None
+    refillable: bool | None = None
 
     @field_validator("unit_price")
     @classmethod
@@ -259,6 +262,8 @@ class MenuItemRead(BaseModel):
     is_available: bool
     sort_order: int
     daily_limited: bool
+    # 可續杯（2026-10-16）。
+    refillable: bool
     # 今天還能賣幾份；不限量＝null（0＝今天售完或還沒填）。
     remaining: int | None
     # 今天填過份數沒有：0 份時 POS 才分得出「售完」還是「還沒填」。
@@ -281,6 +286,7 @@ class MenuItemRead(BaseModel):
             is_available=item.is_available,
             sort_order=item.sort_order,
             daily_limited=item.daily_limited,
+            refillable=item.refillable,
             remaining=remaining_today(item, today()),
             stock_set_today=item.stock_day == today(),
             option_groups=[MenuOptionGroupRead.from_detail(g) for g in detail.option_groups],

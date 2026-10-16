@@ -1,5 +1,5 @@
 // 送單驗價（docs/44 §3.2、§8.1 T4、§8.2）：價格只依雲端目前生效的菜單快照計算，不信任客人送來的任何金額。
-// 品名寫法與 POS 後端 `_line_description` 一致（選項依菜單順序；撞名才加群組名）。
+// 品名寫法與 POS 後端 `_line_description` 一致（選項依菜單順序；撞名才加群組名；續杯冠「續杯・」）。
 import type { MenuItemView, MenuRetailView, MenuSnapshot } from "./client/types";
 
 export const MAX_LINES = 20;
@@ -12,6 +12,8 @@ export interface MenuLineInput {
   qty: number;
   /** 從手沖體驗卡點的（docs/63 §4）：價格仍照原品項＋選項算。 */
   experience_id?: number;
+  /** 續杯（2026-10-16）：品項要可續杯，照菜單折數算；客人自己勾，店員現場確認。 */
+  refill?: true;
 }
 
 /** 帶回家零售商品（docs/63 §13）：沒有選項。 */
@@ -39,6 +41,7 @@ export interface PricedLine {
   /** 品項或所選選項有每日限量：要 POS 先保留（HOLD）才成立。 */
   limited: boolean;
   experience_id?: number;
+  refill?: true;
 }
 
 export type PriceResult =
@@ -65,9 +68,17 @@ function priceRetail(product: MenuRetailView, input: RetailLineInput): PricedLin
   };
 }
 
+export const REFILL_PREFIX = "續杯・";
+
+/** 續杯單價：照原價（含加料）的 pct 成，四捨五入到元（與 POS 後端 round_ntd 一致，只用整數運算）。 */
+export function refillPrice(unit: number, pct: number): number {
+  return Math.floor((unit * pct + 50) / 100);
+}
+
 function priceLine(
   item: MenuItemView,
   input: MenuLineInput,
+  refillPct: number | null,
 ): PricedLine | { reason: string } {
   const chosen = new Set(input.option_ids);
   if (chosen.size !== input.option_ids.length) return { reason: "invalid_options" };
@@ -88,15 +99,24 @@ function priceLine(
       ordered.push(o.id);
     }
   }
+  if (input.refill === true) {
+    if (item.refillable !== true || refillPct === null) return { reason: "not_refillable" };
+    unit = refillPrice(unit, refillPct);
+  }
   return {
     item_id: item.id,
-    name: lineName(item.name, picked),
+    name: (input.refill === true ? REFILL_PREFIX : "") + lineName(item.name, picked),
     option_ids: ordered,
     unit_price: unit,
     qty: input.qty,
     line_total: unit * input.qty,
     limited,
+    ...(input.refill === true ? { refill: true as const } : {}),
   };
+}
+
+function validRefillPct(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 99 ? value : null;
 }
 
 /** 依菜單驗證並計價。剩餘份數只是「明顯不夠就先擋」，真正的保留由 POS 決定（docs/44 §3.7）。 */
@@ -130,7 +150,7 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
     const item = items.get(input.item_id);
     if (item === undefined || !item.available) return { ok: false, reason: "item_not_found", item_id: input.item_id };
     if (item.remaining === 0) return { ok: false, reason: "sold_out", item_id: item.id };
-    const line = priceLine(item, input);
+    const line = priceLine(item, input, validRefillPct(menu.refill_pct));
     if ("reason" in line) return { ok: false, reason: line.reason, item_id: item.id };
     if (input.experience_id !== undefined) {
       // 體驗卡必須是這個品項的，而且預選的選項都要在（客人只能補選其他必選項）
@@ -170,21 +190,26 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
 /** 桌號低消：整筆至少多少元，或每位客人至少一份主品項。null＝不限制。 */
 export type TableMinimum = { mode: "amount"; amount: number } | { mode: "per_person_item" };
 
+/** 低消計算看的明細：算好價的行（續杯行要帶 line_total，才扣得掉）。 */
+export interface MinimumLine { item_id?: number; qty: number; line_total?: number; refill?: true }
+
 /**
  * 桌號低消（2026-10-14 店主）：每張單各自檢查，不跨單累計。
  * 「每人至少一份」只數餐飲主品項的份數；加購選項掛在品項上、帶回家商品不算。
+ * 續杯不算低消（2026-10-16 店主）：金額扣掉續杯行、份數也不數續杯。
  */
 export function minimumShortfall(
   minimum: TableMinimum | null,
   total: number,
-  lines: { item_id?: number; qty: number }[],
+  lines: MinimumLine[],
   partySize: number | null,
 ): { missing_amount: number } | { missing_items: number } | null {
   if (minimum === null) return null;
   if (minimum.mode === "amount") {
-    return total < minimum.amount ? { missing_amount: minimum.amount - total } : null;
+    const counted = total - lines.reduce((sum, l) => sum + (l.refill === true ? l.line_total ?? 0 : 0), 0);
+    return counted < minimum.amount ? { missing_amount: minimum.amount - counted } : null;
   }
-  const items = lines.reduce((n, l) => n + (l.item_id === undefined ? 0 : l.qty), 0);
+  const items = lines.reduce((n, l) => n + (l.item_id === undefined || l.refill === true ? 0 : l.qty), 0);
   const people = partySize ?? 0;
   return items < people ? { missing_items: people - items } : null;
 }

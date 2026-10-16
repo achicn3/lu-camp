@@ -51,7 +51,7 @@ function stubFetch(route: Route, settings: Record<string, unknown> = SETTINGS) {
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
       // 角色以 DB 現值為準（menu 頁 gate 改用 useCurrentRole）：測試一律回 MANAGER。
       if (url.includes("/auth/me")) return json({ id: 1, role: "MANAGER", store_id: 1 });
-      if (url.includes("/settings")) return json(settings);
+      if (url.includes("/settings") && method === "GET") return json(settings);
       const resp = route(url, method, body);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
@@ -465,5 +465,67 @@ describe("/menu 餐飲菜單管理頁", () => {
     const dialog = await screen.findByRole("dialog", { name: "刪除品項" });
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls).toEqual([]);
+  });
+
+  it("建立品項可勾「可續杯」，勾了送 refillable: true", async () => {
+    const posted: string[] = [];
+    stubFetch((url, method, body) => {
+      if (url.includes("/menu-items") && method === "POST") {
+        posted.push(body);
+        return json({ ...ITEMS[0], id: 9 }, 201);
+      }
+      if (url.includes("/menu-items")) return json(ITEMS);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await screen.findByText("手沖-耶加");
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
+    await user.type(screen.getByLabelText("品名"), "美式");
+    await user.type(screen.getByLabelText("售價（整數元）"), "120");
+    await user.click(screen.getByRole("checkbox", { name: "可續杯" }));
+    await user.click(screen.getByRole("button", { name: "新增品項" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(JSON.parse(posted[0]!).refillable).toBe(true);
+  });
+
+  it("清單標出可續杯的品項", async () => {
+    stubFetch((url) =>
+      url.includes("/menu-items") ? json([{ ...ITEMS[0], refillable: true }, ITEMS[1]]) : null,
+    );
+    renderPage("MANAGER");
+    const row = (await screen.findByText("手沖-耶加")).closest("tr")!;
+    expect(within(row).getByText("可續杯")).toBeTruthy();
+    expect(within(screen.getByText("季節限定").closest("tr")!).queryByText("可續杯")).toBeNull();
+  });
+
+  it("續杯折數：帶出現值、改了存到設定；超出 1–99 擋下不送", async () => {
+    const patches: string[] = [];
+    stubFetch(
+      (url, method, body) => {
+        if (url.includes("/settings") && method === "PATCH") {
+          patches.push(body);
+          return json({ ...SETTINGS, menu_refill_pct: 85 });
+        }
+        if (url.includes("/menu-items")) return json(ITEMS);
+        return null;
+      },
+      { ...SETTINGS, menu_refill_pct: 80 },
+    );
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    const input = (await screen.findByLabelText("續杯折數（%）")) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("80"));
+    expect(screen.getByText(/目前續杯打 8 折/)).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, "100");
+    await user.click(screen.getByRole("button", { name: "儲存續杯折數" }));
+    expect(await screen.findByText("續杯折數請輸入 1–99 的整數")).toBeTruthy();
+    expect(patches).toEqual([]);
+    await user.clear(input);
+    await user.type(input, "85");
+    await user.click(screen.getByRole("button", { name: "儲存續杯折數" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(JSON.parse(patches[0]!)).toEqual({ menu_refill_pct: 85 });
   });
 });

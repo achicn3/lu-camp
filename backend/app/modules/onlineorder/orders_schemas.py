@@ -28,6 +28,8 @@ class OnlineOrderLineRead(BaseModel):
     limited: bool
     experience_id: int | None = None
     """體驗卡來的行（M1c）。"""
+    refill: bool = False
+    """續杯（2026-10-16）：客人自己勾的，照折數算價、店員現場確認。"""
 
 
 class HandoverItemRead(BaseModel):
@@ -136,6 +138,8 @@ class OnlineCartLineRead(BaseModel):
     """客人送單時的單價。"""
     unit_price: NTDOut
     """POS 目前的單價（結帳照這個收）。"""
+    menu_refill: bool
+    """續杯（2026-10-16）：帶入 POS 購物車時要保留，結帳才照續杯價。"""
 
 
 class OnlineCartRead(BaseModel):
@@ -165,6 +169,7 @@ class OnlineCartRead(BaseModel):
                     description=line.description,
                     online_unit_price=line.online_unit_price,
                     unit_price=line.unit_price,
+                    menu_refill=line.menu_refill,
                 )
                 for line in cart.lines
             ],

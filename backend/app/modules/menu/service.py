@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import MAX_NTD, format_ntd
+from app.core.money import MAX_NTD, discounted_price, format_ntd
 from app.core.time import store_date, utc_now
 from app.modules.menu.models import (
     MenuCategory,
@@ -26,6 +26,7 @@ from app.modules.menu.models import (
 )
 from app.modules.menu.photos import process_photo_async
 from app.modules.menu.repository import MenuRepository
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import MenuStockAdjustReason, MenuStockTarget
 from app.shared.exceptions import (
     DuplicateMenuEntry,
@@ -41,6 +42,8 @@ from app.shared.exceptions import (
 
 # 銷售明細品名欄寬（sale_lines.description）；品名＋選項超過就截斷並以「…」結尾。
 SALE_LINE_DESCRIPTION_MAX: Final = 300
+# 續杯的品名開頭（2026-10-16）：收據、出餐單、發票、客顯一看就知道；線上點餐雲端用同一個寫法。
+REFILL_PREFIX: Final = "續杯・"
 
 # 區分「未提供（不變）」與「明確設為 None（清空）」——目前僅 category 需要清空語意。
 _UNSET: Final = object()
@@ -164,14 +167,17 @@ def _shortage_message(name: str, entry: MenuItem | MenuOption, day: date) -> str
     return f"「{name}」今天只剩 {left} 份"
 
 
-def _line_description(name: str, picked: Sequence[tuple[str, str]]) -> str:
+def _line_description(name: str, picked: Sequence[tuple[str, str]], *, refill: bool = False) -> str:
     """品名＋選項。平常只列選項名（短，收據好讀）；所選選項有同名時（甜度「正常」、
-    冰量「正常」），撞名的那幾項改成「群組名＋選項名」，否則分不出哪個是哪個。"""
+    冰量「正常」），撞名的那幾項改成「群組名＋選項名」，否則分不出哪個是哪個。
+    續杯在最前面冠「續杯・」。"""
     counts: dict[str, int] = {}
     for _, option in picked:
         counts[option] = counts.get(option, 0) + 1
     labels = [option if counts[option] == 1 else f"{group}{option}" for group, option in picked]
     text = name if not labels else f"{name}（{'、'.join(labels)}）"
+    if refill:
+        text = REFILL_PREFIX + text
     if len(text) <= SALE_LINE_DESCRIPTION_MAX:
         return text
     return text[: SALE_LINE_DESCRIPTION_MAX - 1] + "…"
@@ -192,6 +198,7 @@ class MenuService:
         category: str | None = None,
         description: str | None = None,
         sort_order: int = 0,
+        refillable: bool = False,
         actor_user_id: int,
     ) -> MenuItem:
         """建立品項。`category` 是分類**名稱**：同名沿用既有分類，沒有就建一個。"""
@@ -208,6 +215,7 @@ class MenuService:
                 category_id=await self._category_id_for(store_id, category),
                 description=description,
                 sort_order=sort_order,
+                refillable=refillable,
             )
         )
         await write_audit_log(
@@ -311,6 +319,7 @@ class MenuService:
         sort_order: int | None = None,
         is_available: bool | None = None,
         daily_limited: bool | None = None,
+        refillable: bool | None = None,
         actor_user_id: int,
     ) -> MenuItem:
         """部分更新（None=不變；category/description 另以 _UNSET 區分「不變」與「清空」）。
@@ -344,6 +353,9 @@ class MenuService:
             item.sort_order = sort_order
         if is_available is not None:
             item.is_available = is_available
+        before_refillable = item.refillable
+        if refillable is not None:
+            item.refillable = refillable
         await self._set_daily_limited(store_id, item, daily_limited, actor_user_id, "menu_item")
         await self._session.flush()
 
@@ -369,6 +381,18 @@ class MenuService:
                 entity_id=str(item.id),
                 before={"unit_cost": None if before_cost is None else str(before_cost)},
                 after={"unit_cost": None if unit_cost is None else str(unit_cost)},
+            )
+        # 可不可續杯決定客人能不能打折買，同屬改價，留前後值。
+        if item.refillable != before_refillable:
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="UPDATE_MENU_ITEM_REFILLABLE",
+                entity_type="menu_item",
+                entity_id=str(item.id),
+                before={"refillable": before_refillable},
+                after={"refillable": item.refillable},
             )
         return item
 
@@ -510,8 +534,12 @@ class MenuService:
         *,
         check_stock: bool = True,
         held: Mapping[tuple[str, int], int] | None = None,
+        refill: bool = False,
     ) -> MenuSelection:
         """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
+
+        `refill`：續杯（2026-10-16）。品項要勾「可續杯」，單價＝（基本價＋選項加價）照設定的
+        折數算、四捨五入到元；品名冠「續杯・」。是不是真的續杯由店員現場判斷。
 
         `check_stock=False`：只算價、不看今天剩幾份——線上單帶入結帳前的預覽用，那張單保留的
         份數已經先扣掉了，用剩餘份數判斷會誤報售完（真正結帳仍會檢查）。
@@ -523,6 +551,8 @@ class MenuService:
         """
         if len(set(option_ids)) != len(option_ids):
             raise SaleLineInvalid(f"「{item.name}」的同一個選項不能選兩次")
+        if refill and not item.refillable:
+            raise SaleLineInvalid(f"「{item.name}」不能續杯")
         details = (await self.describe_items(store_id, [item]))[0].option_groups
         chosen = set(option_ids)
         known = {o.id for d in details for o in d.options}
@@ -566,9 +596,12 @@ class MenuService:
                         "price_delta": format_ntd(option.price_delta),
                     }
                 )
+        if refill:
+            settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+            unit_price = Decimal(discounted_price(unit_price, 100 - settings.menu_refill_pct))
         return MenuSelection(
             unit_price=unit_price,
-            description=_line_description(item.name, picked_names),
+            description=_line_description(item.name, picked_names, refill=refill),
             options_snapshot=snapshot,
             options=chosen_options,
             unit_cost=(
@@ -1046,9 +1079,7 @@ class MenuService:
                 entity_id=str(option_id),
                 before={"unit_cost": None if before_cost is None else format_ntd(before_cost)},
                 after={
-                    "unit_cost": None
-                    if unit_cost is None
-                    else format_ntd(unit_cost)  # type: ignore[arg-type]
+                    "unit_cost": None if unit_cost is None else format_ntd(unit_cost)  # type: ignore[arg-type]
                 },
             )
         if price_delta is not None and price_delta != before_delta:

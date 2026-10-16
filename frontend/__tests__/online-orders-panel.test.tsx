@@ -49,7 +49,7 @@ function order(id: number, extra: Partial<Order> = {}): Order {
     total: "300",
     payment_method: "CASH",
     lines: [
-      { line_no: 1, item_id: 5, name: "拿鐵（燕麥奶）", option_ids: [9], unit_price: 150, qty: 2, line_total: 300, limited: false },
+      { line_no: 1, item_id: 5, name: "拿鐵（燕麥奶）", option_ids: [9], unit_price: 150, qty: 2, line_total: 300, limited: false, refill: false },
     ],
     created_at: new Date().toISOString(),
     sync_status: "IMPORTED",
@@ -86,7 +86,7 @@ function cart(extra: Partial<Cart> = {}): Cart {
     service_mode: "DINE_IN",
     table_no: "A1",
     lines: [
-      { line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150" },
+      { line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "150", menu_refill: false },
     ],
     online_total: "300",
     total: "300",
@@ -177,7 +177,7 @@ describe("POS 線上訂單", () => {
 
   it("帶入結帳：價格變了先列出差額，店員確認才帶入", async () => {
     const changed = cart({
-      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160" }],
+      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [9], experience_id: null, qty: 2, description: "拿鐵（燕麥奶）", online_unit_price: "150", unit_price: "160", menu_refill: false }],
       total: "320",
     });
     stubFetch((url) => (url.endsWith("/cart") ? json(changed) : json(overview([order(1)]))));
@@ -225,8 +225,8 @@ describe("POS 線上訂單", () => {
       // 客人點 2 包、櫃檯改成 1 包：交貨照實際結帳
       handover_items: [{ catalog_product_id: 41, name: "耶加雪菲 200g", qty: 1 }],
       lines: [
-        { line_no: 1, item_id: null, catalog_product_id: 41, name: "耶加雪菲 200g", option_ids: [], unit_price: 450, qty: 2, line_total: 900, limited: true },
-        { line_no: 2, item_id: 5, name: "拿鐵", option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false },
+        { line_no: 1, item_id: null, catalog_product_id: 41, name: "耶加雪菲 200g", option_ids: [], unit_price: 450, qty: 2, line_total: 900, limited: true, refill: false },
+        { line_no: 2, item_id: 5, name: "拿鐵", option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false, refill: false },
       ],
     });
     const calls = stubFetch((url, method) =>
@@ -401,7 +401,7 @@ describe("惡意字串不會在 POS 執行", () => {
           [
             order(1, {
               table_label: XSS,
-              lines: [{ line_no: 1, item_id: 5, name: XSS, option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false }],
+              lines: [{ line_no: 1, item_id: 5, name: XSS, option_ids: [], unit_price: 150, qty: 1, line_total: 150, limited: false, refill: false }],
               linepay_paid: true, payment_method: "LINE_PAY", attention: XSS,
             }),
             order(2, { hold_status: "REJECTED", reject_reason: XSS }),
@@ -430,7 +430,7 @@ describe("惡意字串不會在 POS 執行", () => {
 
   it("帶入結帳的價格變動視窗：品名原樣顯示文字", async () => {
     const changed = cart({
-      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [], experience_id: null, qty: 1, description: XSS, online_unit_price: "150", unit_price: "160" }],
+      lines: [{ line_no: 1, line_type: "MENU", menu_item_id: 5, catalog_product_id: null, menu_option_ids: [], experience_id: null, qty: 1, description: XSS, online_unit_price: "150", unit_price: "160", menu_refill: false }],
       total: "160",
     });
     stubFetch((url) => (url.endsWith("/cart") ? json(changed) : json(overview([order(1)]))));

@@ -6068,6 +6068,8 @@ export interface components {
             menu_item_id?: number | null;
             /** Menu Option Ids */
             menu_option_ids?: number[] | null;
+            /** Menu Refill */
+            menu_refill?: boolean | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /**
@@ -9241,6 +9243,11 @@ export interface components {
             /** Name */
             name: string;
             /**
+             * Refillable
+             * @default false
+             */
+            refillable: boolean;
+            /**
              * Sort Order
              * @default 0
              */
@@ -9308,6 +9315,8 @@ export interface components {
             option_groups: components["schemas"]["MenuOptionGroupRead"][];
             /** Photo Sha256 */
             photo_sha256: string | null;
+            /** Refillable */
+            refillable: boolean;
             /** Remaining */
             remaining: number | null;
             /** Sort Order */
@@ -9345,6 +9354,8 @@ export interface components {
             is_available?: boolean | null;
             /** Name */
             name?: string | null;
+            /** Refillable */
+            refillable?: boolean | null;
             /** Sort Order */
             sort_order?: number | null;
             /** Unit Cost */
@@ -9633,6 +9644,8 @@ export interface components {
             menu_item_id: number | null;
             /** Menu Option Ids */
             menu_option_ids: number[];
+            /** Menu Refill */
+            menu_refill: boolean;
             /** Online Unit Price */
             online_unit_price: string;
             /** Qty */
@@ -9708,6 +9721,11 @@ export interface components {
             option_ids: number[];
             /** Qty */
             qty: number;
+            /**
+             * Refill
+             * @default false
+             */
+            refill: boolean;
             /** Unit Price */
             unit_price: number;
         };
@@ -10850,6 +10868,8 @@ export interface components {
             menu_item_id?: number | null;
             /** Menu Option Ids */
             menu_option_ids?: number[] | null;
+            /** Menu Refill */
+            menu_refill?: boolean | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /**
@@ -11596,6 +11616,8 @@ export interface components {
             linepay_enabled: boolean;
             /** Linepay Fee Pct */
             linepay_fee_pct: string;
+            /** Menu Refill Pct */
+            menu_refill_pct: number;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow: string;
             online_order_hours?: components["schemas"]["OnlineHours"];
@@ -11664,6 +11686,8 @@ export interface components {
             linepay_enabled?: boolean | null;
             /** Linepay Fee Pct */
             linepay_fee_pct?: number | string | null;
+            /** Menu Refill Pct */
+            menu_refill_pct?: number | null;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow?: number | string | null;
             online_order_hours?: components["schemas"]["OnlineHours"] | null;
@@ -11864,6 +11888,8 @@ export interface components {
             menu_item_id?: number | null;
             /** Menu Option Ids */
             menu_option_ids?: number[] | null;
+            /** Menu Refill */
+            menu_refill?: boolean | null;
             /** Promo Free */
             promo_free?: boolean | null;
             /** Qty */

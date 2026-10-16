@@ -49,10 +49,16 @@ def build_snapshot(
     presentations: Mapping[int, dict[str, Any]] | None = None,
     experiences: Sequence[dict[str, Any]] = (),
     retail: Sequence[dict[str, Any]] = (),
+    refill_pct: int | None = None,
 ) -> Snapshot:
-    """組快照。品項依傳入順序（菜單排序）；分類只列有品項的，依分類排序。"""
+    """組快照。品項依傳入順序（菜單排序）；分類只列有品項的，依分類排序。
+
+    續杯（2026-10-16）：可續杯的品項標 `refillable`，並帶折數 `refill_pct`（雲端照它算價）。
+    沒有可續杯品項時兩者都不放，快照形狀與舊版一樣。
+    """
     shown = [d for d in details if d.item.archived_at is None and d.item.is_available]
     used = {d.item.category_id for d in shown}
+    refill = refill_pct is not None and any(d.item.refillable for d in shown)
     return {
         "version": version,
         "published_at": published_at.isoformat(),
@@ -74,6 +80,7 @@ def build_snapshot(
                 "available": True,
                 "remaining": remaining_today(d.item, day),
                 "option_groups": _option_groups(d, day),
+                **({"refillable": True} if refill and d.item.refillable else {}),
                 **(
                     {"presentation": presentations[d.item.id]}
                     if presentations is not None and d.item.id in presentations
@@ -86,6 +93,7 @@ def build_snapshot(
         "experiences": list(experiences),
         # 帶回家零售商品（docs/63 §13）：價格是商品含稅售價、remaining 是現量；不含成本。
         "retail": list(retail),
+        **({"refill_pct": refill_pct} if refill else {}),
     }
 
 

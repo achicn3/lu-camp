@@ -219,3 +219,35 @@ def test_snapshot_text_includes_presentation_copy() -> None:
     text = snapshot_text(snapshot)
     assert "蜜桃花香" in text
     assert "喜歡清爽果香的你" in text
+
+
+def test_refillable_items_and_refill_pct_are_published() -> None:
+    """續杯（2026-10-16）：可續杯的品項標 refillable、快照帶折數；雲端照同一個折數算價。"""
+    snap = build_snapshot(
+        [_detail(_item(refillable=True), None, []), _detail(_item(id=6, name="蛋糕"), None, [])],
+        [],
+        store_name="露坑",
+        version=3,
+        published_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        font_sha256=None,
+        day=TODAY,
+        refill_pct=80,
+    )
+    assert snap["refill_pct"] == 80
+    assert [i.get("refillable") for i in snap["items"]] == [True, None]
+
+
+def test_no_refillable_items_keeps_old_snapshot_shape() -> None:
+    """沒有可續杯品項時快照形狀不變（舊版雲端照樣收）。"""
+    snap = build_snapshot(
+        [_detail(_item(refillable=False), None, [])],
+        [],
+        store_name="露坑",
+        version=3,
+        published_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        font_sha256=None,
+        day=TODAY,
+        refill_pct=80,
+    )
+    assert "refill_pct" not in snap
+    assert "refillable" not in snap["items"][0]

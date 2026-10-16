@@ -83,11 +83,13 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   const lines: OrderLineInput[] = [];
   for (const l of o.lines) {
     if (typeof l !== "object" || l === null) return null;
-    const { item_id, option_ids, qty, experience_id, catalog_product_id, ...rest } = l as Record<string, unknown>;
+    const { item_id, option_ids, qty, experience_id, catalog_product_id, refill, ...rest } = l as Record<string, unknown>;
+    // 續杯（2026-10-16）：只收 true；不是續杯就不帶這個鍵（冪等指紋才與舊版一樣）。
+    if (refill !== undefined && refill !== true) return null;
     if (catalog_product_id !== undefined) {
       // 帶回家商品：只有商品與數量（docs/63 §13）。
       if (typeof catalog_product_id !== "number" || typeof qty !== "number") return null;
-      if (item_id !== undefined || option_ids !== undefined || experience_id !== undefined) return null;
+      if (item_id !== undefined || option_ids !== undefined || experience_id !== undefined || refill !== undefined) return null;
       if (Object.keys(rest).length > 0) return null;
       lines.push({ catalog_product_id, qty });
       continue;
@@ -98,6 +100,7 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
     lines.push({
       item_id, option_ids: option_ids as number[], qty,
       ...(typeof experience_id === "number" ? { experience_id } : {}),
+      ...(refill === true ? { refill: true as const } : {}),
     });
   }
   return {
@@ -349,7 +352,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     ...priced.lines.map((l, i) =>
       env.DB.prepare(
         "INSERT INTO order_lines (order_id, store_id, line_no, item_id, catalog_product_id, name, option_ids, " +
-          `unit_price, qty, line_total, limited, experience_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
+          `unit_price, qty, line_total, limited, experience_id, refill) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
       ).bind(
         orderId,
         storeId,
@@ -363,6 +366,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
         l.line_total,
         l.limited ? 1 : 0,
         l.experience_id ?? null,
+        l.refill === true ? 1 : 0,
         orderId,
       ),
     ),

@@ -11,7 +11,12 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
 from app.core.money import format_ntd, format_rate
-from app.modules.settings.defaults import MAX_DINE_IN_TABLE_LENGTH, MAX_DINE_IN_TABLES
+from app.modules.settings.defaults import (
+    MAX_DINE_IN_TABLE_LENGTH,
+    MAX_DINE_IN_TABLES,
+    MENU_REFILL_PCT_MAX,
+    MENU_REFILL_PCT_MIN,
+)
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
 from app.modules.settings.online_hours import OnlineHours
 from app.modules.settings.table_minimums import TableMinimum
@@ -61,6 +66,8 @@ class SettingsRead(BaseModel):
     print_kitchen_ticket: bool
     auto_print_acquisition_labels: bool
     online_order_hours: OnlineHours = Field(default_factory=OnlineHours)
+    # 續杯照原價的幾成算（80＝八折）。
+    menu_refill_pct: int
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -113,6 +120,9 @@ class SettingsUpdateRequest(BaseModel):
     online_order_hours: OnlineHours | None = None
     print_kitchen_ticket: bool | None = None
     auto_print_acquisition_labels: bool | None = None
+    menu_refill_pct: (
+        Annotated[int, Field(ge=MENU_REFILL_PCT_MIN, le=MENU_REFILL_PCT_MAX)] | None
+    ) = None
 
     @field_validator("dine_in_tables")
     @classmethod

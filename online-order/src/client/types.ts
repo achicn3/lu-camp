@@ -35,6 +35,8 @@ export interface MenuItemView {
   presentation?: MenuPresentation;
   /** 人氣名次（docs/63 §7）：1＝人氣 No.1、2–3＝人氣推薦；沒上榜沒有這欄。 */
   popularity?: number;
+  /** 可續杯（2026-10-16）：照菜單的 refill_pct 折數算；不能續杯沒有這欄。 */
+  refillable?: true;
 }
 
 export interface MenuPresentation {
@@ -99,6 +101,8 @@ export interface MenuSnapshot {
   retail?: MenuRetailView[];
   /** 「不知道喝什麼」引導推薦；沒設定或沒有可推薦品項時沒有這欄。 */
   quiz?: MenuQuizView;
+  /** 續杯照原價（含加料）的幾成算，80＝八折；沒有可續杯品項時沒有這欄。 */
+  refill_pct?: number;
   /** 店員推薦（2026-10-10）：店主排好的順序；沒設定時沒有這欄。retail 的 id 是帶著走商品 id。 */
   picks?: { kind: "item" | "experience" | "retail"; id: number }[];
 }

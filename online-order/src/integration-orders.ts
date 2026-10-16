@@ -79,7 +79,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
       ? []
       : (
           await env.DB.prepare(
-            `SELECT order_id, line_no, item_id, catalog_product_id, name, option_ids, unit_price, qty, line_total, limited, experience_id ` +
+            `SELECT order_id, line_no, item_id, catalog_product_id, name, option_ids, unit_price, qty, line_total, limited, experience_id, refill ` +
               `FROM order_lines WHERE order_id IN (${ids.map(() => "?").join(",")}) ORDER BY order_id, line_no`,
           )
             .bind(...ids)
@@ -95,6 +95,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
               line_total: number;
               limited: number;
               experience_id: number | null;
+              refill: number;
             }>()
         ).results;
   return json({
@@ -123,10 +124,12 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
         : {}),
       lines: lines
         .filter((l) => l.order_id === o.id)
-        .map(({ order_id: _, option_ids, limited, ...l }) => ({
+        .map(({ order_id: _, option_ids, limited, refill, ...l }) => ({
           ...l,
           option_ids: JSON.parse(option_ids) as number[],
           limited: limited === 1,
+          // 續杯（2026-10-16）：只在是續杯時帶，舊版 POS 看不到這個鍵也照常匯入。
+          ...(refill === 1 ? { refill: true } : {}),
         })),
     })),
   });

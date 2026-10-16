@@ -114,6 +114,8 @@ class CartLineRequest(BaseModel):
     promo_free: bool | None = None
     # 餐飲選項（docs/44 §3）；與 SaleLineCreateRequest 同形。
     menu_option_ids: list[int] | None = Field(default=None, max_length=MENU_OPTIONS_MAX)
+    # 續杯（2026-10-16）；與 SaleLineCreateRequest 同形。
+    menu_refill: bool | None = None
 
     @model_validator(mode="after")
     def _matching_reference(self) -> "CartLineRequest":
@@ -133,6 +135,8 @@ class CartLineRequest(BaseModel):
             raise ValueError("序號品數量固定為 1")
         if self.line_type is not SaleLineType.MENU and self.menu_option_ids:
             raise ValueError("只有餐飲明細可以帶選項")
+        if self.line_type is not SaleLineType.MENU and self.menu_refill:
+            raise ValueError("只有餐飲明細可以續杯")
         return self
 
     def to_input(self) -> SaleLineInput:
@@ -149,6 +153,7 @@ class CartLineRequest(BaseModel):
             gift_note=self.gift_note,
             promo_free=bool(self.promo_free),
             menu_option_ids=tuple(sorted(self.menu_option_ids or ())),
+            menu_refill=bool(self.menu_refill),
         )
 
 
@@ -320,6 +325,7 @@ class StaffCartLineRead(BaseModel):
     gift_note: str | None = None
     promo_free: bool | None = None
     menu_option_ids: list[int] | None = None
+    menu_refill: bool | None = None
 
 
 class StaffCartAdjustmentRead(BaseModel):

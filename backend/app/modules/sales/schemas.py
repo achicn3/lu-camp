@@ -58,6 +58,8 @@ class SaleLineCreateRequest(BaseModel):
     promo_free: bool | None = None
     # 餐飲選項（docs/44 §3）；只有 MENU 明細可帶。可空＝沒有選項（舊的購物車快照不必補）。
     menu_option_ids: list[int] | None = Field(default=None, max_length=MENU_OPTIONS_MAX)
+    # 續杯（2026-10-16）；只有 MENU 明細可帶。可空＝不是續杯（舊的購物車快照不必補）。
+    menu_refill: bool | None = None
 
     @model_validator(mode="after")
     def _check_shape(self) -> "SaleLineCreateRequest":
@@ -66,6 +68,8 @@ class SaleLineCreateRequest(BaseModel):
             raise ValueError("只有散裝明細可以帶 bulk_basket_id")
         if self.line_type != SaleLineType.MENU and self.menu_option_ids:
             raise ValueError("只有餐飲明細可以帶選項")
+        if self.line_type != SaleLineType.MENU and self.menu_refill:
+            raise ValueError("只有餐飲明細可以續杯")
         if self.line_type == SaleLineType.SERIALIZED:
             if self.item_code is None:
                 raise ValueError("SERIALIZED 明細必須帶 item_code")
@@ -120,6 +124,7 @@ class SaleLineCreateRequest(BaseModel):
             gift_note=self.gift_note,
             promo_free=bool(self.promo_free),
             menu_option_ids=tuple(sorted(self.menu_option_ids or ())),
+            menu_refill=bool(self.menu_refill),
         )
 
 

@@ -36,6 +36,7 @@ UI_TEXT = (
     "使次法"
     "場沿由"
     "模痕說"
+    "打折續般飲"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )
 

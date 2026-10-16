@@ -114,6 +114,8 @@ class CartLine:
     description: str
     online_unit_price: Decimal
     unit_price: Decimal
+    menu_refill: bool = False
+    """續杯（2026-10-16）：照設定折數算價。"""
 
 
 @dataclass(frozen=True)
@@ -462,9 +464,10 @@ class OnlineOrdersService:
                 raise OnlineOrderConflict(f"「{line['name']}」已不在菜單上，請和客人確認後手動點")
             option_ids = [int(o) for o in line["option_ids"]]
             qty = int(line["qty"])
+            refill = line.get("refill") is True
             try:
                 selection = await self._menu.price_selection(
-                    store_id, item, option_ids, qty, check_stock=False
+                    store_id, item, option_ids, qty, check_stock=False, refill=refill
                 )
             except SaleLineInvalid as exc:
                 raise OnlineOrderConflict(f"{exc}（菜單選項改過了，請和客人確認）") from exc
@@ -483,6 +486,7 @@ class OnlineOrdersService:
                     ),
                     online_unit_price=Decimal(line["unit_price"]),
                     unit_price=selection.unit_price,
+                    menu_refill=refill,
                 )
             )
         return OnlineCart(
@@ -819,13 +823,18 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
                 if line.get("experience_id") is not None
                 else {}
             ),
+            # 續杯（2026-10-16）；舊版雲端沒有這個鍵。只收真正的 true（1 之類的一律當格式錯）。
+            **({"refill": _refill_flag(line["refill"])} if "refill" in line else {}),
         }
         for line in raw["lines"]
     ]
     if not lines or any(line["qty"] < 1 for line in lines):
         raise ValueError("empty or bad lines")
-    # 帶回家商品沒有選項、不會是體驗卡。
-    if any(_is_retail(line) and (line["option_ids"] or "experience_id" in line) for line in lines):
+    # 帶回家商品沒有選項、不會是體驗卡、不能續杯。
+    if any(
+        _is_retail(line) and (line["option_ids"] or "experience_id" in line or "refill" in line)
+        for line in lines
+    ):
         raise ValueError("retail line with options")
     mode = str(raw["service_mode"])
     if mode not in ("DINE_IN", "TAKEOUT"):
@@ -879,6 +888,13 @@ def _paid_linepay(raw: dict[str, Any]) -> tuple[str, str] | None:
     return order_id[:64], tx
 
 
+def _refill_flag(value: object) -> bool:
+    """雲端的續杯旗標只會是 true（不是續杯就不帶這個鍵）；其他值代表格式不對，整張跳過。"""
+    if value is not True:
+        raise ValueError("bad refill flag")
+    return True
+
+
 def _invoice(raw: dict[str, Any]) -> tuple[str | None, str | None]:
     """客人填的發票資料（手機條碼, 統編）；格式不對就當沒填（印紙本）。"""
     invoice = raw.get("invoice")
@@ -907,6 +923,7 @@ def _sale_line(line: dict[str, Any]) -> SaleLineInput:
         menu_item_id=int(line["item_id"]),
         qty=int(line["qty"]),
         menu_option_ids=tuple(int(o) for o in line["option_ids"]),
+        menu_refill=line.get("refill") is True,
     )
 
 

@@ -23,6 +23,7 @@ from app.modules.settings.defaults import (
     DEFAULT_DINE_IN_TABLES,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
+    DEFAULT_MENU_REFILL_PCT,
     DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW,
     DEFAULT_PREMIUM_RATE,
     DEFAULT_PREMIUM_RATE_MAX,
@@ -87,6 +88,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         dine_in_minimums={},
         print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
         auto_print_acquisition_labels=DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
+        menu_refill_pct=DEFAULT_MENU_REFILL_PCT,
     )
 
 

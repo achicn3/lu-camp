@@ -31,6 +31,7 @@ interface Draft {
   price: string;
   cost: string;
   description: string;
+  refillable: boolean;
 }
 
 /** 草稿與原本不同的欄位；資料不合法丟錯（訊息直接給店員看）。 */
@@ -51,6 +52,7 @@ function changesOf(item: MenuItemRead, draft: Draft): MenuItemUpdate {
   if (cost !== costNow) changes.unit_cost = cost === null ? null : String(cost);
   const description = draft.description.trim() === "" ? null : draft.description.trim();
   if (description !== (item.description ?? null)) changes.description = description;
+  if (draft.refillable !== item.refillable) changes.refillable = draft.refillable;
   return changes;
 }
 
@@ -72,6 +74,7 @@ export function MenuItemEditDialog({
     price: item.unit_price,
     cost: item.unit_cost ?? "",
     description: item.description ?? "",
+    refillable: item.refillable,
   });
   const [error, setError] = useState<string | null>(null);
   // 改了任何欄位就收掉上一次的錯誤訊息，免得改對了還掛著舊的紅字。
@@ -162,6 +165,15 @@ export function MenuItemEditDialog({
             placeholder="例如：濃縮咖啡加鮮奶，可換燕麥奶"
             onChange={(e) => patchDraft({ description: e.target.value })}
           />
+        </label>
+        <label className="menu-daily-limit">
+          <input
+            type="checkbox"
+            checked={draft.refillable}
+            onChange={(e) => patchDraft({ refillable: e.target.checked })}
+          />
+          可續杯
+          <span className="hint">客人可以點續杯，照「續杯折數」算（加料也打折）。</span>
         </label>
         <h3>選項群組</h3>
         <p className="hint">勾選的順序就是點餐時問的順序。</p>

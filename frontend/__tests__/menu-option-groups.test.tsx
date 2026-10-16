@@ -261,6 +261,7 @@ describe("品項編輯（品名、分類、售價、成本、介紹、選項；�
     is_available: true,
     sort_order: 0,
     daily_limited: false,
+    refillable: false,
     remaining: null,
     stock_set_today: false,
     option_groups: [GROUPS[1]],
@@ -344,6 +345,25 @@ describe("品項編輯（品名、分類、售價、成本、介紹、選項；�
       unit_cost: null,
     });
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("可續杯（2026-10-16）：帶出現況，勾了才送 refillable", async () => {
+    const calls = stubFetch((url, method) => {
+      if (method === "PATCH") return json(ITEM);
+      if (url.includes("/menu-option-groups")) return json(GROUPS);
+      return null;
+    });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    wrap(<MenuItemEditDialog item={ITEM} onDone={onDone} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "編輯 拿鐵" });
+    await within(dialog).findByRole("checkbox", { name: /溫度/ });
+    const refill = within(dialog).getByRole("checkbox", { name: /可續杯/ }) as HTMLInputElement;
+    expect(refill.checked).toBe(false);
+    await user.click(refill);
+    await user.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ refillable: true });
   });
 
   it("清空分類送 null；什麼都沒改就不送", async () => {

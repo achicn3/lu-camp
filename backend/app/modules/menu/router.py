@@ -84,6 +84,7 @@ async def create_menu_item(
             category=body.category,
             description=body.description,
             sort_order=body.sort_order,
+            refillable=body.refillable,
             actor_user_id=user.id,
         )
     except SaleLineInvalid as exc:
@@ -123,6 +124,7 @@ async def update_menu_item(
             sort_order=body.sort_order,
             is_available=body.is_available,
             daily_limited=body.daily_limited,
+            refillable=body.refillable,
             actor_user_id=user.id,
             **category_kw,
             **cost_kw,

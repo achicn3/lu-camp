@@ -18,6 +18,7 @@ import { RetailSection } from "@/features/menu/RetailSection";
 import { OnlinePublishPanel } from "@/features/menu/OnlinePublishPanel";
 import { OptionGroupsSection } from "@/features/menu/OptionGroupsSection";
 import { QuizSection } from "@/features/menu/QuizSection";
+import { RefillSetting } from "@/features/menu/RefillSetting";
 import { StaffPicksSection } from "@/features/menu/StaffPicksSection";
 import { PopularitySection } from "@/features/menu/PopularitySection";
 import { api } from "@/lib/api";
@@ -82,6 +83,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
   const [cost, setCost] = useState("");
   const [margin, setMargin] = useState<string | null>(null);
   const [category, setCategory] = useState("");
+  const [refillable, setRefillable] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const { taxRate, feeRateForPricing, defaultMargin } = rates;
@@ -112,6 +114,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
           unit_cost: cost.trim() === "" ? null : String(costNum),
           category: category.trim() || null,
           sort_order: 0,
+          refillable,
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立品項失敗");
@@ -124,6 +127,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
       setCost("");
       setMargin(null);
       setCategory("");
+      setRefillable(false);
       onCreated();
     },
     onError: (err: Error) => setFormError(err.message),
@@ -185,6 +189,14 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
           />
         </label>
       </div>
+      <label className="menu-daily-limit">
+        <input
+          type="checkbox"
+          checked={refillable}
+          onChange={(e) => setRefillable(e.target.checked)}
+        />
+        可續杯
+      </label>
       <p className="hint">
         成本含材料與包材（濾掛的掛耳袋、外帶杯蓋等一併算進去）；留白代表成本未知，報表不會替它算毛利。
       </p>
@@ -300,6 +312,7 @@ function MenuItemRow({
             ? "沒有選項"
             : item.option_groups.map((g) => g.name).join("、")}
         </span>
+        {item.refillable && <span className="inv-badge inv-tone-ok menu-refill-badge">可續杯</span>}
 
       </td>
       <td>
@@ -562,6 +575,7 @@ function MenuPageContent() {
         <div id="menu-create-item" hidden={!creating}>
           <CreateMenuItemForm onCreated={refresh} rates={rates} />
         </div>
+        <RefillSetting />
         <div className="card menu-items-filters" role="search" aria-label="篩選品項">
           <label className="field">
             <span className="field-label">搜尋品名</span>

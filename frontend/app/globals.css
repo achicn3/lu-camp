@@ -6606,6 +6606,20 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* 續杯折數（2026-10-16） */
+.menu-refill-setting {
+  width: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3);
+}
+.menu-refill-setting input { width: 8rem; min-height: var(--tap-min); }
+.menu-refill-setting > button { min-height: var(--tap-min); }
+.menu-refill-setting > p { flex-basis: 100%; margin: 0; }
+.menu-refill-badge { margin-left: var(--sp-2); }
 .menu-items-filters {
   width: 100%;
   max-width: none;

@@ -638,6 +638,8 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
         fields["promo_free"] = True
     if line.menu_option_ids:  # 後加欄位（docs/44）：沒選項就不放，舊請求的指紋不變
         fields["menu_option_ids"] = sorted(line.menu_option_ids)
+    if line.menu_refill:  # 後加欄位（續杯）：沒勾就不放，舊請求的指紋不變
+        fields["menu_refill"] = True
     return fields
 
 
@@ -3448,7 +3450,12 @@ class SalesService:
             if gift is not None:
                 raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
             selection = await self._menu.price_selection(
-                store_id, menu_item, line.menu_option_ids, line.qty, held=held
+                store_id,
+                menu_item,
+                line.menu_option_ids,
+                line.qty,
+                held=held,
+                refill=line.menu_refill,
             )
             if discountable_out is not None:
                 discountable_out.append(False)
@@ -3794,7 +3801,9 @@ class SalesService:
         if gift is not None:
             # 餐飲現做、不扣庫存，「贈送」在庫存與成本上都留不下痕跡，統計不到。
             raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
-        selection = await self._menu.price_selection(store_id, item, line.menu_option_ids, line.qty)
+        selection = await self._menu.price_selection(
+            store_id, item, line.menu_option_ids, line.qty, refill=line.menu_refill
+        )
         # 每日限量：原子扣份數（docs/44 §3.7）；不夠就整筆回滾。
         consumed = await self._menu.consume_daily_stock(store_id, item, selection, line.qty)
         disc = _AppliedDiscount.full_price(selection.unit_price, line.qty)

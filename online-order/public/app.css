@@ -211,6 +211,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .opt-choice .opt-extra { margin-left: auto; }
 .opt-choice > span { min-width: 0; }
 .opt-choice .opt-extra, .opt-choice .opt-off { flex: none; }
+.opt-note { margin: 2px 0 0; color: var(--soft); font-size: 14px; line-height: 1.5; }
 .detail-controls { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
 .detail-controls .action { margin: 0; }
 .qty-input { width: 68px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); text-align: center; }

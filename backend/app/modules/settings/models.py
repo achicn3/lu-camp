@@ -43,6 +43,7 @@ class StoreSettings(Base, TimestampMixin):
             "signature_cleanup_enforcement_mode = 'REPORT_ONLY'",
             name="ck_settings_signature_cleanup_report_only",
         ),
+        CheckConstraint("menu_refill_pct BETWEEN 1 AND 99", name="ck_settings_menu_refill_pct"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -155,6 +156,10 @@ class StoreSettings(Base, TimestampMixin):
     # 收購送出後自動印標籤（2026-09-23 收購 UX）：幾乎每筆都要印，預設開；櫃台沒接標籤機可關。
     auto_print_acquisition_labels: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    # 續杯（2026-10-16）：可續杯的品項續杯時照原價（含加料）的幾成算，80＝八折。
+    menu_refill_pct: Mapped[int] = mapped_column(
+        Integer, default=80, server_default=text("80"), nullable=False
     )
 
 

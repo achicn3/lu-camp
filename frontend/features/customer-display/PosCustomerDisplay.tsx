@@ -67,15 +67,20 @@ function itemIdentity(item: CartItem): Partial<CartLine> | null {
     }
     case "MENU": {
       // 帶選項的鍵是 MENU:{id}:{選項,…}（後端 menu_line_key）；沒選項就是 MENU:{id}。
-      const [idText, optionsText] = raw.split(":");
+      // 續杯在最後多一段 :refill。
+      const parts = raw.split(":");
+      const refill = parts[parts.length - 1] === "refill";
+      if (refill) parts.pop();
+      const [idText, optionsText] = parts;
       const id = Number(idText);
       if (!Number.isInteger(id) || id <= 0) return null;
       const options = optionsText ? optionsText.split(",").map(Number) : [];
       if (options.some((option) => !Number.isInteger(option) || option <= 0)) return null;
       return {
-        key: `${giftPrefix}${menuLineKey(id, options)}`,
+        key: `${giftPrefix}${menuLineKey(id, options, refill)}`,
         menuItemId: id,
         ...(options.length > 0 ? { menuOptionIds: options } : {}),
+        ...(refill ? { menuRefill: true } : {}),
       };
     }
   }

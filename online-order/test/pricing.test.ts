@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuSnapshot } from "../src/client/types";
-import { priceOrder } from "../src/pricing";
+import { minimumShortfall, priceOrder } from "../src/pricing";
 
 const MENU: MenuSnapshot = {
   version: 7,
@@ -163,5 +163,57 @@ describe("手沖體驗卡送單", () => {
   it("一般品項的明細不多出體驗欄位", () => {
     const r = priceOrder(WITH_EXPERIENCE, [{ item_id: 6, option_ids: [], qty: 1 }]);
     expect(r.ok && Object.hasOwn(r.lines[0]!, "experience_id")).toBe(false);
+  });
+});
+
+describe("續杯（店主 2026-10-16）", () => {
+  const REFILL: MenuSnapshot = {
+    ...MENU,
+    refill_pct: 80,
+    items: [
+      { ...MENU.items[0]!, refillable: true },
+      MENU.items[1]!,
+      { ...MENU.items[0]!, id: 8, name: "冷泡茶", unit_price: 10, option_groups: [], refillable: true },
+    ],
+  };
+
+  it("照折數算（加料也打折）、一杯一杯四捨五入；品名冠「續杯・」並標記續杯", () => {
+    const r = priceOrder(REFILL, [{ item_id: 5, option_ids: [12, 21], qty: 2, refill: true }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.lines).toEqual([
+      {
+        item_id: 5, name: "續杯・拿鐵（冰、燕麥奶）", option_ids: [12, 21],
+        unit_price: 136, qty: 2, line_total: 272, limited: false, refill: true,
+      },
+    ]);
+    const half = priceOrder({ ...REFILL, refill_pct: 85 }, [{ item_id: 8, option_ids: [], qty: 1, refill: true }]);
+    expect(half.ok && half.lines[0]!.unit_price).toBe(9); // 10 × 85% = 8.5 → 9
+  });
+
+  it("續杯和一般點是不同行；一般點不多出續杯欄位", () => {
+    const r = priceOrder(REFILL, [
+      { item_id: 5, option_ids: [11], qty: 1 },
+      { item_id: 5, option_ids: [11], qty: 1, refill: true },
+    ]);
+    expect(r.ok && r.lines.map((l) => [l.name, l.unit_price])).toEqual([["拿鐵（熱）", 150], ["續杯・拿鐵（熱）", 120]]);
+    expect(r.ok && Object.hasOwn(r.lines[0]!, "refill")).toBe(false);
+  });
+
+  it("品項不可續杯、或菜單沒有折數：拒收", () => {
+    expect(priceOrder(REFILL, [{ item_id: 6, option_ids: [], qty: 1, refill: true }]))
+      .toMatchObject({ ok: false, reason: "not_refillable", item_id: 6 });
+    const { refill_pct: _, ...noPct } = REFILL;
+    expect(priceOrder(noPct, [{ item_id: 5, option_ids: [11], qty: 1, refill: true }]))
+      .toMatchObject({ ok: false, reason: "not_refillable" });
+  });
+
+  it("低消不算續杯：金額與每人份數都扣掉續杯", () => {
+    const lines = [
+      { item_id: 5, qty: 1, line_total: 150 },
+      { item_id: 5, qty: 2, line_total: 240, refill: true as const },
+    ];
+    expect(minimumShortfall({ mode: "amount", amount: 300 }, 390, lines, null)).toEqual({ missing_amount: 150 });
+    expect(minimumShortfall({ mode: "per_person_item" }, 390, lines, 2)).toEqual({ missing_items: 1 });
   });
 });

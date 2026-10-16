@@ -143,6 +143,19 @@ describe("菜單", () => {
     expect((await publish({ ...SNAPSHOT, experiences: [experience] })).status).toBe(422);
   });
 
+  it("續杯（2026-10-16）：可續杯品項與折數原樣保留；格式不對拒收", async () => {
+    const snapshot = { ...SNAPSHOT, refill_pct: 80, items: [{ ...SNAPSHOT.items[0], refillable: true }] };
+    expect((await publish(snapshot)).status).toBe(200);
+    expect(await (await get("/api/menu")).json()).toEqual(snapshot);
+    for (const bad of [
+      { ...snapshot, refill_pct: 0 },
+      { ...snapshot, refill_pct: 100 },
+      { ...snapshot, refill_pct: 80.5 },
+      { ...snapshot, items: [{ ...SNAPSHOT.items[0], refillable: false }] },
+      { ...snapshot, items: [{ ...SNAPSHOT.items[0], refillable: "yes" }] },
+    ]) expect((await publish({ ...bad, version: SNAPSHOT.version + 1 })).status).toBe(422);
+  });
+
   it("舊版店內程式還會送 is_recommended（布林）：照收；新版不送也收", async () => {
     const legacy = { ...SNAPSHOT, items: [{ ...SNAPSHOT.items[0], presentation: { ...PRESENTATION, is_recommended: true } }] };
     expect((await publish(legacy)).status).toBe(200);

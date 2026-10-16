@@ -2,7 +2,7 @@
 import type {
   MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
 } from "./types";
-import { isRetailLine, minimumShortfall, type TableMinimum } from "../pricing";
+import { isRetailLine, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
@@ -294,13 +294,23 @@ export function minimumNotice(minimum: TableMinimum | null): string | null {
 
 /** 還不能送出的原因（還差多少）；可以送＝null。與雲端送單檢查用同一支計算。 */
 export function minimumBlock(
-  minimum: TableMinimum | null, total: number, lines: { item_id?: number; qty: number }[], partySize: number | null,
+  minimum: TableMinimum | null, total: number, lines: MinimumLine[], partySize: number | null,
 ): string | null {
   if (minimum?.mode === "per_person_item" && partySize === null) return "請先填寫用餐人數。";
   const shortfall = minimumShortfall(minimum, total, lines, partySize);
   if (shortfall === null || minimum === null) return null;
-  if ("missing_amount" in shortfall) return `本桌低消 ${money(total + shortfall.missing_amount)}，還差 ${money(shortfall.missing_amount)}。`;
-  return `${partySize} 位用餐，至少需點 ${partySize} 份餐點，還差 ${shortfall.missing_items} 份。`;
+  // 續杯不算低消（2026-10-16）：購物車有續杯時說一聲，客人才不會對不上合計。
+  const refillNote = lines.some((l) => l.refill === true) ? "（續杯不計入低消）" : "";
+  if (minimum.mode === "amount" && "missing_amount" in shortfall) {
+    return `本桌低消 ${money(minimum.amount)}，還差 ${money(shortfall.missing_amount)}${refillNote}。`;
+  }
+  if (!("missing_items" in shortfall)) return null;
+  return `${partySize} 位用餐，至少需點 ${partySize} 份餐點，還差 ${shortfall.missing_items} 份${refillNote}。`;
+}
+
+/** 續杯折數的說法（2026-10-16）：80→「8 折」、85→「85 折」。 */
+export function refillDiscountLabel(pct: number): string {
+  return `${pct % 10 === 0 ? pct / 10 : pct} 折`;
 }
 
 /**
@@ -308,7 +318,7 @@ export function minimumBlock(
  * 是不是真的加點由店員現場判斷。已達低消時不帶加點（之前勾過也一樣），POS 才不會亂標。
  */
 export function minimumGate(
-  minimum: TableMinimum | null, total: number, lines: { item_id?: number; qty: number }[],
+  minimum: TableMinimum | null, total: number, lines: MinimumLine[],
   partySize: number | null, addOnChecked: boolean,
 ): { block: string | null; offerAddOn: boolean; addOn: boolean } {
   const block = minimumBlock(minimum, total, lines, partySize);

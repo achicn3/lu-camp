@@ -164,6 +164,9 @@ class OnlineOrderService:
                 },
             ),
             retail=await RetailListingService(self._session).snapshot_retail(store_id),
+            refill_pct=(
+                await StoreSettingsService(self._session).get_effective_settings(store_id)
+            ).menu_refill_pct,
         )
         settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
         snapshot["hours"] = settings.online_order_hours

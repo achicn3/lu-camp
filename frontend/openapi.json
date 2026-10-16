@@ -3741,6 +3741,17 @@
             ],
             "title": "Menu Option Ids"
           },
+          "menu_refill": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Refill"
+          },
           "promo_free": {
             "anyOf": [
               {
@@ -12262,6 +12273,11 @@
             "title": "Name",
             "type": "string"
           },
+          "refillable": {
+            "default": false,
+            "title": "Refillable",
+            "type": "boolean"
+          },
           "sort_order": {
             "default": 0,
             "title": "Sort Order",
@@ -12490,6 +12506,10 @@
             ],
             "title": "Photo Sha256"
           },
+          "refillable": {
+            "title": "Refillable",
+            "type": "boolean"
+          },
           "remaining": {
             "anyOf": [
               {
@@ -12542,6 +12562,7 @@
           "is_available",
           "sort_order",
           "daily_limited",
+          "refillable",
           "remaining",
           "stock_set_today",
           "option_groups"
@@ -12639,6 +12660,17 @@
               }
             ],
             "title": "Name"
+          },
+          "refillable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refillable"
           },
           "sort_order": {
             "anyOf": [
@@ -13439,6 +13471,10 @@
             "title": "Menu Option Ids",
             "type": "array"
           },
+          "menu_refill": {
+            "title": "Menu Refill",
+            "type": "boolean"
+          },
           "online_unit_price": {
             "title": "Online Unit Price",
             "type": "string"
@@ -13462,7 +13498,8 @@
           "qty",
           "description",
           "online_unit_price",
-          "unit_price"
+          "unit_price",
+          "menu_refill"
         ],
         "title": "OnlineCartLineRead",
         "type": "object"
@@ -13659,6 +13696,11 @@
           "qty": {
             "title": "Qty",
             "type": "integer"
+          },
+          "refill": {
+            "default": false,
+            "title": "Refill",
+            "type": "boolean"
           },
           "unit_price": {
             "title": "Unit Price",
@@ -16631,6 +16673,17 @@
             ],
             "title": "Menu Option Ids"
           },
+          "menu_refill": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Refill"
+          },
           "promo_free": {
             "anyOf": [
               {
@@ -18501,6 +18554,10 @@
             "title": "Linepay Fee Pct",
             "type": "string"
           },
+          "menu_refill_pct": {
+            "title": "Menu Refill Pct",
+            "type": "integer"
+          },
           "monthly_fixed_cash_outflow": {
             "title": "Monthly Fixed Cash Outflow",
             "type": "string"
@@ -18588,7 +18645,8 @@
           "backup_offpeak_hour",
           "dine_in_tables",
           "print_kitchen_ticket",
-          "auto_print_acquisition_labels"
+          "auto_print_acquisition_labels",
+          "menu_refill_pct"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -18774,6 +18832,19 @@
               }
             ],
             "title": "Linepay Fee Pct"
+          },
+          "menu_refill_pct": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Refill Pct"
           },
           "monthly_fixed_cash_outflow": {
             "anyOf": [
@@ -19557,6 +19628,17 @@
               }
             ],
             "title": "Menu Option Ids"
+          },
+          "menu_refill": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Refill"
           },
           "promo_free": {
             "anyOf": [

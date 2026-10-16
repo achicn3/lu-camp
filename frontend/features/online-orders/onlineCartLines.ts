@@ -22,7 +22,7 @@ export function onlineCartLines(lines: OnlineCart["lines"]): CartLine[] {
         catalogProductId: line.catalog_product_id,
       };
     }
-    const base = menuLineKey(line.menu_item_id ?? 0, line.menu_option_ids);
+    const base = menuLineKey(line.menu_item_id ?? 0, line.menu_option_ids, line.menu_refill);
     const preferred = line.experience_id == null ? base : `${base}@E${line.experience_id}`;
     const key = used.has(preferred) ? `${preferred}#${line.line_no}` : preferred;
     used.add(key);
@@ -34,6 +34,7 @@ export function onlineCartLines(lines: OnlineCart["lines"]): CartLine[] {
       qty: line.qty,
       menuItemId: line.menu_item_id ?? undefined,
       ...(line.menu_option_ids.length > 0 ? { menuOptionIds: line.menu_option_ids } : {}),
+      ...(line.menu_refill ? { menuRefill: true } : {}),
     };
   });
 }

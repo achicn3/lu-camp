@@ -463,6 +463,7 @@ async def test_cart_reprices_with_current_menu(
             "description": "拿鐵",
             "online_unit_price": "150",
             "unit_price": "160",
+            "menu_refill": False,
         }
     ]
     assert (body["online_total"], body["total"]) == ("300", "320")
@@ -1064,6 +1065,7 @@ async def test_cart_loads_retail_line_as_catalog_product(
         "description": "耶加雪菲 200g",
         "online_unit_price": "450",
         "unit_price": "450",
+        "menu_refill": False,
     }
 
 
@@ -1585,3 +1587,61 @@ async def test_add_on_flag_is_imported_and_shown_to_staff(
     listed = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
     flags = {o["remote_id"]: o["add_on"] for o in listed["orders"]}
     assert flags[_rid(311)] is True and flags[_rid(314)] is False
+
+
+async def test_refill_line_is_imported_carted_and_settled_at_refill_price(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    # 續杯（店主 2026-10-16）：雲端已照折數算價；POS 帶入結帳、LINE Pay 自動成立都要照續杯價。
+    await MenuService(db_session).update_menu_item(
+        ctx.store_id, ctx.latte, refillable=True, actor_user_id=ctx.clerk_id
+    )
+    refill = {**_line(1, ctx.latte, "續杯・拿鐵", 120), "refill": True}
+    row = await _pulled(db_session, ctx, _rid(320), [refill, _line(2, ctx.latte, "拿鐵", 150)])
+    assert [line.get("refill") for line in row.lines] == [True, None]
+    listed = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
+    order = next(o for o in listed["orders"] if o["id"] == row.id)
+    assert [x["refill"] for x in order["lines"]] == [True, False]
+    cart = (await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))).json()
+    assert [(x["description"], x["unit_price"], x["menu_refill"]) for x in cart["lines"]] == [
+        ("續杯・拿鐵", "120", True),
+        ("拿鐵", "150", False),
+    ]
+    assert cart["total"] == "270"
+
+    paid = await _pull_raw(db_session, ctx, _paid(_rid(321), [refill]))
+    settled = await client.post(
+        f"/api/v1/online-orders/{paid.id}/settle-paid", headers=_h(ctx.clerk)
+    )
+    assert settled.status_code == 200, settled.text
+    sale = await client.get(f"/api/v1/sales/{settled.json()['sale_id']}", headers=_h(ctx.clerk))
+    assert [(x["description"], x["unit_price"]) for x in sale.json()["lines"]] == [
+        ("續杯・拿鐵", "120")
+    ]
+
+
+async def test_bad_refill_flags_skip_the_order(db_session: AsyncSession, ctx: Ctx) -> None:
+    ok = {**_line(1, ctx.latte, "續杯・拿鐵", 120), "refill": True}
+    ctx.worker.orders = [
+        _order(_rid(330), [ok]),
+        _order(_rid(331), [{**_line(1, ctx.latte, "拿鐵", 120), "refill": 1}]),
+        _order(
+            _rid(332),
+            [
+                {
+                    "line_no": 1,
+                    "catalog_product_id": 9,
+                    "name": "豆子",
+                    "option_ids": [],
+                    "unit_price": 300,
+                    "qty": 1,
+                    "line_total": 300,
+                    "limited": True,
+                    "refill": True,
+                }
+            ],
+        ),
+    ]
+    result = await _svc(db_session, ctx).pull_once(ctx.store_id)
+    assert result.imported == 1
+    assert (await _order_row(db_session, _rid(330))).lines[0]["refill"] is True

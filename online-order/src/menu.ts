@@ -146,11 +146,15 @@ export function validSnapshot(s: unknown): s is { version: number; published_at:
     Array.isArray(o.retail) ? o.retail.map((r: unknown) => (isRecord(r) ? r.id : undefined)) : [],
   );
   if (!validPicks(o.picks, { item: itemIds, experience: experienceIds, retail: retailIds })) return false;
+  // 續杯折數（2026-10-16）：80＝八折；沒有可續杯品項時不帶。
+  if (o.refill_pct !== undefined && !(Number.isInteger(o.refill_pct) && (o.refill_pct as number) >= 1 &&
+    (o.refill_pct as number) <= 99)) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;
     return keysAre(i, ["id", "name", "description", "category_id", "unit_price", "photo",
-      "available", "remaining", "option_groups"], ["presentation"]) &&
+      "available", "remaining", "option_groups"], ["presentation", "refillable"]) &&
+      (!Object.hasOwn(i, "refillable") || i.refillable === true) &&
       isPositiveInt(i.id) && typeof i.name === "string" && isWholeYuan(i.unit_price) &&
       validGroups(i.option_groups) &&
       (!Object.hasOwn(i, "presentation") || validPresentation(i.presentation));
