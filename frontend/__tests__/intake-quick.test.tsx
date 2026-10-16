@@ -539,6 +539,30 @@ describe("快速估價", () => {
     expect(calls.filter((c) => c.method === "PATCH")[1].body).toMatchObject({ deal_cost: "100" });
   });
 
+  it("詳細開著時列上的收購價被改，再在詳細刻意改回原價：要送出（Codex P2）", async () => {
+    const calls = stubFetch();
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (deal: string, grade: Line["grade"]) => (
+      <QueryClientProvider client={client}>
+        <QuickEstimate batch={batch([line(1, { deal_cost: deal, grade })])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view("100", "B"));
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    rerender(view("200", "C")); // 另一台改成 200、C 級，這台自動更新
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    const price = within(form).getByLabelText("收購價／件");
+    await waitFor(() => expect((price as HTMLInputElement).value).toBe("200"));
+    await user.clear(price);
+    await user.type(price, "100");
+    await user.selectOptions(within(form).getByLabelText("成色"), "B");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ deal_cost: "100", grade: "B" }),
+    );
+  });
+
   it("「儲存詳細」只送這次有動的欄位，不蓋掉另一台剛改的（店主 2026-10-16）", async () => {
     const calls = stubFetch();
     const user = userEvent.setup();

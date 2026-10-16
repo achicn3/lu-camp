@@ -1,7 +1,7 @@
 "use client";
 // 收購佇列的一列估價表單（新增與修改共用；docs/42 §4）。
 // 原價 × 折數自動帶預計售價與建議收購價（與收購頁同一套計價）；成交收購價預設＝建議價、可改。
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import { GRADE_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
 import {
@@ -27,13 +27,14 @@ const TYPE_OPTIONS: { value: AcqType; label: string }[] = [
 const TYPE_LABEL: Record<AcqType, string> = { BUYOUT: "買斷", CONSIGNMENT: "寄售", BULK_LOT: "散裝" };
 const QUICK_DISCOUNTS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-/** 只留跟打開時不一樣的欄位；品牌、型號是一組，有一個變就一起送（Codex P2）。 */
-function changedOnly(fields: LineFields, opened: Line | undefined): LineFields {
+/** 只留店員在這張表單動過的、或跟打開時不一樣的欄位：沒動過的不送，另一台裝置剛改的才不會被蓋回去；
+ * 動過的一律送，刻意改回原值也存得進去（Codex P2）。品牌、型號是一組，有一個變就一起送。 */
+function changedOnly(fields: LineFields, opened: Line | undefined, edited: ReadonlySet<string>): LineFields {
   if (opened === undefined) return fields;
   const before = opened as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== (before[key] ?? null)) out[key] = value;
+    if (edited.has(key) || value !== (before[key] ?? null)) out[key] = value;
   }
   if ("brand_id" in out || "product_model_id" in out) {
     out.brand_id = fields.brand_id ?? null;
@@ -98,6 +99,9 @@ export function LineForm({
   // 舊值蓋回去（店主 2026-10-16）。
   // 「帶入」存好的欄位也算進來，之後改回原值才會被當成有改、送出去（Codex P2）。
   const [opened, setOpened] = useState(initial);
+  // 店員在這張表單動過的欄位（API 欄位名）。
+  const edited = useRef(new Set<string>());
+  const edit = (...keys: string[]) => keys.forEach((key) => edited.current.add(key));
 
   // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
   const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
@@ -159,10 +163,14 @@ export function LineForm({
 
   function applyPricing(nextReference: string, nextDiscount: string) {
     const next = estimateLine(nextReference, nextDiscount, rates);
-    if (next.listed !== null) setListed(String(next.listed));
+    if (next.listed !== null) {
+      setListed(String(next.listed));
+      edit("expected_listed_price");
+    }
     if (next.suggestedCost !== null) {
       setDealCost(String(next.suggestedCost));
       setDealTouched(true);
+      edit("deal_cost", "suggested_cost");
     }
   }
 
@@ -204,7 +212,7 @@ export function LineForm({
         ...quickGrade(),
         ...(appliedPair ?? {}),
         note: note.trim() || null,
-      }, opened));
+      }, opened, edited.current));
       return;
     }
     onSubmit(changedOnly({
@@ -224,7 +232,7 @@ export function LineForm({
         product_model_id: initial?.product_model_id ?? null,
       }),
       note: note.trim() || null,
-    }, opened));
+    }, opened, edited.current));
   }
 
   const subtotal = (parseNtd(dealCost) ?? 0) * (parseNtd(qty) ?? 0);
@@ -234,7 +242,7 @@ export function LineForm({
       <div className="intake-line-grid">
         <div className="field intake-field-wide">
           <span className="field-label">商品簡稱</span>
-          <ShortNameInput value={shortName} onChange={setShortName} excludeLineId={initial?.id}
+          <ShortNameInput value={shortName} onChange={(v) => { setShortName(v); edit("short_name"); }} excludeLineId={initial?.id}
             search={searchShortNames} onApply={applyPrevious} />
           {appliedTypeNote !== null && <span className="intake-field-hint">{appliedTypeNote}</span>}
         </div>
@@ -242,11 +250,11 @@ export function LineForm({
           <>
             <label className="field">
               <span className="field-label">數量</span>
-              <input aria-label="數量" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+              <input aria-label="數量" inputMode="numeric" value={qty} onChange={(e) => { setQty(e.target.value); edit("qty"); }} />
             </label>
             <label className="field">
               <span className="field-label">類型</span>
-              <select aria-label="類型" value={type} onChange={(e) => setType(e.target.value as AcqType)}>
+              <select aria-label="類型" value={type} onChange={(e) => { setType(e.target.value as AcqType); edit("acquisition_type"); }}>
                 {TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
@@ -257,7 +265,7 @@ export function LineForm({
         <label className="field">
           <span className="field-label">原價／件</span>
           <input aria-label="原價／件" inputMode="numeric" value={reference}
-            onChange={(e) => { setReference(e.target.value); applyPricing(e.target.value, discount); }} />
+            onChange={(e) => { setReference(e.target.value); edit("reference_price"); applyPricing(e.target.value, discount); }} />
         </label>
       </div>
 
@@ -265,7 +273,7 @@ export function LineForm({
         {QUICK_DISCOUNTS.map((n) => (
           <button key={n} type="button" className="btn-secondary"
             aria-pressed={!customDiscount && discount === n}
-            onClick={() => { setCustomDiscount(false); setDiscount(n); applyPricing(reference, n); }}>
+            onClick={() => { setCustomDiscount(false); setDiscount(n); edit("discount_pct"); applyPricing(reference, n); }}>
             {n}折
           </button>
         ))}
@@ -273,7 +281,7 @@ export function LineForm({
           onClick={() => setCustomDiscount(true)}>自訂</button>
         {customDiscount && (
           <input aria-label="自訂折數" inputMode="decimal" className="intake-custom-discount" value={discount}
-            onChange={(e) => { setDiscount(e.target.value); applyPricing(reference, e.target.value); }} />
+            onChange={(e) => { setDiscount(e.target.value); edit("discount_pct"); applyPricing(reference, e.target.value); }} />
         )}
       </div>
       <p className="hint">五折＝預計賣原價的一半（不是用一半收購）；預計售價含稅與手續費、進位到十元。</p>
@@ -286,18 +294,18 @@ export function LineForm({
       <div className="intake-line-grid">
         <label className="field">
           <span className="field-label">預計售價／件</span>
-          <input aria-label="預計售價／件" inputMode="numeric" value={listed} onChange={(e) => setListed(e.target.value)} />
+          <input aria-label="預計售價／件" inputMode="numeric" value={listed} onChange={(e) => { setListed(e.target.value); edit("expected_listed_price"); }} />
         </label>
         {isConsignment ? (
           <label className="field">
             <span className="field-label">寄售抽成 %</span>
-            <input aria-label="寄售抽成 %" inputMode="numeric" value={commission} onChange={(e) => setCommission(e.target.value)} />
+            <input aria-label="寄售抽成 %" inputMode="numeric" value={commission} onChange={(e) => { setCommission(e.target.value); edit("commission_pct"); }} />
           </label>
         ) : !showDealCost ? null : (
           <label className="field">
             <span className="field-label">{quick ? "收購價／件" : "成交收購價／件"}</span>
             <input aria-label={quick ? "收購價／件" : "成交收購價／件"} inputMode="numeric" value={shownDealCost}
-              onChange={(e) => { setDealCost(e.target.value); setDealTouched(true); }} />
+              onChange={(e) => { setDealCost(e.target.value); setDealTouched(true); edit("deal_cost"); }} />
             {estimate.suggestedCost !== null && (
               <span className="intake-field-hint">建議 ${formatNtd(estimate.suggestedCost)}</span>
             )}
@@ -306,7 +314,7 @@ export function LineForm({
         {effectiveType !== "BULK_LOT" && (
         <label className="field">
           <span className="field-label">成色（選填）</span>
-          <select aria-label="成色" value={grade} onChange={(e) => { setGrade(e.target.value as Grade | ""); setGradeTouched(true); }}>
+          <select aria-label="成色" value={grade} onChange={(e) => { setGrade(e.target.value as Grade | ""); setGradeTouched(true); edit("grade"); }}>
             <option value="">
               {estimate.inferredGrade ? `依折數：${GRADE_LABEL[estimate.inferredGrade]}` : "不點"}
             </option>
@@ -319,7 +327,7 @@ export function LineForm({
         <label className="field intake-field-wide">
           <span className="field-label">配件／特殊狀況（選填）</span>
           <input aria-label="配件／特殊狀況" value={note} maxLength={500} placeholder="例如：缺收納袋"
-            onChange={(e) => setNote(e.target.value)} />
+            onChange={(e) => { setNote(e.target.value); edit("note"); }} />
         </label>
       </div>
 
