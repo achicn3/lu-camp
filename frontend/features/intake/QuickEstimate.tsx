@@ -404,7 +404,7 @@ function PriceRow({
           busy={patch.isPending || apply.isPending}
           quick
           onSubmit={(fields) => patch.mutate(fields)}
-          onApplied={(fields) => apply.mutate(fields)}
+          onApplied={(fields) => apply.mutateAsync(fields)}
           onCancel={() => {
             setOpen(false);
             setApplyFailed(false);

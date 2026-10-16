@@ -68,7 +68,7 @@ export function LineForm({
   /** 測試用：商品簡稱建議的查詢；預設查後端。 */
   searchShortNames?: (query: string) => Promise<ShortNameSuggestion[]>;
   /** 按了「帶入」：帶進表單的那些欄位。快速估價拿去當場存，列上的收購價才會跟著變（店主 2026-10-15）。 */
-  onApplied?: (fields: LineFields) => void;
+  onApplied?: (fields: LineFields) => Promise<unknown>;
 }) {
   const [shortName, setShortName] = useState(initial?.short_name ?? "");
   const [qty, setQty] = useState(String(initial?.qty ?? 1));
@@ -96,7 +96,8 @@ export function LineForm({
   const [applied, setApplied] = useState<ShortNameSuggestion | null>(null);
   // 打開表單時這一列的樣子：快速估價存檔只送跟它不一樣的欄位，另一台裝置剛改的才不會被這裡沒動過的
   // 舊值蓋回去（店主 2026-10-16）。
-  const [opened] = useState(initial);
+  // 「帶入」存好的欄位也算進來，之後改回原值才會被當成有改、送出去（Codex P2）。
+  const [opened, setOpened] = useState(initial);
 
   // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
   const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
@@ -150,7 +151,10 @@ export function LineForm({
         fields.deal_cost = previous.deal_cost;
       }
     }
-    onApplied?.(fields);
+    onApplied?.(fields).then(
+      () => setOpened((before) => (before === undefined ? before : ({ ...before, ...fields } as Line))),
+      () => undefined, // 沒存進去：基準不動，「儲存詳細」照樣會送帶入的值
+    );
   }
 
   function applyPricing(nextReference: string, nextDiscount: string) {
