@@ -235,6 +235,8 @@ function openDetail(item: MenuItemView): void {
           item_id: item.id, option_ids: optionIds, qty: Number(qty.value),
           ...(refill.checked ? { refill: true as const } : {}),
         });
+        // 續杯就是同桌已經點過（店主 2026-10-16）：自動幫客人勾「我是加點」，客人仍可自己取消。
+        if (refill.checked) sessionStorage.setItem(ADD_ON_KEY, "1");
         saveCart(); renderFooter(); closeDetail(); clearMessage();
         // 從購物車的加點開的：當場重畫購物車（新的一行、合計、低消），不必回菜單再進來。
         if (!$("cart-view").hidden) renderCart();

@@ -1,7 +1,8 @@
 // 續杯（店主 2026-10-16）真瀏覽器煙霧：
 // ① 菜單管理：續杯折數設定、品項「可續杯」勾選。
 // ② POS 點餐視窗勾「續杯」→ 單價照八折（加料也打折）、購物車行冠「續杯・」，和一般點分開。
-// ③ 客人頁：可續杯品項標「可續杯 8 折」、視窗勾「我是續杯」→ 購物車續杯價；低消桌缺額不算續杯並加註。
+// ③ 客人頁：可續杯品項標「可續杯 8 折」、視窗勾「我是續杯」→ 購物車續杯價、自動勾「我是加點」；
+//    取消加點後，低消桌缺額不算續杯並加註。
 // ④ 外帶送一張續杯＋一般點 → POS 線上訂單帶入結帳，續杯行照續杯價。
 // 結束後取消測試單、還原品項與桌號設定並重新發佈。需要本機示範環境（後端 :8116、POS :3116、Worker :8794）。
 import assert from "node:assert/strict";
@@ -127,6 +128,12 @@ try {
   await guest.getByRole("button", { name: /購物車 2 份/ }).click();
   await guest.locator(".cart-line").filter({ hasText: refillLine }).filter({ hasText: "$136" }).waitFor();
   await guest.locator(".cart-total").filter({ hasText: "$306" }).waitFor();
+  // 點了續杯＝同桌已經點過：自動勾好「我是加點」，不被低消卡住；客人取消勾選才看到缺額。
+  const addOn = guest.getByLabel("我是加點（同桌已經點過）");
+  assert.ok(await addOn.isChecked(), "refill auto-checks add-on");
+  assert.ok(await guest.getByRole("button", { name: "送出訂單", exact: true }).isEnabled());
+  await guest.screenshot({ path: `${SHOTS}/06a-guest-refill-add-on.png` });
+  await addOn.uncheck();
   await guest.getByText("本桌低消 $300，還差 $130（續杯不計入低消）。").waitFor();
   assert.ok(await guest.getByRole("button", { name: "送出訂單", exact: true }).isDisabled());
   assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
