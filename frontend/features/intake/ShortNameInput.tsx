@@ -113,6 +113,7 @@ export function ShortNameInput({
   excludeLineId,
   search,
   onApply,
+  applyDisabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -122,6 +123,8 @@ export function ShortNameInput({
   search?: Search;
   /** 「帶入」：把上次估的內容填進表單（店主 2026-10-15）。沒給就不顯示按鈕。 */
   onApply?: (suggestion: ShortNameSuggestion) => void;
+  /** 上一次「帶入」還在存：先不給再按，免得兩次存檔先後顛倒（Codex P2）。 */
+  applyDisabled?: boolean;
 }) {
   const [options, setOptions] = useState<ShortNameSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -268,6 +271,7 @@ export function ShortNameInput({
             <button
               type="button"
               className="btn-secondary sn-apply"
+              disabled={applyDisabled}
               onClick={() => onApply(shownPick)}
             >
               帶入

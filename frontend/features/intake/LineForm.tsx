@@ -29,7 +29,7 @@ const QUICK_DISCOUNTS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 /** 只留店員在這張表單動過的、或跟打開時不一樣的欄位：沒動過的不送，另一台裝置剛改的才不會被蓋回去；
  * 動過的一律送，刻意改回原值也存得進去（Codex P2）。品牌、型號是一組，有一個變就一起送。 */
-function changedOnly(fields: LineFields, opened: Line | undefined, edited: ReadonlySet<string>): LineFields {
+function changedOnly(fields: LineFields, opened: Line | undefined, edited: ReadonlyMap<string, number>): LineFields {
   if (opened === undefined) return fields;
   const before = opened as Record<string, unknown>;
   const out: Record<string, unknown> = {};
@@ -99,9 +99,13 @@ export function LineForm({
   // 舊值蓋回去（店主 2026-10-16）。
   // 「帶入」存好的欄位也算進來，之後改回原值才會被當成有改、送出去（Codex P2）。
   const [opened, setOpened] = useState(initial);
-  // 店員在這張表單動過的欄位（API 欄位名）。
-  const edited = useRef(new Set<string>());
-  const edit = (...keys: string[]) => keys.forEach((key) => edited.current.add(key));
+  // 店員在這張表單動過的欄位（API 欄位名 → 第幾次動作），「帶入」存好時清掉存檔前動過的。
+  const edited = useRef(new Map<string, number>());
+  const editCount = useRef(0);
+  const edit = (...keys: string[]) => {
+    editCount.current += 1;
+    keys.forEach((key) => edited.current.set(key, editCount.current));
+  };
 
   // 快速估價：類型只在列上改，一律看列上最新的；收購價、成色沒在這裡動過也看列上最新的。
   const effectiveType: AcqType = quick ? (initial?.acquisition_type ?? "BUYOUT") : type;
@@ -155,8 +159,16 @@ export function LineForm({
         fields.deal_cost = previous.deal_cost;
       }
     }
+    const startedAt = editCount.current;
     onApplied?.(fields).then(
-      () => setOpened((before) => (before === undefined ? before : ({ ...before, ...fields } as Line))),
+      () => {
+        // 存好了：基準換成帶入的值；存檔前動過的這些欄位也已經存了，不再算「動過」，之後才不會
+        // 重送、蓋掉另一台改的。存檔途中又動的保留（Codex P2）。
+        setOpened((before) => (before === undefined ? before : ({ ...before, ...fields } as Line)));
+        for (const key of Object.keys(fields)) {
+          if ((edited.current.get(key) ?? 0) <= startedAt) edited.current.delete(key);
+        }
+      },
       () => undefined, // 沒存進去：基準不動，「儲存詳細」照樣會送帶入的值
     );
   }
@@ -243,7 +255,7 @@ export function LineForm({
         <div className="field intake-field-wide">
           <span className="field-label">商品簡稱</span>
           <ShortNameInput value={shortName} onChange={(v) => { setShortName(v); edit("short_name"); }} excludeLineId={initial?.id}
-            search={searchShortNames} onApply={applyPrevious} />
+            search={searchShortNames} onApply={applyPrevious} applyDisabled={busy} />
           {appliedTypeNote !== null && <span className="intake-field-hint">{appliedTypeNote}</span>}
         </div>
         {!quick && (

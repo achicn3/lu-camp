@@ -115,6 +115,22 @@ function batch(lines: Line[], extra: Partial<Batch> = {}): Batch {
 
 const RATES = { taxRate: 0.05, feeRate: 0.022, marginPct: 45 };
 
+const SUGGESTED = {
+  short_name: "焚火台",
+  brand_id: null,
+  brand_name: null,
+  product_model_id: null,
+  product_model_name: null,
+  times: 1,
+  estimated_on: "2026-10-01",
+  acquisition_type: "BUYOUT",
+  reference_price: "3000",
+  discount_pct: 50,
+  expected_listed_price: "1500",
+  deal_cost: "777",
+  bulk_piece_count: null,
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -560,6 +576,56 @@ describe("快速估價", () => {
     await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
     await waitFor(() =>
       expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ deal_cost: "100", grade: "B" }),
+    );
+  });
+
+  it("「帶入」存好後，只填備註再儲存：不重送帶入過的欄位，不蓋掉另一台之後改的（Codex P2）", async () => {
+    const calls = stubFetch((url) => (url.includes("short-name-suggestions") ? json([SUGGESTED]) : null));
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (extra: Partial<Line>) => (
+      <QueryClientProvider client={client}>
+        <QuickEstimate batch={batch([line(1, extra)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view({}));
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("商品簡稱"), "焚火");
+    await user.click(await within(form).findByRole("option", { name: /焚火台/ }));
+    await user.click(within(form).getByRole("button", { name: "帶入" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    // 另一台之後把簡稱、原價改掉
+    rerender(view({ short_name: "別台改的", reference_price: "9000", deal_cost: "777" }));
+    await user.type(within(form).getByLabelText("配件／特殊狀況"), "缺袋");
+    await user.click(within(form).getByRole("button", { name: "儲存詳細" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    const body = calls.filter((c) => c.method === "PATCH")[1].body as Record<string, unknown>;
+    expect(body.note).toBe("缺袋");
+    expect(body).not.toHaveProperty("short_name");
+    expect(body).not.toHaveProperty("reference_price");
+  });
+
+  it("「帶入」存檔中：不能再按一次「帶入」（Codex P2）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (url.includes("short-name-suggestions")) return json([SUGGESTED]);
+        if (method === "PATCH") return new Promise<Response>(() => {}); // 一直沒回來
+        return json({});
+      }),
+    );
+    const user = userEvent.setup();
+    wrap(<QuickEstimate batch={batch([line(1)])} rates={RATES} defaultCommissionPct={50} onChanged={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "1 號 詳細" }));
+    const form = screen.getByRole("form", { name: /修改第 1 列/ });
+    await user.type(within(form).getByLabelText("商品簡稱"), "焚火");
+    await user.click(await within(form).findByRole("option", { name: /焚火台/ }));
+    await user.click(within(form).getByRole("button", { name: "帶入" }));
+    await waitFor(() =>
+      expect((within(form).getByRole("button", { name: "帶入" }) as HTMLButtonElement).disabled).toBe(true),
     );
   });
 
