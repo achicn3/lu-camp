@@ -238,15 +238,15 @@ function openDetail(item: MenuItemView): void {
     groups.append(field);
   }
   body.append(groups);
-  // 續杯（2026-10-16）：客人自己勾，照折數算（加料也打折）；店員現場確認。
+  // 續點（2026-10-16）：客人自己勾，照折數算（加料也打折）；店員現場確認。
   const refillPct = refillPctOf(item);
   const refill = el("input"); refill.type = "checkbox"; refill.id = "detail-refill";
   if (refillPct !== null) {
     const field = el("fieldset", "opt-group");
-    field.append(el("legend", "opt-group-name", "續杯"));
+    field.append(el("legend", "opt-group-name", "續點"));
     const label = el("label", "opt-choice");
-    label.append(refill, el("span", "", `我是續杯（${refillDiscountLabel(refillPct)}，加料也打折）`));
-    field.append(label, el("p", "opt-note", "限已經點過的飲料再續一杯，店員會在現場確認。"));
+    label.append(refill, el("span", "", `我是續點（${refillDiscountLabel(refillPct)}，加料也打折）`));
+    field.append(label, el("p", "opt-note", "限已經點過的品項再點一份，店員會在現場確認。"));
     body.append(field);
   }
   {
@@ -275,7 +275,7 @@ function openDetail(item: MenuItemView): void {
           item_id: item.id, option_ids: optionIds, qty: Number(qty.value),
           ...(refill.checked ? { refill: true as const } : {}),
         });
-        // 續杯就是同桌已經點過（店主 2026-10-16）：自動幫客人勾「我是加點」，客人仍可自己取消。
+        // 續點就是同桌已經點過（店主 2026-10-16）：自動幫客人勾「我是加點」，客人仍可自己取消。
         if (refill.checked) sessionStorage.setItem(ADD_ON_KEY, "1");
         saveCart(); renderFooter(); closeDetail(); clearMessage();
         // 從購物車的加點開的：當場重畫購物車（新的一行、合計、低消），不必回菜單再進來。
@@ -289,14 +289,14 @@ function openDetail(item: MenuItemView): void {
   const availability = el("p", "field-error"); availability.id = "detail-availability"; availability.setAttribute("role", "status"); availability.textContent = itemSoldOut(item) ? "今日售完，請選其他品項。" : ""; body.append(availability);
   $("sheet").hidden = false; document.body.classList.add("sheet-open"); $("sheet-close").focus();
 }
-/** 這個品項可續杯就回折數（80＝八折），不行回 null。 */
+/** 這個品項可續點就回折數（80＝八折），不行回 null。 */
 function refillPctOf(item: MenuItemView): number | null {
   const pct = menu?.refill_pct;
   return item.refillable === true && typeof pct === "number" && Number.isInteger(pct) && pct >= 1 && pct <= 99 ? pct : null;
 }
 function cartError(reason: unknown): string {
   const code = reason instanceof Error ? reason.message : "";
-  if (code === "not_refillable") return "這個品項現在不能續杯，請改成一般點。";
+  if (code === "not_refillable") return "這個品項現在不能續點，請改成一般點。";
   if (code === "invalid_options") return "請依每組規則選好選項。";
   if (code === "sold_out") return "品項或選項份數不足，請調整數量。";
   if (code === "invalid_qty" || code === "too_many") return "每項最多 10 份、整張單最多 50 份及 20 項。";
@@ -320,7 +320,7 @@ function itemRow(item: MenuItemView, featured = false): HTMLElement {
   if (item.description && !item.presentation?.flavor_description) copy.append(el("span", "item-desc", item.description));
   const labels = presentationBadges(item, new Date());
   const refillPct = refillPctOf(item);
-  if (refillPct !== null) labels.push(`可續杯 ${refillDiscountLabel(refillPct)}`);
+  if (refillPct !== null) labels.push(`可續點 ${refillDiscountLabel(refillPct)}`);
   if (labels.length) copy.append(el("span", "item-labels", labels.join(" · ")));
   detail.append(copy); row.append(detail);
   const actions = el("div", "item-actions");
@@ -330,7 +330,7 @@ function itemRow(item: MenuItemView, featured = false): HTMLElement {
   const add = button(soldOut ? "今日售完" : item.option_groups.length ? "選擇選項" : "加入", () => {
     const current = menu?.items.find((entry) => entry.id === item.id);
     if (!menu || !current) { showMessage("菜單已更新，請重新選擇。"); return; }
-    // 可續杯的品項也開視窗：客人要在那裡勾「我是續杯」。
+    // 可續點的品項也開視窗：客人要在那裡勾「我是續點」。
     if (current.option_groups.length || refillPctOf(current) !== null) { openDetail(current); return; }
     try {
       cart = addLine(menu, cart, { item_id: current.id, option_ids: [], qty: 1 });
@@ -609,8 +609,9 @@ function renderCart(): void {
         name = menu?.retail?.find((entry) => entry.id === line.catalog_product_id)?.name ?? "已下架商品";
       } else {
         const item = menu?.items.find((entry) => entry.id === line.item_id);
+        const card = line.experience_id === undefined ? undefined : menu?.experiences?.find((entry) => entry.id === line.experience_id);
         const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
-        name = (line.refill === true ? REFILL_PREFIX : "") + [item?.name ?? "已下架品項", ...selected].join(" · ");
+        name = (line.refill === true ? REFILL_PREFIX : "") + (card?.title ?? [item?.name ?? "已下架品項", ...selected].join(" · "));
       }
       const info = el("div"); info.append(el("b", "", name), el("span", "", `${line.qty} 份`));
       const checked = menu ? checkCart(menu, [line]) : null;
@@ -626,7 +627,7 @@ function renderCart(): void {
   }
   priced.lines.forEach((line, index) => {
     const row = el("div", "cart-line");
-    const info = el("div"); info.append(el("b", "", line.name), el("span", "item-price", money(line.line_total)));
+    const info = el("div"); info.append(el("b", "", line.guest_name ?? line.name), el("span", "item-price", money(line.line_total)));
     const controls = el("div", "cart-controls");
     controls.append(button("−", () => updateCartQty(index, line.qty - 1), "qty-button"),
       el("span", "", String(line.qty)),

@@ -1,5 +1,5 @@
 "use client";
-// 續杯折數（2026-10-16）：可續杯的品項續杯時照原價（含加料）的幾成算，80＝八折。
+// 續點折數（2026-10-16）：可續點的品項續點時照原價（含加料）的幾成算，80＝八折。
 // 存在店內設定；線上點餐要重新發佈才會換成新折數。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
@@ -49,7 +49,7 @@ export function RefillSetting() {
     setSaved(false);
     const pct = /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN;
     if (!Number.isInteger(pct) || pct < 1 || pct > 99) {
-      setError("續杯折數請輸入 1–99 的整數");
+      setError("續點折數請輸入 1–99 的整數");
       return;
     }
     setError(null);
@@ -60,7 +60,7 @@ export function RefillSetting() {
   return (
     <form className="card menu-refill-setting" onSubmit={submit}>
       <label className="field">
-        <span className="field-label">續杯折數（%）</span>
+        <span className="field-label">續點折數（%）</span>
         <input
           inputMode="numeric"
           value={value}
@@ -72,11 +72,11 @@ export function RefillSetting() {
         />
       </label>
       <button type="submit" className="btn-secondary" disabled={save.isPending}>
-        儲存續杯折數
+        儲存續點折數
       </button>
       <p className="hint">
-        {shown === null ? "" : `目前續杯打 ${refillLabel(shown)}（照原價含加料的 ${shown}% 算）。`}
-        在品項「編輯」勾「可續杯」才能續杯；改了折數要重新發佈線上菜單，客人那邊才會換。
+        {shown === null ? "" : `目前續點打 ${refillLabel(shown)}（照原價含加料的 ${shown}% 算）。`}
+        在品項「編輯」勾「可續點」才能續點；改了折數要重新發佈線上菜單，客人那邊才會換。
       </p>
       {saved && (
         <p role="status" className="hint">

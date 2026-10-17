@@ -195,7 +195,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
           checked={refillable}
           onChange={(e) => setRefillable(e.target.checked)}
         />
-        可續杯
+        可續點
       </label>
       <p className="hint">
         成本含材料與包材（濾掛的掛耳袋、外帶杯蓋等一併算進去）；留白代表成本未知，報表不會替它算毛利。
@@ -312,7 +312,7 @@ function MenuItemRow({
             ? "沒有選項"
             : item.option_groups.map((g) => g.name).join("、")}
         </span>
-        {item.refillable && <span className="inv-badge inv-tone-ok menu-refill-badge">可續杯</span>}
+        {item.refillable && <span className="inv-badge inv-tone-ok menu-refill-badge">可續點</span>}
 
       </td>
       <td>

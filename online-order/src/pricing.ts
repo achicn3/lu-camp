@@ -1,5 +1,5 @@
 // 送單驗價（docs/44 §3.2、§8.1 T4、§8.2）：價格只依雲端目前生效的菜單快照計算，不信任客人送來的任何金額。
-// 品名寫法與 POS 後端 `_line_description` 一致（選項依菜單順序；撞名才加群組名；續杯冠「續杯・」）。
+// 品名寫法與 POS 後端 `_line_description` 一致（選項依菜單順序；撞名才加群組名；續點冠「續點・」）。
 import type { MenuItemView, MenuRetailView, MenuSnapshot } from "./client/types";
 
 export const MAX_LINES = 20;
@@ -12,7 +12,7 @@ export interface MenuLineInput {
   qty: number;
   /** 從手沖體驗卡點的（docs/63 §4）：價格仍照原品項＋選項算。 */
   experience_id?: number;
-  /** 續杯（2026-10-16）：品項要可續杯，照菜單折數算；客人自己勾，店員現場確認。 */
+  /** 續點（2026-10-16）：品項要可續點，照菜單折數算；客人自己勾，店員現場確認。 */
   refill?: true;
 }
 
@@ -42,6 +42,11 @@ export interface PricedLine {
   limited: boolean;
   experience_id?: number;
   refill?: true;
+  /**
+   * 客人頁（購物車、訂單頁）顯示的品名，只有體驗卡的行才有（店主 2026-10-17）：卡片名稱＋客人另外選的選項。
+   * POS／出餐單／收據照 `name`（卡片名・品項（選項）），店員才知道要做哪一杯。
+   */
+  guest_name?: string;
 }
 
 export type PriceResult =
@@ -68,9 +73,9 @@ function priceRetail(product: MenuRetailView, input: RetailLineInput): PricedLin
   };
 }
 
-export const REFILL_PREFIX = "續杯・";
+export const REFILL_PREFIX = "續點・";
 
-/** 續杯單價：照原價（含加料）的 pct 成，四捨五入到元（與 POS 後端 round_ntd 一致，只用整數運算）。 */
+/** 續點單價：照原價（含加料）的 pct 成，四捨五入到元（與 POS 後端 round_ntd 一致，只用整數運算）。 */
 export function refillPrice(unit: number, pct: number): number {
   return Math.floor((unit * pct + 50) / 100);
 }
@@ -160,6 +165,10 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
       }
       line.name = `${exp.title}・${line.name}`;
       line.experience_id = exp.id;
+      const extras = item.option_groups.flatMap((group) => group.options
+        .filter((o) => line.option_ids.includes(o.id) && !exp.option_ids.includes(o.id))
+        .map((o) => ({ group: group.name, option: o.name })));
+      line.guest_name = (line.refill === true ? REFILL_PREFIX : "") + lineName(exp.title, extras);
     }
     lines.push(line);
     itemQty.set(item.id, (itemQty.get(item.id) ?? 0) + input.qty);
@@ -190,13 +199,13 @@ export function priceOrder(menu: MenuSnapshot, inputs: OrderLineInput[]): PriceR
 /** 桌號低消：整筆至少多少元，或每位客人至少一份主品項。null＝不限制。 */
 export type TableMinimum = { mode: "amount"; amount: number } | { mode: "per_person_item" };
 
-/** 低消計算看的明細：算好價的行（續杯行要帶 line_total，才扣得掉）。 */
+/** 低消計算看的明細：算好價的行（續點行要帶 line_total，才扣得掉）。 */
 export interface MinimumLine { item_id?: number; qty: number; line_total?: number; refill?: true }
 
 /**
  * 桌號低消（2026-10-14 店主）：每張單各自檢查，不跨單累計。
  * 「每人至少一份」只數餐飲主品項的份數；加購選項掛在品項上、帶回家商品不算。
- * 續杯不算低消（2026-10-16 店主）：金額扣掉續杯行、份數也不數續杯。
+ * 續點不算低消（2026-10-16 店主）：金額扣掉續點行、份數也不數續點。
  */
 export function minimumShortfall(
   minimum: TableMinimum | null,

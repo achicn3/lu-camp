@@ -311,8 +311,8 @@ export function minimumBlock(
   if (minimum?.mode === "per_person_item" && partySize === null) return "請先填寫用餐人數。";
   const shortfall = minimumShortfall(minimum, total, lines, partySize);
   if (shortfall === null || minimum === null) return null;
-  // 續杯不算低消（2026-10-16）：購物車有續杯時說一聲，客人才不會對不上合計。
-  const refillNote = lines.some((l) => l.refill === true) ? "（續杯不計入低消）" : "";
+  // 續點不算低消（2026-10-16）：購物車有續點時說一聲，客人才不會對不上合計。
+  const refillNote = lines.some((l) => l.refill === true) ? "（續點不計入低消）" : "";
   if (minimum.mode === "amount" && "missing_amount" in shortfall) {
     return `本桌低消 ${money(minimum.amount)}，還差 ${money(shortfall.missing_amount)}${refillNote}。`;
   }
@@ -320,7 +320,7 @@ export function minimumBlock(
   return `${partySize} 位用餐，至少需點 ${partySize} 份餐點，還差 ${shortfall.missing_items} 份${refillNote}。`;
 }
 
-/** 續杯折數的說法（2026-10-16）：80→「8 折」、85→「85 折」。 */
+/** 續點折數的說法（2026-10-16）：80→「8 折」、85→「85 折」。 */
 export function refillDiscountLabel(pct: number): string {
   return `${pct % 10 === 0 ? pct / 10 : pct} 折`;
 }

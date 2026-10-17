@@ -1592,11 +1592,11 @@ async def test_add_on_flag_is_imported_and_shown_to_staff(
 async def test_refill_line_is_imported_carted_and_settled_at_refill_price(
     client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
 ) -> None:
-    # 續杯（店主 2026-10-16）：雲端已照折數算價；POS 帶入結帳、LINE Pay 自動成立都要照續杯價。
+    # 續點（店主 2026-10-16）：雲端已照折數算價；POS 帶入結帳、LINE Pay 自動成立都要照續點價。
     await MenuService(db_session).update_menu_item(
         ctx.store_id, ctx.latte, refillable=True, actor_user_id=ctx.clerk_id
     )
-    refill = {**_line(1, ctx.latte, "續杯・拿鐵", 120), "refill": True}
+    refill = {**_line(1, ctx.latte, "續點・拿鐵", 120), "refill": True}
     row = await _pulled(db_session, ctx, _rid(320), [refill, _line(2, ctx.latte, "拿鐵", 150)])
     assert [line.get("refill") for line in row.lines] == [True, None]
     listed = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
@@ -1604,7 +1604,7 @@ async def test_refill_line_is_imported_carted_and_settled_at_refill_price(
     assert [x["refill"] for x in order["lines"]] == [True, False]
     cart = (await client.get(f"/api/v1/online-orders/{row.id}/cart", headers=_h(ctx.clerk))).json()
     assert [(x["description"], x["unit_price"], x["menu_refill"]) for x in cart["lines"]] == [
-        ("續杯・拿鐵", "120", True),
+        ("續點・拿鐵", "120", True),
         ("拿鐵", "150", False),
     ]
     assert cart["total"] == "270"
@@ -1616,12 +1616,12 @@ async def test_refill_line_is_imported_carted_and_settled_at_refill_price(
     assert settled.status_code == 200, settled.text
     sale = await client.get(f"/api/v1/sales/{settled.json()['sale_id']}", headers=_h(ctx.clerk))
     assert [(x["description"], x["unit_price"]) for x in sale.json()["lines"]] == [
-        ("續杯・拿鐵", "120")
+        ("續點・拿鐵", "120")
     ]
 
 
 async def test_bad_refill_flags_skip_the_order(db_session: AsyncSession, ctx: Ctx) -> None:
-    ok = {**_line(1, ctx.latte, "續杯・拿鐵", 120), "refill": True}
+    ok = {**_line(1, ctx.latte, "續點・拿鐵", 120), "refill": True}
     ctx.worker.orders = [
         _order(_rid(330), [ok]),
         _order(_rid(331), [{**_line(1, ctx.latte, "拿鐵", 120), "refill": 1}]),

@@ -172,8 +172,8 @@ export function MenuItemEditDialog({
             checked={draft.refillable}
             onChange={(e) => patchDraft({ refillable: e.target.checked })}
           />
-          可續杯
-          <span className="hint">客人可以點續杯，照「續杯折數」算（加料也打折）。</span>
+          可續點
+          <span className="hint">客人可以點續點，照「續點折數」算（加料也打折）。</span>
         </label>
         <h3>選項群組</h3>
         <p className="hint">勾選的順序就是點餐時問的順序。</p>

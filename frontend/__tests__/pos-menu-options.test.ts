@@ -67,12 +67,12 @@ describe("餐飲選項 × 購物車", () => {
   });
 });
 
-describe("續杯（店主 2026-10-16）", () => {
+describe("續點（店主 2026-10-16）", () => {
   const refill = (options: number[]): CartLine => ({
-    ...latte(options), key: menuLineKey(5, options, true), description: "續杯・拿鐵", unitPrice: 136, menuRefill: true,
+    ...latte(options), key: menuLineKey(5, options, true), description: "續點・拿鐵", unitPrice: 136, menuRefill: true,
   });
 
-  it("續杯與一般點是不同行；沒續杯的鍵不變", () => {
+  it("續點與一般點是不同行；沒續點的鍵不變", () => {
     expect(menuLineKey(5, [3], true)).toBe("MENU-5-3-refill");
     expect(menuLineKey(5, [], true)).toBe("MENU-5-refill");
     expect(menuLineKey(5, [3])).toBe("MENU-5-3");
@@ -81,18 +81,18 @@ describe("續杯（店主 2026-10-16）", () => {
     expect(lines.map((l) => l.key)).toEqual(["MENU-5-3", "MENU-5-3-refill"]);
   });
 
-  it("送出時續杯帶 menu_refill；一般點不放這個欄位", () => {
+  it("送出時續點帶 menu_refill；一般點不放這個欄位", () => {
     const [plain, cup] = toSaleLines([latte([3]), refill([3])]);
     expect("menu_refill" in plain).toBe(false);
     expect(cup.menu_refill).toBe(true);
   });
 
-  it("從客顯快照還原：續杯行保留續杯，鍵與點磚時相同", () => {
+  it("從客顯快照還原：續點行保留續點，鍵與點磚時相同", () => {
     const [restored] = restoreLines([
       {
         item_key: "MENU:5:3:refill",
         line_type: "MENU",
-        name: "續杯・拿鐵（冰）",
+        name: "續點・拿鐵（冰）",
         qty: 1,
         unit_price: "120",
         line_kind: "NORMAL",
@@ -100,14 +100,14 @@ describe("續杯（店主 2026-10-16）", () => {
     ]);
     expect(restored).toMatchObject({ key: "MENU-5-3-refill", menuItemId: 5, menuOptionIds: [3], menuRefill: true });
     const [bare] = restoreLines([
-      { item_key: "MENU:5:refill", line_type: "MENU", name: "續杯・水", qty: 1, unit_price: "8", line_kind: "NORMAL" } as never,
+      { item_key: "MENU:5:refill", line_type: "MENU", name: "續點・水", qty: 1, unit_price: "8", line_kind: "NORMAL" } as never,
     ]);
     expect(bare).toMatchObject({ key: "MENU-5-refill", menuRefill: true });
     expect(bare?.menuOptionIds).toBeUndefined();
   });
 });
 
-describe("續杯價（與後端 round_ntd 一致）", () => {
+describe("續點價（與後端 round_ntd 一致）", () => {
   it("照折數算、四捨五入到元；折數說法照台灣習慣", () => {
     expect(refillUnitPrice(170, 80)).toBe(136);
     expect(refillUnitPrice(10, 85)).toBe(9); // 8.5 → 9

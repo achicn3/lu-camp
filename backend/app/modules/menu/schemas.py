@@ -38,7 +38,7 @@ class MenuItemCreateRequest(BaseModel):
     category: str | None = Field(default=None, max_length=50)
     description: str | None = Field(default=None, max_length=500)
     sort_order: int = 0
-    # 可續杯（2026-10-16）：客人可點續杯、照設定折數算。
+    # 可續點（2026-10-16）：客人可點續點、照設定折數算。
     refillable: bool = False
 
     @field_validator("unit_price")
@@ -262,7 +262,7 @@ class MenuItemRead(BaseModel):
     is_available: bool
     sort_order: int
     daily_limited: bool
-    # 可續杯（2026-10-16）。
+    # 可續點（2026-10-16）。
     refillable: bool
     # 今天還能賣幾份；不限量＝null（0＝今天售完或還沒填）。
     remaining: int | None

@@ -1,10 +1,10 @@
-"""sales × 續杯（店主 2026-10-16）：勾了「可續杯」的品項，客人可以點續杯、照折數算價。
+"""sales × 續點（店主 2026-10-16）：勾了「可續點」的品項，客人可以點續點、照折數算價。
 
-- 續杯價 = round_ntd((基本價 + Σ 選項加價) × 折數 / 100)，一杯一杯算；加料也打折（裁示 1）。
+- 續點價 = round_ntd((基本價 + Σ 選項加價) × 折數 / 100)，一杯一杯算；加料也打折（裁示 1）。
 - 折數放設定 `menu_refill_pct`（預設 80＝八折），不寫死。
-- 勾了就算（裁示 3）：後端只檢查品項可不可續杯，是不是真的續杯由店員現場判斷。
-- 品名冠「續杯・」：收據、出餐單、發票、客顯直接看得到；續杯與一般點是不同明細。
-- 冪等指紋：沒續杯時維持舊形狀（部署前送出的重送不被誤判）。
+- 勾了就算（裁示 3）：後端只檢查品項可不可續點，是不是真的續點由店員現場判斷。
+- 品名冠「續點・」：收據、出餐單、發票、客顯直接看得到；續點與一般點是不同明細。
+- 冪等指紋：沒續點時維持舊形狀（部署前送出的重送不被誤判）。
 """
 
 from collections.abc import AsyncGenerator
@@ -48,7 +48,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
 
 class _Menu:
-    """拿鐵 150（可續杯）：奶（必選：鮮奶／燕麥奶 +20）；蛋糕 120（不可續杯）。"""
+    """拿鐵 150（可續點）：奶（必選：鮮奶／燕麥奶 +20）；蛋糕 120（不可續點）。"""
 
     def __init__(self) -> None:
         self.store_id = 0
@@ -125,7 +125,7 @@ async def test_refill_is_priced_at_refill_pct_including_options(
     assert resp.status_code == 201, resp.text
     line = resp.json()["lines"][0]
     assert line["unit_price"] == "136"  # (150 + 20) × 80%：加料也打折
-    assert line["description"] == "續杯・拿鐵（燕麥奶）"
+    assert line["description"] == "續點・拿鐵（燕麥奶）"
     assert resp.json()["total"] == "272"
 
 
@@ -142,7 +142,7 @@ async def test_refill_and_regular_cup_are_separate_lines(
     assert resp.status_code == 201, resp.text
     assert [(ln["description"], ln["unit_price"]) for ln in resp.json()["lines"]] == [
         ("拿鐵（鮮奶）", "150"),
-        ("續杯・拿鐵（鮮奶）", "120"),
+        ("續點・拿鐵（鮮奶）", "120"),
     ]
 
 
@@ -152,7 +152,7 @@ async def test_refill_on_item_that_is_not_refillable_is_rejected(
     m = await _seed(db_session)
     resp = await _sell(client, m, [_line(m.cake, [], refill=True)], "r3")
     assert resp.status_code == 422, resp.text
-    assert "續杯" in resp.json()["detail"]
+    assert "續點" in resp.json()["detail"]
 
 
 async def test_refill_pct_comes_from_settings_and_rounds_half_up(
@@ -183,7 +183,7 @@ async def test_quote_prices_refill(client: httpx.AsyncClient, db_session: AsyncS
     )
     assert resp.status_code == 200, resp.text
     line = resp.json()["lines"][0]
-    assert (line["description"], line["unit_price"]) == ("續杯・拿鐵（鮮奶）", "120")
+    assert (line["description"], line["unit_price"]) == ("續點・拿鐵（鮮奶）", "120")
     assert resp.json()["total"] == "360"
 
 
@@ -227,7 +227,7 @@ async def test_refill_only_allowed_on_menu_lines(
         headers={"Authorization": f"Bearer {m.token}", "Idempotency-Key": "r5"},
     )
     assert resp.status_code == 422
-    assert "只有餐飲明細可以續杯" in resp.text
+    assert "只有餐飲明細可以續點" in resp.text
 
 
 async def test_menu_item_api_reads_and_toggles_refillable(

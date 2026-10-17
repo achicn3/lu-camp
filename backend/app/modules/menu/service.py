@@ -42,8 +42,8 @@ from app.shared.exceptions import (
 
 # 銷售明細品名欄寬（sale_lines.description）；品名＋選項超過就截斷並以「…」結尾。
 SALE_LINE_DESCRIPTION_MAX: Final = 300
-# 續杯的品名開頭（2026-10-16）：收據、出餐單、發票、客顯一看就知道；線上點餐雲端用同一個寫法。
-REFILL_PREFIX: Final = "續杯・"
+# 續點的品名開頭（2026-10-16）：收據、出餐單、發票、客顯一看就知道；線上點餐雲端用同一個寫法。
+REFILL_PREFIX: Final = "續點・"
 
 # 區分「未提供（不變）」與「明確設為 None（清空）」——目前僅 category 需要清空語意。
 _UNSET: Final = object()
@@ -170,7 +170,7 @@ def _shortage_message(name: str, entry: MenuItem | MenuOption, day: date) -> str
 def _line_description(name: str, picked: Sequence[tuple[str, str]], *, refill: bool = False) -> str:
     """品名＋選項。平常只列選項名（短，收據好讀）；所選選項有同名時（甜度「正常」、
     冰量「正常」），撞名的那幾項改成「群組名＋選項名」，否則分不出哪個是哪個。
-    續杯在最前面冠「續杯・」。"""
+    續點在最前面冠「續點・」。"""
     counts: dict[str, int] = {}
     for _, option in picked:
         counts[option] = counts.get(option, 0) + 1
@@ -382,7 +382,7 @@ class MenuService:
                 before={"unit_cost": None if before_cost is None else str(before_cost)},
                 after={"unit_cost": None if unit_cost is None else str(unit_cost)},
             )
-        # 可不可續杯決定客人能不能打折買，同屬改價，留前後值。
+        # 可不可續點決定客人能不能打折買，同屬改價，留前後值。
         if item.refillable != before_refillable:
             await write_audit_log(
                 self._session,
@@ -538,8 +538,8 @@ class MenuService:
     ) -> MenuSelection:
         """依菜單驗證所選選項並計價（docs/44 §3.2–3.3）。永遠以後端菜單為準，不信任客戶端金額。
 
-        `refill`：續杯（2026-10-16）。品項要勾「可續杯」，單價＝（基本價＋選項加價）照設定的
-        折數算、四捨五入到元；品名冠「續杯・」。是不是真的續杯由店員現場判斷。
+        `refill`：續點（2026-10-16）。品項要勾「可續點」，單價＝（基本價＋選項加價）照設定的
+        折數算、四捨五入到元；品名冠「續點・」。是不是真的續點由店員現場判斷。
 
         `check_stock=False`：只算價、不看今天剩幾份——線上單帶入結帳前的預覽用，那張單保留的
         份數已經先扣掉了，用剩餘份數判斷會誤報售完（真正結帳仍會檢查）。
@@ -552,7 +552,7 @@ class MenuService:
         if len(set(option_ids)) != len(option_ids):
             raise SaleLineInvalid(f"「{item.name}」的同一個選項不能選兩次")
         if refill and not item.refillable:
-            raise SaleLineInvalid(f"「{item.name}」不能續杯")
+            raise SaleLineInvalid(f"「{item.name}」不能續點")
         details = (await self.describe_items(store_id, [item]))[0].option_groups
         chosen = set(option_ids)
         known = {o.id for d in details for o in d.options}

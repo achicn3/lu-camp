@@ -67,7 +67,7 @@ function itemIdentity(item: CartItem): Partial<CartLine> | null {
     }
     case "MENU": {
       // 帶選項的鍵是 MENU:{id}:{選項,…}（後端 menu_line_key）；沒選項就是 MENU:{id}。
-      // 續杯在最後多一段 :refill。
+      // 續點在最後多一段 :refill。
       const parts = raw.split(":");
       const refill = parts[parts.length - 1] === "refill";
       if (refill) parts.pop();

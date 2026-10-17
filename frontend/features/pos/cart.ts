@@ -24,7 +24,7 @@ export interface CartLine {
   menuItemId?: number;
   /** 餐飲選項（docs/44 §3.6）：由小到大排序；同品項不同選項是不同行。 */
   menuOptionIds?: number[];
-  /** 續杯（2026-10-16）：照設定折數算；與同一杯的一般點是不同行。 */
+  /** 續點（2026-10-16）：照設定折數算；與同一杯的一般點是不同行。 */
   menuRefill?: boolean;
   /** bulk 可售上限（remaining_qty），用於數量上限提示；serialized 為 1。 */
   maxQty?: number;
@@ -210,14 +210,14 @@ export function menuLineKey(
 }
 
 /**
- * 續杯單價（2026-10-16）：原價（含加料）× 折數，四捨五入到元。只是購物車上的暫時顯示，
+ * 續點單價（2026-10-16）：原價（含加料）× 折數，四捨五入到元。只是購物車上的暫時顯示，
  * 成交價一律以後端為準（後端 discounted_price 也是 ROUND_HALF_UP）。
  */
 export function refillUnitPrice(unitPrice: number, pct: number): number {
   return Math.floor((unitPrice * pct + 50) / 100);
 }
 
-/** 續杯折數的說法：80→「8 折」、85→「85 折」。 */
+/** 續點折數的說法：80→「8 折」、85→「85 折」。 */
 export function refillLabel(pct: number): string {
   return `${pct % 10 === 0 ? pct / 10 : pct} 折`;
 }
@@ -245,7 +245,7 @@ export function toSaleLines(
     ...(l.menuOptionIds && l.menuOptionIds.length > 0
       ? { menu_option_ids: [...l.menuOptionIds].sort((a, b) => a - b) }
       : {}),
-    // 續杯同理：不是續杯就不送（後端也是沒續杯就不入指紋）。
+    // 續點同理：不是續點就不送（後端也是沒續點就不入指紋）。
     ...(l.menuRefill ? { menu_refill: true } : {}),
   }));
 }

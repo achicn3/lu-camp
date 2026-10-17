@@ -115,7 +115,7 @@ class CartLine:
     online_unit_price: Decimal
     unit_price: Decimal
     menu_refill: bool = False
-    """續杯（2026-10-16）：照設定折數算價。"""
+    """續點（2026-10-16）：照設定折數算價。"""
 
 
 @dataclass(frozen=True)
@@ -823,14 +823,14 @@ def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:
                 if line.get("experience_id") is not None
                 else {}
             ),
-            # 續杯（2026-10-16）；舊版雲端沒有這個鍵。只收真正的 true（1 之類的一律當格式錯）。
+            # 續點（2026-10-16）；舊版雲端沒有這個鍵。只收真正的 true（1 之類的一律當格式錯）。
             **({"refill": _refill_flag(line["refill"])} if "refill" in line else {}),
         }
         for line in raw["lines"]
     ]
     if not lines or any(line["qty"] < 1 for line in lines):
         raise ValueError("empty or bad lines")
-    # 帶回家商品沒有選項、不會是體驗卡、不能續杯。
+    # 帶回家商品沒有選項、不會是體驗卡、不能續點。
     if any(
         _is_retail(line) and (line["option_ids"] or "experience_id" in line or "refill" in line)
         for line in lines
@@ -889,7 +889,7 @@ def _paid_linepay(raw: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _refill_flag(value: object) -> bool:
-    """雲端的續杯旗標只會是 true（不是續杯就不帶這個鍵）；其他值代表格式不對，整張跳過。"""
+    """雲端的續點旗標只會是 true（不是續點就不帶這個鍵）；其他值代表格式不對，整張跳過。"""
     if value is not True:
         raise ValueError("bad refill flag")
     return True

@@ -128,7 +128,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
           ...l,
           option_ids: JSON.parse(option_ids) as number[],
           limited: limited === 1,
-          // 續杯（2026-10-16）：只在是續杯時帶，舊版 POS 看不到這個鍵也照常匯入。
+          // 續點（2026-10-16）：只在是續點時帶，舊版 POS 看不到這個鍵也照常匯入。
           ...(refill === 1 ? { refill: true } : {}),
         })),
     })),

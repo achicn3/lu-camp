@@ -428,14 +428,14 @@ it("加點納入冪等指紋；沒勾加點的舊版重送指紋不變", async (
   expect((await order({...plain,add_on:false})).status).toBe(200);
 });
 
-// 續杯（店主 2026-10-16）：可續杯的品項照折數算；續杯不算低消；標記帶給 POS。
-describe("續杯", () => {
+// 續點（店主 2026-10-16）：可續點的品項照折數算；續點不算低消；標記帶給 POS。
+describe("續點", () => {
   const REFILL_MENU = { ...MENU, version: 9, refill_pct: 80, items: [{ ...MENU.items[0], refillable: true }, MENU.items[1]] };
   beforeEach(async () => {
     expect((await integration("PUT", "/integration/menu", JSON.stringify(REFILL_MENU))).status).toBe(200);
   });
 
-  it("照折數算價、品名冠續杯，拉單時帶 refill（一般行沒有）", async () => {
+  it("照折數算價、品名冠續點，拉單時帶 refill（一般行沒有）", async () => {
     const resp = await order({ table_code: null, lines: [
       { item_id: 5, option_ids: [], qty: 1, refill: true },
       { item_id: 5, option_ids: [], qty: 1 },
@@ -445,26 +445,26 @@ describe("續杯", () => {
     const pull = await (await integration("GET", "/integration/orders")).json() as
       { orders: { lines: { name: string; unit_price: number; refill?: boolean }[] }[] };
     expect(pull.orders[0]?.lines.map((l) => [l.name, l.unit_price, l.refill ?? null])).toEqual([
-      ["續杯・拿鐵", 120, true],
+      ["續點・拿鐵", 120, true],
       ["拿鐵", 150, null],
     ]);
   });
 
-  it("不可續杯的品項拒收", async () => {
+  it("不可續點的品項拒收", async () => {
     const resp = await order({ lines: [{ item_id: 6, option_ids: [], qty: 1, refill: true }] });
     expect(resp.status).toBe(422);
     expect(await resp.json()).toMatchObject({ error: "not_refillable", item_id: 6 });
   });
 
-  it.each(["true", 1, null, false])("拒絕無效的續杯標記 %s", async (refill) => {
+  it.each(["true", 1, null, false])("拒絕無效的續點標記 %s", async (refill) => {
     expect((await order({ lines: [{ item_id: 5, option_ids: [], qty: 1, refill }] })).status).toBe(422);
   });
 
-  it("帶回家商品不能續杯", async () => {
+  it("帶回家商品不能續點", async () => {
     expect((await order({ lines: [{ catalog_product_id: 9, qty: 1, refill: true }] })).status).toBe(422);
   });
 
-  it("續杯不算低消：金額與每人份數都不數續杯", async () => {
+  it("續點不算低消：金額與每人份數都不數續點", async () => {
     await minimumTable({ mode: "amount", amount: 300 });
     const denied = await order({ lines: [
       { item_id: 5, option_ids: [], qty: 1 }, { item_id: 5, option_ids: [], qty: 2, refill: true },
@@ -477,7 +477,7 @@ describe("續杯", () => {
     expect(await short.json()).toMatchObject({ error: "minimum_not_met", missing_items: 1 });
   });
 
-  it("續杯納入冪等指紋；沒續杯的舊版重送指紋不變", async () => {
+  it("續點納入冪等指紋；沒續點的舊版重送指紋不變", async () => {
     const key = crypto.randomUUID();
     const refill = { idempotency_key: key, lines: [{ item_id: 5, option_ids: [], qty: 1, refill: true }] };
     expect((await order(refill)).status).toBe(201);

@@ -829,7 +829,7 @@ function MenuItemDialog({
   onCancel,
 }: {
   item: MenuItemRead;
-  /** 續杯折數（80＝八折）；設定還沒讀到為 null，就先不讓選續杯。 */
+  /** 續點折數（80＝八折）；設定還沒讀到為 null，就先不讓選續點。 */
   refillPct: number | null;
   onAdd: (line: PickedMenuLine) => void;
   onCancel: () => void;
@@ -846,7 +846,7 @@ function MenuItemDialog({
   const fullPrice =
     (parseNtd(item.unit_price) ?? 0) +
     pickedOptions.reduce((sum, p) => sum + (parseNtd(p.option.price_delta) ?? 0), 0);
-  // 續杯（2026-10-16）：加料也打折；成交價以後端為準。
+  // 續點（2026-10-16）：加料也打折；成交價以後端為準。
   const price =
     canRefill && refill && refillPct !== null ? refillUnitPrice(fullPrice, refillPct) : fullPrice;
   const missing = groups.filter(
@@ -877,7 +877,7 @@ function MenuItemDialog({
     );
     onAdd({
       optionIds: pickedOptions.map((p) => p.option.id),
-      description: isRefill ? `續杯・${description}` : description,
+      description: isRefill ? `續點・${description}` : description,
       unitPrice: price,
       qty: n,
       refill: isRefill,
@@ -941,14 +941,14 @@ function MenuItemDialog({
         })}
         {canRefill && refillPct !== null && (
           <fieldset className="pos-option-group">
-            <legend>續杯</legend>
+            <legend>續點</legend>
             <label className="pos-option">
               <input
                 type="checkbox"
                 checked={refill}
                 onChange={(e) => setRefill(e.target.checked)}
               />
-              <span>續杯（{refillLabel(refillPct)}，加料也打折）</span>
+              <span>續點（{refillLabel(refillPct)}，加料也打折）</span>
             </label>
           </fieldset>
         )}

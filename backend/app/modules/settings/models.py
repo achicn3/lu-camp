@@ -157,7 +157,7 @@ class StoreSettings(Base, TimestampMixin):
     auto_print_acquisition_labels: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
     )
-    # 續杯（2026-10-16）：可續杯的品項續杯時照原價（含加料）的幾成算，80＝八折。
+    # 續點（2026-10-16）：可續點的品項續點時照原價（含加料）的幾成算，80＝八折。
     menu_refill_pct: Mapped[int] = mapped_column(
         Integer, default=80, server_default=text("80"), nullable=False
     )

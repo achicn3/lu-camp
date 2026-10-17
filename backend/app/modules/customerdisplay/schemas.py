@@ -114,7 +114,7 @@ class CartLineRequest(BaseModel):
     promo_free: bool | None = None
     # 餐飲選項（docs/44 §3）；與 SaleLineCreateRequest 同形。
     menu_option_ids: list[int] | None = Field(default=None, max_length=MENU_OPTIONS_MAX)
-    # 續杯（2026-10-16）；與 SaleLineCreateRequest 同形。
+    # 續點（2026-10-16）；與 SaleLineCreateRequest 同形。
     menu_refill: bool | None = None
 
     @model_validator(mode="after")
@@ -136,7 +136,7 @@ class CartLineRequest(BaseModel):
         if self.line_type is not SaleLineType.MENU and self.menu_option_ids:
             raise ValueError("只有餐飲明細可以帶選項")
         if self.line_type is not SaleLineType.MENU and self.menu_refill:
-            raise ValueError("只有餐飲明細可以續杯")
+            raise ValueError("只有餐飲明細可以續點")
         return self
 
     def to_input(self) -> SaleLineInput:

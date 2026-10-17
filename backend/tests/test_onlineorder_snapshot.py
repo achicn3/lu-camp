@@ -222,7 +222,7 @@ def test_snapshot_text_includes_presentation_copy() -> None:
 
 
 def test_refillable_items_and_refill_pct_are_published() -> None:
-    """續杯（2026-10-16）：可續杯的品項標 refillable、快照帶折數；雲端照同一個折數算價。"""
+    """續點（2026-10-16）：可續點的品項標 refillable、快照帶折數；雲端照同一個折數算價。"""
     snap = build_snapshot(
         [_detail(_item(refillable=True), None, []), _detail(_item(id=6, name="蛋糕"), None, [])],
         [],
@@ -238,7 +238,7 @@ def test_refillable_items_and_refill_pct_are_published() -> None:
 
 
 def test_no_refillable_items_keeps_old_snapshot_shape() -> None:
-    """沒有可續杯品項時快照形狀不變（舊版雲端照樣收）。"""
+    """沒有可續點品項時快照形狀不變（舊版雲端照樣收）。"""
     snap = build_snapshot(
         [_detail(_item(refillable=False), None, [])],
         [],

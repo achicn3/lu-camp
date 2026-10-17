@@ -53,8 +53,8 @@ def build_snapshot(
 ) -> Snapshot:
     """組快照。品項依傳入順序（菜單排序）；分類只列有品項的，依分類排序。
 
-    續杯（2026-10-16）：可續杯的品項標 `refillable`，並帶折數 `refill_pct`（雲端照它算價）。
-    沒有可續杯品項時兩者都不放，快照形狀與舊版一樣。
+    續點（2026-10-16）：可續點的品項標 `refillable`，並帶折數 `refill_pct`（雲端照它算價）。
+    沒有可續點品項時兩者都不放，快照形狀與舊版一樣。
     """
     shown = [d for d in details if d.item.archived_at is None and d.item.is_available]
     used = {d.item.category_id for d in shown}

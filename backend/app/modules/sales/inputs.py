@@ -45,14 +45,14 @@ class SaleLineInput:
     promo_free: bool = False
     # 餐飲選項（docs/44 §3）：一律由小到大排序，順序不同視為同一組選擇。
     menu_option_ids: tuple[int, ...] = ()
-    # 續杯（2026-10-16）：品項要可續杯，照設定折數算價。
+    # 續點（2026-10-16）：品項要可續點，照設定折數算價。
     menu_refill: bool = False
 
 
 def menu_line_key(line: SaleLineInput) -> str:
     """餐飲明細的購物車項目鍵：同品項不同選項是不同項目（否則差異比對會吃掉一筆）。
 
-    沒有選項時維持舊鍵 `MENU:{id}`，既有購物車與快照不受影響；續杯與一般點是不同項目，
+    沒有選項時維持舊鍵 `MENU:{id}`，既有購物車與快照不受影響；續點與一般點是不同項目，
     鍵尾加 `:refill`。
     """
     key = f"MENU:{line.menu_item_id}"

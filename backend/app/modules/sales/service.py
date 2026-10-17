@@ -638,7 +638,7 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
         fields["promo_free"] = True
     if line.menu_option_ids:  # 後加欄位（docs/44）：沒選項就不放，舊請求的指紋不變
         fields["menu_option_ids"] = sorted(line.menu_option_ids)
-    if line.menu_refill:  # 後加欄位（續杯）：沒勾就不放，舊請求的指紋不變
+    if line.menu_refill:  # 後加欄位（續點）：沒勾就不放，舊請求的指紋不變
         fields["menu_refill"] = True
     return fields
 

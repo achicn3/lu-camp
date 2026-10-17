@@ -84,7 +84,7 @@ function parseRequest(raw: Uint8Array): OrderRequest | null {
   for (const l of o.lines) {
     if (typeof l !== "object" || l === null) return null;
     const { item_id, option_ids, qty, experience_id, catalog_product_id, refill, ...rest } = l as Record<string, unknown>;
-    // 續杯（2026-10-16）：只收 true；不是續杯就不帶這個鍵（冪等指紋才與舊版一樣）。
+    // 續點（2026-10-16）：只收 true；不是續點就不帶這個鍵（冪等指紋才與舊版一樣）。
     if (refill !== undefined && refill !== true) return null;
     if (catalog_product_id !== undefined) {
       // 帶回家商品：只有商品與數量（docs/63 §13）。
@@ -352,7 +352,8 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
     ...priced.lines.map((l, i) =>
       env.DB.prepare(
         "INSERT INTO order_lines (order_id, store_id, line_no, item_id, catalog_product_id, name, option_ids, " +
-          `unit_price, qty, line_total, limited, experience_id, refill) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
+          `unit_price, qty, line_total, limited, experience_id, refill, guest_name) ` +
+          `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${exists}`,
       ).bind(
         orderId,
         storeId,
@@ -367,6 +368,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
         l.limited ? 1 : 0,
         l.experience_id ?? null,
         l.refill === true ? 1 : 0,
+        l.guest_name ?? null,
         orderId,
       ),
     ),
@@ -395,7 +397,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
       status: holdStatus === "NONE" ? "UNPAID" : holdStatus,
       total: priced.total,
       table_label: tableLabel,
-      lines: priced.lines.map(({ name, qty, line_total }) => ({ name, qty, line_total })),
+      lines: priced.lines.map(({ name, guest_name, qty, line_total }) => ({ name: guest_name ?? name, qty, line_total })),
     },
     201,
     headers,
@@ -443,7 +445,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
     }>();
   if (row === null) return error("not_found", 404);
   const lines = await env.DB.prepare(
-    "SELECT name, qty, line_total, catalog_product_id IS NOT NULL AS take_home FROM order_lines " +
+    // 客人頁只顯示卡片名稱（guest_name）；舊單與一般點沒有，照 name。
+    "SELECT COALESCE(guest_name, name) AS name, qty, line_total, catalog_product_id IS NOT NULL AS take_home FROM order_lines " +
       "WHERE order_id = ? ORDER BY line_no",
   )
     .bind(row.id)

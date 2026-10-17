@@ -143,7 +143,7 @@ describe("菜單", () => {
     expect((await publish({ ...SNAPSHOT, experiences: [experience] })).status).toBe(422);
   });
 
-  it("續杯（2026-10-16）：可續杯品項與折數原樣保留；格式不對拒收", async () => {
+  it("續點（2026-10-16）：可續點品項與折數原樣保留；格式不對拒收", async () => {
     const snapshot = { ...SNAPSHOT, refill_pct: 80, items: [{ ...SNAPSHOT.items[0], refillable: true }] };
     expect((await publish(snapshot)).status).toBe(200);
     expect(await (await get("/api/menu")).json()).toEqual(snapshot);

@@ -100,7 +100,7 @@ class MenuItem(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(500))
     # 照片（docs/44 §3.4）：`menu_photos` 的內容雜湊；沒照片＝null。
     photo_sha256: Mapped[str | None] = mapped_column(String(64))
-    # 可續杯（2026-10-16）：客人勾「續杯」就照設定的折數算（含加料），真假由店員現場判斷。
+    # 可續點（2026-10-16）：客人勾「續點」就照設定的折數算（含加料），真假由店員現場判斷。
     refillable: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     # POS 是否可點（上架/停售切換，不影響歷史）。
     is_available: Mapped[bool] = mapped_column(default=True, server_default=text("true"))

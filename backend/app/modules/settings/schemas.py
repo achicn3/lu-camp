@@ -66,7 +66,7 @@ class SettingsRead(BaseModel):
     print_kitchen_ticket: bool
     auto_print_acquisition_labels: bool
     online_order_hours: OnlineHours = Field(default_factory=OnlineHours)
-    # 續杯照原價的幾成算（80＝八折）。
+    # 續點照原價的幾成算（80＝八折）。
     menu_refill_pct: int
 
     @classmethod

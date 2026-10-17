@@ -1,9 +1,9 @@
-// 續杯（店主 2026-10-16）真瀏覽器煙霧：
-// ① 菜單管理：續杯折數設定、品項「可續杯」勾選。
-// ② POS 點餐視窗勾「續杯」→ 單價照八折（加料也打折）、購物車行冠「續杯・」，和一般點分開。
-// ③ 客人頁：可續杯品項標「可續杯 8 折」、視窗勾「我是續杯」→ 購物車續杯價、自動勾「我是加點」；
-//    取消加點後，低消桌缺額不算續杯並加註。
-// ④ 外帶送一張續杯＋一般點 → POS 線上訂單帶入結帳，續杯行照續杯價。
+// 續點（店主 2026-10-16）真瀏覽器煙霧：
+// ① 菜單管理：續點折數設定、品項「可續點」勾選。
+// ② POS 點餐視窗勾「續點」→ 單價照八折（加料也打折）、購物車行冠「續點・」，和一般點分開。
+// ③ 客人頁：可續點品項標「可續點 8 折」、視窗勾「我是續點」→ 購物車續點價、自動勾「我是加點」；
+//    取消加點後，低消桌缺額不算續點並加註。
+// ④ 外帶送一張續點＋一般點 → POS 線上訂單帶入結帳，續點行照續點價。
 // 結束後取消測試單、還原品項與桌號設定並重新發佈。需要本機示範環境（後端 :8116、POS :3116、Worker :8794）。
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -15,7 +15,7 @@ const API = "http://localhost:8116/api/v1", POS = "http://localhost:3116", ORDER
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
 const SHOTS = process.env.SMOKE_SHOTS ?? "/tmp/menu-refill-shots";
 const ITEM = process.env.SMOKE_ITEM ?? "拿鐵"; // 基本價 150、溫度（熱／冰）、加購（燕麥奶 +20）
-const TABLE = "煙霧續杯";
+const TABLE = "煙霧續點";
 mkdirSync(SHOTS, { recursive: true });
 
 let token = "";
@@ -50,7 +50,7 @@ try {
   });
   await api("PATCH", `/menu-items/${item.id}`, { refillable: false });
 
-  // ① 菜單管理：勾「可續杯」
+  // ① 菜單管理：勾「可續點」
   const pos = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   await skipOpeningCheckRedirect(pos);
   await pos.goto(`${POS}/login`);
@@ -59,21 +59,21 @@ try {
   await pos.getByRole("button", { name: "登入", exact: true }).click();
   await pos.waitForURL((url) => !url.pathname.startsWith("/login"));
   await pos.goto(`${POS}/menu`);
-  const pct = pos.getByLabel("續杯折數（%）");
-  await pos.getByText("目前續杯打 8 折").waitFor();
+  const pct = pos.getByLabel("續點折數（%）");
+  await pos.getByText("目前續點打 8 折").waitFor();
   assert.equal(await pct.inputValue(), "80");
   await pos.getByRole("button", { name: `${ITEM} 編輯` }).click();
   const dialog = pos.getByRole("dialog", { name: `編輯 ${ITEM}` });
-  await dialog.getByRole("checkbox", { name: /可續杯/ }).check();
+  await dialog.getByRole("checkbox", { name: /可續點/ }).check();
   await pos.screenshot({ path: `${SHOTS}/01-menu-edit-refillable.png` });
   await dialog.getByRole("button", { name: "儲存" }).click();
   await dialog.waitFor({ state: "hidden" });
   const row = pos.locator("tr").filter({ has: pos.locator(".menu-item-name", { hasText: new RegExp(`^${ITEM}$`) }) });
-  await row.getByText("可續杯", { exact: true }).waitFor();
+  await row.getByText("可續點", { exact: true }).waitFor();
   assert.equal((await api("GET", "/menu-items")).find((i) => i.id === item.id).refillable, true);
   await pos.screenshot({ path: `${SHOTS}/02-menu-list.png` });
 
-  // ② POS 點餐：續杯 136（(150＋20)×80%），和一般點分兩行
+  // ② POS 點餐：續點 136（(150＋20)×80%），和一般點分兩行
   await pos.goto(`${POS}/pos`);
   const addCup = async (refill) => {
     await pos.locator(".pos-menu-tile").filter({ hasText: ITEM }).click();
@@ -81,7 +81,7 @@ try {
     await pick.getByRole("radio", { name: "熱" }).check();
     await pick.getByRole("radio", { name: /燕麥奶/ }).check().catch(() => pick.getByRole("checkbox", { name: /燕麥奶/ }).check());
     if (refill) {
-      await pick.getByRole("checkbox", { name: "續杯（8 折，加料也打折）" }).check();
+      await pick.getByRole("checkbox", { name: "續點（8 折，加料也打折）" }).check();
       await pick.locator(".pos-qty-dialog-price").filter({ hasText: "136" }).waitFor();
       await pos.screenshot({ path: `${SHOTS}/03-pos-refill-dialog.png` });
     } else {
@@ -91,7 +91,7 @@ try {
   };
   await addCup(false);
   await addCup(true);
-  const refillLine = `續杯・${ITEM}（熱、燕麥奶）`;
+  const refillLine = `續點・${ITEM}（熱、燕麥奶）`;
   await pos.getByRole("button", { name: `移除 ${refillLine}` }).waitFor();
   await pos.getByRole("button", { name: `移除 ${ITEM}（熱、燕麥奶）` }).waitFor();
   const optionIds = item.option_groups.flatMap((g) => g.options)
@@ -104,20 +104,20 @@ try {
   await pos.getByRole("button", { name: `移除 ${refillLine}` }).click();
   await pos.getByRole("button", { name: `移除 ${ITEM}（熱、燕麥奶）` }).click();
 
-  // ③ 客人頁：低消 $300 的桌，一般 170＋續杯 136＝306，但續杯不算 → 還差 $130
+  // ③ 客人頁：低消 $300 的桌，一般 170＋續點 136＝306，但續點不算 → 還差 $130
   await api("POST", "/online-order/publish");
   const code = (await api("GET", "/online-order/status")).tables.find((t) => t.label === TABLE).code;
   const guest = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const guestCup = async (refill) => {
     await guest.getByRole("button", { name: "飲品", exact: true }).click();
     const card = guest.locator(".item").filter({ hasText: ITEM });
-    await card.getByText("可續杯 8 折").waitFor();
+    await card.getByText("可續點 8 折").waitFor();
     await card.locator(".item-add").click();
     const sheet = guest.locator("#sheet");
     await sheet.getByRole("radio", { name: "熱", exact: true }).check();
     await sheet.getByRole("radio", { name: /燕麥奶/ }).check();
     if (refill) {
-      await sheet.getByLabel("我是續杯（8 折，加料也打折）").check();
+      await sheet.getByLabel("我是續點（8 折，加料也打折）").check();
       await guest.screenshot({ path: `${SHOTS}/05-guest-refill-sheet.png` });
     }
     await guest.locator("#detail-add").click();
@@ -128,18 +128,18 @@ try {
   await guest.getByRole("button", { name: /購物車 2 份/ }).click();
   await guest.locator(".cart-line").filter({ hasText: refillLine }).filter({ hasText: "$136" }).waitFor();
   await guest.locator(".cart-total").filter({ hasText: "$306" }).waitFor();
-  // 點了續杯＝同桌已經點過：自動勾好「我是加點」，不被低消卡住；客人取消勾選才看到缺額。
+  // 點了續點＝同桌已經點過：自動勾好「我是加點」，不被低消卡住；客人取消勾選才看到缺額。
   const addOn = guest.getByLabel("我是加點（同桌已經點過）");
   assert.ok(await addOn.isChecked(), "refill auto-checks add-on");
   assert.ok(await guest.getByRole("button", { name: "送出訂單", exact: true }).isEnabled());
   await guest.screenshot({ path: `${SHOTS}/06a-guest-refill-add-on.png` });
   await addOn.uncheck();
-  await guest.getByText("本桌低消 $300，還差 $130（續杯不計入低消）。").waitFor();
+  await guest.getByText("本桌低消 $300，還差 $130（續點不計入低消）。").waitFor();
   assert.ok(await guest.getByRole("button", { name: "送出訂單", exact: true }).isDisabled());
   assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await guest.screenshot({ path: `${SHOTS}/06-guest-cart-minimum.png` });
 
-  // ④ 外帶送單 → POS 帶入結帳照續杯價（暫時開放接單，結束後還原）
+  // ④ 外帶送單 → POS 帶入結帳照續點價（暫時開放接單，結束後還原）
   await api("PUT", "/online-orders/accepting", { accepting: true });
   await guest.evaluate(() => localStorage.clear());
   await guest.goto(ORDER);

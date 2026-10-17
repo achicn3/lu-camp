@@ -104,6 +104,24 @@ describe("POS 拉單", () => {
     ]);
   });
 
+  it("體驗卡的行：客人頁只顯示卡片名稱，POS 拉到的品名照舊（店主 2026-10-17）", async () => {
+    const card = {
+      id: 9, item_id: 5, option_ids: [], title: "拿鐵體驗", tag: null, origin: null, notes: null,
+      description: null, includes: [], theme: "honey", art: "none", effect: "random",
+    };
+    await integration("PUT", "/integration/menu", JSON.stringify({ ...MENU, version: 4, experiences: [card] }));
+    const token = await place([
+      { item_id: 5, option_ids: [], qty: 1, experience_id: 9 },
+      { item_id: 5, option_ids: [], qty: 1 },
+    ]);
+    const view = (await (await exports.default.fetch(new Request(`https://order.test/api/orders/${token}`))).json()) as {
+      lines: { name: string }[];
+    };
+    expect(view.lines.map((l) => l.name)).toEqual(["拿鐵體驗", "拿鐵"]);
+    const pulled = (await pull()).orders[0]!.lines as unknown as { name: string }[];
+    expect(pulled.map((l) => l.name)).toEqual(["拿鐵體驗・拿鐵", "拿鐵"]);
+  });
+
   it("拉單＝心跳：沒拉超過 2 分鐘客人就不能下單", async () => {
     await env.DB.prepare("UPDATE stores_meta SET last_pos_seen_ms = ?").bind(Date.now() - 3 * 60_000).run();
     const st = (await (await exports.default.fetch(new Request("https://order.test/api/status"))).json()) as {

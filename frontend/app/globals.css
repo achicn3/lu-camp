@@ -6606,7 +6606,7 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-/* 續杯折數（2026-10-16） */
+/* 續點折數（2026-10-16） */
 .menu-refill-setting {
   width: 100%;
   max-width: none;

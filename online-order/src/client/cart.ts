@@ -50,7 +50,7 @@ function valid(menu: MenuSnapshot, cart: CartLine[]): CartLine[] {
   return cart;
 }
 
-/** 同一份東西＝同品項同選項同體驗卡（續杯與否也要一樣），或同一個帶回家商品：合併數量。 */
+/** 同一份東西＝同品項同選項同體驗卡（續點與否也要一樣），或同一個帶回家商品：合併數量。 */
 function sameThing(a: CartLine, b: CartLine): boolean {
   if (isRetailLine(a) || isRetailLine(b)) {
     return isRetailLine(a) && isRetailLine(b) && a.catalog_product_id === b.catalog_product_id;
