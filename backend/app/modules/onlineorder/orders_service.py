@@ -215,6 +215,10 @@ class OnlineOrdersService:
             payment = _paid_linepay(raw)
             if payment is not None and existing.linepay_transaction_id is None:
                 existing.linepay_order_id, existing.linepay_transaction_id = payment
+                # 付款前就匯入的單（限量要先保留）：LINE Pay 綁定的載具付好時才知道，跟付款資料
+                # 一起記下開發票才用得到；客人建單時填的優先、不改（2026-10-18，Codex 對抗審查）。
+                if existing.invoice_carrier is None and existing.invoice_tax_id is None:
+                    existing.invoice_carrier, existing.invoice_tax_id = _invoice(raw)
                 await self._repo.flush()
             return None
         try:

@@ -1308,6 +1308,35 @@ async def test_order_paid_after_import_is_picked_up_on_next_pull(
     assert row.linepay_transaction_id == "2026100800000000001"
 
 
+async def test_bound_carrier_reaches_order_imported_before_payment(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """限量品項要先保留才能付，所以付款前就匯入；付好時雲端才知道 LINE Pay 綁定的載具，
+    要跟付款資料一起記下，開發票才用得到（Codex 對抗審查 2026-10-18）。"""
+    lines = [_line(1, ctx.latte, "拿鐵", 150)]
+    unpaid = {**_order(_rid(74), lines), "payment_method": "LINE_PAY", "payment_status": "PENDING"}
+    row = await _pull_raw(db_session, ctx, unpaid)
+    assert (row.invoice_carrier, row.invoice_tax_id) == (None, None)
+    row = await _pull_raw(db_session, ctx, _paid(_rid(74), lines))
+    assert (row.linepay_transaction_id, row.invoice_carrier) == ("2026100800000000001", "/ABC+123")
+
+
+async def test_typed_invoice_not_replaced_when_order_paid_after_import(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """客人建單時填的發票資料優先：付款後的拉單不改掉。"""
+    lines = [_line(1, ctx.latte, "拿鐵", 150)]
+    unpaid = {
+        **_order(_rid(75), lines),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+        "invoice": {"carrier": None, "tax_id": "12345678"},
+    }
+    await _pull_raw(db_session, ctx, unpaid)
+    row = await _pull_raw(db_session, ctx, _paid(_rid(75), lines))
+    assert (row.invoice_carrier, row.invoice_tax_id) == (None, "12345678")
+
+
 async def test_voiding_an_online_linepay_sale_refunds_by_transaction(
     client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
 ) -> None:

@@ -675,20 +675,19 @@ function paymentChoice(): {
   const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
   const extra = el("div", "invoice-fields");
   const kind = el("select") as HTMLSelectElement; kind.id = "invoice-kind"; kind.setAttribute("aria-label", "發票");
-  for (const [value, label] of [["none", "不用填"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
+  for (const [value, label] of [["none", "LINE Pay 上已綁定"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
     const option = el("option", "", label) as HTMLOptionElement; option.value = value!; kind.append(option);
   }
   const code = el("input") as HTMLInputElement; code.id = "invoice-code"; code.autocomplete = "off"; code.hidden = true;
   // 店主 2026-10-17：客人輸入的優先；沒填就用 LINE Pay 綁定的載具；都沒有才印紙本。
   const hint = el("p", "invoice-hint"); hint.id = "invoice-hint";
   const hints: Record<string, string> = {
-    none: "LINE Pay 已綁定手機條碼載具的話，發票會自動存進去，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。",
-    carrier: "以你輸入的載具為準，不會用 LINE Pay 綁定的。",
+    none: "發票會自動存進你在 LINE Pay 綁定的手機條碼載具，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。",
     tax: "統一編號的發票請到櫃檯領取。",
   };
   hint.textContent = hints.none!;
   kind.addEventListener("change", () => {
-    hint.textContent = hints[kind.value] ?? "";
+    hint.textContent = hints[kind.value] ?? ""; hint.hidden = hint.textContent === "";
     code.hidden = kind.value === "none"; code.value = "";
     code.placeholder = kind.value === "carrier" ? "/ABC+123" : "12345678";
     code.inputMode = kind.value === "tax" ? "numeric" : "text";

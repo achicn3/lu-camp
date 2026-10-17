@@ -107,12 +107,13 @@ try {
     await guest.locator(".item").filter({ hasText: "拿鐵" }).first().locator(".item-add").click();
     await guest.getByRole("button", { name: /購物車 1 份/ }).click();
     await guest.getByLabel(/LINE Pay/).check();
+    assert.equal(await guest.locator("#invoice-kind option:checked").textContent(), "LINE Pay 上已綁定");
     // 沒填的說明：有綁就存、不用輸入；沒綁才印紙本。
-    await guest.getByText("LINE Pay 已綁定手機條碼載具的話，發票會自動存進去，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。").waitFor();
+    await guest.getByText("發票會自動存進你在 LINE Pay 綁定的手機條碼載具，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。").waitFor();
     if (s.name === "bound") await guest.screenshot({ path: `${SHOTS}/01-checkout-hint.png` });
     if (s.typed) {
       await guest.locator("#invoice-kind").selectOption("carrier");
-      await guest.getByText("以你輸入的載具為準，不會用 LINE Pay 綁定的。").waitFor();
+      assert.equal(await guest.locator("#invoice-hint").textContent(), "", "手機條碼載具不另外提醒");
       await guest.locator("#invoice-code").fill(s.typed);
     }
     await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();

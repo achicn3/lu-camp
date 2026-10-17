@@ -9,7 +9,9 @@
 - 請款（confirm）回應 `info.merchantReference.affiliateCards[]` 的 `MOBILE_CARRIER` → `orders.linepay_carrier`（D1 `0015`），與 PAID 同一次寫入。規則同店內 Offline（`backend sales/linepay.py _mobile_carrier`）。
   **沒查到官方 Online v4 confirm 文件**（developers-pay.line.me 擋自動讀取 403），欄位沿用 Offline 已查證的結構——**第一筆正式付款後要確認真的有帶回**；沒帶回時一律走紙本，不會開錯。
 - 只有請款回應帶得回載具：請款結果不明、改由補查（check）確認付款的單拿不到 → 紙本（與店內 Offline 相同取捨）。
-- 優先順序在 `src/invoice.ts`（POS 拉單與客人頁共用）。**部署順序：D1 0015 → Worker**；店內升級 docs/91（只補字型，不急）。
+- 優先順序在 `src/invoice.ts`（POS 拉單與客人頁共用）。付款前就匯入的單（限量先保留）付好再拉單時，後端 `_import` 把載具跟交易號一起記下（客人填的優先；Codex 對抗審查）。
+- **部署順序：店內升級（docs/91，後端重啟＋重發佈菜單）→ D1 0015 → Worker**。
+- 結帳頁下拉：「LINE Pay 上已綁定」（預設，附說明）／手機條碼載具（不提醒）／統一編號（店主 2026-10-18 改字）。
 - 煙霧 `frontend/scripts/online-linepay-carrier-smoke.mjs`（假 LINE Pay，三種情況）。
 
 ## 2026-10-17：體驗卡只顯示卡片名稱、「續杯」改叫「續點」
