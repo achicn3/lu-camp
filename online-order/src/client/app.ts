@@ -124,7 +124,9 @@ function forgetVisit(): void {
   try {
     localStorage.removeItem(CART_KEY);
     for (const key of [ADD_ON_KEY, PARTY_KEY, UPSELL_KEY]) sessionStorage.removeItem(key);
-  } catch { /* 無痕模式拿不到儲存空間：記憶體裡的購物車照樣清 */ }
+  } catch {
+    // 無痕模式拿不到儲存空間：記憶體裡的購物車照樣清
+  }
 }
 const CART_EXPIRED_TEXT = "上次沒送出的購物車已經清空，請重新點餐。";
 function flash(text: string): void {
@@ -1137,7 +1139,9 @@ async function main(): Promise<void> {
     showMessage(menuResult.status === 404 ? "菜單準備中，請洽櫃檯點餐。" : "連不上網路，請稍後再試或至櫃檯點餐。"); return;
   }
   menu = menuResult.body; void loadHandFont(menu.font);
-  try { localStorage.removeItem(LEGACY_CART_KEY); } catch { /* 拿不到儲存空間就算了 */ }
+  try { localStorage.removeItem(LEGACY_CART_KEY); } catch {
+    // 拿不到儲存空間就算了
+  }
   const resumed = readCart(orderToken ? undefined : tableCode);
   cart = resumed.lines; renderMenu(menu); renderFooter();
   if (orderToken) await openOrder(orderToken);
