@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -262,5 +262,17 @@ describe("數量加減", () => {
     expect(qtyLimit({ remaining: 3 })).toBe(3);
     expect(qtyLimit({ remaining: 25 })).toBe(10);
     expect(qtyLimit({ remaining: 0 })).toBe(1);
+  });
+});
+
+// 店主 2026-10-17：LINE Pay 付好之後告訴客人發票去哪。
+describe("LINE Pay 付款後的發票說明", () => {
+  it.each([
+    [{ kind: "LINEPAY_CARRIER", carrier: "/ABC+123" }, "發票已存入你 LINE Pay 綁定的手機條碼載具 /ABC+123，不會印紙本。"],
+    [{ kind: "CARRIER", carrier: "/XYZ.999" }, "發票已存入你輸入的手機條碼載具 /XYZ.999。"],
+    [{ kind: "TAX_ID", tax_id: "12345678" }, "統一編號 12345678 的發票請到櫃檯領取。"],
+    [{ kind: "PAPER" }, "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。"],
+  ] as const)("%o", (to, text) => {
+    expect(invoiceNote(to)).toBe(text);
   });
 });

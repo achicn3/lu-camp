@@ -3,6 +3,15 @@
 > **給接手的人（或 AI）**：這份是「目前做到哪、上線要注意什麼、接下來做什麼」的總整理。
 > 細節以各編號規格為準；本文只指路。最後更新：2026-10-14；日期較早的段落為歷史紀錄，以最新段落為準。
 
+## 2026-10-18：線上 LINE Pay 用客人綁定的載具
+
+- 店主裁示：客人輸入的優先 → 沒填用 LINE Pay 綁定的手機條碼載具 → 都沒有印紙本；付好後客人訂單頁說明發票去哪；結帳頁「不用填」下方提醒「已綁定就不需輸入」。店主表示已向 LINE Pay 開通 merchantReference。
+- 請款（confirm）回應 `info.merchantReference.affiliateCards[]` 的 `MOBILE_CARRIER` → `orders.linepay_carrier`（D1 `0015`），與 PAID 同一次寫入。規則同店內 Offline（`backend sales/linepay.py _mobile_carrier`）。
+  **沒查到官方 Online v4 confirm 文件**（developers-pay.line.me 擋自動讀取 403），欄位沿用 Offline 已查證的結構——**第一筆正式付款後要確認真的有帶回**；沒帶回時一律走紙本，不會開錯。
+- 只有請款回應帶得回載具：請款結果不明、改由補查（check）確認付款的單拿不到 → 紙本（與店內 Offline 相同取捨）。
+- 優先順序在 `src/invoice.ts`（POS 拉單與客人頁共用）。**部署順序：D1 0015 → Worker**；店內升級 docs/91（只補字型，不急）。
+- 煙霧 `frontend/scripts/online-linepay-carrier-smoke.mjs`（假 LINE Pay，三種情況）。
+
 ## 2026-10-17：體驗卡只顯示卡片名稱、「續杯」改叫「續點」
 
 - 客人頁（購物車、訂單頁）體驗卡的行只顯示卡片名稱，客人另外選的選項接在後面（「蜜桃體驗（冰）」）；POS 拉單／出餐單／收據照舊是「卡片名・品項（選項）」（店主裁示：只改客人看到的）。`PricedLine.guest_name`＋D1 `0014`（`order_lines.guest_name`，舊單 NULL 照 `name`）。**部署順序：D1 0014 → Worker**。

@@ -11,6 +11,8 @@ const fake = {
   next: 2026100102385323700n,
   confirmCalls: 0,
   confirmFails: false, // 模擬請款回應遺失
+  /** 客人 LINE Pay 綁定的載具：請款回應的 merchantReference 帶回（null＝沒綁）。 */
+  boundCarrier: null as string | null,
   turnstileOk: true,
   turnstileTokens: [] as string[],
 };
@@ -23,6 +25,7 @@ beforeEach(async () => {
   fake.txs.clear();
   fake.confirmCalls = 0;
   fake.confirmFails = false;
+  fake.boundCarrier = null;
   fake.turnstileOk = true;
   fake.turnstileTokens = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -54,7 +57,9 @@ beforeEach(async () => {
         return lineReply('{"returnCode":"1150","returnMessage":"transaction not found or not authorized"}');
       }
       tx.state = "captured";
-      return lineReply(`{"returnCode":"0000","returnMessage":"Success.","info":{"transactionId":${confirm[1]}}}`);
+      const reference = fake.boundCarrier === null ? ""
+        : `,"merchantReference":{"affiliateCards":[{"cardType":"MOBILE_CARRIER","cardId":"${fake.boundCarrier}"}]}`;
+      return lineReply(`{"returnCode":"0000","returnMessage":"Success.","info":{"transactionId":${confirm[1]}${reference}}}`);
     }
     const check = /^\/v4\/payments\/requests\/(\d+)\/check$/.exec(path);
     if (check) {
@@ -308,6 +313,54 @@ describe("線上 LINE Pay", () => {
   });
 });
 
+
+// 店主 2026-10-17：客人輸入的優先；沒輸入用 LINE Pay 綁定的載具；都沒有就印紙本，付款後告訴客人。
+describe("LINE Pay 綁定的載具", () => {
+  async function payWith(invoice: object | undefined, bound: string | null) {
+    fake.boundCarrier = bound;
+    const { body } = await place(invoice === undefined ? {} : { invoice });
+    expect((await post(`/api/orders/${body.token}/linepay`)).status).toBe(200);
+    authorize(fake.txs.size - 1);
+    expect((await post(`/api/orders/${body.token}/linepay/confirm`)).status).toBe(200);
+    const order = (await pull()).orders.find((o) => o.payment_status === "PAID")!;
+    await integration("POST", `/integration/orders/${order.id}/status`, JSON.stringify({ sync_status: "IMPORTED" }));
+    return { pulled: order.invoice, shown: (await view(body.token)).invoice };
+  }
+
+  it("沒輸入、LINE Pay 有綁：用綁定的載具（補上 /），客人頁說已存入綁定載具", async () => {
+    expect(await payWith(undefined, "ABC+123")).toEqual({
+      pulled: { carrier: "/ABC+123", tax_id: null },
+      shown: { kind: "LINEPAY_CARRIER", carrier: "/ABC+123" },
+    });
+  });
+
+  it("客人自己輸入的載具優先於綁定的", async () => {
+    expect(await payWith({ carrier: "/XYZ.999" }, "/ABC+123")).toEqual({
+      pulled: { carrier: "/XYZ.999", tax_id: null },
+      shown: { kind: "CARRIER", carrier: "/XYZ.999" },
+    });
+  });
+
+  it("填了統編：照統編開，不帶綁定的載具", async () => {
+    expect(await payWith({ tax_id: "12345678" }, "/ABC+123")).toEqual({
+      pulled: { carrier: null, tax_id: "12345678" },
+      shown: { kind: "TAX_ID", tax_id: "12345678" },
+    });
+  });
+
+  it("沒輸入也沒綁：印紙本", async () => {
+    expect(await payWith(undefined, null)).toEqual({
+      pulled: { carrier: null, tax_id: null },
+      shown: { kind: "PAPER" },
+    });
+  });
+
+  it("還沒付款不顯示發票去向（還不知道有沒有綁）", async () => {
+    fake.boundCarrier = "/ABC+123";
+    const { body } = await place();
+    expect(await view(body.token)).not.toHaveProperty("invoice");
+  });
+});
 
 describe("付款端點防濫用（docs/44 §8.4）", () => {
   const paymentPost = (token: string, suffix = "", ip = "10.99.0.1", body?: string) =>

@@ -4,6 +4,7 @@ import type {
 } from "./types";
 import { isRetailLine, lineName, MAX_LINE_QTY, REFILL_PREFIX, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
+import type { InvoiceDestination } from "../invoice";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Taipei",
@@ -108,6 +109,16 @@ export function cartLineLabel(menu: MenuSnapshot | null, line: CartLine): string
   }
   const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
   return prefix + [item?.name ?? "已下架品項", ...selected].join(" · ");
+}
+
+/** LINE Pay 付好之後告訴客人發票去哪（店主 2026-10-17）。 */
+export function invoiceNote(to: InvoiceDestination): string {
+  switch (to.kind) {
+    case "LINEPAY_CARRIER": return `發票已存入你 LINE Pay 綁定的手機條碼載具 ${to.carrier}，不會印紙本。`;
+    case "CARRIER": return `發票已存入你輸入的手機條碼載具 ${to.carrier}。`;
+    case "TAX_ID": return `統一編號 ${to.tax_id} 的發票請到櫃檯領取。`;
+    case "PAPER": return "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。";
+  }
 }
 
 export function tableCodeFromPath(pathname: string): string | null {

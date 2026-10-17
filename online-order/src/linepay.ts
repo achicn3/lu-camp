@@ -16,6 +16,33 @@ export interface LinePayReply {
   message: string;
   transactionId: string | null;
   paymentUrl: string | null;
+  /** 客人 LINE Pay 綁定的手機條碼載具（請款回應 `info.merchantReference`）；沒綁、沒開通或不成形＝null。 */
+  carrier: string | null;
+}
+
+// 手機條碼載具的碼身：7 碼（數字／大寫英文／+-.），標準寫法前面加 /。
+const CARRIER_BODY = /^[0-9A-Z+\-.]{7}$/;
+
+/**
+ * 從 `info.merchantReference.affiliateCards[]` 取客人綁定的載具（店主 2026-10-17；merchantReference 要向
+ * LINE Pay 申請開通才會回傳，TW only）。規則與店內 Offline 收款相同（backend sales/linepay.py `_mobile_carrier`）：
+ * 只認 `cardType == "MOBILE_CARRIER"`；文件沒規定 `cardId` 帶不帶 /，兩種都收並補上 /；
+ * 不成形的當沒有——寧可印紙本，也不能拿不合格的字去開發票。付款已成功，解析失敗不影響付款。
+ */
+function boundCarrier(info: unknown): string | null {
+  if (typeof info !== "object" || info === null) return null;
+  const reference = (info as { merchantReference?: unknown }).merchantReference;
+  if (typeof reference !== "object" || reference === null) return null;
+  const cards = (reference as { affiliateCards?: unknown }).affiliateCards;
+  if (!Array.isArray(cards)) return null;
+  for (const card of cards) {
+    if (typeof card !== "object" || card === null) continue;
+    const { cardType, cardId } = card as { cardType?: unknown; cardId?: unknown };
+    if (cardType !== "MOBILE_CARRIER" || typeof cardId !== "string") continue;
+    const body = cardId.trim().replace(/^\//, "");
+    if (CARRIER_BODY.test(body)) return `/${body}`;
+  }
+  return null;
 }
 
 // 官方要求 confirm／check 讀取逾時至少 20 秒。
@@ -35,11 +62,11 @@ export async function lineSignature(secret: string, path: string, body: string, 
 }
 
 export function parseLinePay(text: string): LinePayReply {
-  let parsed: { returnCode?: unknown; returnMessage?: unknown; info?: { paymentUrl?: { web?: unknown } } };
+  let parsed: { returnCode?: unknown; returnMessage?: unknown; info?: { paymentUrl?: { web?: unknown }; merchantReference?: unknown } };
   try {
     parsed = JSON.parse(text) as typeof parsed;
   } catch {
-    return { code: null, message: "unreadable reply", transactionId: null, paymentUrl: null };
+    return { code: null, message: "unreadable reply", transactionId: null, paymentUrl: null, carrier: null };
   }
   const raw = /"transactionId"\s*:\s*"?(\d{1,20})"?/.exec(text);
   const web = parsed.info?.paymentUrl?.web;
@@ -48,6 +75,7 @@ export function parseLinePay(text: string): LinePayReply {
     message: typeof parsed.returnMessage === "string" ? parsed.returnMessage : "",
     transactionId: raw?.[1] ?? null,
     paymentUrl: typeof web === "string" ? web : null,
+    carrier: boundCarrier(parsed.info),
   };
 }
 
@@ -68,7 +96,7 @@ async function call(config: LinePayConfig, method: "GET" | "POST", path: string,
     });
     return parseLinePay(await resp.text());
   } catch {
-    return { code: null, message: "transport error", transactionId: null, paymentUrl: null };
+    return { code: null, message: "transport error", transactionId: null, paymentUrl: null, carrier: null };
   }
 }
 

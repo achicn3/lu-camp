@@ -176,7 +176,8 @@ async function capture(env: Env, storeId: number, config: LinePayConfig, row: Pa
   const confirming = { ...row, payment_status: "CONFIRMING" };
   const reply = await confirmPayment(config, tx, row.total);
   if (reply.code === "0000") {
-    await move(env, storeId, confirming, ["CONFIRMING"], "PAID");
+    // 綁定的載具跟「已付款」同一次寫入：POS 拉到已付款的單時一定看得到（只有請款回應帶得回來，補查拿不到）。
+    await move(env, storeId, confirming, ["CONFIRMING"], "PAID", { linepay_carrier: reply.carrier });
     return "PAID";
   }
   if (reply.code === null) return "CONFIRMING"; // 結果不明（C7）：留給補查

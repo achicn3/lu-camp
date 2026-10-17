@@ -124,7 +124,7 @@ try {
 
   // POS 拉到的品名照舊（店員要知道做哪一杯），續點冠「續點・」。
   const pulled = await integration("GET", "/integration/orders");
-  const order = pulled.orders.at(-1);
+  const order = pulled.orders.find((o) => o.lines.some((l) => l.name.includes(String(run))));
   assert.deepEqual(order.lines.map((l) => l.name), [`續點・戚風 ${run}`, `${card}・${coffee}（冰）`]);
 
   assert.deepEqual(errors, [], "No browser JavaScript errors");

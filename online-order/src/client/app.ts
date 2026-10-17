@@ -2,11 +2,12 @@
 import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
-  BREW_TAB, cartLineLabel, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
+  BREW_TAB, cartLineLabel, experienceView, invoiceNote, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
   menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine, type TableMinimum } from "../pricing";
+import type { InvoiceDestination } from "../invoice";
 import {
   UPSELL_ROLES, type MenuItemView, type MenuRetailView, type MenuSnapshot, type TableView, type UpsellRole,
 } from "./types";
@@ -44,6 +45,8 @@ interface OrderView {
   repay_challenge?: boolean;
   /** 店內作廢／退貨後累計退了多少（舊版雲端沒有這欄）。 */
   refunded_amount?: number;
+  /** LINE Pay 付好之後發票去哪（舊版雲端、未付款、現金單沒有這欄）。 */
+  invoice?: InvoiceDestination;
 }
 interface OrderCreated { token: string; status: string; total: number }
 interface Draft {
@@ -672,18 +675,27 @@ function paymentChoice(): {
   const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
   const extra = el("div", "invoice-fields");
   const kind = el("select") as HTMLSelectElement; kind.id = "invoice-kind"; kind.setAttribute("aria-label", "發票");
-  for (const [value, label] of [["paper", "紙本（到櫃檯拿）"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
+  for (const [value, label] of [["none", "不用填"], ["carrier", "手機條碼載具"], ["tax", "統一編號"]]) {
     const option = el("option", "", label) as HTMLOptionElement; option.value = value!; kind.append(option);
   }
   const code = el("input") as HTMLInputElement; code.id = "invoice-code"; code.autocomplete = "off"; code.hidden = true;
+  // 店主 2026-10-17：客人輸入的優先；沒填就用 LINE Pay 綁定的載具；都沒有才印紙本。
+  const hint = el("p", "invoice-hint"); hint.id = "invoice-hint";
+  const hints: Record<string, string> = {
+    none: "LINE Pay 已綁定手機條碼載具的話，發票會自動存進去，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。",
+    carrier: "以你輸入的載具為準，不會用 LINE Pay 綁定的。",
+    tax: "統一編號的發票請到櫃檯領取。",
+  };
+  hint.textContent = hints.none!;
   kind.addEventListener("change", () => {
-    code.hidden = kind.value === "paper"; code.value = "";
+    hint.textContent = hints[kind.value] ?? "";
+    code.hidden = kind.value === "none"; code.value = "";
     code.placeholder = kind.value === "carrier" ? "/ABC+123" : "12345678";
     code.inputMode = kind.value === "tax" ? "numeric" : "text";
     code.setAttribute("aria-label", kind.value === "carrier" ? "手機條碼" : "統一編號");
   });
   const kindLabel = el("label", "note-label", "發票"); kindLabel.append(kind);
-  extra.append(kindLabel, code);
+  extra.append(kindLabel, code, hint);
   const options = [
     ["CASH", "櫃檯結帳", "到櫃檯付款後才會製作", true],
     ["LINE_PAY", "LINE Pay", linePayOpen ? "現在付，付好就開始製作" : "即將開放", linePayOpen],
@@ -705,7 +717,7 @@ function paymentChoice(): {
     node: box,
     method: () => method,
     invoice: () => {
-      if (method !== "LINE_PAY" || kind.value === "paper") return { carrier: null, tax_id: null };
+      if (method !== "LINE_PAY" || kind.value === "none") return { carrier: null, tax_id: null };
       const value = code.value.trim().toUpperCase();
       if (kind.value === "carrier") return MOBILE_CARRIER.test(value) ? { carrier: value, tax_id: null } : null;
       return TAX_ID.test(value) ? { carrier: null, tax_id: value } : null;
@@ -990,6 +1002,7 @@ async function refreshOrder(): Promise<void> {
   if (!result.body) { body.replaceChildren(el("p", "message", "暫時查不到訂單，請稍後再試。")); return; }
   const view = result.body; body.replaceChildren();
   body.append(el("p", "order-state", orderState(view)));
+  if (view.invoice) body.append(el("p", "invoice-note", invoiceNote(view.invoice)));
   if (view.table_label) body.append(el("p", "", `桌號 ${view.table_label}`));
   else body.append(el("p", "", "外帶"));
   for (const line of view.lines) {

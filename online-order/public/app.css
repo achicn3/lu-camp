@@ -477,3 +477,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .add-on-hint { margin: 2px 0 0 30px; color: var(--soft); font-size: 13px; }
 .add-on-hint[hidden] { display: none; }
 .action:disabled { opacity: .45; cursor: not-allowed; }
+
+/* LINE Pay 的發票：沒填會用綁定載具的說明、付款後發票去哪（店主 2026-10-17）。 */
+.invoice-hint { margin: 8px 0 0; color: var(--soft); font-size: 14px; line-height: 1.6; }
+.invoice-note { margin: 0 0 16px; padding: 12px 14px; border-left: 2px solid var(--gold); background: var(--photo); line-height: 1.6; }

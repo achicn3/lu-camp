@@ -4,6 +4,7 @@
 // 價格一律依雲端目前生效的菜單重算；各項「未付款單上限」與建單在同一句 SQL 裡判斷（D1 依序寫入），
 // 同時湧進來的請求也不會超過上限。
 import { error, hex, json, sha256Hex } from "./http";
+import { invoiceDestination } from "./invoice";
 import { type OrderLineInput, minimumShortfall, priceOrder } from "./pricing";
 import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
@@ -426,7 +427,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
     "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
-      "linepay_result, linepay_attempt, refunded_amount, created_at FROM orders WHERE store_id = ? AND token_hash = ?",
+      "linepay_result, linepay_attempt, refunded_amount, created_at, invoice_carrier, invoice_tax_id, linepay_carrier " +
+      "FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
     .first<{
@@ -442,6 +444,9 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       linepay_attempt: number;
       refunded_amount: number;
       created_at: number;
+      invoice_carrier: string | null;
+      invoice_tax_id: string | null;
+      linepay_carrier: string | null;
     }>();
   if (row === null) return error("not_found", 404);
   const lines = await env.DB.prepare(
@@ -467,6 +472,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       repay_challenge: row.linepay_attempt > 0,
       // 店內作廢／退貨後退了多少（status 為 PARTIALLY_REFUNDED／REFUNDED 時才有意義）。
       refunded_amount: row.refunded_amount,
+      // LINE Pay 付好之後告訴客人發票去哪（店主 2026-10-17）；付款前還不知道 LINE Pay 有沒有綁載具，不給。
+      ...(row.payment_method === "LINE_PAY" && row.payment_status === "PAID" ? { invoice: invoiceDestination(row) } : {}),
       lines: lines.results.map(({ take_home, ...line }) => ({ ...line, take_home: take_home === 1 })),
     },
     200,
