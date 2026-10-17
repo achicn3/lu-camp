@@ -268,7 +268,7 @@ describe("數量加減", () => {
 // 店主 2026-10-17：LINE Pay 付好之後告訴客人發票去哪。
 describe("LINE Pay 付款後的發票說明", () => {
   it.each([
-    [{ kind: "LINEPAY_CARRIER", carrier: "/ABC+123" }, "發票會存入你 LINE Pay 綁定的手機條碼載具 /ABC+123，不會印紙本。"],
+    [{ kind: "LINEPAY_CARRIER", carrier: "/ABC+123" }, "發票會存入你 LINE Pay 綁定的手機條碼載具 /ABC+123。"],
     [{ kind: "CARRIER", carrier: "/XYZ.999" }, "發票會存入你輸入的手機條碼載具 /XYZ.999。"],
     [{ kind: "TAX_ID", tax_id: "12345678" }, "統一編號 12345678 的發票請到櫃檯領取。"],
     [{ kind: "PAPER" }, "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。"],
