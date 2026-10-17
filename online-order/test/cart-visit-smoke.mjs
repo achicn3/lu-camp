@@ -38,12 +38,16 @@ const run = Date.now();
 const tableA = `smokeA${run}`.padEnd(16, "x");
 const tableB = `smokeB${run}`.padEnd(16, "x");
 const name = `美式 ${run}`;
+const limited = `限量 ${run}`;
 await integration("PUT", "/integration/menu", {
   version: run, published_at: new Date().toISOString(), store_name: "露坑", font: null,
   categories: [{ id: 1, name: "咖啡" }],
   items: [{
     id: 5, name, description: "煙霧測試品項", category_id: 1, unit_price: 120, photo: null,
     available: true, remaining: null, option_groups: [],
+  }, {
+    id: 6, name: limited, description: null, category_id: 1, unit_price: 80, photo: null,
+    available: true, remaining: 1, option_groups: [],
   }],
 });
 await integration("PUT", "/integration/tables", {
@@ -66,9 +70,9 @@ const minus = page.getByRole("button", { name: "少一份" });
 const plus = page.getByRole("button", { name: "多一份" });
 const feedback = page.locator("#cart-feedback");
 
-async function openItem() {
+async function openItem(itemName = name) {
   await page.getByRole("button", { name: "咖啡", exact: true }).click();
-  await page.locator(".item", { hasText: name }).locator(".item-detail").click();
+  await page.locator(".item", { hasText: itemName }).locator(".item-detail").click();
   await qty.waitFor();
 }
 async function ageCart(minutes) {
@@ -132,6 +136,17 @@ try {
   await ageCart(61);
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await footer.filter({ hasText: "查看購物車" }).waitFor();
+
+  // ⑥ 視窗開著時補貨：＋ 的上限跟著最新供應（Codex 審查；每 15 秒更新一次）。
+  await openItem(limited);
+  assert.ok(await plus.isDisabled(), "只剩 1 份時 ＋ 不能按");
+  await integration("PUT", "/integration/menu/availability", {
+    menu_version: run, revision: run,
+    items: [{ id: 5, available: true, remaining: null }, { id: 6, available: true, remaining: 5 }], options: [],
+  });
+  await page.waitForFunction(() => !document.querySelector('[aria-label="多一份"]')?.disabled, null, { timeout: 25_000 });
+  await plus.click();
+  assert.equal(await qty.inputValue(), "2");
 
   assert.deepEqual(errors, []);
   console.log(`cart-visit smoke OK — screenshots in ${shots}`);

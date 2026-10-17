@@ -251,13 +251,17 @@ function openDetail(item: MenuItemView): void {
   }
   {
     const controls = el("div", "detail-controls");
-    const max = qtyLimit(item);
-    const qty = el("input", "qty-input"); qty.type = "number"; qty.min = "1"; qty.max = String(max);
+    // 上限跟著最新供應算：視窗開著時補貨／賣掉，每 15 秒的供應更新會再觸發一次 sync（Codex 審查）。
+    const limit = () => qtyLimit(menu?.items.find((entry) => entry.id === item.id) ?? item);
+    const qty = el("input", "qty-input"); qty.type = "number"; qty.min = "1";
     qty.inputMode = "numeric"; qty.value = "1"; qty.setAttribute("aria-label", "數量"); qty.id = "detail-qty";
     const minus = button("−", () => step(-1), "qty-button"); minus.setAttribute("aria-label", "少一份");
     const plus = button("+", () => step(1), "qty-button"); plus.setAttribute("aria-label", "多一份");
-    const sync = () => { const value = Number(qty.value); minus.disabled = !(value > 1); plus.disabled = value >= max; };
-    const step = (delta: number) => { qty.value = String(stepQty(qty.value, delta, max)); sync(); };
+    const sync = () => {
+      const value = Number(qty.value); const max = limit();
+      qty.max = String(max); minus.disabled = !(value > 1); plus.disabled = value >= max;
+    };
+    const step = (delta: number) => { qty.value = String(stepQty(qty.value, delta, limit())); sync(); };
     qty.addEventListener("input", sync);
     // 客人自己打的數字離開輸入框時拉回 1～上限（打 99 會變 10），不必等按加入才看到錯誤。
     qty.addEventListener("change", () => step(0)); sync();
@@ -1038,6 +1042,7 @@ async function refreshAvailability(): Promise<void> {
     const unavailable = !item || itemSoldOut(item);
     const add = document.getElementById("detail-add") as HTMLButtonElement | null;
     if (add) add.disabled = unavailable;
+    document.getElementById("detail-qty")?.dispatchEvent(new Event("input"));
     let invalidSelection = false;
     for (const input of $("sheet-body").querySelectorAll<HTMLInputElement>(".opt-choice input")) {
       if (input.value === "") continue; // Optional-group clear choice has no stock record.
