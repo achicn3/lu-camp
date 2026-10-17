@@ -86,11 +86,11 @@ const browser = await chromium.launch();
 try {
   const scenarios = [
     { name: "bound", bound: "ABC+123", typed: null,
-      note: "發票已存入你 LINE Pay 綁定的手機條碼載具 /ABC+123，不會印紙本。", pos: { carrier: "/ABC+123", tax_id: null } },
+      note: "發票會存入你 LINE Pay 綁定的手機條碼載具 /ABC+123，不會印紙本。", pos: { carrier: "/ABC+123", tax_id: null } },
     { name: "paper", bound: null, typed: null,
       note: "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。", pos: { carrier: null, tax_id: null } },
     { name: "typed", bound: "/ABC+123", typed: "/XYZ.999",
-      note: "發票已存入你輸入的手機條碼載具 /XYZ.999。", pos: { carrier: "/XYZ.999", tax_id: null } },
+      note: "發票會存入你輸入的手機條碼載具 /XYZ.999。", pos: { carrier: "/XYZ.999", tax_id: null } },
   ];
   for (const s of scenarios) {
     bound = s.bound;
