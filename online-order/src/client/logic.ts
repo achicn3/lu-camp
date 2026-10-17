@@ -2,7 +2,7 @@
 import type {
   MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
 } from "./types";
-import { isRetailLine, MAX_LINE_QTY, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
+import { isRetailLine, lineName, MAX_LINE_QTY, REFILL_PREFIX, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
@@ -89,6 +89,25 @@ export function stepQty(raw: string, delta: number, max: number): number {
   const typed = Math.floor(Number(raw));
   const current = raw.trim() !== "" && Number.isFinite(typed) ? Math.min(max, Math.max(1, typed)) : 0;
   return Math.min(max, Math.max(1, current + delta));
+}
+
+/**
+ * 購物車有行不能結（售完、超量）時逐行顯示用的品名：不經過算價，下架的用替代字。
+ * 體驗卡＝卡片名稱＋客人另外選的選項（與算價後的 guest_name 一致；Codex 審查 2026-10-17）。
+ */
+export function cartLineLabel(menu: MenuSnapshot | null, line: CartLine): string {
+  if (isRetailLine(line)) return menu?.retail?.find((entry) => entry.id === line.catalog_product_id)?.name ?? "已下架商品";
+  const item = menu?.items.find((entry) => entry.id === line.item_id);
+  const card = line.experience_id === undefined ? undefined : menu?.experiences?.find((entry) => entry.id === line.experience_id);
+  const prefix = line.refill === true ? REFILL_PREFIX : "";
+  if (card !== undefined) {
+    const extras = (item?.option_groups ?? []).flatMap((group) => group.options
+      .filter((o) => line.option_ids.includes(o.id) && !card.option_ids.includes(o.id))
+      .map((o) => ({ group: group.name, option: o.name })));
+    return prefix + lineName(card.title, extras);
+  }
+  const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
+  return prefix + [item?.name ?? "已下架品項", ...selected].join(" · ");
 }
 
 export function tableCodeFromPath(pathname: string): string | null {

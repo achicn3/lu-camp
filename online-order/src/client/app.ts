@@ -2,11 +2,11 @@
 import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
-  BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
+  BREW_TAB, cartLineLabel, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
   menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
-import { isRetailLine, REFILL_PREFIX, type TableMinimum } from "../pricing";
+import { isRetailLine, type TableMinimum } from "../pricing";
 import {
   UPSELL_ROLES, type MenuItemView, type MenuRetailView, type MenuSnapshot, type TableView, type UpsellRole,
 } from "./types";
@@ -606,15 +606,7 @@ function renderCart(): void {
     body.append(el("p", "field-error", cartError(new Error(priced.reason))));
     cart.forEach((line, index) => {
       const row = el("div", "cart-line");
-      let name: string;
-      if (isRetailLine(line)) {
-        name = menu?.retail?.find((entry) => entry.id === line.catalog_product_id)?.name ?? "已下架商品";
-      } else {
-        const item = menu?.items.find((entry) => entry.id === line.item_id);
-        const card = line.experience_id === undefined ? undefined : menu?.experiences?.find((entry) => entry.id === line.experience_id);
-        const selected = line.option_ids.map((id) => item?.option_groups.flatMap((group) => group.options).find((option) => option.id === id)?.name ?? "已下架選項");
-        name = (line.refill === true ? REFILL_PREFIX : "") + (card?.title ?? [item?.name ?? "已下架品項", ...selected].join(" · "));
-      }
+      const name = cartLineLabel(menu, line);
       const info = el("div"); info.append(el("b", "", name), el("span", "", `${line.qty} 份`));
       const checked = menu ? checkCart(menu, [line]) : null;
       if (checked && !checked.ok) info.append(el("span", "field-error", cartError(new Error(checked.reason))));

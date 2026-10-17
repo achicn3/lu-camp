@@ -64,6 +64,10 @@ const context = await browser.newContext({ ...devices["iPhone 13"] });
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(String(error)));
+// 重新整理後若停在購物車就不必再點（頁面會記得上次在購物車）。
+async function openCart() {
+  if (await page.locator("#cart-view").isHidden()) await page.getByRole("button", { name: /購物車 2 份/ }).click();
+}
 try {
   await page.goto(base, { waitUntil: "networkidle" });
   // 甜點也能續點：卡片上標「可續點 8 折」，視窗裡勾「我是續點」。
@@ -93,7 +97,26 @@ try {
   assert.deepEqual(names, [`續點・戚風 ${run}`, `${card}（冰）`], "體驗卡只顯示卡片名稱＋客人選的選項");
   await page.screenshot({ path: join(shots, "2-cart.png"), fullPage: true });
 
-  await page.getByRole("button", { name: "送出訂單" }).click();
+  // 有行不能結（手沖剛售完）時改逐行顯示：體驗卡仍是卡片名稱＋客人選的（Codex 審查）。
+  await integration("PUT", "/integration/menu/availability", {
+    menu_version: run, revision: run,
+    items: [{ id: 5, available: true, remaining: 0 }, { id: 6, available: true, remaining: null }],
+    options: [{ id: 9, available: true, remaining: null }, { id: 10, available: true, remaining: null }],
+  });
+  await page.goto(base, { waitUntil: "networkidle" });
+  await openCart();
+  await page.locator(".cart-line b", { hasText: `${card}（冰）` }).waitFor();
+  await page.screenshot({ path: join(shots, "2b-cart-needs-adjusting.png"), fullPage: true });
+  await integration("PUT", "/integration/menu/availability", {
+    menu_version: run, revision: run + 1,
+    items: [{ id: 5, available: true, remaining: null }, { id: 6, available: true, remaining: null }],
+    options: [{ id: 9, available: true, remaining: null }, { id: 10, available: true, remaining: null }],
+  });
+  await page.goto(base, { waitUntil: "networkidle" });
+  await openCart();
+
+  // 補貨後的供應每 15 秒更新一次，購物車恢復成可送出。
+  await page.getByRole("button", { name: "送出訂單" }).click({ timeout: 30000 });
   await page.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 30000 });
   await page.getByText(`${card}（冰） × 1`).waitFor();
   assert.equal(await page.getByText(coffee).count(), 0, "訂單頁也只顯示卡片名稱");

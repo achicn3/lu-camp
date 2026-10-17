@@ -53,7 +53,7 @@ export type PriceResult =
   | { ok: true; lines: PricedLine[]; total: number; needsHold: boolean }
   | { ok: false; reason: string; item_id?: number };
 
-function lineName(name: string, picked: { group: string; option: string }[]): string {
+export function lineName(name: string, picked: { group: string; option: string }[]): string {
   const counts = new Map<string, number>();
   for (const p of picked) counts.set(p.option, (counts.get(p.option) ?? 0) + 1);
   const labels = picked.map((p) => ((counts.get(p.option) ?? 0) > 1 ? `${p.group}${p.option}` : p.option));

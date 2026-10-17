@@ -1,7 +1,7 @@
 // 手沖體驗卡與加購推薦的純邏輯（docs/63 §4、§6；M1c）。
 import { describe, expect, it } from "vitest";
 
-import { experienceView, upsellSuggestions } from "../src/client/logic";
+import { cartLineLabel, experienceView, upsellSuggestions } from "../src/client/logic";
 import type { MenuExperienceView, MenuItemView, MenuSnapshot, UpsellRole } from "../src/client/types";
 
 function item(id: number, overrides: Partial<MenuItemView> = {}, role?: UpsellRole): MenuItemView {
@@ -94,5 +94,33 @@ describe("加購推薦", () => {
     const cart = [{ item_id: 1, option_ids: [11, 21], qty: 1, experience_id: 5 }];
     expect(upsellSuggestions(withBeans, cart, new Set()).map((p) => p.id)).toEqual([7]);
     expect(upsellSuggestions(menu([BREW, latte]), cart, new Set())).toEqual([]);
+  });
+});
+
+// Codex 審查（2026-10-17）：購物車有行不能結（售完／超量）時改用逐行顯示，體驗卡也要帶客人另外選的選項，
+// 同一張卡熱／冰兩行才分得出來。
+describe("購物車要調整時的品名", () => {
+  const menu = {
+    version: 1, published_at: "", store_name: "露坑", font: null, categories: [],
+    items: [{
+      id: 1, name: "手沖", description: null, category_id: null, unit_price: 200, photo: null,
+      available: true, remaining: null,
+      option_groups: [{ id: 4, name: "溫度", min_select: 1, max_select: 1, options: [
+        { id: 5, name: "熱", price_delta: 0, available: true, remaining: null },
+        { id: 6, name: "冰", price_delta: 0, available: true, remaining: null },
+      ] }],
+    }],
+    experiences: [{
+      id: 7, item_id: 1, option_ids: [], title: "蜜桃體驗", tag: null, origin: null, notes: null,
+      description: null, includes: [], theme: "peach", art: "none", effect: "random",
+    }],
+  } as MenuSnapshot;
+
+  it("體驗卡＝卡片名稱＋客人另外選的；一般品項照舊；下架的有替代字", () => {
+    expect(cartLineLabel(menu, { item_id: 1, option_ids: [6], qty: 1, experience_id: 7 })).toBe("蜜桃體驗（冰）");
+    expect(cartLineLabel(menu, { item_id: 1, option_ids: [5], qty: 1, experience_id: 7, refill: true })).toBe("續點・蜜桃體驗（熱）");
+    expect(cartLineLabel(menu, { item_id: 1, option_ids: [6], qty: 1 })).toBe("手沖 · 冰");
+    expect(cartLineLabel(menu, { item_id: 9, option_ids: [], qty: 1 })).toBe("已下架品項");
+    expect(cartLineLabel(null, { catalog_product_id: 3, qty: 1 })).toBe("已下架商品");
   });
 });
