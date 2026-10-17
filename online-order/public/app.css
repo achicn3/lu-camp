@@ -214,7 +214,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .opt-note { margin: 2px 0 0; color: var(--soft); font-size: 14px; line-height: 1.5; }
 .detail-controls { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
 .detail-controls .action { margin: 0; }
-.qty-input { width: 68px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); text-align: center; }
+/* 數量：左 −、中間輸入框、右 ＋（店主 2026-10-17）。字級 ≥16px，iPhone 點進去才不會自動放大畫面。 */
+.qty-stepper { display: flex; flex: none; align-items: center; gap: 6px; }
+.qty-stepper .qty-button { width: 48px; height: 48px; font-size: 22px; }
+.qty-stepper .qty-button:disabled { opacity: .35; cursor: default; }
+.qty-input { width: 64px; height: 48px; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--photo); color: inherit; font-size: 20px; text-align: center; }
 
 @media (max-width: 480px) {
   .cart-line { flex-wrap: wrap; }

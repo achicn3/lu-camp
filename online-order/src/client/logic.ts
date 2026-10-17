@@ -2,7 +2,7 @@
 import type {
   MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
 } from "./types";
-import { isRetailLine, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
+import { isRetailLine, MAX_LINE_QTY, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
 
 const TAIPEI_HOUR = new Intl.DateTimeFormat("en-US", {
@@ -78,6 +78,18 @@ export function visibleItems(items: MenuItemView[]): MenuItemView[] {
 }
 
 const TABLE_PATH = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/;
+
+/** 品項視窗一次最多能加幾份：每項上限 10 份，今天剩不到就以剩下的為準（至少 1，售完由加入鈕擋）。 */
+export function qtyLimit(item: Pick<MenuItemView, "remaining">): number {
+  return Math.max(1, Math.min(MAX_LINE_QTY, item.remaining ?? MAX_LINE_QTY));
+}
+
+/** 數量的 −／＋（店主 2026-10-17）：先把客人打的數字拉回 1～上限，再加減一份。 */
+export function stepQty(raw: string, delta: number, max: number): number {
+  const typed = Math.floor(Number(raw));
+  const current = raw.trim() !== "" && Number.isFinite(typed) ? Math.min(max, Math.max(1, typed)) : 0;
+  return Math.min(max, Math.max(1, current + delta));
+}
 
 export function tableCodeFromPath(pathname: string): string | null {
   return TABLE_PATH.exec(pathname)?.[1] ?? null;

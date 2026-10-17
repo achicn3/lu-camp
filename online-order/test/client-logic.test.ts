@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, tableCodeFromPath } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -236,5 +236,31 @@ describe("續杯（店主 2026-10-16）", () => {
     expect(minimumBlock({ mode: "per_person_item" }, 390, lines, 2))
       .toBe("2 位用餐，至少需點 2 份餐點，還差 1 份（續杯不計入低消）。");
     expect(minimumBlock(amount, 450, [{ item_id: 5, qty: 3, line_total: 450 }], null)).toBeNull();
+  });
+});
+
+// 店主 2026-10-17：品項視窗的數量左邊「−」、右邊「＋」，輸入框也加大。
+describe("數量加減", () => {
+  it("＋／−一次一份，夾在 1 到上限之間", () => {
+    expect(stepQty("1", 1, 10)).toBe(2);
+    expect(stepQty("2", -1, 10)).toBe(1);
+    expect(stepQty("1", -1, 10)).toBe(1);
+    expect(stepQty("10", 1, 10)).toBe(10);
+  });
+
+  it("客人自己打的怪數字先拉回範圍再加減", () => {
+    expect(stepQty("", 1, 10)).toBe(1);
+    expect(stepQty("abc", -1, 10)).toBe(1);
+    expect(stepQty("2.5", 1, 10)).toBe(3);
+    expect(stepQty("99", -1, 10)).toBe(9);
+    expect(stepQty("0", 0, 10)).toBe(1);
+  });
+
+  it("上限＝每項最多 10 份，剩不到 10 份就以剩下的為準", () => {
+    const base = { remaining: null } as Pick<MenuItemView, "remaining">;
+    expect(qtyLimit(base)).toBe(10);
+    expect(qtyLimit({ remaining: 3 })).toBe(3);
+    expect(qtyLimit({ remaining: 25 })).toBe(10);
+    expect(qtyLimit({ remaining: 0 })).toBe(1);
   });
 });

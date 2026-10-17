@@ -1,8 +1,8 @@
 // 客人掃碼點餐頁（docs/44 §4.2）。菜單文字一律 textContent，不拼 HTML。
 import { drawExperience, experienceMini } from "./brew";
-import { addLine, changeQty, checkCart, removeLine, type CartLine } from "./cart";
+import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
-  BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, quizResult,
+  BREW_TAB, experienceView, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
   menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
@@ -13,7 +13,9 @@ import {
 
 const POLL_MS = 5000;
 const MENU_REFRESH_MS = 15000;
-const CART_KEY = "lk_cart_v1";
+const CART_KEY = "lk_cart_v2";
+/** 舊版只存品項陣列、不知道是哪桌與何時：讀到就丟掉。 */
+const LEGACY_CART_KEY = "lk_cart_v1";
 const DRAFT_KEY = "lk_order_draft_v1";
 const ORDER_PATH = /^\/order\/([A-Za-z0-9_-]{32,64})\/?$/;
 const UPSELL_KEY = "lk_upsell_skip_v1";
@@ -100,18 +102,43 @@ function button(label: string, action: () => void, className = "action"): HTMLBu
   node.addEventListener("click", action);
   return node;
 }
-function saveCart(): void { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
-function readCart(): CartLine[] {
+function saveCart(): void {
+  const saved: SavedCart = { lines: cart, table: tableCode ?? homeTable, touched_at: Date.now() };
+  localStorage.setItem(CART_KEY, JSON.stringify(saved));
+}
+function loadSavedCart(): SavedCart | null {
+  try { return parseSavedCart(localStorage.getItem(CART_KEY)); } catch { return null; }
+}
+/**
+ * 打開頁面時決定購物車要不要沿用（店主 2026-10-17）：換桌或放太久沒動就清空，連這一輪的「加點」「人數」一起清。
+ * 送單到一半（還有草稿）不動，草稿要靠同一份內容重送。
+ */
+function readCart(table: string | null | undefined): { lines: CartLine[]; expired: boolean } {
+  const saved = loadSavedCart();
+  if (readDraft()) return { lines: saved?.lines ?? [], expired: false };
+  const resumed = resumeCart(saved, table, Date.now());
+  if (resumed.expired) forgetVisit();
+  return resumed;
+}
+function forgetVisit(): void {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((line): line is CartLine => typeof line === "object" && line !== null && (
-      (Number.isInteger(line.catalog_product_id) && Number.isInteger(line.qty) &&
-        Object.keys(line).length === 2) ||
-      (Number.isInteger(line.item_id) && Number.isInteger(line.qty) && Array.isArray(line.option_ids) &&
-        line.option_ids.every(Number.isInteger) &&
-        (line.experience_id === undefined || Number.isInteger(line.experience_id)))));
-  } catch { return []; }
+    localStorage.removeItem(CART_KEY);
+    for (const key of [ADD_ON_KEY, PARTY_KEY, UPSELL_KEY]) sessionStorage.removeItem(key);
+  } catch { /* 無痕模式拿不到儲存空間：記憶體裡的購物車照樣清 */ }
+}
+const CART_EXPIRED_TEXT = "上次沒送出的購物車已經清空，請重新點餐。";
+function flash(text: string): void {
+  $("cart-feedback").textContent = text;
+  if (feedbackTimer !== null) window.clearTimeout(feedbackTimer);
+  feedbackTimer = window.setTimeout(() => { $("cart-feedback").textContent = ""; }, 4000);
+}
+/** 手機把分頁留在背景很久再切回來：同一套規則，購物車放太久沒動就清空（客人正在點的不會被清）。 */
+function expireIdleCart(): void {
+  if (activeOrder !== null || submitting || checkoutStarting || payStarting || readDraft() || !cart.length) return;
+  if (!resumeCart(loadSavedCart(), undefined, Date.now()).expired) return;
+  cart = []; forgetVisit(); closeDetail(); renderFooter();
+  if (!$("cart-view").hidden) renderCart();
+  flash(CART_EXPIRED_TEXT);
 }
 function readDraft(): Draft | null {
   try {
@@ -224,8 +251,17 @@ function openDetail(item: MenuItemView): void {
   }
   {
     const controls = el("div", "detail-controls");
-    const qty = el("input", "qty-input"); qty.type = "number"; qty.min = "1"; qty.max = "10";
-    qty.inputMode = "numeric"; qty.value = "1"; qty.setAttribute("aria-label", "數量");
+    const max = qtyLimit(item);
+    const qty = el("input", "qty-input"); qty.type = "number"; qty.min = "1"; qty.max = String(max);
+    qty.inputMode = "numeric"; qty.value = "1"; qty.setAttribute("aria-label", "數量"); qty.id = "detail-qty";
+    const minus = button("−", () => step(-1), "qty-button"); minus.setAttribute("aria-label", "少一份");
+    const plus = button("+", () => step(1), "qty-button"); plus.setAttribute("aria-label", "多一份");
+    const sync = () => { const value = Number(qty.value); minus.disabled = !(value > 1); plus.disabled = value >= max; };
+    const step = (delta: number) => { qty.value = String(stepQty(qty.value, delta, max)); sync(); };
+    qty.addEventListener("input", sync);
+    // 客人自己打的數字離開輸入框時拉回 1～上限（打 99 會變 10），不必等按加入才看到錯誤。
+    qty.addEventListener("change", () => step(0)); sync();
+    const stepper = el("div", "qty-stepper"); stepper.append(minus, qty, plus);
     const error = el("p", "field-error"); error.setAttribute("role", "alert");
     const add = button("加入購物車", () => {
       if (menu === null) return;
@@ -243,7 +279,7 @@ function openDetail(item: MenuItemView): void {
       } catch (reason) { error.textContent = cartError(reason); }
     });
     add.id = "detail-add"; add.disabled = itemSoldOut(item);
-    controls.append(qty, add);
+    controls.append(stepper, add);
     body.append(controls, error);
   }
   const availability = el("p", "field-error"); availability.id = "detail-availability"; availability.setAttribute("role", "status"); availability.textContent = itemSoldOut(item) ? "今日售完，請選其他品項。" : ""; body.append(availability);
@@ -1054,7 +1090,8 @@ async function main(): Promise<void> {
   });
   // 付款完成後就不再輪詢；客人切回這個分頁時重抓一次，店裡後來退了款也看得到（docs/44 §4.5 C6）。
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && activeOrder !== null) void refreshOrder();
+    if (document.visibilityState !== "visible") return;
+    if (activeOrder !== null) void refreshOrder(); else expireIdleCart();
   });
   window.addEventListener("popstate", (event: PopStateEvent) => {
     if (ORDER_PATH.test(location.pathname) || activeOrder) { location.reload(); return; }
@@ -1094,10 +1131,13 @@ async function main(): Promise<void> {
     showMessage(menuResult.status === 404 ? "菜單準備中，請洽櫃檯點餐。" : "連不上網路，請稍後再試或至櫃檯點餐。"); return;
   }
   menu = menuResult.body; void loadHandFont(menu.font);
-  cart = readCart(); renderMenu(menu); renderFooter();
+  try { localStorage.removeItem(LEGACY_CART_KEY); } catch { /* 拿不到儲存空間就算了 */ }
+  const resumed = readCart(orderToken ? undefined : tableCode);
+  cart = resumed.lines; renderMenu(menu); renderFooter();
   if (orderToken) await openOrder(orderToken);
   else if (readDraft() || history.state?.cart) renderCart();
   else showScreen("menu");
+  if (resumed.expired) flash(CART_EXPIRED_TEXT);
   window.setInterval(() => void refreshAvailability(), MENU_REFRESH_MS);
 }
 void main();
