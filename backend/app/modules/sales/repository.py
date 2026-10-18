@@ -38,6 +38,7 @@ from app.shared.enums import (
     SaleLineKind,
     SaleLineType,
     SaleStatus,
+    ServiceMode,
     TenderType,
 )
 
@@ -592,6 +593,25 @@ class SalesRepository:
             stmt = stmt.where(Sale.created_at < date_to)
         stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
         return list(await self._session.scalars(stmt))
+
+    async def dine_in_menu_item_ids_since(
+        self, store_id: int, table_no: str, since: datetime
+    ) -> list[int]:
+        """某桌 `since` 之後（內用、沒作廢）點過的餐飲品項 id。"""
+        stmt = (
+            select(SaleLine.menu_item_id)
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.service_mode == ServiceMode.DINE_IN,
+                Sale.table_no == table_no,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= since,
+                SaleLine.menu_item_id.is_not(None),
+            )
+            .distinct()
+        )
+        return [item_id for item_id in await self._session.scalars(stmt) if item_id is not None]
 
     async def list_lines_for_sales(self, sale_ids: list[int]) -> list[SaleLine]:
         if not sale_ids:

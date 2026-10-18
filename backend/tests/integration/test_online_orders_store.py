@@ -55,6 +55,8 @@ from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
 from app.modules.sales.models import LinePayTransaction
 from app.modules.sales.service import SalesService
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import SaleLineType, ServiceMode, StockReason, TenderType, UserRole
@@ -1638,7 +1640,12 @@ async def test_refill_line_is_imported_carted_and_settled_at_refill_price(
     ]
     assert cart["total"] == "270"
 
-    paid = await _pull_raw(db_session, ctx, _paid(_rid(321), [refill]))
+    # 續點限內用（店主 2026-10-19）：自動成立內用單要桌號在設定清單裡
+    await StoreSettingsService(db_session).update_settings(
+        ctx.store_id, actor_user_id=None, patch=SettingsUpdateRequest(dine_in_tables=["A1"])
+    )
+    dine_in = {**_paid(_rid(321), [refill]), "service_mode": "DINE_IN", "table_label": "A1"}
+    paid = await _pull_raw(db_session, ctx, dine_in)
     settled = await client.post(
         f"/api/v1/online-orders/{paid.id}/settle-paid", headers=_h(ctx.clerk)
     )

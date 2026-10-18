@@ -2,6 +2,7 @@
 // 桌位碼不是身分證明，只決定桌號，不能用來查任何訂單。
 import { error, json } from "./http";
 import type { TableMinimum } from "./pricing";
+import { refillEligibleItems } from "./refill";
 
 export type { TableMinimum };
 
@@ -93,5 +94,8 @@ export async function readTable(env: Env, storeId: number, code: string): Promis
   const row = await env.DB.prepare("SELECT label, service_mode, minimum FROM tables WHERE store_id = ? AND code = ?")
     .bind(storeId, code)
     .first<{ label: string; service_mode: string; minimum: string | null }>();
-  return row === null ? error("not_found", 404) : json({ ...row, minimum: parseMinimum(row.minimum) });
+  if (row === null) return error("not_found", 404);
+  // 本桌 90 分鐘內點過的品項：客人頁據此決定要不要顯示「我是續點」（店主 2026-10-19）。
+  const refill = await refillEligibleItems(env, storeId, code, row.service_mode);
+  return json({ ...row, minimum: parseMinimum(row.minimum), refill_item_ids: [...refill].sort((a, b) => a - b) });
 }

@@ -1,6 +1,6 @@
 // 客人點餐頁的純邏輯（不碰 DOM，好測）。
 import type {
-  MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, UpsellRole,
+  MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot, OptionGroupView, QuizRef, TableView, UpsellRole,
 } from "./types";
 import { isRetailLine, lineName, MAX_LINE_QTY, REFILL_PREFIX, type MinimumLine, minimumShortfall, type TableMinimum } from "../pricing";
 import type { CartLine } from "./cart";
@@ -119,6 +119,19 @@ export function invoiceNote(to: InvoiceDestination): string {
     case "TAX_ID": return `統一編號 ${to.tax_id} 的發票請到櫃檯領取。`;
     case "PAPER": return "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。";
   }
+}
+
+/**
+ * 這個品項在這一桌能不能續點（店主 2026-10-19）：本桌 90 分鐘內點過（看桌不看手機）才能勾；
+ * 內用還沒點過就說明要先點過；外帶、沒有桌號、不可續點的品項完全不提續點。
+ */
+export function refillState(
+  item: Pick<MenuItemView, "id" | "refillable">,
+  pct: number | null,
+  table: Pick<TableView, "service_mode" | "refill_item_ids"> | null,
+): "ELIGIBLE" | "NOT_ORDERED" | "NONE" {
+  if (item.refillable !== true || pct === null || table === null || table.service_mode !== "DINE_IN") return "NONE";
+  return (table.refill_item_ids ?? []).includes(item.id) ? "ELIGIBLE" : "NOT_ORDERED";
 }
 
 export function tableCodeFromPath(pathname: string): string | null {

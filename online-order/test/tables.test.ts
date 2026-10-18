@@ -24,7 +24,8 @@ describe("桌位碼", () => {
     ).toBe(200);
     const resp = await get(`/api/tables/${CODE_A}`);
     expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({ label: "A3", service_mode: "DINE_IN", minimum: null });
+    // refill_item_ids：本桌 90 分鐘內點過、可續點的品項（店主 2026-10-19）；還沒點過是空的。
+    expect(await resp.json()).toEqual({ label: "A3", service_mode: "DINE_IN", minimum: null, refill_item_ids: [] });
   });
 
   it("重發後舊碼失效", async () => {

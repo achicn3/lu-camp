@@ -23,6 +23,7 @@ from app.modules.sales.linepay import (
     linepay_order_id,
 )
 from app.modules.sales.schemas import (
+    DineInRecentItemsRead,
     FnbSaleSummaryRead,
     LinePayRefundAttemptRead,
     LinePayRefundResolveRequest,
@@ -36,7 +37,12 @@ from app.modules.sales.schemas import (
     SaleRead,
     SaleSummaryRead,
 )
-from app.modules.sales.service import LinePayAttemptState, QuoteLineCampaign, SalesService
+from app.modules.sales.service import (
+    REFILL_LOOKBACK,
+    LinePayAttemptState,
+    QuoteLineCampaign,
+    SalesService,
+)
 from app.modules.user.service import UserService
 from app.shared.enums import UserRole
 from app.shared.exceptions import (
@@ -569,6 +575,28 @@ async def list_sales(
         )
         for sale in sales
     ]
+
+
+@router.get(
+    "/dine-in-recent-items",
+    response_model=DineInRecentItemsRead,
+    operation_id="listDineInRecentItems",
+)
+async def list_dine_in_recent_items(
+    session: SessionDep,
+    user: CurrentUserDep,
+    table_no: Annotated[str, Query(min_length=1, max_length=20)],
+) -> DineInRecentItemsRead:
+    """本桌 90 分鐘內點過的餐飲品項：POS 勾續點時提醒用（店主 2026-10-19）。
+
+    **必須排在 `/{sale_id}` 之前**：否則會被當成單號而回 422。
+    """
+    ids = await SalesService(session).dine_in_recent_menu_item_ids(user.store_id, table_no)
+    return DineInRecentItemsRead(
+        table_no=table_no.strip(),
+        window_minutes=int(REFILL_LOOKBACK.total_seconds() // 60),
+        menu_item_ids=sorted(ids),
+    )
 
 
 @router.get("/fnb", response_model=list[FnbSaleSummaryRead], operation_id="listFnbSales")

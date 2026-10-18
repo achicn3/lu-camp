@@ -6328,6 +6328,33 @@
         "title": "DineInHourBucket",
         "type": "object"
       },
+      "DineInRecentItemsRead": {
+        "description": "本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒用，不擋結帳。",
+        "properties": {
+          "menu_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Menu Item Ids",
+            "type": "array"
+          },
+          "table_no": {
+            "title": "Table No",
+            "type": "string"
+          },
+          "window_minutes": {
+            "title": "Window Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "table_no",
+          "window_minutes",
+          "menu_item_ids"
+        ],
+        "title": "DineInRecentItemsRead",
+        "type": "object"
+      },
       "DineInReport": {
         "description": "餐飲內用／外帶報表（docs/39）。\n\n**口徑三條**（畫面必須顯示，不能只留在文件裡）：\n1. 佔比的分母是「有餐飲的單」，不是全店訂單\n2. 客單價只算 MENU 行\n3. 內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、\n   不可用購物金（docs/35），計價條件本就不同",
         "properties": {
@@ -34574,6 +34601,56 @@
           }
         ],
         "summary": "Create Sale",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/sales/dine-in-recent-items": {
+      "get": {
+        "description": "本桌 90 分鐘內點過的餐飲品項：POS 勾續點時提醒用（店主 2026-10-19）。\n\n**必須排在 `/{sale_id}` 之前**：否則會被當成單號而回 422。",
+        "operationId": "listDineInRecentItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "table_no",
+            "required": true,
+            "schema": {
+              "maxLength": 20,
+              "minLength": 1,
+              "title": "Table No",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DineInRecentItemsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Dine In Recent Items",
         "tags": [
           "sales"
         ]

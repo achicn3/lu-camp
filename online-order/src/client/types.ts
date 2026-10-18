@@ -118,4 +118,6 @@ export interface TableView {
   service_mode: "DINE_IN" | "TAKEOUT";
   /** 桌號低消；舊版雲端沒有這欄。 */
   minimum?: TableMinimum | null;
+  /** 本桌 90 分鐘內點過（已付款）的品項，可以續點（店主 2026-10-19）；舊版雲端沒有這欄。 */
+  refill_item_ids?: number[];
 }

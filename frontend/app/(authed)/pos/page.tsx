@@ -62,6 +62,8 @@ import {
   type ServiceMode,
   clearDineIn,
   dineInRequestFields,
+  refillCheck,
+  type RefillLine,
   validateDineIn,
 } from "@/features/pos/dineIn";
 import {
@@ -2005,6 +2007,28 @@ export default function PosPage() {
   const hasMenuLine = lines.some((line) => line.lineType === "MENU");
   const dineInTables = settings.data?.dine_in_tables ?? [];
   const dineInValidation = validateDineIn(hasMenuLine, dineIn, dineInTables);
+  // 續點（店主 2026-10-19）：外帶擋下；內用查本桌 90 分鐘內點過的品項，沒點過只提醒。
+  const refillLines: RefillLine[] = lines.flatMap((line) =>
+    line.menuRefill && line.menuItemId !== undefined
+      ? [{ menuItemId: line.menuItemId, description: line.description }]
+      : [],
+  );
+  const refillTable =
+    refillLines.length > 0 && dineIn.mode === "DINE_IN" ? dineIn.tableNo : null;
+  const recentItems = useQuery({
+    queryKey: ["dine-in-recent-items", refillTable],
+    enabled: refillTable !== null,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error: err } = await api.GET("/api/v1/sales/dine-in-recent-items", {
+        params: { query: { table_no: refillTable ?? "" } },
+      });
+      if (!data) throw new Error(extractDetail(err) ?? "讀取本桌點過的品項失敗");
+      return data.menu_item_ids;
+    },
+  });
+  const refillValidation = refillCheck(refillLines, dineIn, recentItems.data ?? null);
+  const dineInOk = dineInValidation.ok && refillValidation.error === null;
 
   // 商品備註提醒：車內帶備註的行，與「這組備註是否已被確認過」。
   const notedLines = linesWithNotes(lines);
@@ -3318,6 +3342,19 @@ export default function PosPage() {
               {dineInValidation.error !== null && (
                 <p className="hint pos-dinein-error">{dineInValidation.error}</p>
               )}
+              {refillValidation.error !== null && (
+                <p className="hint pos-dinein-error">{refillValidation.error}</p>
+              )}
+              {refillValidation.found !== null && (
+                <p className="hint pos-refill-found" role="status">
+                  {refillValidation.found}
+                </p>
+              )}
+              {refillValidation.warning !== null && (
+                <p className="hint pos-refill-warning" role="status">
+                  {refillValidation.warning}
+                </p>
+              )}
             </div>
           )}
 
@@ -3382,7 +3419,7 @@ export default function PosPage() {
                       // 含餐飲卻沒選內用/外帶就送簽 → 客人簽完名後結帳才被擋，而那時
                       // 內用/外帶鍵已因購物車凍結而停用，只能撤回重簽（QA BUG-004）。
                       // 錯誤訊息本來就顯示在上方的餐飲區塊，店員看得到原因。
-                      !dineInValidation.ok ||
+                      !dineInOk ||
                       // 而且畫面上的購物車要**已經同步到伺服器**：同步有 180ms 防抖，
                       // 改完立刻送簽的話凍結到的是上一版，客人簽的內容與實際結帳對不
                       // 起來，一樣得撤回重簽。用整車指紋而不是只比餐飲欄位——移除最後
@@ -3645,7 +3682,7 @@ export default function PosPage() {
               settings.isFetching ||
               settings.failureCount > 0 ||
               // 含餐飲卻沒選內用/外帶或桌號 → 先擋（後端亦有同一組守衛）。
-              !dineInValidation.ok
+              !dineInOk
             }
             onClick={() => {
               // 有未確認的商品備註 → 先跳提醒，確認後才進收款（不直接送出）。

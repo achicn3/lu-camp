@@ -3,6 +3,18 @@
 > **給接手的人（或 AI）**：這份是「目前做到哪、上線要注意什麼、接下來做什麼」的總整理。
 > 細節以各編號規格為準；本文只指路。最後更新：2026-10-14；日期較早的段落為歷史紀錄，以最新段落為準。
 
+
+## 2026-10-19：續點要本桌點過（90 分鐘）、外帶不續點
+
+- 店主裁示：續點限**本桌 90 分鐘內點過（已付款）的同一品項**；看桌不看手機（同桌別支手機點的也算）；**外帶不續點**；**份數不限**。
+- 線上：`src/refill.ts`（D1 查本桌 PAID、DINE_IN、created_at 在 90 分鐘內的品項）；`GET /api/tables/:code` 多 `refill_item_ids`；
+  送單時再驗一次，不符回 422 `refill_not_eligible`。客人頁：點過才有「我是續點」，沒點過只說明；外帶不標「可續點」。
+  限制：櫃檯點的單雲端看不到，第一杯在櫃檯點的要回櫃檯續點。
+- POS：後端外帶續點直接擋（`_validate_service_mode_shape`）；`GET /api/v1/sales/dine-in-recent-items?table_no=` 給本桌 90 分鐘內點過的品項（含線上單成立的銷售）；
+  結帳區選好桌號就顯示「本桌 90 分鐘內點過／沒點過」，**沒點過只提醒、不擋**（店主 2026-10-19）。時限常數：後端 `REFILL_LOOKBACK`、雲端 `REFILL_WINDOW_MS`。
+- 店內升級 docs/92（無 migration）；雲端與店內先後順序都可以。煙霧：`online-order/test/refill-table-smoke.mjs`、`frontend/scripts/pos-refill-table-smoke.mjs`、
+  `frontend/scripts/menu-refill-smoke.mjs`（已改為先點、結帳後才續點；可用 SMOKE_API／SMOKE_POS／SMOKE_ORDER 指到隔離環境）。
+
 ## 2026-10-18：線上 LINE Pay 用客人綁定的載具
 
 - 店主裁示：客人輸入的優先 → 沒填用 LINE Pay 綁定的手機條碼載具 → 都沒有印紙本；付好後客人訂單頁說明發票去哪；結帳頁「不用填」下方提醒「已綁定就不需輸入」。店主表示已向 LINE Pay 開通 merchantReference。

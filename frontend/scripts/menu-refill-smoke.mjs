@@ -1,17 +1,20 @@
 // 續點（店主 2026-10-16）真瀏覽器煙霧：
 // ① 菜單管理：續點折數設定、品項「可續點」勾選。
 // ② POS 點餐視窗勾「續點」→ 單價照八折（加料也打折）、購物車行冠「續點・」，和一般點分開。
-// ③ 客人頁：可續點品項標「可續點 8 折」、視窗勾「我是續點」→ 購物車續點價、自動勾「我是加點」；
-//    取消加點後，低消桌缺額不算續點並加註。
-// ④ 外帶送一張續點＋一般點 → POS 線上訂單帶入結帳，續點行照續點價。
-// 結束後取消測試單、還原品項與桌號設定並重新發佈。需要本機示範環境（後端 :8116、POS :3116、Worker :8794）。
+// ③ 客人頁（2026-10-19 起續點要本桌 90 分鐘內點過）：本桌還沒點過只說明；先點兩杯、POS 結帳後
+//    才能勾「我是續點」→ 購物車續點價、自動勾「我是加點」；取消加點後，低消桌缺額不算續點並加註。
+// ④ 同桌送一張續點單 → POS 線上訂單帶入結帳，續點行照續點價。
+// 結束後取消測試單、還原品項與桌號設定並重新發佈。預設連本機示範環境（後端 :8116、POS :3116、Worker :8794），
+// 可用 SMOKE_API／SMOKE_POS／SMOKE_ORDER 指到隔離環境。
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 assert.equal(process.env.SMOKE_ALLOW_WRITE, "1");
-const API = "http://localhost:8116/api/v1", POS = "http://localhost:3116", ORDER = "http://localhost:8794";
+const API = process.env.SMOKE_API ?? "http://localhost:8116/api/v1";
+const POS = process.env.SMOKE_POS ?? "http://localhost:3116";
+const ORDER = process.env.SMOKE_ORDER ?? "http://localhost:8794";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
 const SHOTS = process.env.SMOKE_SHOTS ?? "/tmp/menu-refill-shots";
 const ITEM = process.env.SMOKE_ITEM ?? "拿鐵"; // 基本價 150、溫度（熱／冰）、加購（燕麥奶 +20）
@@ -122,6 +125,49 @@ try {
     }
     await guest.locator("#detail-add").click();
   };
+  await api("PUT", "/online-orders/accepting", { accepting: true });
+  await guest.goto(`${ORDER}/t/${code}`);
+  // 本桌還沒點過：只說明、沒有續點勾選
+  await guest.getByRole("button", { name: "飲品", exact: true }).click();
+  await guest.locator(".item").filter({ hasText: ITEM }).locator(".item-add").click();
+  await guest.getByText("本桌 90 分鐘內點過這項，才能用續點價（8 折）再點。").waitFor();
+  assert.equal(await guest.locator("#detail-refill").count(), 0);
+  await guest.screenshot({ path: `${SHOTS}/05a-guest-not-ordered-yet.png` });
+  await guest.locator("#sheet-close").click();
+  // 先點兩杯（340 ≥ 低消 300）送出 → POS 帶入結帳收現 → 雲端記已付款
+  await guestCup(false);
+  await guestCup(false);
+  await guest.getByRole("button", { name: /購物車 2 份/ }).click();
+  const before = new Set((await api("GET", "/online-orders")).orders.map((o) => o.id)); // 只認這次送的單
+  await guest.getByRole("button", { name: "送出訂單", exact: true }).click();
+  await guest.waitForURL(/\/order\//, { timeout: 90000 });
+  let firstOrder;
+  for (let n = 0; n < 40 && !firstOrder; n++) {
+    firstOrder = (await api("GET", "/online-orders")).orders.find((o) => !before.has(o.id) && o.table_label === TABLE);
+    if (!firstOrder) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.ok(firstOrder, "first order must reach POS");
+  const firstCart = await api("GET", `/online-orders/${firstOrder.id}/cart`);
+  const sale = await fetch(`${API}/sales`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "Idempotency-Key": `refill-smoke-${firstOrder.id}` },
+    body: JSON.stringify({
+      lines: firstCart.lines.map((l) => ({
+        line_type: l.line_type, menu_item_id: l.menu_item_id, menu_option_ids: l.menu_option_ids, qty: l.qty,
+      })),
+      service_mode: "DINE_IN", table_no: TABLE,
+      tenders: [{ tender_type: "CASH", amount: firstCart.total }],
+      online_order_id: firstOrder.id,
+    }),
+  });
+  assert.equal(sale.status, 201, await sale.clone().text());
+  let eligible = false;
+  for (let n = 0; n < 60 && !eligible; n++) {
+    await api("GET", "/online-orders"); // POS 輪詢會把「已付款」回報雲端
+    eligible = ((await (await fetch(`${ORDER}/api/tables/${code}`)).json()).refill_item_ids ?? []).length > 0;
+    if (!eligible) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.ok(eligible, "paid order makes the item refillable at this table");
   await guest.goto(`${ORDER}/t/${code}`);
   await guestCup(false);
   await guestCup(true);
@@ -139,10 +185,12 @@ try {
   assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await guest.screenshot({ path: `${SHOTS}/06-guest-cart-minimum.png` });
 
-  // ④ 外帶送單 → POS 帶入結帳照續點價（暫時開放接單，結束後還原）
-  await api("PUT", "/online-orders/accepting", { accepting: true });
+  // ④ 同桌送續點單 → POS 帶入結帳照續點價（暫時開放接單，結束後還原）
   await guest.evaluate(() => localStorage.clear());
-  await guest.goto(ORDER);
+  await guest.goto(`${ORDER}/t/${code}`, { waitUntil: "networkidle" });
+  // 頁面記得上次在購物車：等畫面出來，停在購物車就回菜單
+  await guest.waitForFunction(() => !document.getElementById("cart-view")?.hidden || document.querySelector(".item"));
+  if (await guest.locator("#cart-view").isVisible()) await guest.locator("#back-menu").click();
   await guestCup(true);
   await guest.getByRole("button", { name: /購物車 1 份/ }).click();
   const resultPromise = guest.waitForResponse(
@@ -172,7 +220,7 @@ try {
   const cart = await api("GET", `/online-orders/${orderId}/cart`);
   assert.deepEqual(cart.lines.map((l) => [l.description, l.unit_price, l.menu_refill]), [[refillLine, "136", true]]);
   await pos.getByRole("button", { name: "取消帶入" }).click();
-  console.log("PASS refill setting + toggle → POS refill 136 separate line → guest refill badge/sheet/cart, minimum excludes refill → takeout refill order loads into POS at 136");
+  console.log("PASS refill setting + toggle → POS refill 136 separate line → guest: not ordered yet → order + POS settle → refill sheet/cart, minimum excludes refill → same-table refill order loads into POS at 136");
 } finally {
   if (orderId) await api("POST", `/online-orders/${orderId}/cancel`).catch(() => {});
   if (!wasAccepting) await api("PUT", "/online-orders/accepting", { accepting: false }).catch(() => {});

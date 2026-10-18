@@ -1,4 +1,5 @@
-// 客人頁品名（店主 2026-10-17）的真瀏覽器煙霧：體驗卡的行只顯示卡片名稱、「續杯」改叫「續點」。
+// 客人頁品名（店主 2026-10-17）的真瀏覽器煙霧：體驗卡的行只顯示卡片名稱。
+// 續點（要本桌點過才能勾，2026-10-19）另見 refill-table-smoke.mjs。
 // 只對隔離的本機 wrangler dev（Cloudflare 官方 Turnstile 測試金鑰）跑，絕不指向正式站。
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -70,22 +71,16 @@ async function openCart() {
 }
 try {
   await page.goto(base, { waitUntil: "networkidle" });
-  // 甜點也能續點：卡片上標「可續點 8 折」，視窗裡勾「我是續點」。
+  // 外帶（沒掃桌碼）不續點：可續點的品項也不標「可續點」（2026-10-19）。
   await page.getByRole("button", { name: "甜點", exact: true }).click();
-  const cake = page.locator(".item", { hasText: `戚風 ${run}` });
-  await cake.getByText("可續點 8 折").waitFor();
-  await cake.locator(".item-detail").click();
-  await page.getByLabel("我是續點（8 折，加料也打折）").check();
-  await page.getByText("限已經點過的品項再點一份，店員會在現場確認。").waitFor();
-  await page.screenshot({ path: join(shots, "1-refill-sheet.png") });
-  assert.equal(await page.getByText(/續杯/).count(), 0, "畫面不再出現「續杯」");
-  await page.getByRole("button", { name: "加入購物車" }).click();
+  await page.locator(".item", { hasText: `戚風 ${run}` }).waitFor();
+  assert.equal(await page.getByText("可續點 8 折").count(), 0, "外帶不提續點");
 
   // 體驗卡的行：購物車直接放一行（體驗卡的翻卡動畫不是這次要驗的）。
   await page.evaluate(({ saved }) => localStorage.setItem("lk_cart_v2", JSON.stringify(saved)), {
     saved: {
       lines: [
-        { item_id: 6, option_ids: [], qty: 1, refill: true },
+        { item_id: 6, option_ids: [], qty: 1 },
         { item_id: 5, option_ids: [10], qty: 1, experience_id: 3 },
       ],
       table: null, touched_at: Date.now(),
@@ -94,7 +89,7 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: /購物車 2 份/ }).click();
   const names = await page.locator(".cart-line b").allTextContents();
-  assert.deepEqual(names, [`續點・戚風 ${run}`, `${card}（冰）`], "體驗卡只顯示卡片名稱＋客人選的選項");
+  assert.deepEqual(names, [`戚風 ${run}`, `${card}（冰）`], "體驗卡只顯示卡片名稱＋客人選的選項");
   await page.screenshot({ path: join(shots, "2-cart.png"), fullPage: true });
 
   // 有行不能結（手沖剛售完）時改逐行顯示：體驗卡仍是卡片名稱＋客人選的（Codex 審查）。
@@ -122,10 +117,10 @@ try {
   assert.equal(await page.getByText(coffee).count(), 0, "訂單頁也只顯示卡片名稱");
   await page.screenshot({ path: join(shots, "3-order.png"), fullPage: true });
 
-  // POS 拉到的品名照舊（店員要知道做哪一杯），續點冠「續點・」。
+  // POS 拉到的品名照舊（店員要知道做哪一杯）。
   const pulled = await integration("GET", "/integration/orders");
   const order = pulled.orders.find((o) => o.lines.some((l) => l.name.includes(String(run))));
-  assert.deepEqual(order.lines.map((l) => l.name), [`續點・戚風 ${run}`, `${card}・${coffee}（冰）`]);
+  assert.deepEqual(order.lines.map((l) => l.name), [`戚風 ${run}`, `${card}・${coffee}（冰）`]);
 
   assert.deepEqual(errors, [], "No browser JavaScript errors");
   console.log(`guest-names smoke OK — screenshots in ${shots}`);

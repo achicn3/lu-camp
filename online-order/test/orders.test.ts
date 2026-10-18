@@ -431,12 +431,28 @@ it("加點納入冪等指紋；沒勾加點的舊版重送指紋不變", async (
 // 續點（店主 2026-10-16）：可續點的品項照折數算；續點不算低消；標記帶給 POS。
 describe("續點", () => {
   const REFILL_MENU = { ...MENU, version: 9, refill_pct: 80, items: [{ ...MENU.items[0], refillable: true }, MENU.items[1]] };
+  /** 本桌先點過、付過（店主 2026-10-19：續點要本桌 90 分鐘內點過，限內用）。 */
+  async function paidBefore(opts: { table?: string | null; item?: number; minutesAgo?: number; paid?: boolean } = {}) {
+    const resp = await order({ table_code: opts.table === undefined ? TABLE : opts.table,
+      lines: [{ item_id: opts.item ?? 5, option_ids: [], qty: 1 }] });
+    expect(resp.status).toBe(201);
+    // 標成已付、指定下單時間；標已匯入，後面拉單只看得到測試自己送的單。
+    await env.DB.prepare(
+      "UPDATE orders SET payment_status = ?, sync_status = 'IMPORTED', created_at = ? " +
+        "WHERE id = (SELECT id FROM orders ORDER BY rowid DESC LIMIT 1)",
+    ).bind(opts.paid === false ? "UNPAID" : "PAID", Date.now() - (opts.minutesAgo ?? 10) * 60_000).run();
+  }
+  const refillLine = { item_id: 5, option_ids: [], qty: 1, refill: true };
+  const tableView = async (code = TABLE) =>
+    (await (await exports.default.fetch(new Request(`https://order.test/api/tables/${code}`))).json()) as
+      { refill_item_ids?: number[] };
   beforeEach(async () => {
     expect((await integration("PUT", "/integration/menu", JSON.stringify(REFILL_MENU))).status).toBe(200);
   });
 
   it("照折數算價、品名冠續點，拉單時帶 refill（一般行沒有）", async () => {
-    const resp = await order({ table_code: null, lines: [
+    await paidBefore();
+    const resp = await order({ lines: [
       { item_id: 5, option_ids: [], qty: 1, refill: true },
       { item_id: 5, option_ids: [], qty: 1 },
     ] });
@@ -465,6 +481,7 @@ describe("續點", () => {
   });
 
   it("續點不算低消：金額與每人份數都不數續點", async () => {
+    await paidBefore();
     await minimumTable({ mode: "amount", amount: 300 });
     const denied = await order({ lines: [
       { item_id: 5, option_ids: [], qty: 1 }, { item_id: 5, option_ids: [], qty: 2, refill: true },
@@ -478,10 +495,52 @@ describe("續點", () => {
   });
 
   it("續點納入冪等指紋；沒續點的舊版重送指紋不變", async () => {
+    await paidBefore();
     const key = crypto.randomUUID();
     const refill = { idempotency_key: key, lines: [{ item_id: 5, option_ids: [], qty: 1, refill: true }] };
     expect((await order(refill)).status).toBe(201);
     expect((await order(refill)).status).toBe(200);
     expect((await order({ idempotency_key: key, lines: [{ item_id: 5, option_ids: [], qty: 1 }] })).status).toBe(409);
+  });
+
+  // 店主 2026-10-19：續點要本桌 90 分鐘內點過（已付款）的同一品項；外帶不續點；份數不限。
+  it("本桌沒點過這項：不能續點", async () => {
+    await paidBefore({ item: 6 });
+    const resp = await order({ lines: [refillLine] });
+    expect(resp.status).toBe(422);
+    expect(await resp.json()).toMatchObject({ error: "refill_not_eligible", item_id: 5 });
+  });
+
+  it.each<[string, { table?: string; minutesAgo?: number; paid?: boolean }]>([
+    ["超過 90 分鐘", { minutesAgo: 91 }],
+    ["別桌點的", { table: "tB9kq9ZxWm2pLr7v" }],
+    ["還沒付款", { paid: false }],
+  ])("%s不算", async (_, opts) => {
+    if (opts.table) {
+      await integration("PUT", "/integration/tables", JSON.stringify({ revision: 5, tables: [
+        { code: TABLE, label: "A3", service_mode: "DINE_IN" }, { code: opts.table, label: "B1", service_mode: "DINE_IN" },
+      ] }));
+    }
+    await paidBefore(opts);
+    expect(await (await order({ lines: [refillLine] })).json()).toMatchObject({ error: "refill_not_eligible" });
+  });
+
+  it("外帶不能續點", async () => {
+    await paidBefore({ table: null });
+    expect(await (await order({ table_code: null, lines: [refillLine] })).json()).toMatchObject({ error: "refill_not_eligible" });
+  });
+
+  it("同桌換另一支手機也能續點，份數不限", async () => {
+    await paidBefore();
+    const resp = await order({ lines: [{ ...refillLine, qty: 5 }] }, { device: "another-phone-device-id-0001" });
+    expect(resp.status).toBe(201);
+  });
+
+  it("桌位資訊帶本桌 90 分鐘內點過的品項，客人頁才知道要不要顯示續點", async () => {
+    expect((await tableView()).refill_item_ids).toEqual([]);
+    await paidBefore({ item: 6 });
+    await paidBefore({ item: 5, minutesAgo: 30 });
+    await paidBefore({ item: 5, minutesAgo: 100 });
+    expect((await tableView()).refill_item_ids).toEqual([5, 6]);
   });
 });

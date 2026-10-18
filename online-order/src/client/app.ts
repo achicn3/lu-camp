@@ -3,7 +3,7 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
   BREW_TAB, cartLineLabel, experienceView, invoiceNote, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
-  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, refillState, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine, type TableMinimum } from "../pricing";
@@ -65,6 +65,8 @@ let tableCode: string | null = null;
 let homeTable: string | null = null;
 /** 這桌的低消（2026-10-14 店主）；外帶或沒設＝null。 */
 let tableMinimum: TableMinimum | null = null;
+/** 這一桌的資訊（內用／外帶、本桌 90 分鐘內點過可續點的品項）；外帶首頁或沒掃桌碼＝null。 */
+let tableInfo: TableView | null = null;
 let cart: CartLine[] = [];
 let status: StoreStatus | null = null;
 let activeOrder: string | null = null;
@@ -243,15 +245,20 @@ function openDetail(item: MenuItemView): void {
     groups.append(field);
   }
   body.append(groups);
-  // 續點（2026-10-16）：客人自己勾，照折數算（加料也打折）；店員現場確認。
+  // 續點（2026-10-16）：照折數算（加料也打折）。2026-10-19 起要本桌 90 分鐘內點過才能勾；外帶不續點。
   const refillPct = refillPctOf(item);
+  const refillable = refillOf(item);
   const refill = el("input"); refill.type = "checkbox"; refill.id = "detail-refill";
-  if (refillPct !== null) {
+  if (refillPct !== null && refillable !== "NONE") {
     const field = el("fieldset", "opt-group");
     field.append(el("legend", "opt-group-name", "續點"));
-    const label = el("label", "opt-choice");
-    label.append(refill, el("span", "", `我是續點（${refillDiscountLabel(refillPct)}，加料也打折）`));
-    field.append(label, el("p", "opt-note", "限已經點過的品項再點一份，店員會在現場確認。"));
+    if (refillable === "ELIGIBLE") {
+      const label = el("label", "opt-choice");
+      label.append(refill, el("span", "", `我是續點（${refillDiscountLabel(refillPct)}，加料也打折）`));
+      field.append(label, el("p", "opt-note", "本桌點過這項，可以用續點價再點。"));
+    } else {
+      field.append(el("p", "opt-note", `本桌 90 分鐘內點過這項，才能用續點價（${refillDiscountLabel(refillPct)}）再點。`));
+    }
     body.append(field);
   }
   {
@@ -299,6 +306,10 @@ function refillPctOf(item: MenuItemView): number | null {
   const pct = menu?.refill_pct;
   return item.refillable === true && typeof pct === "number" && Number.isInteger(pct) && pct >= 1 && pct <= 99 ? pct : null;
 }
+/** 這一桌能不能續點這個品項（店主 2026-10-19）。 */
+function refillOf(item: MenuItemView): "ELIGIBLE" | "NOT_ORDERED" | "NONE" {
+  return refillState(item, refillPctOf(item), tableInfo);
+}
 function cartError(reason: unknown): string {
   const code = reason instanceof Error ? reason.message : "";
   if (code === "not_refillable") return "這個品項現在不能續點，請改成一般點。";
@@ -325,7 +336,7 @@ function itemRow(item: MenuItemView, featured = false): HTMLElement {
   if (item.description && !item.presentation?.flavor_description) copy.append(el("span", "item-desc", item.description));
   const labels = presentationBadges(item, new Date());
   const refillPct = refillPctOf(item);
-  if (refillPct !== null) labels.push(`可續點 ${refillDiscountLabel(refillPct)}`);
+  if (refillPct !== null && refillOf(item) !== "NONE") labels.push(`可續點 ${refillDiscountLabel(refillPct)}`);
   if (labels.length) copy.append(el("span", "item-labels", labels.join(" · ")));
   detail.append(copy); row.append(detail);
   const actions = el("div", "item-actions");
@@ -335,8 +346,8 @@ function itemRow(item: MenuItemView, featured = false): HTMLElement {
   const add = button(soldOut ? "今日售完" : item.option_groups.length ? "選擇選項" : "加入", () => {
     const current = menu?.items.find((entry) => entry.id === item.id);
     if (!menu || !current) { showMessage("菜單已更新，請重新選擇。"); return; }
-    // 可續點的品項也開視窗：客人要在那裡勾「我是續點」。
-    if (current.option_groups.length || refillPctOf(current) !== null) { openDetail(current); return; }
+    // 本桌能續點的品項也開視窗：客人要在那裡勾「我是續點」。
+    if (current.option_groups.length || refillOf(current) === "ELIGIBLE") { openDetail(current); return; }
     try {
       cart = addLine(menu, cart, { item_id: current.id, option_ids: [], qty: 1 });
       saveCart(); renderFooter(); clearMessage();
@@ -888,6 +899,7 @@ async function submitDraft(draft: Draft): Promise<void> {
       showMessage(result.error === "minimum_not_met" ? minimumRejected(result) :
         result.error === "party_size_required" ? "這桌需要填寫用餐人數，請重新整理頁面後再送出。" :
         result.error === "sold_out" ? "品項已售完，請更新菜單後再選。" :
+        result.error === "refill_not_eligible" ? "本桌 90 分鐘內沒有點過這項，不能用續點價，請改成一般點。" :
         result.error === "challenge_failed" ? "驗證未通過，請重新送出。" : "訂單內容有變，請重新確認後送出。");
     } else {
       renderCart(); showMessage("尚未確認訂單是否成立。請按「重試確認訂單」，不要重新選品項送單。");
@@ -1037,6 +1049,11 @@ async function refreshAvailability(): Promise<void> {
     getJson<MenuSnapshot>("/api/menu"), getJson<StoreStatus>("/api/status"),
   ]);
   if (nextStatus.body) status = nextStatus.body;
+  // 本桌剛付好的單讓品項可以續點：內用桌、菜單有可續點品項時一起重抓（同桌別支手機點的也算）。
+  if (tableCode !== null && tableInfo?.service_mode === "DINE_IN" && menu.items.some((item) => refillPctOf(item) !== null)) {
+    const nextTable = await getJson<TableView>(`/api/tables/${tableCode}`);
+    if (nextTable.body) tableInfo = nextTable.body;
+  }
   if (nextMenu.body && JSON.stringify(nextMenu.body) !== JSON.stringify(menu)) {
     menu = nextMenu.body;
     const current = checkCart(menu, cart);
@@ -1135,6 +1152,7 @@ async function main(): Promise<void> {
     if (tableResult.body) {
       $("table").textContent = tableResult.body.service_mode === "TAKEOUT" ? "外帶" : `桌 ${tableResult.body.label}`;
       tableMinimum = tableResult.body.service_mode === "DINE_IN" ? tableResult.body.minimum ?? null : null;
+      tableInfo = tableResult.body;
       $("table").hidden = false;
     } else if (tableResult.status === 404) { showMessage("這個 QR 已經失效了，請洽櫃檯。"); return; }
   }

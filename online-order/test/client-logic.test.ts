@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote, refillState } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -274,5 +274,24 @@ describe("LINE Pay 付款後的發票說明", () => {
     [{ kind: "PAPER" }, "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。"],
   ] as const)("%o", (to, text) => {
     expect(invoiceNote(to)).toBe(text);
+  });
+});
+
+// 店主 2026-10-19：本桌 90 分鐘內點過才能續點（看桌不看手機）；外帶不續點。
+describe("續點資格（客人頁）", () => {
+  const latte = { id: 5, refillable: true } as Pick<MenuItemView, "id" | "refillable">;
+  const dineIn = { service_mode: "DINE_IN" as const, refill_item_ids: [5] };
+  it("內用、本桌點過：可以勾續點", () => {
+    expect(refillState(latte, 80, dineIn)).toBe("ELIGIBLE");
+  });
+  it("內用、本桌還沒點過：說明要先點過", () => {
+    expect(refillState(latte, 80, { ...dineIn, refill_item_ids: [] })).toBe("NOT_ORDERED");
+    expect(refillState(latte, 80, { service_mode: "DINE_IN" })).toBe("NOT_ORDERED"); // 舊版雲端沒有這欄
+  });
+  it("外帶、沒有桌號、不可續點的品項、沒有折數：完全不提續點", () => {
+    expect(refillState(latte, 80, { service_mode: "TAKEOUT", refill_item_ids: [5] })).toBe("NONE");
+    expect(refillState(latte, 80, null)).toBe("NONE");
+    expect(refillState({ id: 5 }, 80, dineIn)).toBe("NONE");
+    expect(refillState(latte, null, dineIn)).toBe("NONE");
   });
 });

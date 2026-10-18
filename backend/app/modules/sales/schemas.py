@@ -591,6 +591,14 @@ class SaleRead(BaseModel):
         )
 
 
+class DineInRecentItemsRead(BaseModel):
+    """本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒用，不擋結帳。"""
+
+    table_no: str
+    window_minutes: int
+    menu_item_ids: list[int]
+
+
 class FnbSaleSummaryRead(BaseModel):
     """餐飲交易紀錄的一列（docs/47 §4）：只列含餐點的交易。"""
 

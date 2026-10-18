@@ -5,9 +5,11 @@
 - 勾了就算（裁示 3）：後端只檢查品項可不可續點，是不是真的續點由店員現場判斷。
 - 品名冠「續點・」：收據、出餐單、發票、客顯直接看得到；續點與一般點是不同明細。
 - 冪等指紋：沒續點時維持舊形狀（部署前送出的重送不被誤判）。
+- 外帶不能續點（店主 2026-10-19）；POS 查「本桌 90 分鐘內點過的品項」做提醒、不擋。
 """
 
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from decimal import Decimal
 
 import httpx
@@ -18,16 +20,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.security import encode_access_token
+from app.core.time import utc_now
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import SaleLineInput, menu_line_key
+from app.modules.sales.models import Sale
 from app.modules.sales.service import _line_fingerprint
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import SaleLineType, UserRole
+from app.shared.enums import SaleLineType, SaleStatus, UserRole
 from tests.integration.customer_display_helpers import CustomerDisplayAwareClient
 
 
@@ -68,6 +72,9 @@ async def _seed(session: AsyncSession) -> _Menu:
     session.add(manager)
     await session.flush()
     await CashDrawerService(session).open_session(store.id, manager.id, Decimal("1000"))
+    await StoreSettingsService(session).update_settings(
+        store.id, actor_user_id=None, patch=SettingsUpdateRequest(dine_in_tables=["A1", "B2"])
+    )
     svc = MenuService(session)
     latte = await svc.create_menu_item(
         store.id, name="拿鐵", unit_price=Decimal(150), refillable=True, actor_user_id=manager.id
@@ -108,11 +115,25 @@ def _line(item_id: int, option_ids: list[int], *, refill: bool, qty: int = 1) ->
 
 
 async def _sell(
-    client: httpx.AsyncClient, m: _Menu, lines: list[dict[str, object]], idem: str
+    client: httpx.AsyncClient,
+    m: _Menu,
+    lines: list[dict[str, object]],
+    idem: str,
+    *,
+    table_no: str | None = "A1",
 ) -> httpx.Response:
+    """續點限內用：預設內用 A1；`table_no=None` 為外帶。"""
+    mode = (
+        {"service_mode": "TAKEOUT"}
+        if table_no is None
+        else {
+            "service_mode": "DINE_IN",
+            "table_no": table_no,
+        }
+    )
     return await client.post(
         "/api/v1/sales",
-        json={"lines": lines, "service_mode": "TAKEOUT"},
+        json={"lines": lines, **mode},
         headers={"Authorization": f"Bearer {m.token}", "Idempotency-Key": idem},
     )
 
@@ -263,3 +284,59 @@ async def test_settings_expose_refill_pct_with_default_eighty(db_session: AsyncS
 def test_refill_pct_must_be_between_1_and_99(pct: int) -> None:
     with pytest.raises(ValidationError):
         SettingsUpdateRequest(menu_refill_pct=pct)
+
+
+async def test_takeout_cannot_refill(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """外帶不能續點（店主 2026-10-19）。"""
+    m = await _seed(db_session)
+    resp = await _sell(client, m, [_line(m.latte, [m.milk], refill=True)], "t1", table_no=None)
+    assert resp.status_code == 422
+    assert "外帶不能續點" in resp.text
+
+
+async def _recent(client: httpx.AsyncClient, m: _Menu, table_no: str) -> list[int]:
+    resp = await client.get(
+        "/api/v1/sales/dine-in-recent-items",
+        params={"table_no": table_no},
+        headers={"Authorization": f"Bearer {m.token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["window_minutes"] == 90
+    return sorted(body["menu_item_ids"])
+
+
+async def test_recent_items_lists_this_tables_menu_items_within_90_minutes(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """POS 勾續點時用來提醒「本桌 90 分鐘內沒點過這項」：只看同一桌的內用、沒作廢、90 分鐘內。"""
+    m = await _seed(db_session)
+    assert await _recent(client, m, "A1") == []
+    first = await _sell(client, m, [_line(m.latte, [m.milk], refill=False)], "n1")
+    assert first.status_code == 201, first.text
+    other_table = await _sell(client, m, [_line(m.cake, [], refill=False)], "n2", table_no="B2")
+    assert other_table.status_code == 201, other_table.text
+    takeout = await _sell(client, m, [_line(m.cake, [], refill=False)], "n3", table_no=None)
+    assert takeout.status_code == 201, takeout.text
+    assert await _recent(client, m, "A1") == [m.latte]
+    assert await _recent(client, m, " B2 ") == [m.cake]
+
+    # 超過 90 分鐘就不算
+    sale = await db_session.get(Sale, first.json()["id"])
+    assert sale is not None
+    sale.created_at = utc_now() - timedelta(minutes=91)
+    await db_session.flush()
+    assert await _recent(client, m, "A1") == []
+
+
+async def test_recent_items_skip_voided_sales(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    m = await _seed(db_session)
+    sold = await _sell(client, m, [_line(m.latte, [m.milk], refill=False)], "v1")
+    assert sold.status_code == 201, sold.text
+    sale = await db_session.get(Sale, sold.json()["id"])
+    assert sale is not None
+    sale.status = SaleStatus.VOIDED
+    await db_session.flush()
+    assert await _recent(client, m, "A1") == []

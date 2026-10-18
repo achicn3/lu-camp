@@ -15,7 +15,7 @@ commit/rollback 由呼叫端控制），不留「庫存扣了但現金沒進」�
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -469,6 +469,11 @@ def _dining_identity_of_cart(cart: CartSession) -> tuple[str | None, str | None]
     )
 
 
+# 續點要「本桌最近點過」（店主 2026-10-19）。線上點餐的雲端用同一個時限
+# （online-order/src/refill.ts）。
+REFILL_LOOKBACK = timedelta(minutes=90)
+
+
 def _validate_service_mode_shape(
     lines: Sequence[SaleLineInput],
     service_mode: ServiceMode | None,
@@ -496,6 +501,8 @@ def _validate_service_mode_shape(
         return normalized
     if normalized is not None:
         raise InvalidServiceMode("外帶不可指定桌號")
+    if any(line.menu_refill for line in lines):
+        raise InvalidServiceMode("外帶不能續點")  # 店主 2026-10-19：續點限內用
     return None
 
 
@@ -2399,6 +2406,14 @@ class SalesService:
             FoodWasteRow(reason=name, qty=qty, cost=cost, unknown_cost_qty=unknown)
             for name, (qty, cost, unknown) in rows
         )
+
+    async def dine_in_recent_menu_item_ids(self, store_id: int, table_no: str) -> list[int]:
+        """本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒「本桌沒點過這項」，不擋。
+
+        只看同一桌的內用、沒作廢、`REFILL_LOOKBACK` 之內的銷售（含線上單成立的銷售）。
+        """
+        since = datetime.now(UTC) - REFILL_LOOKBACK
+        return await self._repo.dine_in_menu_item_ids_since(store_id, table_no.strip(), since)
 
     async def list_fnb_sales(
         self,

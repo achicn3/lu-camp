@@ -6882,3 +6882,19 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   body:has(.table-qr-page) .app-main { padding: 0; margin: 0; max-width: none; }
   .table-qr-sheet { grid-template-columns: repeat(2, 95mm); }
 }
+
+/* 續點提醒（店主 2026-10-19）：本桌 90 分鐘內沒點過這項——只提醒、照樣能結。 */
+.pos-refill-warning {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: rgba(184, 134, 11, 0.08);
+  color: var(--warn);
+}
+.pos-refill-found {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--success);
+  background: rgba(46, 125, 79, 0.08);
+  color: var(--success);
+}

@@ -3991,6 +3991,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales/dine-in-recent-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dine In Recent Items
+         * @description 本桌 90 分鐘內點過的餐飲品項：POS 勾續點時提醒用（店主 2026-10-19）。
+         *
+         *     **必須排在 `/{sale_id}` 之前**：否則會被當成單號而回 422。
+         */
+        get: operations["listDineInRecentItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales/fnb": {
         parameters: {
             query?: never;
@@ -7036,6 +7058,18 @@ export interface components {
             hour: number;
             /** Takeout Groups */
             takeout_groups: number;
+        };
+        /**
+         * DineInRecentItemsRead
+         * @description 本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒用，不擋結帳。
+         */
+        DineInRecentItemsRead: {
+            /** Menu Item Ids */
+            menu_item_ids: number[];
+            /** Table No */
+            table_no: string;
+            /** Window Minutes */
+            window_minutes: number;
         };
         /**
          * DineInReport
@@ -20242,6 +20276,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listDineInRecentItems: {
+        parameters: {
+            query: {
+                table_no: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DineInRecentItemsRead"];
                 };
             };
             /** @description Validation Error */
