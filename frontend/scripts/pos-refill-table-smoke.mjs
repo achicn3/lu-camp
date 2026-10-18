@@ -1,6 +1,7 @@
 // 續點要「本桌點過」（店主 2026-10-19）POS 真瀏覽器煙霧：真 backend＋真 Postgres＋真瀏覽器。
 // 先用 API 在 A1 賣一杯（一般點），再到 POS 點同一項的續點：
 //   內用 A1 → 顯示「本桌 90 分鐘內點過」；內用 B2（沒點過）→ 提醒但照樣能結；外帶 → 擋下「外帶不能續點」。
+// 再打開「不限品項都可以續點」：沒勾可續點的品項也能續點，A1（有消費過）確認、B2（沒消費）提醒。結束後關回去。
 // 需：後端 SMOKE_API（預設 http://localhost:8131/api/v1）、POS SMOKE_POS（預設 http://localhost:3131），
 // 隔離的測試資料庫（會改桌號、續點折數設定並新增一個品項）。
 import assert from "node:assert/strict";
@@ -30,10 +31,12 @@ const must = async (...args) => {
   return r.body;
 };
 token = (await must("POST", "/auth/login", { username: "dev-manager", password: PASSWORD })).access_token;
-await must("PATCH", "/settings", { dine_in_tables: ["A1", "B2"], menu_refill_pct: 80 });
+await must("PATCH", "/settings", { dine_in_tables: ["A1", "B2"], menu_refill_pct: 80, menu_refill_any_item: false });
 await api("POST", "/cash-sessions/open", { opening_float: "1000" }); // 已經開帳就沿用
 const NAME = `煙霧美式${Date.now() % 100000}`;
 const item = await must("POST", "/menu-items", { name: NAME, unit_price: "120", refillable: true });
+const CAKE = `煙霧蛋糕${Date.now() % 100000}`;
+await must("POST", "/menu-items", { name: CAKE, unit_price: "100" }); // 沒勾可續點
 
 // A1 先點一杯（一般點）
 const sold = await api(
@@ -86,7 +89,31 @@ try {
   await pos.getByText("外帶不能續點，請把續點改成一般點，或改選內用").waitFor();
   assert.equal(await warning.count(), 0);
   await pos.screenshot({ path: `${SHOTS}/03-takeout-blocked.png` });
-  console.log("PASS A1 顯示點過 → B2 提醒不擋 → 外帶擋下");
+
+  // 不限品項續點：菜單頁打開設定
+  await pos.goto(`${POS}/menu`, { waitUntil: "networkidle" });
+  await pos.getByText("目前續點打 8 折", { exact: false }).waitFor();
+  const anyBox = pos.getByRole("checkbox", { name: /不限品項都可以續點/ });
+  await anyBox.click();
+  await pos.getByText("目前不限品項：每個餐飲品項都能續點。").waitFor();
+  await pos.screenshot({ path: `${SHOTS}/04-setting-any-item.png` });
+  await pos.goto(`${POS}/pos`, { waitUntil: "networkidle" });
+  await pos.locator(".pos-menu-tile").filter({ hasText: CAKE }).waitFor();
+  const leftover = pos.getByRole("button", { name: `移除 續點・${NAME}` }); // 購物車若還留著上一段的續點就移除
+  if (await leftover.count()) await leftover.click();
+  await pos.locator(".pos-menu-tile").filter({ hasText: CAKE }).click();
+  const cakePick = pos.getByRole("dialog", { name: `加入 ${CAKE}` });
+  await cakePick.getByRole("checkbox", { name: "續點（8 折，加料也打折）" }).check();
+  await cakePick.getByRole("button", { name: "加入購物車" }).click();
+  await pos.getByRole("radio", { name: "內用" }).click();
+  await pos.getByRole("radiogroup", { name: "桌號" }).getByRole("radio", { name: "A1" }).click();
+  await pos.locator(".pos-refill-found").filter({ hasText: `本桌 90 分鐘內有消費過，可以續點：續點・${CAKE}` }).waitFor();
+  await pos.screenshot({ path: `${SHOTS}/05-any-item-a1.png` });
+  await pos.getByRole("radiogroup", { name: "桌號" }).getByRole("radio", { name: "B2" }).click();
+  await warning.filter({ hasText: `本桌 90 分鐘內沒有消費紀錄：續點・${CAKE}。確定是續點再結帳。` }).waitFor();
+  await pos.getByRole("button", { name: `移除 續點・${CAKE}` }).click();
+  console.log("PASS A1 顯示點過 → B2 提醒不擋 → 外帶擋下 → 不限品項：沒勾可續點也能續點、A1 有消費確認、B2 提醒");
 } finally {
+  await must("PATCH", "/settings", { menu_refill_any_item: false }).catch(() => {});
   await browser.close();
 }

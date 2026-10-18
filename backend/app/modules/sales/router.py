@@ -591,11 +591,12 @@ async def list_dine_in_recent_items(
 
     **必須排在 `/{sale_id}` 之前**：否則會被當成單號而回 422。
     """
-    ids = await SalesService(session).dine_in_recent_menu_item_ids(user.store_id, table_no)
+    ids, has_sale = await SalesService(session).dine_in_recent(user.store_id, table_no)
     return DineInRecentItemsRead(
         table_no=table_no.strip(),
         window_minutes=int(REFILL_LOOKBACK.total_seconds() // 60),
         menu_item_ids=sorted(ids),
+        has_recent_sale=has_sale,
     )
 
 

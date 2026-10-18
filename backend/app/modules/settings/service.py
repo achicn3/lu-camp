@@ -89,6 +89,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
         auto_print_acquisition_labels=DEFAULT_AUTO_PRINT_ACQUISITION_LABELS,
         menu_refill_pct=DEFAULT_MENU_REFILL_PCT,
+        menu_refill_any_item=False,
     )
 
 

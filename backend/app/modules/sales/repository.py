@@ -613,6 +613,21 @@ class SalesRepository:
         )
         return [item_id for item_id in await self._session.scalars(stmt) if item_id is not None]
 
+    async def has_dine_in_sale_since(self, store_id: int, table_no: str, since: datetime) -> bool:
+        """某桌 `since` 之後有沒有內用、沒作廢的銷售。"""
+        stmt = select(
+            select(Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.service_mode == ServiceMode.DINE_IN,
+                Sale.table_no == table_no,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= since,
+            )
+            .exists()
+        )
+        return bool(await self._session.scalar(stmt))
+
     async def list_lines_for_sales(self, sale_ids: list[int]) -> list[SaleLine]:
         if not sale_ids:
             return []

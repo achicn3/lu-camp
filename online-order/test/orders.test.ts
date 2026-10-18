@@ -536,6 +536,36 @@ describe("續點", () => {
     expect(resp.status).toBe(201);
   });
 
+  // 不限品項續點（店主 2026-10-19）：本桌 90 分鐘內有消費過（已付款）就能續點任何品項。
+  describe("不限品項續點", () => {
+    const ANY_MENU = { ...REFILL_MENU, version: 10, refill_any_item: true,
+      items: [{ ...MENU.items[0], refillable: true }, { ...MENU.items[1], refillable: true }] };
+    beforeEach(async () => {
+      expect((await integration("PUT", "/integration/menu", JSON.stringify(ANY_MENU))).status).toBe(200);
+    });
+
+    it("本桌點過別的品項也能續點", async () => {
+      await paidBefore({ item: 6 });
+      expect((await order({ lines: [refillLine] })).status).toBe(201);
+      expect((await tableView())).toMatchObject({ refill_any: true });
+    });
+
+    it("本桌還沒消費過：不能續點", async () => {
+      expect(await (await order({ lines: [refillLine] })).json()).toMatchObject({ error: "refill_not_eligible" });
+      expect((await tableView())).toMatchObject({ refill_any: false });
+    });
+
+    it("外帶照樣不能續點", async () => {
+      await paidBefore({ table: null });
+      expect(await (await order({ table_code: null, lines: [refillLine] })).json()).toMatchObject({ error: "refill_not_eligible" });
+    });
+
+    it("快照的 refill_any_item 只收 true", async () => {
+      const bad = await integration("PUT", "/integration/menu", JSON.stringify({ ...ANY_MENU, version: 11, refill_any_item: "yes" }));
+      expect(bad.status).toBe(422);
+    });
+  });
+
   it("桌位資訊帶本桌 90 分鐘內點過的品項，客人頁才知道要不要顯示續點", async () => {
     expect((await tableView()).refill_item_ids).toEqual([]);
     await paidBefore({ item: 6 });

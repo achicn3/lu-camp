@@ -288,6 +288,10 @@ describe("續點資格（客人頁）", () => {
     expect(refillState(latte, 80, { ...dineIn, refill_item_ids: [] })).toBe("NOT_ORDERED");
     expect(refillState(latte, 80, { service_mode: "DINE_IN" })).toBe("NOT_ORDERED"); // 舊版雲端沒有這欄
   });
+  it("不限品項續點：本桌有消費過就都能續點", () => {
+    expect(refillState(latte, 80, { service_mode: "DINE_IN", refill_item_ids: [], refill_any: true })).toBe("ELIGIBLE");
+    expect(refillState(latte, 80, { service_mode: "DINE_IN", refill_item_ids: [], refill_any: false })).toBe("NOT_ORDERED");
+  });
   it("外帶、沒有桌號、不可續點的品項、沒有折數：完全不提續點", () => {
     expect(refillState(latte, 80, { service_mode: "TAKEOUT", refill_item_ids: [5] })).toBe("NONE");
     expect(refillState(latte, 80, null)).toBe("NONE");

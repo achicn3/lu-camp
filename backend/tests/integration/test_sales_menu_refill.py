@@ -280,6 +280,26 @@ async def test_settings_expose_refill_pct_with_default_eighty(db_session: AsyncS
     assert settings.menu_refill_pct == 80
 
 
+async def test_refill_any_item_defaults_off(db_session: AsyncSession) -> None:
+    m = await _seed(db_session)
+    settings = await StoreSettingsService(db_session).get_effective_settings(m.store_id)
+    assert settings.menu_refill_any_item is False
+
+
+async def test_refill_any_item_lets_unmarked_items_refill(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """不限品項續點（店主 2026-10-19）：打開後沒勾「可續點」的品項也能續點、照折數算。"""
+    m = await _seed(db_session)
+    await StoreSettingsService(db_session).update_settings(
+        m.store_id, actor_user_id=None, patch=SettingsUpdateRequest(menu_refill_any_item=True)
+    )
+    resp = await _sell(client, m, [_line(m.cake, [], refill=True)], "any1")
+    assert resp.status_code == 201, resp.text
+    line = resp.json()["lines"][0]
+    assert (line["description"], line["unit_price"]) == ("續點・蛋糕", "96")
+
+
 @pytest.mark.parametrize("pct", [0, 100, -5])
 def test_refill_pct_must_be_between_1_and_99(pct: int) -> None:
     with pytest.raises(ValidationError):
@@ -292,6 +312,17 @@ async def test_takeout_cannot_refill(client: httpx.AsyncClient, db_session: Asyn
     resp = await _sell(client, m, [_line(m.latte, [m.milk], refill=True)], "t1", table_no=None)
     assert resp.status_code == 422
     assert "外帶不能續點" in resp.text
+
+
+async def _recent_body(client: httpx.AsyncClient, m: _Menu, table_no: str) -> dict[str, object]:
+    resp = await client.get(
+        "/api/v1/sales/dine-in-recent-items",
+        params={"table_no": table_no},
+        headers={"Authorization": f"Bearer {m.token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body: dict[str, object] = resp.json()
+    return body
 
 
 async def _recent(client: httpx.AsyncClient, m: _Menu, table_no: str) -> list[int]:
@@ -340,3 +371,15 @@ async def test_recent_items_skip_voided_sales(
     sale.status = SaleStatus.VOIDED
     await db_session.flush()
     assert await _recent(client, m, "A1") == []
+
+
+async def test_recent_items_tells_whether_table_had_any_sale(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """不限品項續點時 POS 看「本桌 90 分鐘內有沒有消費」。"""
+    m = await _seed(db_session)
+    assert (await _recent_body(client, m, "A1"))["has_recent_sale"] is False
+    sold = await _sell(client, m, [_line(m.cake, [], refill=False)], "h1")
+    assert sold.status_code == 201, sold.text
+    assert (await _recent_body(client, m, "A1"))["has_recent_sale"] is True
+    assert (await _recent_body(client, m, "B2"))["has_recent_sale"] is False

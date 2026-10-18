@@ -528,4 +528,28 @@ describe("/menu 餐飲菜單管理頁", () => {
     await waitFor(() => expect(patches).toHaveLength(1));
     expect(JSON.parse(patches[0]!)).toEqual({ menu_refill_pct: 85 });
   });
+
+  it("不限品項續點（2026-10-19）：帶出現況，勾了就存到設定", async () => {
+    const patches: string[] = [];
+    stubFetch(
+      (url, method, body) => {
+        if (url.includes("/settings") && method === "PATCH") {
+          patches.push(body);
+          return json({ ...SETTINGS, menu_refill_pct: 80, menu_refill_any_item: true });
+        }
+        if (url.includes("/menu-items")) return json(ITEMS);
+        return null;
+      },
+      { ...SETTINGS, menu_refill_pct: 80, menu_refill_any_item: false },
+    );
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    const box = (await screen.findByRole("checkbox", {
+      name: /不限品項都可以續點/,
+    })) as HTMLInputElement;
+    await waitFor(() => expect(box.checked).toBe(false));
+    await user.click(box);
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(JSON.parse(patches[0]!)).toEqual({ menu_refill_any_item: true });
+  });
 });

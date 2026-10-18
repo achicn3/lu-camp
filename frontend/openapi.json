@@ -6331,6 +6331,10 @@
       "DineInRecentItemsRead": {
         "description": "本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒用，不擋結帳。",
         "properties": {
+          "has_recent_sale": {
+            "title": "Has Recent Sale",
+            "type": "boolean"
+          },
           "menu_item_ids": {
             "items": {
               "type": "integer"
@@ -6350,7 +6354,8 @@
         "required": [
           "table_no",
           "window_minutes",
-          "menu_item_ids"
+          "menu_item_ids",
+          "has_recent_sale"
         ],
         "title": "DineInRecentItemsRead",
         "type": "object"
@@ -18581,6 +18586,11 @@
             "title": "Linepay Fee Pct",
             "type": "string"
           },
+          "menu_refill_any_item": {
+            "default": false,
+            "title": "Menu Refill Any Item",
+            "type": "boolean"
+          },
           "menu_refill_pct": {
             "title": "Menu Refill Pct",
             "type": "integer"
@@ -18859,6 +18869,17 @@
               }
             ],
             "title": "Linepay Fee Pct"
+          },
+          "menu_refill_any_item": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Refill Any Item"
           },
           "menu_refill_pct": {
             "anyOf": [

@@ -128,9 +128,10 @@ export function invoiceNote(to: InvoiceDestination): string {
 export function refillState(
   item: Pick<MenuItemView, "id" | "refillable">,
   pct: number | null,
-  table: Pick<TableView, "service_mode" | "refill_item_ids"> | null,
+  table: Pick<TableView, "service_mode" | "refill_item_ids" | "refill_any"> | null,
 ): "ELIGIBLE" | "NOT_ORDERED" | "NONE" {
   if (item.refillable !== true || pct === null || table === null || table.service_mode !== "DINE_IN") return "NONE";
+  if (table.refill_any === true) return "ELIGIBLE"; // 不限品項續點：本桌有消費過就都能續點
   return (table.refill_item_ids ?? []).includes(item.id) ? "ELIGIBLE" : "NOT_ORDERED";
 }
 

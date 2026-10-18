@@ -827,19 +827,22 @@ type PickedMenuLine = {
 function MenuItemDialog({
   item,
   refillPct,
+  refillAnyItem,
   onAdd,
   onCancel,
 }: {
   item: MenuItemRead;
   /** 續點折數（80＝八折）；設定還沒讀到為 null，就先不讓選續點。 */
   refillPct: number | null;
+  /** 不限品項續點（2026-10-19）：沒勾「可續點」的品項也能續點。 */
+  refillAnyItem: boolean;
   onAdd: (line: PickedMenuLine) => void;
   onCancel: () => void;
 }) {
   const [qty, setQty] = useState("1");
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [refill, setRefill] = useState(false);
-  const canRefill = item.refillable && refillPct !== null;
+  const canRefill = (item.refillable || refillAnyItem) && refillPct !== null;
   const groups = item.option_groups;
   const n = Math.max(1, Math.trunc(parseNtd(qty) ?? 1));
   const pickedOptions = groups.flatMap((g) =>
@@ -1236,10 +1239,12 @@ function DiscountDialog({
 function MenuPanel({
   onAdd,
   refillPct,
+  refillAnyItem,
   disabled = false,
 }: {
   onAdd: (line: CartLine) => void;
   refillPct: number | null;
+  refillAnyItem: boolean;
   disabled?: boolean;
 }) {
   const [selected, setSelected] = useState<MenuItemRead | null>(null);
@@ -1341,6 +1346,7 @@ function MenuPanel({
         <MenuItemDialog
           item={selected}
           refillPct={refillPct}
+          refillAnyItem={refillAnyItem}
           onAdd={add}
           onCancel={() => setSelected(null)}
         />
@@ -2024,10 +2030,16 @@ export default function PosPage() {
         params: { query: { table_no: refillTable ?? "" } },
       });
       if (!data) throw new Error(extractDetail(err) ?? "讀取本桌點過的品項失敗");
-      return data.menu_item_ids;
+      return { menuItemIds: data.menu_item_ids, hasRecentSale: data.has_recent_sale };
     },
   });
-  const refillValidation = refillCheck(refillLines, dineIn, recentItems.data ?? null);
+  const refillAnyItem = settings.data?.menu_refill_any_item ?? false;
+  const refillValidation = refillCheck(
+    refillLines,
+    dineIn,
+    recentItems.data ?? null,
+    refillAnyItem,
+  );
   const dineInOk = dineInValidation.ok && refillValidation.error === null;
 
   // 商品備註提醒：車內帶備註的行，與「這組備註是否已被確認過」。
@@ -3122,6 +3134,7 @@ export default function PosPage() {
           <MenuPanel
             onAdd={addToCart}
             refillPct={settings.data?.menu_refill_pct ?? null}
+            refillAnyItem={refillAnyItem}
             disabled={cartMutationLocked}
           />
         </div>

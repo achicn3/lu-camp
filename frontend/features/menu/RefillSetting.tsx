@@ -44,6 +44,23 @@ export function RefillSetting() {
     onError: (err: Error) => setError(err.message),
   });
 
+  // 不限品項續點（2026-10-19）：勾了就存，不必另外按儲存。
+  const anyItem = useMutation({
+    mutationFn: async (on: boolean) => {
+      const { data, error: err } = await api.PATCH("/api/v1/settings", {
+        body: { menu_refill_any_item: on },
+      });
+      if (!data) throw new Error(extractDetail(err) ?? "儲存失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setSaved(true);
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+  const anyItemOn = settings.data?.menu_refill_any_item ?? false;
+
   function submit(event: FormEvent) {
     event.preventDefault();
     setSaved(false);
@@ -74,9 +91,25 @@ export function RefillSetting() {
       <button type="submit" className="btn-secondary" disabled={save.isPending}>
         儲存續點折數
       </button>
+      <label className="menu-refill-any">
+        <input
+          type="checkbox"
+          checked={anyItemOn}
+          disabled={settings.data == null || anyItem.isPending}
+          onChange={(e) => {
+            setSaved(false);
+            setError(null);
+            anyItem.mutate(e.target.checked);
+          }}
+        />
+        <span>不限品項都可以續點（本桌 90 分鐘內有消費過，就能續點任何餐飲品項）</span>
+      </label>
       <p className="hint">
         {shown === null ? "" : `目前續點打 ${refillLabel(shown)}（照原價含加料的 ${shown}% 算）。`}
-        在品項「編輯」勾「可續點」才能續點；改了折數要重新發佈線上菜單，客人那邊才會換。
+        {anyItemOn
+          ? "目前不限品項：每個餐飲品項都能續點。"
+          : "在品項「編輯」勾「可續點」才能續點，而且本桌 90 分鐘內要點過同一項。"}
+        改了設定要重新發佈線上菜單，客人那邊才會換。
       </p>
       {saved && (
         <p role="status" className="hint">

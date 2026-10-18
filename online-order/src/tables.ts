@@ -2,7 +2,8 @@
 // 桌位碼不是身分證明，只決定桌號，不能用來查任何訂單。
 import { error, json } from "./http";
 import type { TableMinimum } from "./pricing";
-import { refillEligibleItems } from "./refill";
+import { refillEligibility } from "./refill";
+import { currentEffectiveMenu } from "./menu";
 
 export type { TableMinimum };
 
@@ -96,6 +97,12 @@ export async function readTable(env: Env, storeId: number, code: string): Promis
     .first<{ label: string; service_mode: string; minimum: string | null }>();
   if (row === null) return error("not_found", 404);
   // 本桌 90 分鐘內點過的品項：客人頁據此決定要不要顯示「我是續點」（店主 2026-10-19）。
-  const refill = await refillEligibleItems(env, storeId, code, row.service_mode);
-  return json({ ...row, minimum: parseMinimum(row.minimum), refill_item_ids: [...refill].sort((a, b) => a - b) });
+  // 不限品項續點（refill_any）時，本桌有消費過就都能續點。
+  const refill = await refillEligibility(env, storeId, code, row.service_mode);
+  const anyItem = (await currentEffectiveMenu(env, storeId))?.refill_any_item === true;
+  return json({
+    ...row, minimum: parseMinimum(row.minimum),
+    refill_item_ids: [...refill.items].sort((a, b) => a - b),
+    refill_any: anyItem && refill.anySale,
+  });
 }

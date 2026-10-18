@@ -255,9 +255,11 @@ function openDetail(item: MenuItemView): void {
     if (refillable === "ELIGIBLE") {
       const label = el("label", "opt-choice");
       label.append(refill, el("span", "", `我是續點（${refillDiscountLabel(refillPct)}，加料也打折）`));
-      field.append(label, el("p", "opt-note", "本桌點過這項，可以用續點價再點。"));
+      field.append(label, el("p", "opt-note", menu?.refill_any_item === true ? "本桌消費過，可以用續點價再點。" : "本桌點過這項，可以用續點價再點。"));
     } else {
-      field.append(el("p", "opt-note", `本桌 90 分鐘內點過這項，才能用續點價（${refillDiscountLabel(refillPct)}）再點。`));
+      // 不限品項續點時看「本桌有沒有消費過」，否則看「本桌點過這項」。
+      const need = menu?.refill_any_item === true ? "本桌 90 分鐘內有消費過" : "本桌 90 分鐘內點過這項";
+      field.append(el("p", "opt-note", `${need}，才能用續點價（${refillDiscountLabel(refillPct)}）再點。`));
     }
     body.append(field);
   }
@@ -899,7 +901,9 @@ async function submitDraft(draft: Draft): Promise<void> {
       showMessage(result.error === "minimum_not_met" ? minimumRejected(result) :
         result.error === "party_size_required" ? "這桌需要填寫用餐人數，請重新整理頁面後再送出。" :
         result.error === "sold_out" ? "品項已售完，請更新菜單後再選。" :
-        result.error === "refill_not_eligible" ? "本桌 90 分鐘內沒有點過這項，不能用續點價，請改成一般點。" :
+        result.error === "refill_not_eligible" ? (menu?.refill_any_item === true
+          ? "本桌 90 分鐘內沒有消費紀錄，不能用續點價，請改成一般點。"
+          : "本桌 90 分鐘內沒有點過這項，不能用續點價，請改成一般點。") :
         result.error === "challenge_failed" ? "驗證未通過，請重新送出。" : "訂單內容有變，請重新確認後送出。");
     } else {
       renderCart(); showMessage("尚未確認訂單是否成立。請按「重試確認訂單」，不要重新選品項送單。");

@@ -597,6 +597,8 @@ class DineInRecentItemsRead(BaseModel):
     table_no: str
     window_minutes: int
     menu_item_ids: list[int]
+    # 本桌時限內有沒有任何內用消費：不限品項續點時 POS 看這個（2026-10-19）。
+    has_recent_sale: bool
 
 
 class FnbSaleSummaryRead(BaseModel):

@@ -68,6 +68,8 @@ class SettingsRead(BaseModel):
     online_order_hours: OnlineHours = Field(default_factory=OnlineHours)
     # 續點照原價的幾成算（80＝八折）。
     menu_refill_pct: int
+    # 不限品項續點：每個餐飲品項都能續點，本桌 90 分鐘內有消費過就行（2026-10-19）。
+    menu_refill_any_item: bool = False
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -123,6 +125,7 @@ class SettingsUpdateRequest(BaseModel):
     menu_refill_pct: (
         Annotated[int, Field(ge=MENU_REFILL_PCT_MIN, le=MENU_REFILL_PCT_MAX)] | None
     ) = None
+    menu_refill_any_item: bool | None = None
 
     @field_validator("dine_in_tables")
     @classmethod

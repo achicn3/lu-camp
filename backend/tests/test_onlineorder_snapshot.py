@@ -251,3 +251,35 @@ def test_no_refillable_items_keeps_old_snapshot_shape() -> None:
     )
     assert "refill_pct" not in snap
     assert "refillable" not in snap["items"][0]
+
+
+def test_refill_any_item_marks_every_item_and_tells_the_cloud() -> None:
+    """不限品項續點（店主 2026-10-19）：每個品項都能續點，雲端照「本桌有消費過」判斷資格。"""
+    snap = build_snapshot(
+        [_detail(_item(refillable=False), None, []), _detail(_item(id=6, name="蛋糕"), None, [])],
+        [],
+        store_name="露坑",
+        version=3,
+        published_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        font_sha256=None,
+        day=TODAY,
+        refill_pct=80,
+        refill_any_item=True,
+    )
+    assert snap["refill_pct"] == 80
+    assert snap["refill_any_item"] is True
+    assert [i.get("refillable") for i in snap["items"]] == [True, True]
+
+
+def test_refill_any_item_off_keeps_snapshot_shape() -> None:
+    snap = build_snapshot(
+        [_detail(_item(refillable=True), None, [])],
+        [],
+        store_name="露坑",
+        version=3,
+        published_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        font_sha256=None,
+        day=TODAY,
+        refill_pct=80,
+    )
+    assert "refill_any_item" not in snap

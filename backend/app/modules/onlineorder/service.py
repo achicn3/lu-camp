@@ -139,6 +139,7 @@ class OnlineOrderService:
         )
 
     async def _snapshot(self, store_id: int, version: int, published_at: datetime) -> Snapshot:
+        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
         menu = MenuService(self._session)
         items = await menu.list_items(store_id, include_unavailable=False)
         details = await menu.describe_items(store_id, items)
@@ -164,11 +165,9 @@ class OnlineOrderService:
                 },
             ),
             retail=await RetailListingService(self._session).snapshot_retail(store_id),
-            refill_pct=(
-                await StoreSettingsService(self._session).get_effective_settings(store_id)
-            ).menu_refill_pct,
+            refill_pct=settings.menu_refill_pct,
+            refill_any_item=settings.menu_refill_any_item,
         )
-        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
         snapshot["hours"] = settings.online_order_hours
         # 引導推薦（M2a）：只引用這份快照裡有的品項與體驗卡；沒有可推薦的就不帶。
         quiz = await MenuQuizService(self._session).snapshot_quiz(

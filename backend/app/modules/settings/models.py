@@ -161,6 +161,11 @@ class StoreSettings(Base, TimestampMixin):
     menu_refill_pct: Mapped[int] = mapped_column(
         Integer, default=80, server_default=text("80"), nullable=False
     )
+    # 不限品項續點（2026-10-19）：打開後每個餐飲品項都能續點，
+    # 本桌 90 分鐘內有消費過就能續點任何品項。
+    menu_refill_any_item: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
 
 class PremiumRateHistory(Base):

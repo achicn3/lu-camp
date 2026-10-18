@@ -2407,13 +2407,15 @@ class SalesService:
             for name, (qty, cost, unknown) in rows
         )
 
-    async def dine_in_recent_menu_item_ids(self, store_id: int, table_no: str) -> list[int]:
-        """本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒「本桌沒點過這項」，不擋。
+    async def dine_in_recent(self, store_id: int, table_no: str) -> tuple[list[int], bool]:
+        """本桌最近點過的餐飲品項，與有沒有任何消費（店主 2026-10-19）：POS 勾續點時提醒用，不擋。
 
         只看同一桌的內用、沒作廢、`REFILL_LOOKBACK` 之內的銷售（含線上單成立的銷售）。
         """
         since = datetime.now(UTC) - REFILL_LOOKBACK
-        return await self._repo.dine_in_menu_item_ids_since(store_id, table_no.strip(), since)
+        table = table_no.strip()
+        items = await self._repo.dine_in_menu_item_ids_since(store_id, table, since)
+        return items, await self._repo.has_dine_in_sale_since(store_id, table, since)
 
     async def list_fnb_sales(
         self,

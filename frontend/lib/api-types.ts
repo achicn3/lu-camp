@@ -7064,6 +7064,8 @@ export interface components {
          * @description 本桌最近點過的餐飲品項（店主 2026-10-19）：POS 勾續點時提醒用，不擋結帳。
          */
         DineInRecentItemsRead: {
+            /** Has Recent Sale */
+            has_recent_sale: boolean;
             /** Menu Item Ids */
             menu_item_ids: number[];
             /** Table No */
@@ -11650,6 +11652,11 @@ export interface components {
             linepay_enabled: boolean;
             /** Linepay Fee Pct */
             linepay_fee_pct: string;
+            /**
+             * Menu Refill Any Item
+             * @default false
+             */
+            menu_refill_any_item: boolean;
             /** Menu Refill Pct */
             menu_refill_pct: number;
             /** Monthly Fixed Cash Outflow */
@@ -11720,6 +11727,8 @@ export interface components {
             linepay_enabled?: boolean | null;
             /** Linepay Fee Pct */
             linepay_fee_pct?: number | string | null;
+            /** Menu Refill Any Item */
+            menu_refill_any_item?: boolean | null;
             /** Menu Refill Pct */
             menu_refill_pct?: number | null;
             /** Monthly Fixed Cash Outflow */

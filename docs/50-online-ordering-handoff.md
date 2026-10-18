@@ -12,7 +12,10 @@
   限制：櫃檯點的單雲端看不到，第一杯在櫃檯點的要回櫃檯續點。
 - POS：後端外帶續點直接擋（`_validate_service_mode_shape`）；`GET /api/v1/sales/dine-in-recent-items?table_no=` 給本桌 90 分鐘內點過的品項（含線上單成立的銷售）；
   結帳區選好桌號就顯示「本桌 90 分鐘內點過／沒點過」，**沒點過只提醒、不擋**（店主 2026-10-19）。時限常數：後端 `REFILL_LOOKBACK`、雲端 `REFILL_WINDOW_MS`。
-- 店內升級 docs/92（無 migration）；雲端與店內先後順序都可以。煙霧：`online-order/test/refill-table-smoke.mjs`、`frontend/scripts/pos-refill-table-smoke.mjs`、
+- **設定「不限品項都可以續點」**（`settings.menu_refill_any_item`，migration `d4a8c2e6f1b3`；店主 2026-10-19）：打開後每個餐飲品項都能續點，
+  前提是本桌 90 分鐘內**有消費過**（不必同一項）。快照帶 `refill_any_item: true` 且每個品項標 `refillable`；雲端 `GET /api/tables/:code` 多 `refill_any`；
+  POS `dine-in-recent-items` 多 `has_recent_sale`。菜單管理「品項」分頁的續點折數旁勾選。
+- 店內升級 docs/92（有 migration）；**雲端先上、再升級店內**（新雲端才認得 `refill_any_item`；舊雲端會無視它、照同一項規則）。煙霧：`online-order/test/refill-table-smoke.mjs`、`frontend/scripts/pos-refill-table-smoke.mjs`、
   `frontend/scripts/menu-refill-smoke.mjs`（已改為先點、結帳後才續點；可用 SMOKE_API／SMOKE_POS／SMOKE_ORDER 指到隔離環境）。
 
 ## 2026-10-18：線上 LINE Pay 用客人綁定的載具

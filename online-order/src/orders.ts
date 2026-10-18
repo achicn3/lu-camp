@@ -10,7 +10,7 @@ import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
 import { TABLE_CODE, type TableMinimum, parseMinimum } from "./tables";
 import { withinHours } from "./hours";
-import { refillEligibleItems } from "./refill";
+import { refillAllowed, refillEligibility } from "./refill";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
 const PARTY_MAX = 50;
@@ -300,8 +300,9 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
   const refills = priced.lines.filter((l) => l.refill === true);
   if (refills.length > 0) {
     // 續點要本桌 90 分鐘內點過、已付款的同一品項；外帶不續點（店主 2026-10-19）。
-    const eligible = await refillEligibleItems(env, storeId, body.table_code, serviceMode, now);
-    const denied = refills.find((l) => !eligible.has(l.item_id ?? -1));
+    const eligible = await refillEligibility(env, storeId, body.table_code, serviceMode, now);
+    const anyItem = menu.refill_any_item === true;
+    const denied = refills.find((l) => !refillAllowed(eligible, l.item_id ?? -1, anyItem));
     if (denied !== undefined) return json({ error: "refill_not_eligible", item_id: denied.item_id ?? null }, 422);
   }
   const shortfall = minimumShortfall(minimum, priced.total, priced.lines, body.party_size);

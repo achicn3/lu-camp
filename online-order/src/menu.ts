@@ -149,6 +149,8 @@ export function validSnapshot(s: unknown): s is { version: number; published_at:
   // 續點折數（2026-10-16）：80＝八折；沒有可續點品項時不帶。
   if (o.refill_pct !== undefined && !(Number.isInteger(o.refill_pct) && (o.refill_pct as number) >= 1 &&
     (o.refill_pct as number) <= 99)) return false;
+  // 不限品項續點（2026-10-19）：只收 true，沒打開不帶這欄。
+  if (o.refill_any_item !== undefined && o.refill_any_item !== true) return false;
   return o.items.every((item: unknown) => {
     if (!isRecord(item)) return false;
     const i = item as Record<string, unknown>;

@@ -1,6 +1,7 @@
 // 續點要「本桌 90 分鐘內點過」（店主 2026-10-19）真瀏覽器煙霧：本機 Worker/D1＋真客人頁。
 // 手機 A 在 T1 點手沖 → POS 結帳回報已付款 → 手機 B（另一支手機）在 T1：手沖可勾「我是續點」、
 // 戚風（本桌還沒點過）只說明要先點過；送出續點單成功。外帶桌不提續點。
+// 再發佈「不限品項續點」的菜單：同桌（有消費過）連沒點過的戚風也能續點。
 // 只對隔離的本機 wrangler dev（Cloudflare 官方 Turnstile 測試金鑰）跑，絕不指向正式站。
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -41,7 +42,7 @@ const coffee = `手沖 ${run}`;
 const cake = `戚風 ${run}`;
 const T1 = `smokeT1${run}`.padEnd(16, "x");
 const TO = `smokeTO${run}`.padEnd(16, "x");
-await integration("PUT", "/integration/menu", {
+const menu = {
   version: run, published_at: new Date().toISOString(), store_name: "露坑", font: null, refill_pct: 80,
   categories: [{ id: 1, name: "咖啡" }, { id: 2, name: "甜點" }],
   items: [
@@ -50,7 +51,8 @@ await integration("PUT", "/integration/menu", {
     { id: 6, name: cake, description: null, category_id: 2, unit_price: 100, photo: null,
       available: true, remaining: null, refillable: true, option_groups: [] },
   ],
-});
+};
+await integration("PUT", "/integration/menu", menu);
 await integration("PUT", "/integration/tables", { revision: run, tables: [
   { code: T1, label: "T1", service_mode: "DINE_IN" },
   { code: TO, label: "外帶", service_mode: "TAKEOUT" },
@@ -118,6 +120,15 @@ try {
   await c.getByRole("button", { name: "咖啡", exact: true }).click();
   await c.locator(".item", { hasText: coffee }).waitFor();
   assert.equal(await c.getByText("可續點 8 折").count(), 0, "外帶不提續點");
+
+  // 不限品項續點：本桌有消費過，沒點過的戚風也能續點
+  await integration("PUT", "/integration/menu", { ...menu, version: run + 1, refill_any_item: true });
+  const d = await phone();
+  await d.goto(`${base}/t/${T1}`, { waitUntil: "networkidle" });
+  await openItem(d, "甜點", cake);
+  await d.getByLabel("我是續點（8 折，加料也打折）").check();
+  await d.getByText("本桌消費過，可以用續點價再點。").waitFor();
+  await d.screenshot({ path: join(shots, "4-any-item-eligible.png") });
 
   assert.deepEqual(errors, [], "No browser JavaScript errors");
   console.log(`refill-table smoke OK — screenshots in ${shots}`);

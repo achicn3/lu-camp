@@ -552,7 +552,12 @@ class MenuService:
         if len(set(option_ids)) != len(option_ids):
             raise SaleLineInvalid(f"「{item.name}」的同一個選項不能選兩次")
         if refill and not item.refillable:
-            raise SaleLineInvalid(f"「{item.name}」不能續點")
+            # 不限品項續點（2026-10-19）：設定打開時沒勾「可續點」的品項也能續點。
+            any_item = (
+                await StoreSettingsService(self._session).get_effective_settings(store_id)
+            ).menu_refill_any_item
+            if not any_item:
+                raise SaleLineInvalid(f"「{item.name}」不能續點")
         details = (await self.describe_items(store_id, [item]))[0].option_groups
         chosen = set(option_ids)
         known = {o.id for d in details for o in d.options}

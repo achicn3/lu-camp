@@ -94,25 +94,37 @@ export interface RefillLine {
   description: string;
 }
 
+/** 本桌最近的消費（後端 `dine-in-recent-items`）。 */
+export interface TableRecent {
+  menuItemIds: readonly number[];
+  hasRecentSale: boolean;
+}
+
 /**
  * 續點檢查（店主 2026-10-19）：外帶不能續點（擋下，後端同一條）。內用選好桌號後顯示本桌 90 分鐘內
  * 有沒有點過：有就確認（found）、沒有只提醒（warning），照樣能結（櫃檯常有換桌、桌號沒填的狀況）。
- * `recentIds`＝本桌最近點過的品項，還沒查到是 null（先不說）。
+ * `anyItem`＝設定「不限品項續點」：看本桌有沒有消費過，不必是同一項。`recent` 還沒查到是 null（先不說）。
  */
 export function refillCheck(
   refills: RefillLine[],
   selection: DineInSelection,
-  recentIds: readonly number[] | null,
+  recent: TableRecent | null,
+  anyItem: boolean,
 ): { error: string | null; warning: string | null; found: string | null } {
   const none = { error: null, warning: null, found: null };
   if (refills.length === 0) return none;
   if (selection.mode === "TAKEOUT") {
     return { ...none, error: "外帶不能續點，請把續點改成一般點，或改選內用" };
   }
-  if (selection.mode !== "DINE_IN" || selection.tableNo === null || recentIds === null) return none;
+  if (selection.mode !== "DINE_IN" || selection.tableNo === null || recent === null) return none;
   const names = (lines: RefillLine[]) => lines.map((line) => line.description).join("、");
-  const ordered = refills.filter((line) => recentIds.includes(line.menuItemId));
-  const missing = refills.filter((line) => !recentIds.includes(line.menuItemId));
+  if (anyItem) {
+    return recent.hasRecentSale
+      ? { ...none, found: `本桌 90 分鐘內有消費過，可以續點：${names(refills)}` }
+      : { ...none, warning: `本桌 90 分鐘內沒有消費紀錄：${names(refills)}。確定是續點再結帳。` };
+  }
+  const ordered = refills.filter((line) => recent.menuItemIds.includes(line.menuItemId));
+  const missing = refills.filter((line) => !recent.menuItemIds.includes(line.menuItemId));
   return {
     error: null,
     warning: missing.length > 0 ? `本桌 90 分鐘內沒點過：${names(missing)}。確定是續點再結帳。` : null,

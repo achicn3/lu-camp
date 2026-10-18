@@ -37,7 +37,7 @@ UI_TEXT = (
     "場沿由"
     "模痕說"
     "打折續般飲"
-    "價"
+    "價紀費都錄"
     "印為綁話輸進"
     "+-×$0123456789.,:;!?()/ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz&"
 )

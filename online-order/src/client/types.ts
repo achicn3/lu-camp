@@ -103,6 +103,8 @@ export interface MenuSnapshot {
   quiz?: MenuQuizView;
   /** 續點照原價（含加料）的幾成算，80＝八折；沒有可續點品項時沒有這欄。 */
   refill_pct?: number;
+  /** 不限品項續點（2026-10-19）：本桌有消費過就能續點任何品項；沒打開沒有這欄。 */
+  refill_any_item?: true;
   /** 店員推薦（2026-10-10）：店主排好的順序；沒設定時沒有這欄。retail 的 id 是帶著走商品 id。 */
   picks?: { kind: "item" | "experience" | "retail"; id: number }[];
 }
@@ -120,4 +122,6 @@ export interface TableView {
   minimum?: TableMinimum | null;
   /** 本桌 90 分鐘內點過（已付款）的品項，可以續點（店主 2026-10-19）；舊版雲端沒有這欄。 */
   refill_item_ids?: number[];
+  /** 不限品項續點時，本桌 90 分鐘內有消費過（已付款）＝都能續點；舊版雲端沒有這欄。 */
+  refill_any?: boolean;
 }

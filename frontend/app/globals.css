@@ -6898,3 +6898,14 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   background: rgba(46, 125, 79, 0.08);
   color: var(--success);
 }
+/* 不限品項續點（2026-10-19）：勾選框不吃折數輸入框的寬度。 */
+.menu-refill-any {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--tap-min);
+}
+.menu-refill-setting .menu-refill-any input {
+  width: auto;
+  min-height: auto;
+}
