@@ -1403,6 +1403,31 @@ async def test_typed_invoice_not_replaced_when_order_paid_after_import(
     assert (row.invoice_carrier, row.invoice_tax_id) == (None, "12345678")
 
 
+async def test_paid_retail_only_order_from_a_table_settles_without_dine_in(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """只買帶著走商品的 LINE Pay 單、從內用桌點的：自動成立銷售不帶內用／桌號（2026-10-21 店主測試發現；
+    沒有餐飲的銷售不可指定內用/外帶）。"""
+    bean = await _bean(db_session, ctx)
+    lines = [_retail_line(1, bean.id)]
+    held = {
+        **_order(_rid(77), lines, hold="HOLD_REQUESTED"),
+        "payment_method": "LINE_PAY",
+        "payment_status": "PENDING",
+    }
+    await _pull_raw(db_session, ctx, held)
+    paid = {**_paid(_rid(77), lines), "service_mode": "DINE_IN", "table_label": "A1"}
+    row = await _pull_raw(db_session, ctx, paid)
+    settled = await client.post(
+        f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk)
+    )
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["sale_id"] is not None, settled.text
+    sale = await SalesService(db_session).get_sale(ctx.store_id, settled.json()["sale_id"])
+    assert sale is not None
+    assert (sale.service_mode, sale.table_no) == (None, None)
+
+
 async def test_voiding_an_online_linepay_sale_refunds_by_transaction(
     client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
 ) -> None:

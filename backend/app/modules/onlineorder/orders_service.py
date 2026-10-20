@@ -699,6 +699,7 @@ class OnlineOrdersService:
             raise OnlineOrderConflict("這張線上單還沒用 LINE Pay 付款")
         sales = SalesService(self._session)
         lines = [_sale_line(line) for line in order.lines]
+        has_menu = any(not _is_retail(line) for line in order.lines)
         # 沒開電子發票的店不能帶發票欄位（照櫃檯結帳的規則）：客人填的載具就用不到了。
         einvoice = (
             await StoreSettingsService(self._session).get_effective_settings(store_id)
@@ -725,8 +726,11 @@ class OnlineOrdersService:
                     tenders=[TenderInput(tender_type=TenderType.LINE_PAY, amount=order.total)],
                     idempotency_key=f"online-linepay-{order.remote_id}",
                     disabled_campaigns=overrides,
-                    service_mode=ServiceMode(order.service_mode),
-                    table_no=order.table_label if order.service_mode == "DINE_IN" else None,
+                    # 只買帶著走商品的單沒有餐飲：不帶內用／外帶與桌號（2026-10-21 店主測試發現）。
+                    service_mode=ServiceMode(order.service_mode) if has_menu else None,
+                    table_no=(
+                        order.table_label if has_menu and order.service_mode == "DINE_IN" else None
+                    ),
                     invoice_info=_invoice_info(order) if einvoice else None,
                     online_order_id=order.id,
                     online_linepay=OnlineLinePayCapture(
