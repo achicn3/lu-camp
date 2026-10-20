@@ -15,6 +15,8 @@
 - **設定「不限品項都可以續點」**（`settings.menu_refill_any_item`，migration `d4a8c2e6f1b3`；店主 2026-10-19）：打開後每個餐飲品項都能續點，
   前提是本桌 90 分鐘內**有消費過**（不必同一項）。快照帶 `refill_any_item: true` 且每個品項標 `refillable`；雲端 `GET /api/tables/:code` 多 `refill_any`；
   POS `dine-in-recent-items` 多 `has_recent_sale`。菜單管理「品項」分頁的續點折數旁勾選。
+- Codex 對抗審查（2026-10-19）：「外帶不續點」的檢查在冪等重放與線上已付款自動成立之前，升級前已成立／已付款的外帶續點單
+  升級後會被擋——**店主裁示不修、不再提**（正式站未開 LINE Pay；跨升級重送幾乎不會發生；被擋只是顯示原因，不會多收少收）。
 - 店內升級 docs/92（有 migration）；**雲端先上、再升級店內**（新雲端才認得 `refill_any_item`；舊雲端會無視它、照同一項規則）。煙霧：`online-order/test/refill-table-smoke.mjs`、`frontend/scripts/pos-refill-table-smoke.mjs`、
   `frontend/scripts/menu-refill-smoke.mjs`（已改為先點、結帳後才續點；可用 SMOKE_API／SMOKE_POS／SMOKE_ORDER 指到隔離環境）。
 
