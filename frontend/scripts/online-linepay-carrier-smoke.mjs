@@ -107,7 +107,11 @@ try {
     await guest.goto(ORDER);
     await guest.locator(".item").filter({ hasText: "拿鐵" }).first().locator(".item-add").click();
     await guest.getByRole("button", { name: /購物車 1 份/ }).click();
+    const cashNote = guest.getByText("櫃檯結帳訂單請在送出後 10 分鐘內結帳，逾時將自動取消。", { exact: true });
+    await cashNote.waitFor();
     await guest.getByLabel(/LINE Pay/).check();
+    // 「10 分鐘內到櫃檯結帳」只跟櫃檯結帳有關：選 LINE Pay 就不顯示（店主 2026-10-20）
+    assert.ok(await cashNote.isHidden(), "LINE Pay 不顯示櫃檯結帳期限");
     assert.equal(await guest.locator("#invoice-kind option:checked").textContent(), "LINE Pay 上已綁定");
     // 沒填的說明：有綁就存、不用輸入；沒綁才印紙本。
     // 「LINE Pay 上已綁定」不另外說明（店主 2026-10-20：客人會自己知道）。
