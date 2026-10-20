@@ -1,5 +1,6 @@
 // LINE Pay 綁定載具（店主 2026-10-17）真瀏覽器煙霧：真客人頁 ＋ 本機 Worker/D1 ＋ 假 LINE Pay。
 // 三種情況各付一次：①沒填、LINE Pay 有綁 → 存綁定的載具 ②沒填、沒綁 → 印紙本 ③自己填了 → 以填的為準。
+// 結帳頁只有選「統一編號」才有說明（店主 2026-10-20）。
 // 每次付好看訂單頁的發票說明，並用 POS 拉單確認開發票用的載具。只連隔離的 Worker（不碰 POS／Postgres），需：
 //   wrangler dev 帶 --var LINEPAY_CHANNEL_ID／LINEPAY_CHANNEL_SECRET／
 //   LINEPAY_API_BASE=http://127.0.0.1:<SMOKE_LINEPAY_PORT>，TURNSTILE 用 Cloudflare 測試金鑰；
@@ -109,7 +110,8 @@ try {
     await guest.getByLabel(/LINE Pay/).check();
     assert.equal(await guest.locator("#invoice-kind option:checked").textContent(), "LINE Pay 上已綁定");
     // 沒填的說明：有綁就存、不用輸入；沒綁才印紙本。
-    await guest.getByText("發票會自動存進你在 LINE Pay 綁定的手機條碼載具，不需輸入；沒綁定就印紙本發票，請到櫃檯領取。").waitFor();
+    // 「LINE Pay 上已綁定」不另外說明（店主 2026-10-20：客人會自己知道）。
+    assert.ok(await guest.locator("#invoice-hint").isHidden(), "預設選項不顯示說明");
     if (s.name === "bound") await guest.screenshot({ path: `${SHOTS}/01-checkout-hint.png` });
     if (s.typed) {
       await guest.locator("#invoice-kind").selectOption("carrier");
