@@ -414,6 +414,9 @@ class OnlineOrderLink(Base, TimestampMixin):
 
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), primary_key=True)
     accepting: Mapped[bool | None] = mapped_column(Boolean)
+    # 線上 LINE Pay 開關（2026-10-20）：雲端說的開／關，與雲端有沒有設定金鑰；None＝還沒聽雲端說過。
+    linepay_enabled: Mapped[bool | None] = mapped_column(Boolean)
+    linepay_configured: Mapped[bool | None] = mapped_column(Boolean)
     within_hours: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     payment_alerts: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb")

@@ -13633,6 +13633,20 @@
         "title": "OnlineHoursDay",
         "type": "object"
       },
+      "OnlineLinePayRequest": {
+        "description": "線上 LINE Pay 開關（店主 2026-10-20）。",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OnlineLinePayRequest",
+        "type": "object"
+      },
       "OnlineMenuPublishRead": {
         "properties": {
           "font_pushed": {
@@ -13992,6 +14006,28 @@
               }
             ],
             "title": "Last Pull Error"
+          },
+          "linepay_configured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linepay Configured"
+          },
+          "linepay_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linepay Enabled"
           },
           "orders": {
             "items": {
@@ -31761,6 +31797,53 @@
           }
         ],
         "summary": "Set Online Order Accepting",
+        "tags": [
+          "online-orders"
+        ]
+      }
+    },
+    "/api/v1/online-orders/linepay": {
+      "put": {
+        "description": "打開／關掉線上點餐的 LINE Pay（店主 2026-10-20，管理者）；雲端生效，回最新狀態。",
+        "operationId": "setOnlineOrderLinePay",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnlineLinePayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineOrdersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Online Order Linepay",
         "tags": [
           "online-orders"
         ]

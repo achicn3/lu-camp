@@ -9,11 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.orders_schemas import (
     OnlineAcceptingRequest,
     OnlineCartRead,
+    OnlineLinePayRequest,
     OnlineOrderRead,
     OnlineOrdersRead,
     OnlineSettlePaidRead,
@@ -120,6 +121,23 @@ async def hand_over_online_order(
         raise _http_error(exc) from exc
     await session.commit()
     return OnlineOrderRead.from_row(order)
+
+
+@router.put("/linepay", response_model=OnlineOrdersRead, operation_id="setOnlineOrderLinePay")
+async def set_online_order_linepay(
+    payload: OnlineLinePayRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(require_role("MANAGER"))],
+    client: ClientDep,
+) -> OnlineOrdersRead:
+    """打開／關掉線上點餐的 LINE Pay（店主 2026-10-20，管理者）；雲端生效，回最新狀態。"""
+    svc = OnlineOrdersService(session, client)
+    try:
+        await svc.set_linepay(user.store_id, payload.enabled)
+    except _Errors as exc:
+        raise _http_error(exc) from exc
+    await session.commit()
+    return OnlineOrdersRead.from_overview(await svc.overview(user.store_id))
 
 
 @router.put("/accepting", response_model=OnlineOrdersRead, operation_id="setOnlineOrderAccepting")

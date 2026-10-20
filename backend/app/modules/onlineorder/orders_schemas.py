@@ -101,6 +101,10 @@ class OnlineOrdersRead(BaseModel):
     payment_alert_count: int = 0
     accepting: bool | None
     """雲端說的接單狀態；還沒拉過單是 null。"""
+    linepay_enabled: bool | None = None
+    """線上 LINE Pay 開關（2026-10-20）；還沒聽雲端說過是 null。"""
+    linepay_configured: bool | None = None
+    """雲端有沒有設定 LINE Pay 金鑰；沒有的話打開也不會生效。"""
     paused_reason: str | None
     last_pull_at: datetime | None
     last_pull_error: str | None
@@ -117,6 +121,8 @@ class OnlineOrdersRead(BaseModel):
             else [OnlinePaymentAlert.model_validate(a) for a in link.payment_alerts],
             payment_alert_count=0 if link is None else link.payment_alert_count,
             accepting=None if link is None else link.accepting,
+            linepay_enabled=None if link is None else link.linepay_enabled,
+            linepay_configured=None if link is None else link.linepay_configured,
             paused_reason=None if link is None else link.paused_reason,
             last_pull_at=None if link is None else link.last_pull_at,
             last_pull_error=None if link is None else link.last_pull_error,
@@ -180,6 +186,12 @@ class OnlineCartRead(BaseModel):
 
 class OnlineAcceptingRequest(BaseModel):
     accepting: bool
+
+
+class OnlineLinePayRequest(BaseModel):
+    """線上 LINE Pay 開關（店主 2026-10-20）。"""
+
+    enabled: bool
 
 
 class OnlineSettlePaidRead(BaseModel):

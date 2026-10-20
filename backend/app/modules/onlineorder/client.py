@@ -100,6 +100,14 @@ class OnlineOrderClient:
             raise OnlineOrderPushFailed(f"線上點餐雲端拒收（{code}），請稍後再試")
         return data
 
+    async def set_linepay(self, enabled: bool) -> dict[str, object]:
+        """線上 LINE Pay 開關（2026-10-20）。"""
+        body = json.dumps({"enabled": enabled}).encode()
+        code, data = await self._send("PUT", "/integration/linepay", body)
+        if code >= 400:
+            raise OnlineOrderPushFailed(f"線上點餐雲端拒收（{code}），請先更新雲端或稍後再試")
+        return data
+
     async def put_json(self, path: str, payload: object) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
         await self._put(path, body, "application/json")

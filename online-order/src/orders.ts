@@ -6,10 +6,10 @@
 import { error, hex, json, sha256Hex } from "./http";
 import { invoiceDestination } from "./invoice";
 import { type OrderLineInput, minimumShortfall, priceOrder } from "./pricing";
-import { linePayConfig } from "./linepay";
 import { currentEffectiveMenu } from "./menu";
 import { TABLE_CODE, type TableMinimum, parseMinimum } from "./tables";
 import { withinHours } from "./hours";
+import { linePayOpen } from "./linepay-switch";
 import { refillAllowed, refillEligibility } from "./refill";
 
 export const ORDER_MAX_BYTES = 16 * 1024;
@@ -271,7 +271,7 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
   // 暫停只擋新的單：已經成立的單（回應遺失後重送）要拿得回來，否則客人查不到自己的單（Codex O4 第一輪）。
   if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
-  if (body.payment_method === "LINE_PAY" && linePayConfig(env) === null) return error("linepay_unavailable", 422);
+  if (body.payment_method === "LINE_PAY" && !(await linePayOpen(env, storeId))) return error("linepay_unavailable", 422);
   if (!(await verifyTurnstile(env, body.turnstile_token, ip))) return error("challenge_failed", 403);
 
   let tableLabel: string | null = null;
@@ -496,7 +496,7 @@ export async function storeStatus(env: Env, storeId: number): Promise<Response> 
       accepting: await accepting(env, storeId),
       within_hours: await withinHours(env, storeId),
       turnstile_site_key: env.TURNSTILE_SITE_KEY ?? null,
-      linepay: linePayConfig(env) !== null,
+      linepay: await linePayOpen(env, storeId),
     },
     200,
     { "Cache-Control": "no-store" },

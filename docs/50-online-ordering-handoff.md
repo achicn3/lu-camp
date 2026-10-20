@@ -4,6 +4,17 @@
 > 細節以各編號規格為準；本文只指路。最後更新：2026-10-14；日期較早的段落為歷史紀錄，以最新段落為準。
 
 
+
+## 2026-10-20：線上 LINE Pay 開關、測試站換新的沙盒金鑰
+
+- 店主 LINE Pay 申請通過，給了**測試環境**金鑰（Channel 2012116977）：**只設在測試站**（staging Worker secret，`LINEPAY_API_BASE=https://sandbox-api-pay.line.me`），
+  沙盒 `/v4/payments/request` 回 0000 驗過。正式站等正式金鑰再設（店主裁示）。測試站同時補上 D1 0010–0015 並部署最新 Worker。
+- **線上 LINE Pay 開關**（店主裁示預設關）：D1 `0016`（`stores_meta.linepay_enabled`）、`PUT /integration/linepay {enabled}`；`/api/status.linepay`＝有金鑰且打開；
+  關掉只擋建 LINE Pay 單與開始新付款，PENDING 的拿回原連結、請款與補查照常（錢收了要完成）。拉單與開關回應帶 `linepay_enabled`／`linepay_configured`。
+  POS：`PUT /api/v1/online-orders/linepay`（管理者）、`online_order_links` 快取兩欄（migration `e6b2d8f4a3c1`）；「餐飲菜單 → 線上發布」的勾選。
+  **部署順序：D1 0016 → Worker → 店內（docs/93）**。煙霧 `frontend/scripts/online-linepay-switch-smoke.mjs`；既有 LINE Pay 煙霧都補上先打開開關。
+- 測試坑：`online-order` 的 LINE Pay 測試偶爾 5 秒逾時（main 上一樣，5 次約 1 次），不是邏輯錯。
+
 ## 2026-10-19：續點要本桌點過（90 分鐘）、外帶不續點
 
 - 店主裁示：續點限**本桌 90 分鐘內點過（已付款）的同一品項**；看桌不看手機（同桌別支手機點的也算）；**外帶不續點**；**份數不限**。

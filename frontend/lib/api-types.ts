@@ -3170,6 +3170,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-orders/linepay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Online Order Linepay
+         * @description 打開／關掉線上點餐的 LINE Pay（店主 2026-10-20，管理者）；雲端生效，回最新狀態。
+         */
+        put: operations["setOnlineOrderLinePay"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-orders/{order_id}/cancel": {
         parameters: {
             query?: never;
@@ -9721,6 +9741,14 @@ export interface components {
             /** Opens */
             opens: string;
         };
+        /**
+         * OnlineLinePayRequest
+         * @description 線上 LINE Pay 開關（店主 2026-10-20）。
+         */
+        OnlineLinePayRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** OnlineMenuPublishRead */
         OnlineMenuPublishRead: {
             /** Font Pushed */
@@ -9835,6 +9863,10 @@ export interface components {
             last_pull_at: string | null;
             /** Last Pull Error */
             last_pull_error: string | null;
+            /** Linepay Configured */
+            linepay_configured?: boolean | null;
+            /** Linepay Enabled */
+            linepay_enabled?: boolean | null;
             /** Orders */
             orders: components["schemas"]["OnlineOrderRead"][];
             /** Paused Reason */
@@ -18745,6 +18777,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OnlineAcceptingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlineOrdersRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setOnlineOrderLinePay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnlineLinePayRequest"];
             };
         };
         responses: {

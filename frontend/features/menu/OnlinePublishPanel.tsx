@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { OnlineHoursSection } from "@/features/menu/OnlineHoursSection";
+import { OnlineLinePaySwitch } from "@/features/menu/OnlineLinePaySwitch";
 import { api } from "@/lib/api";
 import { formatTaipeiDateTime } from "@/lib/datetime";
 
@@ -81,6 +82,7 @@ export function OnlinePublishPanel() {
   return (
     <section className="card online-publish" aria-labelledby="online-publish-title">
       <h2 id="online-publish-title">線上點餐</h2>
+      <OnlineLinePaySwitch />
       <OnlineHoursSection />
       {status.isError && (
         <p role="alert" className="form-error">

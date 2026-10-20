@@ -7,7 +7,7 @@
 // 其餘交給靜態資產（點餐頁）。每個回應都加安全標頭。
 import { verifyIntegration } from "./auth";
 import { AVAILABILITY_MAX_BYTES, publishAvailability } from "./availability";
-import { pullOrders, reportOrder, setStoreStatus } from "./integration-orders";
+import { pullOrders, reportOrder, setLinePayEnabled, setStoreStatus } from "./integration-orders";
 import { BodyTooLarge, error, readBody, withSecurityHeaders } from "./http";
 import { type MediaKind, getMedia, mediaLimit, putMedia } from "./media";
 import { cancelLinePay, confirmLinePay, startLinePay } from "./linepay-orders";
@@ -26,6 +26,7 @@ const ROUTES: { method: string; pattern: RegExp; limit: number }[] = [
   { method: "GET", pattern: /^\/integration\/orders$/, limit: 0 },
   { method: "POST", pattern: /^\/integration\/orders\/[^/]+\/status$/, limit: 1024 },
   { method: "PUT", pattern: /^\/integration\/store-status$/, limit: 1024 },
+  { method: "PUT", pattern: /^\/integration\/linepay$/, limit: 1024 },
 ];
 
 async function integrationRoute(req: Request, env: Env, storeId: number, path: string): Promise<Response> {
@@ -48,6 +49,7 @@ async function integrationRoute(req: Request, env: Env, storeId: number, path: s
   if (path === "/integration/tables") return publishTables(env, storeId, body);
   if (path === "/integration/orders") return pullOrders(env, storeId);
   if (path === "/integration/store-status") return setStoreStatus(env, storeId, body);
+  if (path === "/integration/linepay") return setLinePayEnabled(env, storeId, body);
   const status = /^\/integration\/orders\/([^/]+)\/status$/.exec(path);
   if (status) return reportOrder(env, storeId, status[1] ?? "", body);
   return error("not_found", 404);

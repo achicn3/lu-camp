@@ -104,6 +104,7 @@ await must("PATCH", "/settings", { dine_in_tables: [...new Set([...(settings.din
 await must("POST", "/online-order/publish");
 const code = (await must("GET", "/online-order/status")).tables.find((t) => t.label === "A1")?.code;
 await must("PUT", "/online-orders/accepting", { accepting: true });
+await must("PUT", "/online-orders/linepay", { enabled: true }); // 線上 LINE Pay 開關預設關（2026-10-20）
 
 const browser = await chromium.launch();
 const errors = [];
@@ -138,7 +139,7 @@ try {
   await guest.getByLabel("手機條碼", { exact: true }).fill("/ABC+123");
   await guest.screenshot({ path: join(SHOTS, "01-guest-choose-linepay.png"), fullPage: true });
   await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();
-  await guest.waitForURL(/127\.0\.0\.1:8955\/pay\/\d+$/, { timeout: 45000 });
+  await guest.waitForURL(new RegExp(`127\\.0\\.0\\.1:${FAKE_PORT}/pay/\\d+$`), { timeout: 45000 });
   ok("跳到 LINE Pay 付款頁、金額正確", (await guest.locator("body").innerText()).includes("NT$150"));
   await guest.locator("#pay").click();
   await guest.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 30000 });
@@ -171,7 +172,7 @@ try {
   // ② 取消付款
   await orderLatte();
   await guest.getByRole("button", { name: "用 LINE Pay 付款" }).click();
-  await guest.waitForURL(/127\.0\.0\.1:8955\/pay\/\d+$/, { timeout: 45000 });
+  await guest.waitForURL(new RegExp(`127\\.0\\.0\\.1:${FAKE_PORT}/pay/\\d+$`), { timeout: 45000 });
   await guest.locator("#cancel").click();
   await guest.waitForURL(/\/order\/[A-Za-z0-9_-]+$/, { timeout: 30000 });
   await guest.getByText("LINE Pay 付款已取消，沒有扣款。").waitFor({ timeout: 20000 });

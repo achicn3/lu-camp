@@ -189,6 +189,7 @@ class OnlineOrdersService:
         link.accepting = accepting if isinstance(accepting, bool) else None
         reason = data.get("paused_reason")
         link.paused_reason = reason[:100] if isinstance(reason, str) else None
+        _store_linepay_state(link, data)
         imported = held = rejected = 0
         raw_orders = data.get("orders")
         for raw in raw_orders if isinstance(raw_orders, list) else []:
@@ -792,6 +793,14 @@ class OnlineOrdersService:
         title = await self._experiences.title_of(store_id, experience_id)
         return ordered_name if title is None else f"{title}・{description}"
 
+    async def set_linepay(self, store_id: int, enabled: bool) -> OnlineOrderLink:
+        """打開／關掉線上 LINE Pay（店主 2026-10-20）；雲端那邊生效，記下雲端回的現況。"""
+        data = await self._require_client(store_id).set_linepay(enabled)
+        link = await self._link(store_id)
+        _store_linepay_state(link, data)
+        await self._repo.flush()
+        return link
+
     async def set_accepting(self, store_id: int, accepting: bool) -> OnlineOrderLink:
         """暫停／恢復接單（雲端那邊生效）；恢復也會清掉雲端自動暫停的原因。"""
         data = await self._require_client(store_id).set_accepting(accepting)
@@ -802,6 +811,13 @@ class OnlineOrdersService:
         link.paused_reason = reason[:100] if isinstance(reason, str) else None
         await self._repo.flush()
         return link
+
+
+def _store_linepay_state(link: OnlineOrderLink, data: dict[str, Any]) -> None:
+    """雲端說的線上 LINE Pay 開關與有沒有金鑰；舊版雲端沒有這兩欄就記 None（不知道）。"""
+    enabled, configured = data.get("linepay_enabled"), data.get("linepay_configured")
+    link.linepay_enabled = enabled if isinstance(enabled, bool) else None
+    link.linepay_configured = configured if isinstance(configured, bool) else None
 
 
 def _order_from_cloud(store_id: int, raw: dict[str, Any]) -> OnlineOrder:

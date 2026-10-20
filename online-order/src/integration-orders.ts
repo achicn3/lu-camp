@@ -5,6 +5,7 @@
 // - 暫停／恢復（PUT /integration/store-status）。
 import { error, json } from "./http";
 import { invoiceForPos } from "./invoice";
+import { linePayConfig } from "./linepay";
 import { reconcileLinePay } from "./linepay-orders";
 import { withinHours } from "./hours";
 
@@ -31,11 +32,40 @@ interface OrderRow {
   row_version: number;
 }
 
-async function storeMeta(env: Env, storeId: number): Promise<{ accepting: boolean; paused_reason: string | null }> {
-  const meta = await env.DB.prepare("SELECT accepting_orders, paused_reason FROM stores_meta WHERE store_id = ?")
+async function storeMeta(env: Env, storeId: number): Promise<{
+  accepting: boolean; paused_reason: string | null; linepay_enabled: boolean; linepay_configured: boolean;
+}> {
+  const meta = await env.DB.prepare(
+    "SELECT accepting_orders, paused_reason, linepay_enabled FROM stores_meta WHERE store_id = ?",
+  )
     .bind(storeId)
-    .first<{ accepting_orders: number; paused_reason: string | null }>();
-  return { accepting: meta?.accepting_orders === 1, paused_reason: meta?.paused_reason ?? null };
+    .first<{ accepting_orders: number; paused_reason: string | null; linepay_enabled: number }>();
+  return {
+    accepting: meta?.accepting_orders === 1,
+    paused_reason: meta?.paused_reason ?? null,
+    // 線上 LINE Pay 開關（店主 2026-10-20）與雲端有沒有設定金鑰：POS 設定頁據此顯示。
+    linepay_enabled: meta?.linepay_enabled === 1,
+    linepay_configured: linePayConfig(env) !== null,
+  };
+}
+
+/** POS 設定打開／關掉線上 LINE Pay（店主 2026-10-20，預設關）。 */
+export async function setLinePayEnabled(env: Env, storeId: number, raw: Uint8Array): Promise<Response> {
+  let v: unknown;
+  try {
+    v = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    return error("invalid_json", 422);
+  }
+  const enabled = (v as { enabled?: unknown } | null)?.enabled;
+  if (typeof enabled !== "boolean") return error("invalid_linepay", 422);
+  await env.DB.prepare(
+    "INSERT INTO stores_meta (store_id, linepay_enabled) VALUES (?, ?) " +
+      "ON CONFLICT (store_id) DO UPDATE SET linepay_enabled = excluded.linepay_enabled",
+  )
+    .bind(storeId, enabled ? 1 : 0)
+    .run();
+  return json(await storeMeta(env, storeId));
 }
 
 export async function pullOrders(env: Env, storeId: number): Promise<Response> {

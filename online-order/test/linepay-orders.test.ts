@@ -78,6 +78,8 @@ beforeEach(async () => {
     ],
   }));
   await integration("PUT", "/integration/store-status", JSON.stringify({ accepting: true }));
+  // 線上 LINE Pay 開關（店主 2026-10-20）：預設關，POS 設定打開才開放；這裡的測試都在開著時跑。
+  await integration("PUT", "/integration/linepay", JSON.stringify({ enabled: true }));
   await integration("GET", "/integration/orders");
 });
 afterEach(() => vi.restoreAllMocks());
@@ -359,6 +361,47 @@ describe("LINE Pay 綁定的載具", () => {
     fake.boundCarrier = "/ABC+123";
     const { body } = await place();
     expect(await view(body.token)).not.toHaveProperty("invoice");
+  });
+});
+
+// 店主 2026-10-20：POS 設定可以開關線上 LINE Pay（預設關）。關掉只擋新的付款，已經在付的照常完成。
+describe("線上 LINE Pay 開關", () => {
+  const status = async () =>
+    (await (await exports.default.fetch(new Request("https://order.test/api/status"))).json()) as { linepay: boolean };
+  const setLinePay = (enabled: unknown) => integration("PUT", "/integration/linepay", JSON.stringify({ enabled }));
+
+  it("關掉：客人頁不顯示、不能建 LINE Pay 單；打開又可以", async () => {
+    const off = await setLinePay(false);
+    expect(off.status).toBe(200);
+    expect(await off.json()).toMatchObject({ linepay_enabled: false, linepay_configured: true });
+    expect((await status()).linepay).toBe(false);
+    const denied = await place();
+    expect(denied.status).toBe(422);
+    expect(denied.body.error).toBe("linepay_unavailable");
+    await setLinePay(true);
+    expect((await status()).linepay).toBe(true);
+    expect((await place()).status).toBe(201);
+  });
+
+  it("關掉後：還沒開始付的不能再付；已經授權的照常請款", async () => {
+    const waiting = await place();
+    const paying = await place();
+    expect((await post(`/api/orders/${paying.body.token}/linepay`)).status).toBe(200);
+    authorize(fake.txs.size - 1);
+    await setLinePay(false);
+    expect((await post(`/api/orders/${waiting.body.token}/linepay`)).status).toBe(422);
+    expect((await post(`/api/orders/${paying.body.token}/linepay/confirm`)).status).toBe(200);
+    expect(await view(paying.body.token)).toMatchObject({ status: "PAID" });
+  });
+
+  it("POS 拉單看得到開關與雲端有沒有設定金鑰", async () => {
+    await setLinePay(false);
+    const pulled = (await (await integration("GET", "/integration/orders")).json()) as Record<string, unknown>;
+    expect(pulled).toMatchObject({ linepay_enabled: false, linepay_configured: true });
+  });
+
+  it("開關只收 true／false", async () => {
+    for (const bad of ["yes", 1, null]) expect((await setLinePay(bad)).status).toBe(422);
   });
 });
 

@@ -63,6 +63,7 @@ await integration("PUT", "/integration/menu", JSON.stringify({
   items: [{ id: 5, name: "拿鐵", description: "", category_id: 1, unit_price: 150, photo: null, available: true, remaining: null, option_groups: [] }],
 }));
 await integration("PUT", "/integration/store-status", JSON.stringify({ accepting: true }));
+await integration("PUT", "/integration/linepay", JSON.stringify({ enabled: true })); // 線上 LINE Pay 開關預設關（2026-10-20）
 await integration("GET", "/integration/orders");
 
 const browser = await chromium.launch();

@@ -83,6 +83,9 @@ class FakeWorker:
     payment_alerts: list[dict[str, Any]] = field(default_factory=list)
     within_hours: bool = True
     pull_fails: bool = False
+    linepay_enabled: bool = False
+    linepay_configured: bool = True
+    linepay_calls: list[bool] = field(default_factory=list)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = request.content
@@ -108,6 +111,8 @@ class FakeWorker:
                         "payment_alerts": self.payment_alerts,
                         "payment_alert_count": len(self.payment_alerts),
                         "within_hours": self.within_hours,
+                        "linepay_enabled": self.linepay_enabled,
+                        "linepay_configured": self.linepay_configured,
                         "server_time": "2026-10-02T08:00:00.000Z",
                         "orders": self.orders,
                     }
@@ -127,6 +132,19 @@ class FakeWorker:
             self.store_status.append(accepting)
             self.accepting = accepting
             return httpx.Response(200, json={"accepting": accepting, "paused_reason": None})
+        if request.method == "PUT" and path == "/integration/linepay":
+            enabled = json.loads(body)["enabled"]
+            self.linepay_calls.append(enabled)
+            self.linepay_enabled = enabled
+            return httpx.Response(
+                200,
+                json={
+                    "accepting": self.accepting,
+                    "paused_reason": None,
+                    "linepay_enabled": enabled,
+                    "linepay_configured": self.linepay_configured,
+                },
+            )
         return httpx.Response(404, json={"error": "not_found"})
 
 
@@ -634,6 +652,52 @@ async def test_pause_and_resume_forwarded_to_cloud(
     assert ctx.worker.store_status == [False]
     status = await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))
     assert status.json()["accepting"] is False
+
+
+async def _manager(db_session: AsyncSession, ctx: Ctx) -> str:
+    mgr = await db_session.scalar(
+        select(User).where(User.store_id == ctx.store_id, User.username == "mgr")
+    )
+    assert mgr is not None
+    return encode_access_token(user_id=mgr.id, role="MANAGER", store_id=ctx.store_id)
+
+
+async def test_linepay_switch_forwarded_to_cloud(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    """線上 LINE Pay 開關（店主 2026-10-20）：管理者在設定打開／關掉，雲端生效，POS 看得到現況。"""
+    manager = await _manager(db_session, ctx)
+    resp = await client.put(
+        "/api/v1/online-orders/linepay", json={"enabled": True}, headers=_h(manager)
+    )
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["linepay_enabled"], resp.json()["linepay_configured"]) == (True, True)
+    assert ctx.worker.linepay_calls == [True]
+    off = await client.put(
+        "/api/v1/online-orders/linepay", json={"enabled": False}, headers=_h(manager)
+    )
+    assert off.json()["linepay_enabled"] is False
+    assert ctx.worker.linepay_calls == [True, False]
+
+
+async def test_linepay_switch_is_manager_only(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    resp = await client.put(
+        "/api/v1/online-orders/linepay", json={"enabled": True}, headers=_h(ctx.clerk)
+    )
+    assert resp.status_code == 403
+    assert ctx.worker.linepay_calls == []
+
+
+async def test_pull_refreshes_linepay_state(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
+) -> None:
+    ctx.worker.linepay_enabled = True
+    ctx.worker.linepay_configured = False
+    await _svc(db_session, ctx).pull_once(ctx.store_id)
+    status = (await client.get("/api/v1/online-orders", headers=_h(ctx.clerk))).json()
+    assert (status["linepay_enabled"], status["linepay_configured"]) == (True, False)
 
 
 async def test_pull_failure_is_recorded_for_the_pos(

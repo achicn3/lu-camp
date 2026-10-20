@@ -7,6 +7,7 @@
 import { error, json, sha256Hex } from "./http";
 import { checkPayment, confirmPayment, type LinePayConfig, linePayConfig, requestPayment } from "./linepay";
 import { verifyTurnstile } from "./orders";
+import { linePayOpen } from "./linepay-switch";
 
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const RECHECK_MS = 30_000;
@@ -104,6 +105,8 @@ export async function startLinePay(
   const row = await byToken(env, storeId, token);
   if (row === null) return error("not_found", 404);
   if (row.payment_method !== "LINE_PAY") return error("not_linepay", 409);
+  // POS 關掉線上 LINE Pay（店主 2026-10-20）：不再開始新的付款；已經在付（PENDING）的照樣拿回原連結。
+  if (row.payment_status !== "PENDING" && !(await linePayOpen(env, storeId))) return error("linepay_unavailable", 422);
   if (row.payment_status === "PAID") return error("already_paid", 409);
   if (!["UNPAID", "PENDING"].includes(row.payment_status)) return error("payment_in_progress", 409);
   const problem = holdProblem(row);
