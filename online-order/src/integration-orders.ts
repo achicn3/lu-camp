@@ -4,7 +4,6 @@
 // - 回報（POST /integration/orders/:id/status）：只接受合法的狀態轉換；重送同一結果冪等。
 // - 暫停／恢復（PUT /integration/store-status）。
 import { error, json } from "./http";
-import { invoiceForPos } from "./invoice";
 import { linePayConfig } from "./linepay";
 import { reconcileLinePay } from "./linepay-orders";
 import { withinHours } from "./hours";
@@ -82,7 +81,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
   // 卡住沒成立的已付款單（例如價格不符等店員處理）再多，也擋不住新單進來（Codex O5 第四輪）。
   const columns =
     "SELECT id, table_label, service_mode, menu_version, total, payment_method, payment_status, hold_status, " +
-    "party_size, add_on, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, linepay_carrier FROM orders ";
+    "party_size, add_on, created_at, linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id FROM orders ";
   type PulledRow = Record<string, unknown> & {
     id: string;
     created_at: number;
@@ -93,7 +92,6 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
     linepay_attempt: number;
     invoice_carrier: string | null;
     invoice_tax_id: string | null;
-    linepay_carrier: string | null;
     add_on: number;
   };
   const [fresh, paid] = await env.DB.batch<PulledRow>([
@@ -135,7 +133,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
     within_hours: await withinHours(env, storeId, now),
     ...(await paymentAlerts(env, storeId, now)),
     server_time: new Date(now).toISOString(),
-    orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, linepay_carrier, add_on, ...o }) => ({
+    orders: orders.results.map(({ linepay_transaction_id, linepay_attempt, invoice_carrier, invoice_tax_id, add_on, ...o }) => ({
       ...o,
       created_at: new Date(o.created_at).toISOString(),
       add_on: add_on === 1,
@@ -152,8 +150,7 @@ export async function pullOrders(env: Env, storeId: number): Promise<Response> {
         }
         : {}),
       ...(invoice_carrier !== null || invoice_tax_id !== null || o.payment_method === "LINE_PAY"
-        // 客人輸入的優先，沒填才用 LINE Pay 綁定的載具（店主 2026-10-17）。
-        ? { invoice: invoiceForPos({ invoice_carrier, invoice_tax_id, linepay_carrier }) }
+        ? { invoice: { carrier: invoice_carrier, tax_id: invoice_tax_id } }
         : {}),
       lines: lines
         .filter((l) => l.order_id === o.id)

@@ -114,10 +114,9 @@ export function cartLineLabel(menu: MenuSnapshot | null, line: CartLine): string
 /** LINE Pay 付好之後告訴客人發票去哪（店主 2026-10-17）。 */
 export function invoiceNote(to: InvoiceDestination): string {
   switch (to.kind) {
-    case "LINEPAY_CARRIER": return `發票會存入你 LINE Pay 綁定的手機條碼載具 ${to.carrier}。`;
     case "CARRIER": return `發票會存入你輸入的手機條碼載具 ${to.carrier}。`;
     case "TAX_ID": return `統一編號 ${to.tax_id} 的發票請到櫃檯領取。`;
-    case "PAPER": return "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。";
+    case "PAPER": return "紙本發票請到櫃檯領取。";
   }
 }
 

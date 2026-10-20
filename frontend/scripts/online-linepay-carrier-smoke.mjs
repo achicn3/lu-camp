@@ -1,5 +1,5 @@
-// LINE Pay 綁定載具（店主 2026-10-17）真瀏覽器煙霧：真客人頁 ＋ 本機 Worker/D1 ＋ 假 LINE Pay。
-// 三種情況各付一次：①沒填、LINE Pay 有綁 → 存綁定的載具 ②沒填、沒綁 → 印紙本 ③自己填了 → 以填的為準。
+// 線上 LINE Pay 付款的發票真瀏覽器煙霧：真客人頁 ＋ 本機 Worker/D1 ＋ 假 LINE Pay。
+// 2026-10-21 店主拿掉「LINE Pay 上已綁定」：①沒填（就算 LINE Pay 帶回綁定的載具）→ 印紙本 ②自己填了手機條碼 → 照填的開。
 // 結帳頁只有選「統一編號」才有說明（店主 2026-10-20）。
 // 每次付好看訂單頁的發票說明，並用 POS 拉單確認開發票用的載具。只連隔離的 Worker（不碰 POS／Postgres），需：
 //   wrangler dev 帶 --var LINEPAY_CHANNEL_ID／LINEPAY_CHANNEL_SECRET／
@@ -87,10 +87,8 @@ await integration("GET", "/integration/orders");
 const browser = await chromium.launch();
 try {
   const scenarios = [
-    { name: "bound", bound: "ABC+123", typed: null,
-      note: "發票會存入你 LINE Pay 綁定的手機條碼載具 /ABC+123。", pos: { carrier: "/ABC+123", tax_id: null } },
-    { name: "paper", bound: null, typed: null,
-      note: "你的 LINE Pay 沒有綁定載具，紙本發票請到櫃檯領取。", pos: { carrier: null, tax_id: null } },
+    { name: "paper", bound: "ABC+123", typed: null,
+      note: "紙本發票請到櫃檯領取。", pos: { carrier: null, tax_id: null } },
     { name: "typed", bound: "/ABC+123", typed: "/XYZ.999",
       note: "發票會存入你輸入的手機條碼載具 /XYZ.999。", pos: { carrier: "/XYZ.999", tax_id: null } },
   ];
@@ -113,11 +111,12 @@ try {
     await guest.getByLabel(/LINE Pay/).check();
     // 「10 分鐘內到櫃檯結帳」只跟櫃檯結帳有關：選 LINE Pay 就不顯示（店主 2026-10-20）
     assert.ok(await cashNote.isHidden(), "LINE Pay 不顯示櫃檯結帳期限");
-    assert.equal(await guest.locator("#invoice-kind option:checked").textContent(), "LINE Pay 上已綁定");
+    assert.equal(await guest.locator("#invoice-kind option:checked").textContent(), "紙本（到櫃檯拿）");
+    assert.equal(await guest.locator("#invoice-kind option").count(), 3, "紙本／手機條碼載具／統一編號");
     // 沒填的說明：有綁就存、不用輸入；沒綁才印紙本。
-    // 「LINE Pay 上已綁定」不另外說明（店主 2026-10-20：客人會自己知道）。
+    // 紙本不另外說明（店主 2026-10-21：客人會自己知道）。
     assert.ok(await guest.locator("#invoice-hint").isHidden(), "預設選項不顯示說明");
-    if (s.name === "bound") await guest.screenshot({ path: `${SHOTS}/01-checkout-hint.png` });
+    if (s.name === "paper") await guest.screenshot({ path: `${SHOTS}/01-checkout-invoice.png` });
     if (s.typed) {
       await guest.locator("#invoice-kind").selectOption("carrier");
       assert.equal(await guest.locator("#invoice-hint").textContent(), "", "手機條碼載具不另外提醒");

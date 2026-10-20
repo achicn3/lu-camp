@@ -436,7 +436,7 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
     "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
-      "linepay_result, linepay_attempt, refunded_amount, created_at, invoice_carrier, invoice_tax_id, linepay_carrier " +
+      "linepay_result, linepay_attempt, refunded_amount, created_at, invoice_carrier, invoice_tax_id " +
       "FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
@@ -455,7 +455,6 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
       created_at: number;
       invoice_carrier: string | null;
       invoice_tax_id: string | null;
-      linepay_carrier: string | null;
     }>();
   if (row === null) return error("not_found", 404);
   const lines = await env.DB.prepare(

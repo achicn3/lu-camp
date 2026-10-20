@@ -5,6 +5,16 @@
 
 
 
+
+## 2026-10-21：LINE Pay 發票拿掉「LINE Pay 上已綁定」、只買帶著走商品的 LINE Pay 單
+
+- 店主用測試站沙盒實測：付款都成功，但**請款回應沒有帶回綁定的載具**（D1 `linepay_carrier` 全是 null）。店主裁示：拿掉「LINE Pay 上已綁定」，
+  下拉改回「紙本（到櫃檯拿）／手機條碼載具／統一編號」（紙本不加說明）；**就算之後 LINE Pay 有回傳也不用，沒填就印紙本**。
+  已移除：Worker 解析 merchantReference、`linepay_carrier` 寫入（D1 欄位保留不用）、`invoice.ts` 的 LINEPAY_CARRIER、後端付款後補記載具。
+  付款後訂單頁的紙本說明改為「紙本發票請到櫃檯領取。」
+- 同一次實測發現：**只買帶著走商品的 LINE Pay 單、從內用桌點的**，自動成立銷售被「本單沒有餐飲明細，不可指定內用/外帶或桌號」擋下。
+  修：`settle_paid` 沒有餐飲行時不帶內用／桌號。店內升級 docs/94。
+
 ## 2026-10-20：線上 LINE Pay 開關、測試站換新的沙盒金鑰
 
 - 店主 LINE Pay 申請通過，給了**測試環境**金鑰（Channel 2012116977）：**只設在測試站**（staging Worker secret，`LINEPAY_API_BASE=https://sandbox-api-pay.line.me`），

@@ -316,8 +316,9 @@ describe("線上 LINE Pay", () => {
 });
 
 
-// 店主 2026-10-17：客人輸入的優先；沒輸入用 LINE Pay 綁定的載具；都沒有就印紙本，付款後告訴客人。
-describe("LINE Pay 綁定的載具", () => {
+// 付款後的發票去向（店主 2026-10-21：測試環境 LINE Pay 不回傳綁定的載具，拿掉「LINE Pay 上已綁定」）：
+// 客人填的手機條碼或統編照填的開；沒填就印紙本——就算 LINE Pay 帶回了綁定的載具也不用。
+describe("LINE Pay 付款後的發票", () => {
   async function payWith(invoice: object | undefined, bound: string | null) {
     fake.boundCarrier = bound;
     const { body } = await place(invoice === undefined ? {} : { invoice });
@@ -329,36 +330,28 @@ describe("LINE Pay 綁定的載具", () => {
     return { pulled: order.invoice, shown: (await view(body.token)).invoice };
   }
 
-  it("沒輸入、LINE Pay 有綁：用綁定的載具（補上 /），客人頁說已存入綁定載具", async () => {
-    expect(await payWith(undefined, "ABC+123")).toEqual({
-      pulled: { carrier: "/ABC+123", tax_id: null },
-      shown: { kind: "LINEPAY_CARRIER", carrier: "/ABC+123" },
-    });
-  });
-
-  it("客人自己輸入的載具優先於綁定的", async () => {
-    expect(await payWith({ carrier: "/XYZ.999" }, "/ABC+123")).toEqual({
-      pulled: { carrier: "/XYZ.999", tax_id: null },
-      shown: { kind: "CARRIER", carrier: "/XYZ.999" },
-    });
-  });
-
-  it("填了統編：照統編開，不帶綁定的載具", async () => {
-    expect(await payWith({ tax_id: "12345678" }, "/ABC+123")).toEqual({
-      pulled: { carrier: null, tax_id: "12345678" },
-      shown: { kind: "TAX_ID", tax_id: "12345678" },
-    });
-  });
-
-  it("沒輸入也沒綁：印紙本", async () => {
-    expect(await payWith(undefined, null)).toEqual({
+  it("沒填：印紙本，不用 LINE Pay 帶回的載具", async () => {
+    expect(await payWith(undefined, "/ABC+123")).toEqual({
       pulled: { carrier: null, tax_id: null },
       shown: { kind: "PAPER" },
     });
   });
 
-  it("還沒付款不顯示發票去向（還不知道有沒有綁）", async () => {
-    fake.boundCarrier = "/ABC+123";
+  it("填了手機條碼：照填的開", async () => {
+    expect(await payWith({ carrier: "/XYZ.999" }, null)).toEqual({
+      pulled: { carrier: "/XYZ.999", tax_id: null },
+      shown: { kind: "CARRIER", carrier: "/XYZ.999" },
+    });
+  });
+
+  it("填了統編：照統編開", async () => {
+    expect(await payWith({ tax_id: "12345678" }, null)).toEqual({
+      pulled: { carrier: null, tax_id: "12345678" },
+      shown: { kind: "TAX_ID", tax_id: "12345678" },
+    });
+  });
+
+  it("還沒付款不顯示發票去向", async () => {
     const { body } = await place();
     expect(await view(body.token)).not.toHaveProperty("invoice");
   });
