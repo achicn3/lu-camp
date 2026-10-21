@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,8 @@ from app.modules.sales.linepay import (
     build_packages,
     build_pay_body,
     check_path,
+    linepay_client_from_config,
+    linepay_online_client_from_config,
     linepay_order_id,
     parse_check_result,
     parse_pay_result,
@@ -335,3 +338,31 @@ def test_parse_pay_result_survives_junk_shapes() -> None:
         "info": {"transactionId": 1, "merchantReference": "not-a-dict"},
     }
     assert parse_pay_result(weird).mobile_carrier is None
+
+
+def _cfg(**overrides: str) -> SimpleNamespace:
+    base = {
+        "linepay_channel_id": "offline-id",
+        "linepay_channel_secret": "offline-secret",
+        "linepay_online_channel_id": "",
+        "linepay_online_channel_secret": "",
+        "linepay_api_base": "https://sandbox-api-pay.line.me",
+    }
+    return SimpleNamespace(**{**base, **overrides})
+
+
+def test_online_client_uses_its_own_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """線上點餐收的錢要用線上通路的金鑰退，不能拿門市掃碼那組。"""
+    cfg = _cfg(linepay_online_channel_id="online-id", linepay_online_channel_secret="online-s")
+    monkeypatch.setattr("app.core.config.get_settings", lambda: cfg)
+    online = linepay_online_client_from_config()
+    offline = linepay_client_from_config()
+    assert online is not None and offline is not None
+    assert online.channel_id == "online-id"
+    assert offline.channel_id == "offline-id"
+
+
+def test_online_client_missing_without_online_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """沒設線上金鑰就是沒有，不會偷用門市那組。"""
+    monkeypatch.setattr("app.core.config.get_settings", lambda: _cfg())
+    assert linepay_online_client_from_config() is None

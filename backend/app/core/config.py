@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     linepay_channel_id: str = ""
     linepay_channel_secret: str = ""
     linepay_api_base: str = "https://sandbox-api-pay.line.me"
+    # 線上點餐的 LINE Pay（Online API）是另一個 Channel：客人在雲端付款，退款一律由 POS 作廢／退貨
+    # 發動，所以 POS 也要有這組金鑰（docs/44 C6）。空字串＝未設定，線上付款的單無法退款。
+    # 正式／沙盒與門市共用 linepay_api_base。
+    linepay_online_channel_id: str = ""
+    linepay_online_channel_secret: str = ""
     # 備份系統（docs/31）：R2 憑證與 AES 口令走 .env.r2、不入 repo/DB；空字串＝未設定，
     # 未設定時排程 tick 不會嘗試備份（改由健康度頁告警），手動觸發則回錯。
     # 部署時以 `set -a; source .env.r2; set +a` 注入下列 R2_* 與 BACKUP_PASSPHRASE。

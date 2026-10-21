@@ -360,6 +360,10 @@ class LinePayClient:
         self._transport = transport
         self._nonce = nonce_factory if nonce_factory is not None else lambda: str(uuid4())
 
+    @property
+    def channel_id(self) -> str:
+        return self._channel_id
+
     def _headers(self, api_path: str, body: str) -> dict[str, str]:
         nonce = self._nonce()
         return {
@@ -419,11 +423,25 @@ def linepay_client_from_config() -> LinePayClient | None:
     from app.core.config import get_settings
 
     cfg = get_settings()
-    if not cfg.linepay_channel_id.strip() or not cfg.linepay_channel_secret.strip():
+    return _client(cfg.linepay_channel_id, cfg.linepay_channel_secret, cfg.linepay_api_base)
+
+
+def linepay_online_client_from_config() -> LinePayClient | None:
+    """線上點餐那個 Channel 的客戶端，只用來退客人在線上付的款。未設定 → None。"""
+    from app.core.config import get_settings
+
+    cfg = get_settings()
+    return _client(
+        cfg.linepay_online_channel_id, cfg.linepay_online_channel_secret, cfg.linepay_api_base
+    )
+
+
+def _client(channel_id: str, channel_secret: str, base_url: str) -> LinePayClient | None:
+    if not channel_id.strip() or not channel_secret.strip():
         return None
     return LinePayClient(
-        channel_id=cfg.linepay_channel_id,
-        channel_secret=cfg.linepay_channel_secret,
-        base_url=cfg.linepay_api_base,
+        channel_id=channel_id,
+        channel_secret=channel_secret,
+        base_url=base_url,
         transport=HttpxLinePayTransport(),
     )

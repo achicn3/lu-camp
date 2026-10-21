@@ -6,6 +6,14 @@
 
 
 
+## 2026-10-21：線上 LINE Pay 退款改用線上通路的金鑰
+
+- 發現：線上付款的單作廢／退貨時，POS 用的是**店內掃碼那組**金鑰（`LINEPAY_CHANNEL_*`）去退；
+  線上點餐是另一個 Channel（測試站 2012116977），換 Channel 平台找不到交易，退款會失敗（作廢／退貨整筆擋下，不會亂扣錢）。
+  以前沙盒線上與店內共用同一組金鑰所以沒發現。
+- 店主裁示：**退款不走雲端，由 POS 退**。POS 新增 `LINEPAY_ONLINE_CHANNEL_ID`／`LINEPAY_ONLINE_CHANNEL_SECRET`
+  （與雲端 Worker 同一組），線上付款的單一律用它退；沒設就擋下並說明，**不拿店內那組代退**。店內升級 docs/95。
+
 ## 2026-10-21：LINE Pay 發票拿掉「LINE Pay 上已綁定」、只買帶著走商品的 LINE Pay 單
 
 - 店主用測試站沙盒實測：付款都成功，但**請款回應沒有帶回綁定的載具**（D1 `linepay_carrier` 全是 null）。店主裁示：拿掉「LINE Pay 上已綁定」，

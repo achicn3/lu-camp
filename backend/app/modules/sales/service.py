@@ -1792,6 +1792,7 @@ class SalesService:
             txn.status = LinePayStatus.REFUNDED
             await self._session.flush()
             return
+        client = _refund_client(txn, client)
         if client is None:
             raise LinePayChargeFailed(
                 "LINE Pay 尚未設定（缺 Channel 憑證），無法退款作廢；請設定後重試"
@@ -1842,6 +1843,7 @@ class SalesService:
             # 平台已退款：本次只補完本地交易。背景復原與使用者重試都走這條，絕不再打 refund。
             await self._apply_ledger_truth(store_id, txn)
             return True
+        client = _refund_client(txn, client)
         if client is None:
             raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法退款")
         await self._durable_line_pay_refund(
@@ -4266,6 +4268,23 @@ class SalesService:
             ]
         )
         return disc.line_total
+
+
+def _refund_client(
+    txn: LinePayTransaction, store_client: LinePayClient | None
+) -> LinePayClient | None:
+    """退款要用收款那個 Channel 的金鑰：門市掃碼的用門市那組，線上點餐付的用線上那組。
+
+    線上金鑰沒設就擋下，不拿門市那組代退（換 Channel 平台找不到這筆交易）。
+    """
+    if txn.channel != LinePayChannel.ONLINE.value:
+        return store_client
+    online = sales_linepay.linepay_online_client_from_config()
+    if online is None:
+        raise LinePayChargeFailed(
+            "線上點餐的 LINE Pay 金鑰尚未設定，無法退這筆線上付款；請設定後重試"
+        )
+    return online
 
 
 def _online_transaction(txn: LinePayTransaction) -> str | None:

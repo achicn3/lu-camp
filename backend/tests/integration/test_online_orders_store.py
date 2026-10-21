@@ -53,14 +53,18 @@ from app.modules.onlineorder.signing import canonical_string
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
-from app.modules.sales.models import LinePayTransaction
+from app.modules.sales.models import LinePayTransaction, Sale
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import SaleLineType, ServiceMode, StockReason, TenderType, UserRole
-from app.shared.exceptions import OnlineOrderNotConfigured, SignatureContentMismatch
+from app.shared.exceptions import (
+    LinePayChargeFailed,
+    OnlineOrderNotConfigured,
+    SignatureContentMismatch,
+)
 from tests.integration.customer_display_helpers import (
     CustomerDisplayAwareClient,
     ensure_paired_customer_display,
@@ -1400,30 +1404,96 @@ async def test_paid_retail_only_order_from_a_table_settles_without_dine_in(
     assert (sale.service_mode, sale.table_no) == (None, None)
 
 
-async def test_voiding_an_online_linepay_sale_refunds_by_transaction(
-    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx
-) -> None:
+async def _settled_linepay_sale(
+    client: httpx.AsyncClient, db_session: AsyncSession, ctx: Ctx, n: int, tx: str
+) -> Sale:
     row = await _pull_raw(
-        db_session,
-        ctx,
-        _paid(_rid(74), [_line(1, ctx.latte, "拿鐵", 150)], tx="2026100800000000074"),
+        db_session, ctx, _paid(_rid(n), [_line(1, ctx.latte, "拿鐵", 150, qty=2)], tx=tx)
     )
     settled = await client.post(
         f"/api/v1/online-orders/{row.id}/settle-paid", headers=_h(ctx.clerk)
     )
     sale = await SalesService(db_session).get_sale(ctx.store_id, settled.json()["sale_id"])
     assert sale is not None
-    transport = _RefundTransport()
-    linepay = LinePayClient(
-        channel_id="1",
+    return sale
+
+
+def _refund_client(transport: "_RefundTransport", channel: str) -> LinePayClient:
+    return LinePayClient(
+        channel_id=channel,
         channel_secret="s",
         base_url="https://sandbox-api-pay.line.me",
         transport=transport,
         nonce_factory=lambda: "n",
     )
-    await SalesService(db_session).void_sale(sale, ctx.clerk_id, linepay_client=linepay)
-    # 線上付款的退款走交易號（Online API），不是門市掃碼用的 orderId 路徑
-    assert transport.paths == ["/v4/payments/2026100800000000074/refund"]
+
+
+def _online_keys(monkeypatch: pytest.MonkeyPatch, client: LinePayClient | None) -> None:
+    monkeypatch.setattr(
+        "app.modules.sales.linepay.linepay_online_client_from_config", lambda: client
+    )
+
+
+async def test_voiding_an_online_linepay_sale_refunds_with_the_online_channel(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    ctx: Ctx,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """線上收的錢用線上通路的金鑰、以交易號退；門市掃碼那組完全不碰。"""
+    sale = await _settled_linepay_sale(client, db_session, ctx, 74, "2026100800000000074")
+    online, offline = _RefundTransport(), _RefundTransport()
+    _online_keys(monkeypatch, _refund_client(online, "online"))
+
+    await SalesService(db_session).void_sale(
+        sale, ctx.clerk_id, linepay_client=_refund_client(offline, "offline")
+    )
+
+    assert online.paths == ["/v4/payments/2026100800000000074/refund"]
+    assert offline.paths == []
+
+
+async def test_returning_part_of_an_online_linepay_sale_refunds_with_the_online_channel(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    ctx: Ctx,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sale = await _settled_linepay_sale(client, db_session, ctx, 75, "2026100800000000075")
+    online, offline = _RefundTransport(), _RefundTransport()
+    _online_keys(monkeypatch, _refund_client(online, "online"))
+    [line] = await SalesService(db_session).get_lines(sale.id)
+
+    await ReturnsService(db_session).create_return(
+        ctx.store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(sale_line_id=line.id, qty=1)],
+        reason="客人退貨",
+        actor_user_id=ctx.clerk_id,
+        idempotency_key="online-linepay-return-75",
+        linepay_client=_refund_client(offline, "offline"),
+    )
+
+    assert online.paths == ["/v4/payments/2026100800000000075/refund"]
+    assert offline.paths == []
+
+
+async def test_online_linepay_refund_refused_without_online_keys(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    ctx: Ctx,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """沒設線上金鑰：作廢擋下並說明，不拿門市那組去退（平台一定拒絕）。"""
+    sale = await _settled_linepay_sale(client, db_session, ctx, 76, "2026100800000000076")
+    offline = _RefundTransport()
+    _online_keys(monkeypatch, None)
+
+    with pytest.raises(LinePayChargeFailed, match="線上點餐"):
+        await SalesService(db_session).void_sale(
+            sale, ctx.clerk_id, linepay_client=_refund_client(offline, "offline")
+        )
+    assert offline.paths == []
 
 
 class _RefundTransport(LinePayTransport):
