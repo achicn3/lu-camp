@@ -6,6 +6,13 @@
 
 
 
+## 2026-10-22：續點不能用 LINE Pay
+
+- 店主裁示：**續點一定要到櫃檯結帳**。購物車有續點時，付款方式的 LINE Pay 反灰、寫「續點請到櫃檯結帳」，只能選櫃檯結帳；
+  雲端建單也擋（LINE Pay＋續點 → 422 `refill_counter_only`，客人頁說明改選櫃檯結帳）。只動雲端，店內不用升級。
+  煙霧 `online-order/test/refill-linepay-smoke.mjs`。
+- 同次一起部署 MacBook 推上 main 的 b680675f（訂單頁「回到首頁」回同一桌）。
+
 ## 2026-10-21：線上 LINE Pay 退款改用線上通路的金鑰
 
 - 發現：線上付款的單作廢／退貨時，POS 用的是**店內掃碼那組**金鑰（`LINEPAY_CHANNEL_*`）去退；
