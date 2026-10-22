@@ -3,7 +3,7 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
   BREW_TAB, cartLineLabel, experienceView, invoiceNote, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
-  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, refillState, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, refillState, linePayChoice, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine, type TableMinimum } from "../pricing";
@@ -690,8 +690,8 @@ function paymentChoice(): {
   node: HTMLElement; method: () => PayMethod; invoice: () => InvoiceInput | null; onChange: (fn: () => void) => void;
 } {
   const box = el("div", "pay-choice");
-  const linePayOpen = status?.linepay === true;
-  let method: PayMethod = linePayOpen && sessionStorage.getItem(PAY_KEY) === "LINE_PAY" ? "LINE_PAY" : "CASH";
+  const linePay = linePayChoice(status?.linepay === true, cart.some((line) => "refill" in line && line.refill === true));
+  let method: PayMethod = linePay.enabled && sessionStorage.getItem(PAY_KEY) === "LINE_PAY" ? "LINE_PAY" : "CASH";
   const listeners: (() => void)[] = [];
   const group = el("fieldset", "pay-methods"); group.append(el("legend", "", "付款方式"));
   const extra = el("div", "invoice-fields");
@@ -715,7 +715,7 @@ function paymentChoice(): {
   extra.append(kindLabel, code, hint);
   const options = [
     ["CASH", "櫃檯結帳", "到櫃檯付款後才會製作", true],
-    ["LINE_PAY", "LINE Pay", linePayOpen ? "現在付，付好就開始製作" : "即將開放", linePayOpen],
+    ["LINE_PAY", "LINE Pay", linePay.hint, linePay.enabled],
   ] as const;
   for (const [value, label, hint, enabled] of options) {
     const option = el("label", enabled ? "pay-option" : "pay-option pay-option-off");
@@ -909,6 +909,7 @@ async function submitDraft(draft: Draft): Promise<void> {
         result.error === "refill_not_eligible" ? (menu?.refill_any_item === true
           ? "本桌 90 分鐘內沒有消費紀錄，不能用續點價，請改成一般點。"
           : "本桌 90 分鐘內沒有點過這項，不能用續點價，請改成一般點。") :
+        result.error === "refill_counter_only" ? "續點請到櫃檯結帳，不能用 LINE Pay。請改選櫃檯結帳後送出。" :
         result.error === "challenge_failed" ? "驗證未通過，請重新送出。" : "訂單內容有變，請重新確認後送出。");
     } else {
       renderCart(); showMessage("尚未確認訂單是否成立。請按「重試確認訂單」，不要重新選品項送單。");

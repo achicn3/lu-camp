@@ -380,3 +380,10 @@ export function minimumGate(
   const addOn = block !== null && addOnChecked;
   return { block: addOn ? null : block, offerAddOn: block !== null, addOn };
 }
+
+/** 付款方式裡的 LINE Pay 選項：店家沒開就「即將開放」；購物車有續點要到櫃檯結帳（店主 2026-10-22）。 */
+export function linePayChoice(open: boolean, hasRefill: boolean): { enabled: boolean; hint: string } {
+  if (!open) return { enabled: false, hint: "即將開放" };
+  if (hasRefill) return { enabled: false, hint: "續點請到櫃檯結帳" };
+  return { enabled: true, hint: "現在付，付好就開始製作" };
+}

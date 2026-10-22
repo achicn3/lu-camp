@@ -484,6 +484,17 @@ describe("續點", () => {
     ]);
   });
 
+  // 店主 2026-10-22：續點不能用 LINE Pay，一定要到櫃檯結帳。
+  it("續點不能用 LINE Pay：整張單擋下，請客人到櫃檯結帳", async () => {
+    await paidBefore();
+    const resp = await order({ payment_method: "LINE_PAY", lines: [
+      { item_id: 5, option_ids: [], qty: 1 }, refillLine,
+    ] });
+    expect(resp.status).toBe(422);
+    expect(await resp.json()).toMatchObject({ error: "refill_counter_only" });
+    expect((await order({ lines: [refillLine] })).status).toBe(201);
+  });
+
   it("不可續點的品項拒收", async () => {
     const resp = await order({ lines: [{ item_id: 6, option_ids: [], qty: 1, refill: true }] });
     expect(resp.status).toBe(422);

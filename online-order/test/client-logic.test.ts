@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote, refillState } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote, refillState, linePayChoice } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -296,5 +296,19 @@ describe("續點資格（客人頁）", () => {
     expect(refillState(latte, 80, null)).toBe("NONE");
     expect(refillState({ id: 5 }, 80, dineIn)).toBe("NONE");
     expect(refillState(latte, null, dineIn)).toBe("NONE");
+  });
+});
+
+// 店主 2026-10-22：購物車有續點就不能選 LINE Pay，要到櫃檯結帳，並告訴客人。
+describe("LINE Pay 選項", () => {
+  it("沒開放：反灰、即將開放", () => {
+    expect(linePayChoice(false, false)).toEqual({ enabled: false, hint: "即將開放" });
+    expect(linePayChoice(false, true)).toEqual({ enabled: false, hint: "即將開放" });
+  });
+  it("有續點：反灰，請到櫃檯結帳", () => {
+    expect(linePayChoice(true, true)).toEqual({ enabled: false, hint: "續點請到櫃檯結帳" });
+  });
+  it("沒有續點：照常可選", () => {
+    expect(linePayChoice(true, false)).toEqual({ enabled: true, hint: "現在付，付好就開始製作" });
   });
 });

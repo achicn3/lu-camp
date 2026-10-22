@@ -271,6 +271,10 @@ export async function createOrder(req: Request, env: Env, storeId: number, raw: 
   // 暫停只擋新的單：已經成立的單（回應遺失後重送）要拿得回來，否則客人查不到自己的單（Codex O4 第一輪）。
   if (!(await accepting(env, storeId, now))) return error("not_accepting", 503);
 
+  // 續點不能用 LINE Pay，一定要到櫃檯結帳（店主 2026-10-22）。
+  if (body.payment_method === "LINE_PAY" && body.lines.some((l) => "refill" in l && l.refill === true)) {
+    return error("refill_counter_only", 422);
+  }
   if (body.payment_method === "LINE_PAY" && !(await linePayOpen(env, storeId))) return error("linepay_unavailable", 422);
   if (!(await verifyTurnstile(env, body.turnstile_token, ip))) return error("challenge_failed", 403);
 
