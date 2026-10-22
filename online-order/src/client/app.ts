@@ -35,6 +35,8 @@ const TAX_ID = /^\d{8}$/;
 interface OrderLine { name: string; qty: number; line_total: number; take_home?: boolean }
 interface OrderView {
   status: string; table_label: string | null; service_mode: string;
+  /** 這張單的桌位碼（桌碼已重發或外帶＝null；舊版雲端沒有這欄）。 */
+  table_code?: string | null;
   total: number; created_at: string; lines: OrderLine[];
   /** 帶回家商品交貨（docs/63 §13）；舊版雲端沒有這欄。 */
   fulfillment?: "NONE" | "AWAITING" | "HANDED_OVER";
@@ -1019,6 +1021,8 @@ async function refreshOrder(): Promise<void> {
   const body = $("order-body");
   if (!result.body) { body.replaceChildren(el("p", "message", "暫時查不到訂單，請稍後再試。")); return; }
   const view = result.body; body.replaceChildren();
+  // 回首頁以雲端記的桌為準：LINE Pay 付完常在另一個瀏覽器開訂單頁，那裡沒有掃碼時記的桌號。
+  if (view.table_code !== undefined) homeTable = tableCodeFromPath(`/t/${view.table_code ?? ""}`);
   body.append(el("p", "order-state", orderState(view)));
   if (view.invoice) body.append(el("p", "invoice-note", invoiceNote(view.invoice)));
   if (view.table_label) body.append(el("p", "", `桌號 ${view.table_label}`));

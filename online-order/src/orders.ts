@@ -436,13 +436,16 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
   const hash = await sha256Hex(new TextEncoder().encode(token));
   const row = await env.DB.prepare(
     "SELECT id, table_label, service_mode, total, payment_method, payment_status, hold_status, fulfillment, " +
-      "linepay_result, linepay_attempt, refunded_amount, created_at, invoice_carrier, invoice_tax_id " +
+      "linepay_result, linepay_attempt, refunded_amount, created_at, invoice_carrier, invoice_tax_id, " +
+      // 桌碼重發後舊碼已失效，不帶（回首頁改回外帶首頁，不帶客人去失效的桌）。
+      "(SELECT t.code FROM tables t WHERE t.store_id = orders.store_id AND t.code = orders.table_code) AS table_code " +
       "FROM orders WHERE store_id = ? AND token_hash = ?",
   )
     .bind(storeId, hash)
     .first<{
       id: string;
       table_label: string | null;
+      table_code: string | null;
       service_mode: string;
       total: number;
       payment_status: string;
@@ -468,6 +471,8 @@ export async function readOrder(env: Env, storeId: number, token: string): Promi
     {
       status: customerStatus(row),
       table_label: row.table_label,
+      // 回首頁回同一桌：LINE Pay 付完常換到另一個瀏覽器開訂單頁，瀏覽器記的桌號就沒了（店主 2026-10-22）。
+      table_code: row.table_code,
       service_mode: row.service_mode,
       total: row.total,
       created_at: new Date(row.created_at).toISOString(),

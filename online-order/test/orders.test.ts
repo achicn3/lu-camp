@@ -100,6 +100,24 @@ describe("送單", () => {
     expect(row?.token_hash).not.toBe(body.token);
   });
 
+  it("訂單頁帶回本桌桌位碼（回首頁回同一桌，不靠瀏覽器記）；桌碼重發後或外帶單不帶", async () => {
+    const dine = (await (await order()).json()) as { token: string };
+    const takeout = (await (await order({ table_code: null })).json()) as { token: string };
+    const view = async (token: string) =>
+      (await (await exports.default.fetch(new Request(`https://order.test/api/orders/${token}`))).json()) as {
+        table_code: string | null;
+      };
+    expect((await view(dine.token)).table_code).toBe(TABLE);
+    expect((await view(takeout.token)).table_code).toBeNull();
+
+    await integration(
+      "PUT",
+      "/integration/tables",
+      JSON.stringify({ revision: 2, tables: [{ code: "zNewCode9xWm2pLr7v", label: "A3", service_mode: "DINE_IN" }] }),
+    );
+    expect((await view(dine.token)).table_code).toBeNull();
+  });
+
   it("客人送來的金額一律不理（伺服器重算）", async () => {
     const resp = await order({ total: 1, lines: [{ item_id: 5, option_ids: [], qty: 1, unit_price: 1 }] });
     expect(((await resp.json()) as { total: number }).total).toBe(150);
