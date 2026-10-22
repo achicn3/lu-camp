@@ -387,3 +387,8 @@ export function linePayChoice(open: boolean, hasRefill: boolean): { enabled: boo
   if (hasRefill) return { enabled: false, hint: "續點請到櫃檯結帳" };
   return { enabled: true, hint: "現在付，付好就開始製作" };
 }
+
+/** 進購物車時的提醒（店主 2026-10-22）：有續點又開了 LINE Pay 才講，否則不打擾。 */
+export function refillCounterToast(linePayOpen: boolean, hasRefill: boolean): string | null {
+  return linePayOpen && hasRefill ? "有續點，請選櫃檯結帳（不能用 LINE Pay）" : null;
+}

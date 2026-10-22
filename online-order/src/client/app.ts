@@ -3,7 +3,7 @@ import { drawExperience, experienceMini } from "./brew";
 import { addLine, changeQty, checkCart, parseSavedCart, removeLine, resumeCart, type CartLine, type SavedCart } from "./cart";
 import {
   BREW_TAB, cartLineLabel, experienceView, invoiceNote, greeting, itemBadge, itemSoldOut, money, presentationBadges, priceText, qtyLimit, quizResult, stepQty,
-  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, refillState, linePayChoice, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
+  menuTabs, minimumGate, minimumNotice, OTHER_TAB, PICKS_TAB, refillDiscountLabel, refillState, linePayChoice, refillCounterToast, retailGroups, retailSoldOut, staffPicks, TAKEAWAY_TAB, tableCodeFromPath,
   upsellSuggestions, visibleItems, type ExperienceView, type MenuTab, type UpsellPick,
 } from "./logic";
 import { isRetailLine, type TableMinimum } from "../pricing";
@@ -585,17 +585,26 @@ function minimumField(onChange: () => void): HTMLElement | null {
   const box = el("div", "minimum-box");
   box.append(el("p", "", notice));
   if (tableMinimum?.mode === "per_person_item") {
-    const label = el("label", "party-field", "用餐人數");
-    const input = el("input") as HTMLInputElement;
-    input.id = "party-size"; input.type = "number"; input.inputMode = "numeric";
+    // 不用 <label> 包：點「用餐人數」字會被當成按第一個按鈕（−）。
+    const label = el("div", "party-field", "用餐人數");
+    const input = el("input", "qty-input") as HTMLInputElement;
+    input.id = "party-size"; input.type = "number"; input.inputMode = "numeric"; input.setAttribute("aria-label", "用餐人數");
     input.min = "1"; input.max = String(PARTY_MAX); input.value = String(readParty() ?? "");
-    input.addEventListener("input", () => {
+    // 跟商品數量一樣有 −／＋（店主 2026-10-22）；空白按 + 從 1 人開始。
+    const minus = button("−", () => step(-1), "qty-button"); minus.setAttribute("aria-label", "少一位");
+    const plus = button("+", () => step(1), "qty-button"); plus.setAttribute("aria-label", "多一位");
+    const save = () => {
       const value = Number(input.value);
       if (Number.isInteger(value) && value >= 1 && value <= PARTY_MAX) sessionStorage.setItem(PARTY_KEY, String(value));
       else sessionStorage.removeItem(PARTY_KEY);
+      minus.disabled = !(value > 1); plus.disabled = value >= PARTY_MAX;
       onChange();
-    });
-    label.append(input); box.append(label);
+    };
+    const step = (delta: number) => { input.value = String(stepQty(input.value, delta, PARTY_MAX)); save(); };
+    input.addEventListener("input", save);
+    minus.disabled = !(Number(input.value) > 1); plus.disabled = Number(input.value) >= PARTY_MAX;
+    const stepper = el("div", "qty-stepper"); stepper.append(minus, input, plus);
+    label.append(stepper); box.append(label);
   }
   return box;
 }
@@ -606,6 +615,8 @@ function renderFooter(): void {
 }
 function renderCart(): void {
   if (menu === null) return;
+  // 只在剛進購物車時提醒；購物車裡加減數量重畫不再跳。
+  const entering = $("cart-view").hidden;
   const body = $("cart-body"); body.replaceChildren(); clearMessage();
   const draft = readDraft();
   if (draft !== null) {
@@ -683,6 +694,8 @@ function renderCart(): void {
   refreshMinimum();
   body.append(submit);
   showScreen("cart");
+  const toast = refillCounterToast(status?.linepay === true, cart.some((line) => "refill" in line && line.refill === true));
+  if (entering && toast !== null) flash(toast);
 }
 /** 付款方式（docs/44 §4.4.2）：兩個單選——櫃檯結帳、LINE Pay。店家還沒開 LINE Pay 時 LINE Pay 反灰、寫「即將開放」
  *  （店主 2026-10-16）；LINE Pay 可填手機條碼或統編，沒填印紙本。 */

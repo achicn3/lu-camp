@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MenuExperienceView, MenuItemView, MenuPresentation, MenuRetailView, MenuSnapshot } from "../src/client/types";
-import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote, refillState, linePayChoice } from "../src/client/logic";
+import { greeting, itemBadge, refillDiscountLabel, itemSoldOut, menuTabs, minimumBlock, minimumGate, minimumNotice, presentationBadges, staffPicks, visibleItems, priceText, qtyLimit, stepQty, tableCodeFromPath, invoiceNote, refillState, linePayChoice, refillCounterToast } from "../src/client/logic";
 
 // 台北時間 = UTC+8
 const taipei = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 2, hh - 8, mm));
@@ -310,5 +310,16 @@ describe("LINE Pay 選項", () => {
   });
   it("沒有續點：照常可選", () => {
     expect(linePayChoice(true, false)).toEqual({ enabled: true, hint: "現在付，付好就開始製作" });
+  });
+});
+
+// 店主 2026-10-22：進購物車時跳 toast 提醒續點要到櫃檯結帳（LINE Pay 有開才需要講）。
+describe("續點的購物車提醒", () => {
+  it("有續點、LINE Pay 有開：提醒", () => {
+    expect(refillCounterToast(true, true)).toBe("有續點，請選櫃檯結帳（不能用 LINE Pay）");
+  });
+  it("沒續點或 LINE Pay 沒開：不提醒", () => {
+    expect(refillCounterToast(true, false)).toBeNull();
+    expect(refillCounterToast(false, true)).toBeNull();
   });
 });
