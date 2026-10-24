@@ -17,15 +17,19 @@ type Reason = components["schemas"]["CatalogQuantityAdjustReason"];
 export function CatalogQuantityAdjust({
   productId,
   quantity,
+  nextQty,
+  onNextQty,
   disabled,
   onDone,
 }: {
   productId: number;
   quantity: number;
+  /** 新數量輸入值由編輯視窗持有：主「儲存」要能看出數量改了卻還沒更新。 */
+  nextQty: string;
+  onNextQty: (value: string) => void;
   disabled: boolean;
   onDone: () => void;
 }) {
-  const [nextQty, setNextQty] = useState(String(quantity));
   const [reason, setReason] = useState<Reason>("COUNT_CORRECTION");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +73,7 @@ export function CatalogQuantityAdjust({
           aria-label="新數量"
           value={nextQty}
           disabled={busy}
-          onChange={(e) => setNextQty(e.target.value)}
+          onChange={(e) => onNextQty(e.target.value)}
         />
       </label>
       <label className="field">

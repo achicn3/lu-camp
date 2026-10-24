@@ -52,7 +52,7 @@ try {
     await page.click('[role="dialog"] button:has-text("取消")');
   }
   ok("找到有庫存的一般商品並開啟編輯", row !== null, `現量 ${before}`);
-  const productName = (await row.locator("td").nth(1).innerText()).trim();
+  const productName = (await row.locator("td").nth(2).innerText()).trim(); // 欄位：編號、品牌、品名…
   await page.screenshot({ path: `${SHOTS}/01-edit-dialog.png`, fullPage: true });
 
   // 破損卻要增加 → 擋下

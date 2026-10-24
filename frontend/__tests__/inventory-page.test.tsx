@@ -933,6 +933,29 @@ it("編輯：全新售價（原價）可以改，也可以清空", async () => {
     expect(posts).toEqual([]);
   });
 
+  it("調整數量：改了數量卻按儲存，擋下並提醒按「更新數量」", async () => {
+    loginManager();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return route(url) ?? json(null, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "編輯商品" });
+    const qty = within(dialog).getByLabelText("新數量");
+    await userEvent.clear(qty);
+    await userEvent.type(qty, "1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "儲存" }));
+    expect(await within(dialog).findByText(/數量改了還沒按「更新數量」/)).toBeTruthy();
+    const writes = fetchMock.mock.calls.filter(
+      ([input]) => input instanceof Request && input.method !== "GET",
+    );
+    expect(writes).toEqual([]);
+  });
+
   it("停售：確認後送 is_active=false；停售中的顯示徽章並可恢復上架", async () => {
     loginManager();
     let patched = "";

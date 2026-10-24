@@ -344,6 +344,7 @@ function ItemEditButton({
   const [nextName, setNextName] = useState(name);
   const [nextPrice, setNextPrice] = useState(price);
   const [nextReorder, setNextReorder] = useState(String(reorderPoint ?? 0));
+  const [nextQty, setNextQty] = useState(String(quantity ?? 0));
   const [nextRetail, setNextRetail] = useState(retailPrice ?? "");
   const initialDiscount = "resale_discount_pct" in item && item.resale_discount_pct != null ? String(item.resale_discount_pct / 10) : "";
   const [nextDiscount, setNextDiscount] = useState(initialDiscount);
@@ -361,6 +362,10 @@ function ItemEditButton({
     if (amount === null || amount <= 0) throw new Error("售價須為正整數元");
     if (amount !== parseNtd(price)) body.unit_price = String(amount);
     if (kind === "catalog") {
+      // 數量走獨立的「更新數量」（要選原因）；改了卻按儲存會被當成沒改，直接關掉視窗。
+      if (quantity !== undefined && nextQty.trim() !== String(quantity)) {
+        throw new Error("數量改了還沒按「更新數量」；要改數量請先按「更新數量」，不改請把數量改回原值");
+      }
       const reorder = parseNtd(nextReorder);
       if (reorder === null || reorder < 0) throw new Error("再訂購點須為 0 以上的整數");
       if (reorder !== reorderPoint) body.reorder_point = reorder;
@@ -447,6 +452,7 @@ function ItemEditButton({
           setNextName(name);
           setNextPrice(price);
           setNextReorder(String(reorderPoint ?? 0));
+          setNextQty(String(quantity ?? 0));
           setNextRetail(retailPrice ?? "");
           setNextDiscount(initialDiscount);
           setEdits({});
@@ -542,6 +548,8 @@ function ItemEditButton({
           <CatalogQuantityAdjust
             productId={id}
             quantity={quantity}
+            nextQty={nextQty}
+            onNextQty={setNextQty}
             disabled={busy}
             onDone={() => {
               setOpen(false);
