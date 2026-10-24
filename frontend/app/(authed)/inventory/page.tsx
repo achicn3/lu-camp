@@ -344,6 +344,9 @@ function ItemEditButton({
   const [nextName, setNextName] = useState(name);
   const [nextPrice, setNextPrice] = useState(price);
   const [nextReorder, setNextReorder] = useState(String(reorderPoint ?? 0));
+  // 打開視窗那一刻的現量：列表在視窗開著時可能重抓（例如儲存失敗後），
+  // 比對要用店員看到的數字，否則期間賣掉的那幾件會被新數字蓋掉。
+  const [openedQty, setOpenedQty] = useState(quantity);
   const [nextQty, setNextQty] = useState(String(quantity ?? 0));
   const [nextRetail, setNextRetail] = useState(retailPrice ?? "");
   const initialDiscount = "resale_discount_pct" in item && item.resale_discount_pct != null ? String(item.resale_discount_pct / 10) : "";
@@ -363,7 +366,7 @@ function ItemEditButton({
     if (amount !== parseNtd(price)) body.unit_price = String(amount);
     if (kind === "catalog") {
       // 數量走獨立的「更新數量」（要選原因）；改了卻按儲存會被當成沒改，直接關掉視窗。
-      if (quantity !== undefined && nextQty.trim() !== String(quantity)) {
+      if (openedQty !== undefined && nextQty.trim() !== String(openedQty)) {
         throw new Error("數量改了還沒按「更新數量」；要改數量請先按「更新數量」，不改請把數量改回原值");
       }
       const reorder = parseNtd(nextReorder);
@@ -452,6 +455,7 @@ function ItemEditButton({
           setNextName(name);
           setNextPrice(price);
           setNextReorder(String(reorderPoint ?? 0));
+          setOpenedQty(quantity);
           setNextQty(String(quantity ?? 0));
           setNextRetail(retailPrice ?? "");
           setNextDiscount(initialDiscount);
@@ -544,10 +548,10 @@ function ItemEditButton({
             "全新售價只是記錄，用來跟客人說明二手價的落差，不會影響售價、毛利或報表。"}
         </p>
 
-        {kind === "catalog" && quantity !== undefined && (
+        {kind === "catalog" && openedQty !== undefined && (
           <CatalogQuantityAdjust
             productId={id}
-            quantity={quantity}
+            quantity={openedQty}
             nextQty={nextQty}
             onNextQty={setNextQty}
             disabled={busy}

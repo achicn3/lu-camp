@@ -545,6 +545,10 @@ class CatalogProductUpdateRequest(BaseModel):
         return PriceUpdateRequest._positive_integer(value)
 
 
+# 手動改數量的上限：一般商品不會有百萬件，超過多半是手滑；也擋住超出 DB 整數範圍變 500。
+CATALOG_ADJUST_QTY_MAX = 1_000_000
+
+
 class CatalogQuantityAdjustRequest(BaseModel):
     """手動把一般商品現量改成 `new_qty`（店主 2026-10-24）。
 
@@ -553,7 +557,7 @@ class CatalogQuantityAdjustRequest(BaseModel):
     """
 
     expected_qty: int = Field(ge=0)
-    new_qty: int = Field(ge=0)
+    new_qty: int = Field(ge=0, le=CATALOG_ADJUST_QTY_MAX)
     reason: CatalogQuantityAdjustReason
     note: str | None = Field(default=None, max_length=200)
 

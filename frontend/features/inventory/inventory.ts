@@ -92,6 +92,9 @@ export const QUANTITY_ADJUST_REASONS: Record<
   OTHER_ADJUST: { label: "其他", decreaseOnly: false },
 };
 
+/** 手動改數量的上限（與後端 `CATALOG_ADJUST_QTY_MAX` 同值）。 */
+export const QUANTITY_ADJUST_MAX = 1_000_000;
+
 /** 檢查手動輸入的新數量；回傳要送出的數字，或給店員看的錯誤。 */
 export function checkQuantityAdjust(
   current: number,
@@ -101,6 +104,7 @@ export function checkQuantityAdjust(
   const text = input.trim();
   if (!/^\d+$/.test(text)) return { error: "數量須為 0 以上的整數" };
   const newQty = Number(text);
+  if (newQty > QUANTITY_ADJUST_MAX) return { error: `數量不能超過 ${QUANTITY_ADJUST_MAX.toLocaleString()}` };
   if (newQty === current) return { error: "數量沒有變" };
   if (newQty > current && QUANTITY_ADJUST_REASONS[reason].decreaseOnly) {
     return { error: "破損、過期、自用只能減少數量；要增加請選數量更正或其他" };

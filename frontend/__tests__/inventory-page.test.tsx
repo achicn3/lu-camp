@@ -911,6 +911,44 @@ it("編輯：全新售價（原價）可以改，也可以清空", async () => {
     expect(JSON.parse(posted)).toEqual({ expected_qty: 2, new_qty: 1, reason: "DAMAGED", note: "漏氣" });
   });
 
+  it("調整數量：視窗開著時列表重抓到新現量，仍送出打開時看到的數字讓後端比對", async () => {
+    loginManager();
+    let listCalls = 0;
+    let posted = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      const path = new URL(url).pathname;
+      if (method === "PATCH") return json({ detail: "品名不可空白" }, 422);
+      if (method === "POST" && path.endsWith("/quantity-adjustments")) {
+        posted = input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+        return json({ ...CATALOG[0], quantity_on_hand: 1 });
+      }
+      if (path === "/api/v1/catalog-products") {
+        listCalls += 1;
+        // 第一次 2 件；之後（期間有人賣出／進貨）變 4 件
+        return json([{ ...CATALOG[0], quantity_on_hand: listCalls === 1 ? 2 : 4 }]);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "編輯商品" });
+    // 改品名儲存失敗 → 視窗不關、列表重抓（現量變 4）
+    await userEvent.type(within(dialog).getByLabelText("品名"), "X");
+    await userEvent.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(listCalls).toBeGreaterThan(1));
+    const qty = within(dialog).getByLabelText("新數量");
+    await userEvent.clear(qty);
+    await userEvent.type(qty, "1");
+    await userEvent.selectOptions(within(dialog).getByLabelText("調整原因"), "DAMAGED");
+    await userEvent.click(within(dialog).getByRole("button", { name: "更新數量" }));
+    await waitFor(() => expect(posted).not.toBe(""));
+    expect(JSON.parse(posted).expected_qty).toBe(2);
+  });
+
   it("調整數量：破損不能增加，不送出", async () => {
     loginManager();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

@@ -77,6 +77,8 @@ describe("checkQuantityAdjust（一般商品手動改數量）", () => {
     expect(checkQuantityAdjust(5, "2.5", "OTHER_ADJUST")).toHaveProperty("error");
     expect(checkQuantityAdjust(5, "-1", "OTHER_ADJUST")).toHaveProperty("error");
     expect(checkQuantityAdjust(5, "", "OTHER_ADJUST")).toHaveProperty("error");
+    expect(checkQuantityAdjust(5, "1000001", "OTHER_ADJUST")).toHaveProperty("error");
+    expect(checkQuantityAdjust(5, "1000000", "OTHER_ADJUST")).toEqual({ newQty: 1000000 });
   });
   it("每個原因都有中文名稱", () => {
     expect(QUANTITY_ADJUST_REASONS.DAMAGED.label).toBe("破損");

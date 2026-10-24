@@ -179,8 +179,13 @@ async def test_unchanged_or_negative_qty_is_rejected(
     )
     bad_reason = await _adjust(client, mgr, product_id, expected_qty=5, new_qty=4, reason="SALE")
 
+    huge = await _adjust(
+        client, mgr, product_id, expected_qty=5, new_qty=2_147_483_648, reason="OTHER_ADJUST"
+    )
+
     assert same.status_code == 422
     assert negative.status_code == 422
+    assert huge.status_code == 422  # 超過 DB 整數範圍要擋在入口，不是 500
     assert bad_reason.status_code == 422
     assert await _movements(db_session, product_id) == []
 

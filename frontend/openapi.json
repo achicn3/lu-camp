@@ -5000,6 +5000,7 @@
             "type": "integer"
           },
           "new_qty": {
+            "maximum": 1000000.0,
             "minimum": 0.0,
             "title": "New Qty",
             "type": "integer"
