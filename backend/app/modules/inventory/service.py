@@ -35,6 +35,7 @@ from app.modules.inventory.repository import InventoryRepository
 from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
+    CatalogQuantityAdjustReason,
     Grade,
     ItemKind,
     OwnershipType,
@@ -44,6 +45,8 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     AcquisitionHasSoldItems,
+    CatalogQuantityAdjustInvalid,
+    CatalogQuantityChanged,
     CrossStoreReference,
     DuplicateCatalogProduct,
     IdempotencyKeyConflict,
@@ -66,6 +69,13 @@ _MOVEMENT_LABELS: dict[tuple[StockDirection, StockReason], str] = {
     (StockDirection.IN, StockReason.ONLINE_RELEASE): "線上訂單保留加回",
     (StockDirection.IN, StockReason.PURCHASE_CORRECTION): "進貨更正（加回）",
     (StockDirection.OUT, StockReason.PURCHASE_CORRECTION): "進貨更正（扣除）",
+    (StockDirection.OUT, StockReason.DAMAGED): "破損",
+    (StockDirection.OUT, StockReason.EXPIRED): "過期",
+    (StockDirection.OUT, StockReason.SELF_USE): "自用",
+    (StockDirection.IN, StockReason.COUNT_CORRECTION): "數量更正（增加）",
+    (StockDirection.OUT, StockReason.COUNT_CORRECTION): "數量更正（減少）",
+    (StockDirection.IN, StockReason.OTHER_ADJUST): "手動調整（增加）",
+    (StockDirection.OUT, StockReason.OTHER_ADJUST): "手動調整（減少）",
 }
 
 
@@ -870,6 +880,65 @@ class InventoryService:
                 before=before,
                 after=after,
             )
+        return product
+
+    async def adjust_catalog_quantity(
+        self,
+        store_id: int,
+        product_id: int,
+        *,
+        expected_qty: int,
+        new_qty: int,
+        reason: CatalogQuantityAdjustReason,
+        note: str | None,
+        actor_user_id: int,
+    ) -> CatalogProduct | None:
+        """手動把一般商品現量改成 `new_qty`，寫異動帳與稽核（店主 2026-10-24）。找不到→None。
+
+        庫存價值本來就是「現量 × 進價」，改了數量成本就跟著變，不另記損耗支出。
+        持商品列鎖比對 `expected_qty`：不同代表期間有人賣出／進貨，擋下而不是蓋掉。
+        破損／過期／自用只能減少。
+        """
+        product = await self._repo.get_catalog_for_update(store_id, product_id)
+        if product is None:
+            return None
+        current = product.quantity_on_hand
+        if current != expected_qty:
+            raise CatalogQuantityChanged(
+                f"「{product.name}」現在是 {current} 件（剛剛有賣出或進貨），請重新打開再改"
+            )
+        delta = new_qty - current
+        if delta == 0:
+            raise CatalogQuantityAdjustInvalid("數量沒有變")
+        if delta > 0 and reason.decrease_only:
+            raise CatalogQuantityAdjustInvalid(
+                "破損、過期、自用只能減少數量；要增加請選數量更正或其他"
+            )
+        product.quantity_on_hand = new_qty
+        await self._repo.add_stock_movement(
+            StockMovement(
+                store_id=store_id,
+                item_kind=ItemKind.CATALOG,
+                direction=StockDirection.IN if delta > 0 else StockDirection.OUT,
+                qty=abs(delta),
+                reason=StockReason(reason.value),
+                catalog_product_id=product_id,
+            )
+        )
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="ADJUST_CATALOG_QUANTITY",
+            entity_type="catalog_product",
+            entity_id=str(product_id),
+            before={"quantity_on_hand": current},
+            after={
+                "quantity_on_hand": new_qty,
+                "reason": reason.value,
+                "note": (note or "").strip() or None,
+            },
+        )
         return product
 
     async def delete_catalog_product(

@@ -1143,6 +1143,26 @@ export interface paths {
         patch: operations["updateCatalogPrice"];
         trace?: never;
     };
+    "/api/v1/catalog-products/{product_id}/quantity-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adjust Catalog Quantity
+         * @description 手動改一般商品數量（限管理者；要選原因）。現量已變→409、數量沒變或原因不符→422。
+         */
+        post: operations["adjustCatalogQuantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/categories": {
         parameters: {
             query?: never;
@@ -6533,6 +6553,30 @@ export interface components {
             supplier_name: string;
             /** Unit Cost */
             unit_cost: string;
+        };
+        /**
+         * CatalogQuantityAdjustReason
+         * @description 一般商品手動調整數量可選的原因（值與 `StockReason` 同名，直接當異動原因寫帳）。
+         *
+         *     破損／過期／自用只會讓東西變少；數量更正與其他可增可減。
+         * @enum {string}
+         */
+        CatalogQuantityAdjustReason: "DAMAGED" | "EXPIRED" | "SELF_USE" | "COUNT_CORRECTION" | "OTHER_ADJUST";
+        /**
+         * CatalogQuantityAdjustRequest
+         * @description 手動把一般商品現量改成 `new_qty`（店主 2026-10-24）。
+         *
+         *     `expected_qty` 是編輯視窗打開時看到的數量：送出時現量已經不同（有人賣掉／進貨）就擋下，
+         *     不讓舊數字蓋掉那筆異動。
+         */
+        CatalogQuantityAdjustRequest: {
+            /** Expected Qty */
+            expected_qty: number;
+            /** New Qty */
+            new_qty: number;
+            /** Note */
+            note?: string | null;
+            reason: components["schemas"]["CatalogQuantityAdjustReason"];
         };
         /**
          * CategoryCreate
@@ -14619,6 +14663,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adjustCatalogQuantity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogQuantityAdjustRequest"];
             };
         };
         responses: {

@@ -25,6 +25,7 @@ from app.modules.inventory.schemas import (
     CatalogProductListRead,
     CatalogProductRead,
     CatalogProductUpdateRequest,
+    CatalogQuantityAdjustRequest,
     CategoryCreate,
     CategoryRead,
     CategoryTargetUpdate,
@@ -54,6 +55,8 @@ from app.shared.enums import (
     UserRole,
 )
 from app.shared.exceptions import (
+    CatalogQuantityAdjustInvalid,
+    CatalogQuantityChanged,
     CrossStoreReference,
     DuplicateCatalogProduct,
     IdempotencyKeyConflict,
@@ -894,6 +897,43 @@ async def _delete_item(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
     await session.commit()
+
+
+@router.post(
+    "/catalog-products/{product_id}/quantity-adjustments",
+    response_model=CatalogProductRead,
+    operation_id="adjustCatalogQuantity",
+)
+async def adjust_catalog_quantity(
+    product_id: int,
+    payload: CatalogQuantityAdjustRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> CatalogProductRead:
+    """手動改一般商品數量（限管理者；要選原因）。現量已變→409、數量沒變或原因不符→422。"""
+    try:
+        product = await InventoryService(session).adjust_catalog_quantity(
+            user.store_id,
+            product_id,
+            expected_qty=payload.expected_qty,
+            new_qty=payload.new_qty,
+            reason=payload.reason,
+            note=payload.note,
+            actor_user_id=user.id,
+        )
+    except CatalogQuantityChanged as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CatalogQuantityAdjustInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if product is None:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到一般商品")
+    await session.commit()
+    return CatalogProductRead.model_validate(product)
 
 
 @router.patch(

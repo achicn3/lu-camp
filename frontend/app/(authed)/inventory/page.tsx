@@ -15,6 +15,7 @@ import {
   NOTE_MAX_LENGTH,
   type Badge,
   bulkStatusBadge,
+  extractDetail,
   gradeLabel,
   hasNote,
   isLowStock,
@@ -24,6 +25,7 @@ import {
   sellThroughPct,
   serializedStatusBadge,
 } from "@/features/inventory/inventory";
+import { CatalogQuantityAdjust } from "@/features/inventory/CatalogQuantityAdjust";
 import { labelConditionForGrade } from "@/features/inventory/grades";
 import { BasketPanel } from "@/features/inventory/BasketPanel";
 import { type LabelCondition, printLabel } from "@/lib/agent";
@@ -114,14 +116,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "bulk", label: "散裝" },
   { key: "baskets", label: "販售籃" },
 ];
-
-function extractDetail(error: unknown): string | null {
-  if (error && typeof error === "object" && "detail" in error) {
-    const detail = (error as { detail: unknown }).detail;
-    if (typeof detail === "string") return detail;
-  }
-  return null;
-}
 
 function MoneyText({ value }: { value: string | null | undefined }) {
   if (value === null || value === undefined) return <span className="money">—</span>;
@@ -328,6 +322,7 @@ function ItemEditButton({
   price,
   retailPrice,
   reorderPoint,
+  quantity,
   sku,
   isActive,
 }: {
@@ -339,6 +334,8 @@ function ItemEditButton({
   /** 全新售價（原價）；一般商品沒有這個欄位，序號品／散裝批可為 null。 */
   retailPrice?: string | null;
   reorderPoint?: number;
+  /** 一般商品現量；手動改數量時當作「打開視窗時看到的數字」送出比對。 */
+  quantity?: number;
   sku?: string;
   isActive?: boolean;
 }) {
@@ -540,6 +537,18 @@ function ItemEditButton({
           {kind !== "catalog" &&
             "全新售價只是記錄，用來跟客人說明二手價的落差，不會影響售價、毛利或報表。"}
         </p>
+
+        {kind === "catalog" && quantity !== undefined && (
+          <CatalogQuantityAdjust
+            productId={id}
+            quantity={quantity}
+            disabled={busy}
+            onDone={() => {
+              setOpen(false);
+              refresh();
+            }}
+          />
+        )}
 
         {kind === "catalog" && (
           <>
@@ -1652,6 +1661,7 @@ function CatalogPanel() {
                     name={product.name}
                     price={product.unit_price}
                     reorderPoint={product.reorder_point}
+                    quantity={product.quantity_on_hand}
                     sku={product.sku}
                     isActive={product.is_active}
                   />

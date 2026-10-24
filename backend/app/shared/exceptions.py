@@ -284,6 +284,14 @@ class DuplicateCatalogProduct(DomainError):
     """同店 SKU 重複（一般商品上架）。"""
 
 
+class CatalogQuantityAdjustInvalid(DomainError):
+    """一般商品手動調整數量不合法（數量沒變、破損／過期／自用卻要增加）。"""
+
+
+class CatalogQuantityChanged(DomainError):
+    """一般商品手動調整數量時，現量已不是畫面上看到的數字（期間有人賣出或進貨）。"""
+
+
 class StocktakeNotFound(DomainError):
     """指定的盤點單不存在（或不屬於本店）。"""
 

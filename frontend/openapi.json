@@ -4979,6 +4979,55 @@
         "title": "CatalogPurchaseRead",
         "type": "object"
       },
+      "CatalogQuantityAdjustReason": {
+        "description": "一般商品手動調整數量可選的原因（值與 `StockReason` 同名，直接當異動原因寫帳）。\n\n破損／過期／自用只會讓東西變少；數量更正與其他可增可減。",
+        "enum": [
+          "DAMAGED",
+          "EXPIRED",
+          "SELF_USE",
+          "COUNT_CORRECTION",
+          "OTHER_ADJUST"
+        ],
+        "title": "CatalogQuantityAdjustReason",
+        "type": "string"
+      },
+      "CatalogQuantityAdjustRequest": {
+        "description": "手動把一般商品現量改成 `new_qty`（店主 2026-10-24）。\n\n`expected_qty` 是編輯視窗打開時看到的數量：送出時現量已經不同（有人賣掉／進貨）就擋下，\n不讓舊數字蓋掉那筆異動。",
+        "properties": {
+          "expected_qty": {
+            "minimum": 0.0,
+            "title": "Expected Qty",
+            "type": "integer"
+          },
+          "new_qty": {
+            "minimum": 0.0,
+            "title": "New Qty",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CatalogQuantityAdjustReason"
+          }
+        },
+        "required": [
+          "expected_qty",
+          "new_qty",
+          "reason"
+        ],
+        "title": "CatalogQuantityAdjustRequest",
+        "type": "object"
+      },
       "CategoryCreate": {
         "description": "分類建立（查無即建；未給 target 用店層級 default_margin_pct）。",
         "properties": {
@@ -24827,6 +24876,64 @@
           }
         ],
         "summary": "Update Catalog Price",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/{product_id}/quantity-adjustments": {
+      "post": {
+        "description": "手動改一般商品數量（限管理者；要選原因）。現量已變→409、數量沒變或原因不符→422。",
+        "operationId": "adjustCatalogQuantity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogQuantityAdjustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adjust Catalog Quantity",
         "tags": [
           "inventory"
         ]

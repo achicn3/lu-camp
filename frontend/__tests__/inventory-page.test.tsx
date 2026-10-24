@@ -883,6 +883,56 @@ it("編輯：全新售價（原價）可以改，也可以清空", async () => {
     expect(JSON.parse(patched).sku).toBeUndefined();
   });
 
+  it("調整數量：選原因送出畫面上的現量與新數量", async () => {
+    loginManager();
+    let posted = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "POST" && new URL(url).pathname === "/api/v1/catalog-products/2/quantity-adjustments") {
+        posted = input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+        return json({ ...CATALOG[0], quantity_on_hand: 1 });
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "編輯商品" });
+    const qty = within(dialog).getByLabelText("新數量");
+    expect((qty as HTMLInputElement).value).toBe("2");
+    await userEvent.clear(qty);
+    await userEvent.type(qty, "1");
+    await userEvent.selectOptions(within(dialog).getByLabelText("調整原因"), "DAMAGED");
+    await userEvent.type(within(dialog).getByLabelText("調整備註"), "漏氣");
+    await userEvent.click(within(dialog).getByRole("button", { name: "更新數量" }));
+    await waitFor(() => expect(posted).not.toBe(""));
+    expect(JSON.parse(posted)).toEqual({ expected_qty: 2, new_qty: 1, reason: "DAMAGED", note: "漏氣" });
+  });
+
+  it("調整數量：破損不能增加，不送出", async () => {
+    loginManager();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return route(url) ?? json(null, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "編輯商品" });
+    const qty = within(dialog).getByLabelText("新數量");
+    await userEvent.clear(qty);
+    await userEvent.type(qty, "9");
+    await userEvent.selectOptions(within(dialog).getByLabelText("調整原因"), "DAMAGED");
+    await userEvent.click(within(dialog).getByRole("button", { name: "更新數量" }));
+    expect(await within(dialog).findByText(/破損、過期、自用只能減少數量/)).toBeTruthy();
+    const posts = fetchMock.mock.calls.filter(([input]) => input instanceof Request && input.method === "POST");
+    expect(posts).toEqual([]);
+  });
+
   it("停售：確認後送 is_active=false；停售中的顯示徽章並可恢復上架", async () => {
     loginManager();
     let patched = "";

@@ -40,6 +40,7 @@ GET    /api/v1/contacts/{id}/purchases     # 會員消費紀錄
 GET    /api/v1/catalog-products?q=&low_stock=
 POST   /api/v1/catalog-products                    # 店員/管理者建一般商品；SKU 留白由系統產生，留白時必帶 Idempotency-Key
 PATCH  /api/v1/catalog-products/{id}        # 改價留痕
+POST   /api/v1/catalog-products/{id}/quantity-adjustments  # 管理者手動改數量：{expected_qty,new_qty,reason,note?}；現量≠expected_qty→409；數量沒變／破損過期自用卻增加→422
 
 GET    /api/v1/serialized-items?status=&ownership=&q=
 GET    /api/v1/serialized-items/{id}

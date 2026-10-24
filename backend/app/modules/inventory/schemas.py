@@ -15,6 +15,7 @@ from app.core.money import ensure_ntd_fits_numeric_12, format_ntd, format_rate
 from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
+    CatalogQuantityAdjustReason,
     Grade,
     OwnershipType,
     SerializedItemStatus,
@@ -542,6 +543,19 @@ class CatalogProductUpdateRequest(BaseModel):
         if value is None:
             raise ValueError("售價不可為空")
         return PriceUpdateRequest._positive_integer(value)
+
+
+class CatalogQuantityAdjustRequest(BaseModel):
+    """手動把一般商品現量改成 `new_qty`（店主 2026-10-24）。
+
+    `expected_qty` 是編輯視窗打開時看到的數量：送出時現量已經不同（有人賣掉／進貨）就擋下，
+    不讓舊數字蓋掉那筆異動。
+    """
+
+    expected_qty: int = Field(ge=0)
+    new_qty: int = Field(ge=0)
+    reason: CatalogQuantityAdjustReason
+    note: str | None = Field(default=None, max_length=200)
 
 
 class ItemUpdateRequest(BaseModel):

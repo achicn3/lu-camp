@@ -13,12 +13,14 @@ from pathlib import Path
 from types import ModuleType
 
 from app.shared.enums import (
+    CatalogQuantityAdjustReason,
     EInvoiceIssueChannel,
     Grade,
     SaleInvoiceStatus,
     SaleStatus,
     ServiceMode,
     SignatureTaskKind,
+    StockReason,
 )
 
 _VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
@@ -72,3 +74,14 @@ def test_grade_check_lists_every_enum_value() -> None:
         ("bulk_lots", "grade"),
         ("category_pricing_rules", "condition_band"),
     }
+
+
+def test_stock_reason_check_lists_every_enum_value() -> None:
+    """一般商品手動調整數量的原因（店主 2026-10-24）。"""
+    migration = _load("f8c4a2e6d0b9_catalog_quantity_adjust_reasons.py")
+    assert set(migration._NEW_REASONS) == {r.value for r in StockReason}
+
+
+def test_catalog_adjust_reasons_are_stock_reasons() -> None:
+    """調整原因直接當異動原因寫帳，少一個就寫不進去。"""
+    assert {r.value for r in CatalogQuantityAdjustReason} <= {r.value for r in StockReason}

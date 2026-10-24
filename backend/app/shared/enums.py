@@ -169,6 +169,38 @@ class StockReason(StrEnum):
     ONLINE_RELEASE = "ONLINE_RELEASE"
     # 採購單事後修改（docs/70 §4.4）：已收數量／商品改了，差額加減庫存（IN 或 OUT）。
     PURCHASE_CORRECTION = "PURCHASE_CORRECTION"
+    # 一般商品手動調整數量（店主 2026-10-24）：原因即異動原因，見 `CatalogQuantityAdjustReason`。
+    DAMAGED = "DAMAGED"
+    EXPIRED = "EXPIRED"
+    SELF_USE = "SELF_USE"
+    COUNT_CORRECTION = "COUNT_CORRECTION"
+    OTHER_ADJUST = "OTHER_ADJUST"
+
+
+class CatalogQuantityAdjustReason(StrEnum):
+    """一般商品手動調整數量可選的原因（值與 `StockReason` 同名，直接當異動原因寫帳）。
+
+    破損／過期／自用只會讓東西變少；數量更正與其他可增可減。
+    """
+
+    DAMAGED = "DAMAGED"
+    EXPIRED = "EXPIRED"
+    SELF_USE = "SELF_USE"
+    COUNT_CORRECTION = "COUNT_CORRECTION"
+    OTHER_ADJUST = "OTHER_ADJUST"
+
+    @property
+    def decrease_only(self) -> bool:
+        return self in _DECREASE_ONLY_ADJUST_REASONS
+
+
+_DECREASE_ONLY_ADJUST_REASONS = frozenset(
+    {
+        CatalogQuantityAdjustReason.DAMAGED,
+        CatalogQuantityAdjustReason.EXPIRED,
+        CatalogQuantityAdjustReason.SELF_USE,
+    }
+)
 
 
 class PurchaseOrderStatus(StrEnum):

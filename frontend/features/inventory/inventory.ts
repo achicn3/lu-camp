@@ -77,3 +77,42 @@ export function noteSummary(note: string | null | undefined, maxChars: number): 
   const flat = (note as string).trim().replace(/\s+/g, " ");
   return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
 }
+
+type QuantityAdjustReason = components["schemas"]["CatalogQuantityAdjustReason"];
+
+/** 一般商品手動改數量的原因（店主 2026-10-24）；破損／過期／自用只能減少，與後端同一規則。 */
+export const QUANTITY_ADJUST_REASONS: Record<
+  QuantityAdjustReason,
+  { label: string; decreaseOnly: boolean }
+> = {
+  DAMAGED: { label: "破損", decreaseOnly: true },
+  EXPIRED: { label: "過期", decreaseOnly: true },
+  SELF_USE: { label: "自用", decreaseOnly: true },
+  COUNT_CORRECTION: { label: "數量更正", decreaseOnly: false },
+  OTHER_ADJUST: { label: "其他", decreaseOnly: false },
+};
+
+/** 檢查手動輸入的新數量；回傳要送出的數字，或給店員看的錯誤。 */
+export function checkQuantityAdjust(
+  current: number,
+  input: string,
+  reason: QuantityAdjustReason,
+): { newQty: number } | { error: string } {
+  const text = input.trim();
+  if (!/^\d+$/.test(text)) return { error: "數量須為 0 以上的整數" };
+  const newQty = Number(text);
+  if (newQty === current) return { error: "數量沒有變" };
+  if (newQty > current && QUANTITY_ADJUST_REASONS[reason].decreaseOnly) {
+    return { error: "破損、過期、自用只能減少數量；要增加請選數量更正或其他" };
+  }
+  return { newQty };
+}
+
+/** API 錯誤回應的 `detail` 字串（後端擋下的原因照實給店員看）。 */
+export function extractDetail(error: unknown): string | null {
+  if (error && typeof error === "object" && "detail" in error) {
+    const detail = (error as { detail: unknown }).detail;
+    if (typeof detail === "string") return detail;
+  }
+  return null;
+}

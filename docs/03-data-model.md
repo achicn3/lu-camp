@@ -134,7 +134,8 @@ erDiagram
 - 結帳 `expected = opening_float + Σ SALE_IN − Σ BUYOUT_OUT − Σ CONSIGNMENT_PAYOUT_OUT ± MANUAL_ADJUST`。
 
 ### stock_movement（庫存異動帳）
-`id, store_id, item_kind(SERIALIZED|CATALOG|BULK_LOT), serialized_item_id?, catalog_product_id?, bulk_lot_id?, direction(IN|OUT|ADJUST), qty, reason(ACQUISITION|PURCHASE|SALE|RETURN|CONSIGN_RETURN|WRITE_OFF|STOCKTAKE), ref_type, ref_id, created_at`
+`id, store_id, item_kind(SERIALIZED|CATALOG|BULK_LOT), serialized_item_id?, catalog_product_id?, bulk_lot_id?, direction(IN|OUT|ADJUST), qty, reason(ACQUISITION|PURCHASE|SALE|RETURN|CONSIGN_RETURN|GIFT|GIFT_RETURN|WRITE_OFF|STOCKTAKE|ONLINE_HOLD|ONLINE_RELEASE|PURCHASE_CORRECTION|DAMAGED|EXPIRED|SELF_USE|COUNT_CORRECTION|OTHER_ADJUST), ref_type, ref_id, created_at`
+- 一般商品手動改數量（2026-10-24）：`DAMAGED`（破損）／`EXPIRED`（過期）／`SELF_USE`（自用）只能 OUT；`COUNT_CORRECTION`（數量更正）／`OTHER_ADJUST`（其他）可 IN 可 OUT。`qty` 為差額絕對值；備註與前後數量寫在 `audit_log`（`ADJUST_CATALOG_QUANTITY`）。不另記損耗支出：庫存價值 = 現量 × 最新進價，數量改了就跟著變。
 
 ### stocktake / stocktake_line（盤點）
 `stocktake: id, store_id, status, started_by, started_at, closed_at?`

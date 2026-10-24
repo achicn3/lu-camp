@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  QUANTITY_ADJUST_REASONS,
   bulkStatusBadge,
+  checkQuantityAdjust,
   gradeLabel,
   isLowStock,
   orUndefined,
@@ -57,5 +59,28 @@ describe("orUndefined", () => {
   it("maps empty string to undefined, keeps non-empty", () => {
     expect(orUndefined("")).toBeUndefined();
     expect(orUndefined("IN_STOCK")).toBe("IN_STOCK");
+  });
+});
+
+describe("checkQuantityAdjust（一般商品手動改數量）", () => {
+  it("減少：任何原因都可以", () => {
+    expect(checkQuantityAdjust(5, "3", "DAMAGED")).toEqual({ newQty: 3 });
+    expect(checkQuantityAdjust(5, " 0 ", "SELF_USE")).toEqual({ newQty: 0 });
+  });
+  it("增加：只有數量更正／其他可以", () => {
+    expect(checkQuantityAdjust(5, "8", "COUNT_CORRECTION")).toEqual({ newQty: 8 });
+    expect(checkQuantityAdjust(5, "8", "OTHER_ADJUST")).toEqual({ newQty: 8 });
+    expect(checkQuantityAdjust(5, "8", "EXPIRED")).toHaveProperty("error");
+  });
+  it("數量沒變、非整數、負數都擋下", () => {
+    expect(checkQuantityAdjust(5, "5", "OTHER_ADJUST")).toHaveProperty("error");
+    expect(checkQuantityAdjust(5, "2.5", "OTHER_ADJUST")).toHaveProperty("error");
+    expect(checkQuantityAdjust(5, "-1", "OTHER_ADJUST")).toHaveProperty("error");
+    expect(checkQuantityAdjust(5, "", "OTHER_ADJUST")).toHaveProperty("error");
+  });
+  it("每個原因都有中文名稱", () => {
+    expect(QUANTITY_ADJUST_REASONS.DAMAGED.label).toBe("破損");
+    expect(QUANTITY_ADJUST_REASONS.SELF_USE.decreaseOnly).toBe(true);
+    expect(QUANTITY_ADJUST_REASONS.COUNT_CORRECTION.decreaseOnly).toBe(false);
   });
 });
