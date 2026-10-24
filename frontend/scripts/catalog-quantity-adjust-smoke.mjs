@@ -8,6 +8,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS =
   process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "catalog-quantity-adjust");
@@ -21,6 +23,7 @@ function ok(name, pass, detail = "") {
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
+await skipOpeningCheckRedirect(page);
 
 try {
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
