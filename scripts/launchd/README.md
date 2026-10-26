@@ -76,8 +76,8 @@ launchctl bootout gui/$(id -u)/com.lucamp.backend
 剛好被別的程式佔走，Postgres 以為自己還在跑而拒絕啟動（log：`lock file "postmaster.pid"
 already exists`），整個系統連不上 DB，重開好幾次才碰巧起來。
 
-這支開機後輪詢最多 5 分鐘：鎖定檔上的 PID **不是活著的 postgres** 且連續兩次看到同一份內容，
-才刪掉鎖定檔，讓 brew services 下一輪（每 10 秒）把 Postgres 正常拉起、自動修復。看到
+這支開機後輪詢最多 5 分鐘：鎖定檔上的 PID **被別的程式佔走**（或檔案是空的／壞的）且連續兩次
+看到同一份內容，才刪掉鎖定檔；PID 已經沒有程式在用的不動（Postgres 自己會清，兩邊一起刪會互搶），讓 brew services 下一輪（每 10 秒）把 Postgres 正常拉起、自動修復。看到
 postgres 在跑就結束。紀錄在 `~/Library/Logs/lucamp/pg-stale-pid.log`。
 
 測試（用暫存目錄，不碰真 DB）：`scripts/launchd/test-clear-stale-pg-pid.sh`

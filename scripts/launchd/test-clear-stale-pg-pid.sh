@@ -36,26 +36,28 @@ check "編號被非 postgres 程式佔用 → 清掉" absent
 kill "$OTHER_PID" 2>/dev/null || true
 wait "$OTHER_PID" 2>/dev/null || true
 
-# 2. 編號已經沒有任何程式在用 → 要刪
+# 2. 編號已經沒有任何程式在用 → 不動：Postgres 自己會刪掉並重建，這支去刪會跟它搶
 write_pid_file 999999
 run 2
-check "編號不存在 → 清掉" absent
+check "編號不存在 → 不動，交給 Postgres" present
+rm -f "$TMP/postmaster.pid"
 
 # 3. 內容是空的（壞檔）→ 要刪
 : > "$TMP/postmaster.pid"
 run 2
 check "空檔 → 清掉" absent
 
-# 4. 編號是活著的 postgres → 絕對不能刪
-PG_PID="$(pgrep -x postgres | head -n1 || true)"
-if [ -n "$PG_PID" ]; then
-    write_pid_file "$PG_PID"
-    run 2
-    check "編號是活著的 postgres → 保留" present
-    rm -f "$TMP/postmaster.pid"
-else
-    echo "SKIP  編號是活著的 postgres（這台沒在跑 postgres）"
-fi
+# 4. 編號是活著的 postgres → 絕對不能刪（用改名成 postgres 的 sleep 當假資料庫，不必真的跑 Postgres）
+mkdir -p "$TMP/bin"
+cp "$(command -v sleep)" "$TMP/bin/postgres"
+"$TMP/bin/postgres" 30 &
+PG_PID=$!
+write_pid_file "$PG_PID"
+run 2
+check "編號是活著的 postgres → 保留" present
+kill "$PG_PID" 2>/dev/null || true
+wait "$PG_PID" 2>/dev/null || true
+rm -f "$TMP/postmaster.pid"
 
 # 5. 沒有鎖定檔 → 什麼都不做、時間到正常結束
 run 1
