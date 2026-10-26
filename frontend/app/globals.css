@@ -6909,3 +6909,43 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   width: auto;
   min-height: auto;
 }
+
+/* ── 錯誤頁（features/common/ErrorScreen）── */
+
+.error-screen {
+  padding: var(--sp-4);
+}
+
+.error-screen .card {
+  max-width: 720px;
+}
+
+.error-screen-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.error-screen-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.error-screen pre {
+  margin: 0;
+  padding: var(--sp-2);
+  font-size: var(--text-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error-screen-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
