@@ -80,6 +80,10 @@ already exists`），整個系統連不上 DB，重開好幾次才碰巧起來�
 看到同一份內容，才刪掉鎖定檔；PID 已經沒有程式在用的不動（Postgres 自己會清，兩邊一起刪會互搶），讓 brew services 下一輪（每 10 秒）把 Postgres 正常拉起、自動修復。看到
 postgres 在跑就結束。紀錄在 `~/Library/Logs/lucamp/pg-stale-pid.log`。
 
+已接受的殘餘風險（2026-10-26 店主裁示不修）：佔住 PID 的程式剛好在最後一次檢查與刪除之間結束、
+同一瞬間 Postgres 又重建了鎖定檔，才會刪到正在跑的 DB 的鎖定檔；DB 約一分鐘內自行停下、由
+brew services 重新拉起。改成「停服務→刪→再啟動」的話，腳本中途被打斷 DB 就停著不起來，更糟。
+
 測試（用暫存目錄，不碰真 DB）：`scripts/launchd/test-clear-stale-pg-pid.sh`
 
 ## 已知事項
