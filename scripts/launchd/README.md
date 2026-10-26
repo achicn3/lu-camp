@@ -14,6 +14,7 @@
 | 工作 | plist | 說明 |
 |---|---|---|
 | 每日資料庫備份 | `com.lucamp.daily-backup.plist` | 每天 04:00 跑 `run-daily-backup.sh` |
+| 開機清 Postgres 過期鎖定檔 | `com.lucamp.pg-stale-pid.plist` | 開機跑一次 `clear-stale-pg-pid.sh`（見下） |
 
 這裡的 `.plist.template` 是**存底**（版控用），用 `__REPO_DIR__` / `__HOME__` 佔位、不寫死
 任何一台機器的路徑；實際生效的副本（真實路徑）由 `install-launchd.sh` 產生到
@@ -68,6 +69,18 @@ launchctl bootout gui/$(id -u)/com.lucamp.backend
 
 > ⚠️ 這是**同一台機器上的本機備份**，防得了誤刪與升級失敗，**防不了整機滅失／失竊／火災**。
 > 異地加密備份走 app 的備份模組上傳 R2（見 `docs/28`），兩者互為保險，都要留著。
+
+## 開機清 Postgres 過期鎖定檔（`clear-stale-pg-pid.sh`）
+
+2026-10-26 事故：前一晚關機時 Postgres 沒關乾淨，`postmaster.pid` 留著舊 PID；開機後該 PID
+剛好被別的程式佔走，Postgres 以為自己還在跑而拒絕啟動（log：`lock file "postmaster.pid"
+already exists`），整個系統連不上 DB，重開好幾次才碰巧起來。
+
+這支開機後輪詢最多 5 分鐘：鎖定檔上的 PID **不是活著的 postgres** 且連續兩次看到同一份內容，
+才刪掉鎖定檔，讓 brew services 下一輪（每 10 秒）把 Postgres 正常拉起、自動修復。看到
+postgres 在跑就結束。紀錄在 `~/Library/Logs/lucamp/pg-stale-pid.log`。
+
+測試（用暫存目錄，不碰真 DB）：`scripts/launchd/test-clear-stale-pg-pid.sh`
 
 ## 已知事項
 

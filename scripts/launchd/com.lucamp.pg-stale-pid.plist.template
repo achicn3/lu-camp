@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lucamp.pg-stale-pid</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_DIR__/scripts/launchd/clear-stale-pg-pid.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+    <!-- 開機（登入）時跑一次：看到 postgres 在跑或等滿 5 分鐘就結束。不常駐，KeepAlive 必須關掉。 -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/lucamp/pg-stale-pid.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/lucamp/pg-stale-pid.error.log</string>
+</dict>
+</plist>
