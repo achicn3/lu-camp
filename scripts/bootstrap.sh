@@ -17,7 +17,7 @@ PG_BIN="/opt/homebrew/opt/postgresql@16/bin"
 echo "==> lu-camp bootstrap：$REPO_DIR"
 
 if ! command -v "$BREW" >/dev/null 2>&1; then
-    echo "找不到 Homebrew（$BREW）。請先手動安裝：https://brew.sh" >&2
+    echo "找不到 Homebrew（${BREW}）。請先手動安裝：https://brew.sh" >&2
     exit 1
 fi
 
@@ -104,7 +104,7 @@ AGENT_DEVICES=fake
 AGENT_BACKEND_URL=http://127.0.0.1:8000
 AGENT_CORS_ORIGINS=http://localhost:3000
 EOF
-    echo "    寫了新的 $HW_ENV（fake 模式，記得之後視情況把 AGENT_CORS_ORIGINS 加上這台的內網 IP）"
+    echo "    寫了新的 ${HW_ENV}（fake 模式，記得之後視情況把 AGENT_CORS_ORIGINS 加上這台的內網 IP）"
 else
     echo "    已存在，不覆寫：$HW_ENV"
 fi
@@ -117,7 +117,7 @@ if [ ! -f "$FE_ENV" ]; then
 NEXT_PUBLIC_API_BASE_URL=http://${LAN_IP}:8000
 NEXT_PUBLIC_AGENT_URL=http://localhost:8001
 EOF
-    echo "    寫了新的 $FE_ENV（偵測到內網 IP：$LAN_IP）"
+    echo "    寫了新的 ${FE_ENV}（偵測到內網 IP：${LAN_IP}）"
 else
     echo "    已存在，不覆寫：$FE_ENV"
 fi

@@ -37,7 +37,7 @@ if ! [[ "$RESTORE_DB" =~ ^lucamp_restore_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}$ ]]; then
   exit 2
 fi
 if [[ "$RESTORE_DB" == "$LIVE_DB" || "$LIVE_DB" == "postgres" ]]; then
-  echo "錯誤：LIVE_DB 設定不合法（$LIVE_DB）。" >&2
+  echo "錯誤：LIVE_DB 設定不合法（${LIVE_DB}）。" >&2
   exit 2
 fi
 
@@ -46,7 +46,7 @@ db_exists() { psql_postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$1'" 
 
 # 前置檢查：還原庫存在、營運庫存在
 if ! db_exists "$RESTORE_DB"; then
-  echo "錯誤：還原庫不存在：$RESTORE_DB（請先從 /backup 觸發還原並確認四驗通過）" >&2
+  echo "錯誤：還原庫不存在：${RESTORE_DB}（請先從 /backup 觸發還原並確認四驗通過）" >&2
   exit 1
 fi
 if ! db_exists "$LIVE_DB"; then
@@ -64,7 +64,7 @@ fi
 
 echo "== 切換前確認 =="
 echo "  營運庫 LIVE_DB   = $LIVE_DB  → 將改名保留為 $OLD_DB"
-echo "  還原庫 RESTORE_DB = $RESTORE_DB  → 將改名為 $LIVE_DB（restore_runs 已確認 VERIFIED）"
+echo "  還原庫 RESTORE_DB = $RESTORE_DB  → 將改名為 ${LIVE_DB}（restore_runs 已確認 VERIFIED）"
 echo "請確認：①後端已停 ②清楚這會停機切換營運庫。"
 read -r -p "輸入 SWITCH 以繼續：" ans
 if [[ "$ans" != "SWITCH" ]]; then
@@ -86,9 +86,9 @@ fi
 if ! psql_postgres -c "ALTER DATABASE \"$RESTORE_DB\" RENAME TO \"$LIVE_DB\";"; then
   echo "錯誤：改名 $RESTORE_DB → $LIVE_DB 失敗,回滾中…" >&2
   if psql_postgres -c "ALTER DATABASE \"$OLD_DB\" RENAME TO \"$LIVE_DB\";"; then
-    echo "已回滾：$OLD_DB → $LIVE_DB，營運庫恢復原狀。請排除 $RESTORE_DB 的連線後重試。" >&2
+    echo "已回滾：$OLD_DB → ${LIVE_DB}，營運庫恢復原狀。請排除 $RESTORE_DB 的連線後重試。" >&2
   else
-    echo "嚴重：回滾也失敗！營運庫目前名為 $OLD_DB，請手動執行：" >&2
+    echo "嚴重：回滾也失敗！營運庫目前名為 ${OLD_DB}，請手動執行：" >&2
     echo "  \"$DOCKER\" exec $CONTAINER psql -U $DB_USER -d postgres -c 'ALTER DATABASE \"$OLD_DB\" RENAME TO \"$LIVE_DB\"'" >&2
   fi
   exit 1
@@ -101,6 +101,6 @@ if ! db_exists "$LIVE_DB" || ! db_exists "$OLD_DB"; then
 fi
 
 echo ""
-echo "✅ 切換完成：$RESTORE_DB 現為營運庫 $LIVE_DB；原營運庫保留為 $OLD_DB（可回退）。"
+echo "✅ 切換完成：$RESTORE_DB 現為營運庫 ${LIVE_DB}；原營運庫保留為 ${OLD_DB}（可回退）。"
 echo "下一步：重啟後端（uvicorn / docker compose start backend）→ 驗證營運正常。"
 echo "確認數日無誤後再刪舊庫：\"$DOCKER\" exec $CONTAINER psql -U $DB_USER -d postgres -c 'DROP DATABASE \"$OLD_DB\"'"

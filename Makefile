@@ -6,9 +6,9 @@
 UV ?= python -m uv
 PNPM ?= pnpm
 
-.PHONY: check backend-check contract-check frontend-check install
+.PHONY: check backend-check contract-check frontend-check shell-check install
 
-check: backend-check contract-check frontend-check
+check: backend-check contract-check frontend-check shell-check
 	@echo "==> ALL CHECKS PASSED"
 
 # 1) 後端四道門：lint / format / type / test+coverage
@@ -33,3 +33,7 @@ frontend-check:
 install:
 	cd backend && $(UV) sync
 	cd frontend && $(PNPM) install
+
+# 4) shell 腳本：變數後緊接中文／全形標點須寫成 ${VAR}（macOS bash 3.2 會誤判變數名）
+shell-check:
+	scripts/check-shell-var-braces.sh

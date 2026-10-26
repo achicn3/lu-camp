@@ -18,4 +18,7 @@ git diff --exit-code frontend/openapi.json frontend/lib/api-types.ts
 echo "==> frontend: eslint / tsc / vitest"
 ( cd frontend && $PNPM run lint && $PNPM run typecheck && $PNPM run test )
 
+echo "==> shell: 變數後緊接中文須加大括號（bash 3.2）"
+scripts/check-shell-var-braces.sh
+
 echo "==> ALL CHECKS PASSED"

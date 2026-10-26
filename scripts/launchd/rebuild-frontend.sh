@@ -34,7 +34,7 @@ restore() {
       rm -rf "$BACKUP"
       RESTORE_MSG="已還原成上一版前端，未重啟 frontend（目前的前端照常可用）"
     else
-      RESTORE_MSG="還原失敗：上一版前端備份留在 frontend/$BACKUP，請勿重啟 frontend，把這段訊息給店主看"
+      RESTORE_MSG="還原失敗：上一版前端備份留在 frontend/${BACKUP}，請勿重啟 frontend，把這段訊息給店主看"
     fi
   fi
 }
