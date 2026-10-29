@@ -27,7 +27,7 @@
 ```
 POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp.com            官網 lukeng-camp.com
 ───────────────────                     ───────────────────────────────             ─────────────────────
-寄售品＋官網資料 ──(HMAC 簽章 PUT)──▶  /integration/tent-photos/:hash → R2 tents/     tents.html
+寄售品＋官網資料 ──(HMAC 簽章 PUT)──▶  /integration/tent-photos/:hash → R2 tent-photos/     tents.html
   背景工作每分鐘比對內容雜湊             /integration/tents         → D1（最新一份）
   有變才推                                                                          
                                         GET /api/tents   ◀─────────(fetch，CORS)───  tents.js
@@ -35,7 +35,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 ```
 
 - **沿用線上點餐的雲端**（同一個 Worker、同一組整合密鑰、同一套簽章與防重放、同一個 R2 桶；
-  帳篷照片放獨立的 `tents/` 前綴，才能放心刪除而不碰到菜單照片）。
+  帳篷照片放獨立的 `tent-photos/` 前綴，才能放心刪除而不碰到菜單照片）。
   雲端永遠不連進店內（ADR-027）。不另建第二個要維護的雲端服務。
 - 官網仍是純靜態網站，只是清單改從 `https://order.lukeng-camp.com/api/tents` 讀。
 - 店裡電腦關機時，官網照樣顯示最後一次推送的清單。
@@ -126,7 +126,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 ### 4.4 售出後刪照片（裁示 8）
 
 - 售出的帳篷在推送內容裡 `photos` 一律是空陣列；官網「最近售出」與詳情頁只顯示色塊與「已售出」，不顯示照片。
-- 雲端每收到一份清單，就把 R2 `tents/` 底下**不再被清單引用**的照片刪掉——售出、下架、還給寄售人的都一樣。
+- 雲端每收到一份清單，就把 R2 `tent-photos/` 底下**不再被清單引用**的照片刪掉——售出、下架、還給寄售人的都一樣。
 - POS 的 `online_tent_listing_photos` 不刪。退貨讓商品回到 IN_STOCK 時，照片重新出現在清單，
   雲端回 `missing_photo`，POS 自動補推。
 
@@ -134,10 +134,10 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 
 - `PUT /integration/tents`（簽章，上限 256 KB）：body＝`{version, syncedAt, soldDays, tents:[…]}`。
   `version` 只能往前（比照菜單），舊的回 409。存進 D1 新表 `tent_listing`（每店一列，存整份 JSON）。
-  照片雜湊必須都已存在 R2 `tents/`，否則回 409 `{"error":"missing_photo","missing":[…]}`，清單不更新。
-  更新成功後刪掉 `tents/` 底下沒被新清單引用的照片。
-- `PUT /integration/tent-photos/:hash`（簽章）：存到 R2 `tents/<hash>.webp`，驗證內容雜湊（比照菜單照片）。
-- `GET /tent-photos/:hash.webp`（公開）：讀 R2 `tents/`；被刪掉的回 404。
+  照片雜湊必須都已存在 R2 `tent-photos/`，否則回 409 `{"error":"missing_photo","missing":[…]}`，清單不更新。
+  更新成功後刪掉 `tent-photos/` 底下沒被新清單引用的照片。
+- `PUT /integration/tent-photos/:hash`（簽章）：存到 R2 `tent-photos/<hash>.webp`，驗證內容雜湊（比照菜單照片）。
+- `GET /tent-photos/:hash.webp`（公開）：讀 R2 `tent-photos/`；被刪掉的回 404。
 - `GET /api/tents`（公開）：回最新一份，照片雜湊轉成絕對網址。
   `Access-Control-Allow-Origin` 只給 `https://lukeng-camp.com`、`https://www.lukeng-camp.com`；
   `Cache-Control: public, max-age=60`。還沒推過回 `{meta:{…}, tents:[]}`。
@@ -151,7 +151,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
   （沒照片、沒填露數會標示）。最上方顯示「官網上次更新：10/30 14:20」或錯誤。
 - POS 結帳掃到「保留中」的帳篷：跳提醒「這頂在官網標示保留中，確定要賣？」，可以照賣（裁示 6）；
   背景工作組清單時發現已售出的帳篷還勾著保留，就把勾選清掉（退貨回庫時不會又變成保留中）；
-  一樣不改結帳流程。提醒的資料由 POS 掃碼查件時另呼叫 `GET /online-tents/by-item-code/{code}` 取得。
+  一樣不改結帳流程。提醒的資料由 POS 掃碼查件時另呼叫 `GET /api/v1/online-order/tents/by-item-code/{item_code}` 取得。
 - 編輯：顏色、使用露數、缺件／瑕疵／額外配件（多行文字框，一行一項）、YouTube 網址、
   照片（上傳、排序、刪除，第一張是封面），以及兩個勾選。
 - 「上架官網」與「保留中」的變更寫 `audit_log`（誰、何時、哪一件、前後值）。

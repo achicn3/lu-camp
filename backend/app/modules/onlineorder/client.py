@@ -123,5 +123,14 @@ class OnlineOrderClient:
     async def put_photo(self, sha256: str, content: bytes) -> None:
         await self._put(f"/integration/photos/{sha256}", content, "image/webp")
 
+    async def put_tent_photo(self, sha256: str, content: bytes) -> None:
+        """寄售帳篷照片（docs/97 §5）：放雲端獨立前綴，清單不再引用時雲端會刪掉。"""
+        await self._put(f"/integration/tent-photos/{sha256}", content, "image/webp")
+
+    async def put_tents(self, payload: object) -> tuple[int, dict[str, object]]:
+        """推寄售帳篷清單；回 (狀態碼, JSON)，缺照片時 JSON 帶 `missing`。連不上丟例外。"""
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        return await self._send("PUT", "/integration/tents", body)
+
     async def put_font(self, sha256: str, content: bytes) -> None:
         await self._put(f"/integration/fonts/{sha256}", content, "font/woff2")

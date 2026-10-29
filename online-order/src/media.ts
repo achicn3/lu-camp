@@ -1,11 +1,18 @@
-// 菜單照片與手寫字型子集（docs/44 §3.4、§8.1 T10）：存 R2，鍵＝內容雜湊。
+// 菜單照片、手寫字型子集（docs/44 §3.4、§8.1 T10）與寄售帳篷照片（docs/97 §5）：存 R2，鍵＝內容雜湊。
+// 帳篷照片放獨立前綴 tent-photos/：清單更新時會刪掉沒被引用的，不能碰到菜單照片。
 // 只收雜湊對得上、檔頭正確的 WebP／WOFF2；照片已由店內 backend 重新編碼、去掉 EXIF。
 import { IMMUTABLE, error, sha256Hex } from "./http";
 
-export type MediaKind = "photos" | "fonts";
+export type MediaKind = "photos" | "fonts" | "tent-photos";
 
 const KINDS: Record<MediaKind, { ext: string; type: string; max: number; magic: (b: Uint8Array) => boolean }> = {
   photos: {
+    ext: "webp",
+    type: "image/webp",
+    max: 2 * 1024 * 1024,
+    magic: (b) => ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP",
+  },
+  "tent-photos": {
     ext: "webp",
     type: "image/webp",
     max: 2 * 1024 * 1024,

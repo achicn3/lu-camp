@@ -425,3 +425,77 @@ class OnlineOrderLink(Base, TimestampMixin):
     paused_reason: Mapped[str | None] = mapped_column(String(100))
     last_pull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_pull_error: Mapped[str | None] = mapped_column(String(200))
+
+
+class OnlineTentListing(Base, TimestampMixin):
+    """寄售帳篷的官網資料（docs/97 §3.1）：只存 POS 原本沒有的欄位。
+
+    售價、品牌、名稱、狀態一律讀序號品本身；`published`＝上架官網、`reserved`＝官網顯示已有人保留
+    （不是庫存保留，不擋結帳）。缺件／瑕疵／配件各存一個字串陣列。
+    """
+
+    __tablename__ = "online_tent_listings"
+    __table_args__ = (
+        UniqueConstraint("store_id", "serialized_item_id", name="uq_online_tent_listings_item"),
+        CheckConstraint("nights IS NULL OR nights >= 0", name="ck_online_tent_listings_nights"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    serialized_item_id: Mapped[int] = mapped_column(
+        ForeignKey("serialized_items.id", ondelete="CASCADE"), index=True
+    )
+    published: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    reserved: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    color: Mapped[str | None] = mapped_column(String(30))
+    nights: Mapped[int | None] = mapped_column()
+    missing: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=text("'[]'"))
+    defects: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=text("'[]'"))
+    extras: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=text("'[]'"))
+    video_url: Mapped[str | None] = mapped_column(String(300))
+
+
+class OnlineTentListingPhoto(Base, TimestampMixin):
+    """帳篷照片（docs/97 §3.2）：沿用菜單照片表；`position` 0 是封面。售出後 POS 仍保留。"""
+
+    __tablename__ = "online_tent_listing_photos"
+    __table_args__ = (
+        UniqueConstraint("listing_id", "position", name="uq_online_tent_listing_photos_position"),
+        UniqueConstraint("listing_id", "photo_sha256", name="uq_online_tent_listing_photos_sha"),
+        CheckConstraint("position BETWEEN 0 AND 7", name="ck_online_tent_listing_photos_position"),
+        ForeignKeyConstraint(
+            ["store_id", "photo_sha256"],
+            ["menu_photos.store_id", "menu_photos.sha256"],
+            name="fk_online_tent_listing_photos_photo",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("online_tent_listings.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column()
+    photo_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class OnlineTentPublication(Base, TimestampMixin):
+    """寄售帳篷清單推到雲端的結果（docs/97 §4.3）：每店每個雲端一列。
+
+    `content_sha256` 是上次推成功的內容雜湊（不含推送時間）；不同才推。
+    `last_error` 給 POS 畫面顯示。
+    """
+
+    __tablename__ = "online_tent_publications"
+    __table_args__ = (
+        UniqueConstraint("store_id", "cloud", name="uq_online_tent_publications_cloud"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    cloud: Mapped[str] = mapped_column(String(200))
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    version: Mapped[int | None] = mapped_column(BigInteger)
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

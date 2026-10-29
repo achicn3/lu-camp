@@ -1,4 +1,5 @@
-"""線上訂單背景工作（docs/44 §5.3）：每幾秒拉單（兼心跳）、放掉到期的保留、送出回報佇列。
+"""線上訂單背景工作（docs/44 §5.3）：每幾秒拉單（兼心跳）、放掉到期的保留、送出回報佇列；
+每分鐘把寄售帳篷清單推上官網（docs/97 §4.3，內容沒變就不推）。
 
 沒設定雲端（網址或密鑰空白）就什麼都不做。每一步各自 commit：拉單匯入成功了，回報失敗也不會
 把匯入回滾；本層不承擔業務規則。
@@ -7,17 +8,21 @@
 import asyncio
 import contextlib
 import logging
+import time
+from datetime import UTC, datetime
 
 from app.core.db import get_sessionmaker
 from app.modules.onlineorder.availability_service import AvailabilityService
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.orders_service import OnlineOrdersService
 from app.modules.onlineorder.router import get_online_order_client
+from app.modules.onlineorder.tent_publish_service import TentPublishService
 from app.shared.exceptions import OnlineOrderPushFailed
 
 logger = logging.getLogger(__name__)
 
 PULL_INTERVAL_SECONDS = 5
+TENT_PUBLISH_INTERVAL_SECONDS = 60
 
 
 async def _reconcile_availability(client: OnlineOrderClient) -> None:
@@ -80,11 +85,32 @@ async def tick_once() -> None:
             logger.exception("online availability reconciliation failed")
 
 
+async def publish_tents_once() -> None:
+    """寄售帳篷清單有變就推上官網；雲端出錯只記在推送紀錄，下一輪再試。"""
+    client = get_online_order_client()
+    if client is None:
+        return
+    async with get_sessionmaker()() as session:
+        result = await TentPublishService(session, client).publish(
+            client.store_id, now=datetime.now(UTC)
+        )
+        await session.commit()
+    if result.pushed:
+        logger.info("consignment tents published")
+
+
 async def scheduler_loop(stop_event: asyncio.Event) -> None:
+    last_tents = float("-inf")
     while not stop_event.is_set():
         try:
             await tick_once()
         except Exception:
             logger.exception("online order tick failed")
+        if time.monotonic() - last_tents >= TENT_PUBLISH_INTERVAL_SECONDS:
+            last_tents = time.monotonic()
+            try:
+                await publish_tents_once()
+            except Exception:
+                logger.exception("consignment tents publish failed")
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=PULL_INTERVAL_SECONDS)

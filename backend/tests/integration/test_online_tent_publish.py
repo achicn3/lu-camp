@@ -1,0 +1,296 @@
+"""寄售帳篷清單推到雲端（docs/97 §4.3）。
+
+用假的 Worker 接住店內送出的請求（每個都驗簽）：內容沒變就不推；雲端說缺照片就補傳再推；
+雲端出錯記下原因、下次重試；推之前清掉已售出的保留勾選；沒設定雲端時什麼都不做。
+"""
+
+import hashlib
+import hmac
+import io
+import json
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+import httpx
+import pytest_asyncio
+from PIL import Image
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_session
+from app.core.security import encode_access_token
+from app.main import create_app
+from app.modules.contacts.models import Contact
+from app.modules.inventory.models import SerializedItem
+from app.modules.onlineorder.client import OnlineOrderClient
+from app.modules.onlineorder.models import OnlineTentListing
+from app.modules.onlineorder.router import get_online_order_client
+from app.modules.onlineorder.scheduler import publish_tents_once
+from app.modules.onlineorder.signing import canonical_string
+from app.modules.onlineorder.tent_publish_service import TentPublishService
+from app.modules.store.models import Store
+from app.modules.user.models import User
+from app.shared.enums import Grade, OwnershipType, SerializedItemStatus, UserRole
+
+SECRET = "tent-publish-secret"
+CLOUD = "https://order.test"
+API = "/api/v1/online-order/tents"
+
+
+@dataclass
+class FakeWorker:
+    """驗簽、記下請求；照片要先傳才收清單（同 online-order/src/tents.ts）。"""
+
+    calls: list[tuple[str, str]] = field(default_factory=list)
+    photos: set[str] = field(default_factory=set)
+    feeds: list[dict[str, Any]] = field(default_factory=list)
+    fail_status: int | None = None
+    # 端點用的雲端綁哪家店（seed 之後才知道 id）
+    store_id: int = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        body = request.content
+        text = canonical_string(
+            request.method,
+            request.url.raw_path.decode(),
+            request.headers["X-LuCamp-Timestamp"],
+            request.headers["X-LuCamp-Nonce"],
+            body,
+        )
+        expected = hmac.new(SECRET.encode(), text.encode(), hashlib.sha256).hexdigest()
+        assert request.headers["X-LuCamp-Signature"] == expected
+        path = request.url.path
+        self.calls.append((request.method, path))
+        if self.fail_status is not None:
+            return httpx.Response(self.fail_status, json={"error": "boom"})
+        if path.startswith("/integration/tent-photos/"):
+            sha = path.rsplit("/", 1)[1]
+            assert hashlib.sha256(body).hexdigest() == sha
+            self.photos.add(sha)
+            return httpx.Response(201)
+        if path == "/integration/tents":
+            feed = json.loads(body)
+            missing = sorted({h for t in feed["tents"] for h in t["photos"]} - self.photos)
+            if missing:
+                return httpx.Response(409, json={"error": "missing_photo", "missing": missing})
+            self.feeds.append(feed)
+            return httpx.Response(200, json={"version": feed["version"]})
+        return httpx.Response(404, json={"error": "not_found"})
+
+    def tent_puts(self) -> int:
+        return sum(1 for _, p in self.calls if p == "/integration/tents")
+
+
+@dataclass
+class Ctx:
+    store_id: int
+    clerk: str
+    item: SerializedItem
+
+
+async def seed(session: AsyncSession) -> Ctx:
+    store = Store(name="露坑")
+    session.add(store)
+    await session.flush()
+    clerk = User(store_id=store.id, username="露坑-clerk", password_hash="h", role=UserRole.CLERK)
+    consignor = Contact(store_id=store.id, name="寄售人")
+    session.add_all([clerk, consignor])
+    await session.flush()
+    item = SerializedItem(
+        store_id=store.id,
+        item_code="T-1",
+        name="Amenity Dome M",
+        grade=Grade.A,
+        ownership_type=OwnershipType.CONSIGNMENT,
+        consignor_id=consignor.id,
+        commission_pct=30,
+        listed_price=Decimal(6800),
+    )
+    session.add(item)
+    await session.commit()
+    return Ctx(
+        store.id, encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id), item
+    )
+
+
+def _client(worker: FakeWorker, store_id: int) -> OnlineOrderClient:
+    return OnlineOrderClient(
+        CLOUD, SECRET, store_id=store_id, transport=httpx.MockTransport(worker.handler)
+    )
+
+
+@pytest_asyncio.fixture
+async def api(db_session: AsyncSession) -> AsyncGenerator[tuple[httpx.AsyncClient, FakeWorker]]:
+    worker = FakeWorker()
+    app = create_app()
+
+    async def session_override() -> AsyncGenerator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[get_online_order_client] = lambda: _client(worker, worker.store_id)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c, worker
+
+
+def _jpeg() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), (180, 120, 80)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _list_it(c: httpx.AsyncClient, ctx: Ctx, **extra: object) -> None:
+    body = {"published": True, "color": "象牙白", **extra}
+    resp = await c.put(f"{API}/{ctx.item.id}", json=body, headers=_auth(ctx.clerk))
+    assert resp.status_code == 200, resp.text
+
+
+async def test_publish_uploads_missing_photos_then_skips_when_unchanged(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    up = await c.post(
+        f"{API}/{ctx.item.id}/photos",
+        files={"file": ("p.jpg", _jpeg(), "image/jpeg")},
+        headers=_auth(ctx.clerk),
+    )
+    sha = up.json()["photos"][0]
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    now = datetime(2026, 10, 30, 6, 20, tzinfo=UTC)
+
+    first = await svc.publish(ctx.store_id, now=now)
+    assert first.pushed is True
+    assert worker.photos == {sha}
+    assert worker.tent_puts() == 2  # 第一次被說缺照片，補傳後再送
+    [feed] = worker.feeds
+    assert feed["syncedAt"] == "2026-10-30T14:20:00+08:00"
+    assert feed["soldDays"] == 30
+    assert [t["id"] for t in feed["tents"]] == ["T-1"]
+
+    again = await svc.publish(ctx.store_id, now=now + timedelta(minutes=1))
+    assert again.pushed is False
+    assert worker.tent_puts() == 2
+
+
+async def test_changes_are_pushed_with_a_newer_version(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    now = datetime.now(UTC)
+    await svc.publish(ctx.store_id, now=now)
+    await _list_it(c, ctx, reserved=True)
+    # 時鐘倒退也一樣往前推版本
+    await svc.publish(ctx.store_id, now=now - timedelta(hours=1))
+    assert len(worker.feeds) == 2
+    assert worker.feeds[1]["version"] > worker.feeds[0]["version"]
+    assert worker.feeds[1]["tents"][0]["status"] == "reserved"
+
+
+async def test_cloud_error_is_recorded_and_retried_next_time(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    worker.fail_status = 500
+    failed = await svc.publish(ctx.store_id, now=datetime.now(UTC))
+    assert failed.pushed is False
+    assert failed.last_error is not None and "500" in failed.last_error
+    worker.fail_status = None
+    ok = await svc.publish(ctx.store_id, now=datetime.now(UTC))
+    assert ok.pushed is True
+    assert ok.last_error is None
+
+
+async def test_unreachable_cloud_is_recorded(db_session: AsyncSession) -> None:
+    ctx = await seed(db_session)
+    db_session.add(
+        OnlineTentListing(store_id=ctx.store_id, serialized_item_id=ctx.item.id, published=True)
+    )
+    await db_session.flush()
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = OnlineOrderClient(
+        CLOUD, SECRET, store_id=ctx.store_id, transport=httpx.MockTransport(offline)
+    )
+    result = await TentPublishService(db_session, client).publish(
+        ctx.store_id, now=datetime.now(UTC)
+    )
+    assert result.pushed is False
+    assert result.last_error is not None
+
+
+async def test_publish_clears_reserved_mark_of_sold_tents(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx, reserved=True)
+    ctx.item.status, ctx.item.sold_date = SerializedItemStatus.SOLD, datetime.now(UTC)
+    await db_session.flush()
+    await TentPublishService(db_session, _client(worker, ctx.store_id)).publish(
+        ctx.store_id, now=datetime.now(UTC)
+    )
+    row = await db_session.scalar(
+        select(OnlineTentListing).where(OnlineTentListing.serialized_item_id == ctx.item.id)
+    )
+    assert row is not None and row.reserved is False
+    assert worker.feeds[0]["tents"][0]["status"] == "sold"
+
+
+async def test_not_configured_or_other_store_does_nothing(db_session: AsyncSession) -> None:
+    ctx = await seed(db_session)
+    none = await TentPublishService(db_session, None).publish(ctx.store_id, now=datetime.now(UTC))
+    assert (none.configured, none.pushed) == (False, False)
+    worker = FakeWorker()
+    other = await TentPublishService(db_session, _client(worker, ctx.store_id + 999)).publish(
+        ctx.store_id, now=datetime.now(UTC)
+    )
+    assert other.configured is False
+    assert worker.calls == []
+
+
+async def test_status_and_publish_endpoints(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    worker.store_id = ctx.store_id
+    await _list_it(c, ctx)
+    before = await c.get(f"{API}/status", headers=_auth(ctx.clerk))
+    assert before.status_code == 200, before.text
+    assert before.json() == {
+        "configured": True,
+        "pending": True,
+        "pushed_at": None,
+        "last_error": None,
+        "last_attempt_at": None,
+    }
+    pushed = await c.post(f"{API}/publish", headers=_auth(ctx.clerk))
+    assert pushed.status_code == 200, pushed.text
+    body = pushed.json()
+    assert body["pending"] is False
+    assert body["pushed_at"] is not None
+    assert len(worker.feeds) == 1
+
+
+async def test_scheduler_publish_is_a_no_op_without_cloud_settings() -> None:
+    """沒設定雲端網址／密鑰：背景工作不推帳篷清單。"""
+    await publish_tents_once()

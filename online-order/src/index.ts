@@ -2,8 +2,9 @@
 //   客人（公開）：GET /api/menu、GET /api/status、GET /api/tables/:code、POST /api/orders、
 //                GET /api/orders/:token、POST /api/orders/:token/linepay(/confirm|/cancel)、
 //                GET /photos/:hash.webp、GET /fonts/:hash.woff2
+//   官網（公開，docs/97）：GET /api/tents、GET /tent-photos/:hash.webp
 //   店內 backend（HMAC 簽章）：PUT /integration/menu、/integration/menu/availability、/integration/tables、/integration/photos/:hash、
-//                              /integration/fonts/:hash
+//                              /integration/fonts/:hash、/integration/tents、/integration/tent-photos/:hash
 // 其餘交給靜態資產（點餐頁）。每個回應都加安全標頭。
 import { verifyIntegration } from "./auth";
 import { AVAILABILITY_MAX_BYTES, publishAvailability } from "./availability";
@@ -14,6 +15,7 @@ import { cancelLinePay, confirmLinePay, startLinePay } from "./linepay-orders";
 import { MENU_MAX_BYTES, publishMenu, readMenu } from "./menu";
 import { ORDER_MAX_BYTES, createOrder, paymentRateLimited, readOrder, storeStatus } from "./orders";
 import { publishTables, readTable } from "./tables";
+import { TENTS_MAX_BYTES, publishTents, readTents } from "./tents";
 
 const TABLES_MAX_BYTES = 64 * 1024;
 
@@ -23,6 +25,8 @@ const ROUTES: { method: string; pattern: RegExp; limit: number }[] = [
   { method: "PUT", pattern: /^\/integration\/tables$/, limit: TABLES_MAX_BYTES },
   { method: "PUT", pattern: /^\/integration\/photos\/[^/]+$/, limit: mediaLimit("photos") },
   { method: "PUT", pattern: /^\/integration\/fonts\/[^/]+$/, limit: mediaLimit("fonts") },
+  { method: "PUT", pattern: /^\/integration\/tent-photos\/[^/]+$/, limit: mediaLimit("tent-photos") },
+  { method: "PUT", pattern: /^\/integration\/tents$/, limit: TENTS_MAX_BYTES },
   { method: "GET", pattern: /^\/integration\/orders$/, limit: 0 },
   { method: "POST", pattern: /^\/integration\/orders\/[^/]+\/status$/, limit: 1024 },
   { method: "PUT", pattern: /^\/integration\/store-status$/, limit: 1024 },
@@ -42,11 +46,12 @@ async function integrationRoute(req: Request, env: Env, storeId: number, path: s
     throw e;
   }
   if (!(await verifyIntegration(req, body, env, storeId))) return error("unauthorized", 401);
-  const media = /^\/integration\/(photos|fonts)\/([^/]+)$/.exec(path);
+  const media = /^\/integration\/(photos|fonts|tent-photos)\/([^/]+)$/.exec(path);
   if (media) return putMedia(env, media[1] as MediaKind, media[2] ?? "", body);
   if (path === "/integration/menu") return publishMenu(env, storeId, body);
   if (path === "/integration/menu/availability") return publishAvailability(env, storeId, body);
   if (path === "/integration/tables") return publishTables(env, storeId, body);
+  if (path === "/integration/tents") return publishTents(env, storeId, body);
   if (path === "/integration/orders") return pullOrders(env, storeId);
   if (path === "/integration/store-status") return setStoreStatus(env, storeId, body);
   if (path === "/integration/linepay") return setLinePayEnabled(env, storeId, body);
@@ -88,14 +93,17 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   if (path === "/api/menu") return readMenu(env, storeId, req);
   if (path === "/api/status") return storeStatus(env, storeId);
+  if (path === "/api/tents") return readTents(env, storeId, req);
   const orderView = /^\/api\/orders\/([^/]+)$/.exec(path);
   if (orderView) return readOrder(env, storeId, orderView[1] ?? "");
   const table = /^\/api\/tables\/([^/]+)$/.exec(path);
   if (table) return readTable(env, storeId, decodeURIComponent(table[1] ?? ""));
   if (path.startsWith("/api/")) return error("not_found", 404);
-  const media = /^\/(photos|fonts)\/([^/]+)$/.exec(path);
+  const media = /^\/(photos|fonts|tent-photos)\/([^/]+)$/.exec(path);
   if (media) return getMedia(env, media[1] as MediaKind, media[2] ?? "");
-  if (path.startsWith("/photos/") || path.startsWith("/fonts/")) return error("not_found", 404);
+  if (path.startsWith("/photos/") || path.startsWith("/fonts/") || path.startsWith("/tent-photos/")) {
+    return error("not_found", 404);
+  }
   return env.ASSETS.fetch(req);
 }
 

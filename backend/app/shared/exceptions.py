@@ -635,6 +635,22 @@ class OnlineRetailListingDuplicate(DomainError):
     """同一個商品已經上線（一個商品只能有一筆帶回家設定）。"""
 
 
+class OnlineTentListingNotFound(DomainError):
+    """寄售帳篷的序號品不存在（或不屬於本店）。"""
+
+
+class OnlineTentListingNotEditable(DomainError):
+    """只有在庫的寄售品可以編輯官網資料（docs/97 §3.3）。"""
+
+
+class OnlineTentPhotoRejected(DomainError):
+    """帳篷照片超過上限或重複。"""
+
+
+class OnlineTentPhotoOrderInvalid(DomainError):
+    """照片排序的內容和現有照片不符。"""
+
+
 class OnlineOrderNotConfigured(DomainError):
     """線上點餐尚未設定（沒有雲端網址或整合密鑰）。"""
 

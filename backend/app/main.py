@@ -47,6 +47,7 @@ from app.modules.menu.router import router as menu_router
 from app.modules.onlineorder.orders_router import router as online_orders_router
 from app.modules.onlineorder.router import router as online_order_router
 from app.modules.onlineorder.scheduler import scheduler_loop as online_order_scheduler_loop
+from app.modules.onlineorder.tent_router import router as online_tent_router
 from app.modules.openingcheck.router import router as opening_check_router
 from app.modules.purchasing.router import router as purchasing_router
 from app.modules.reports.finance_router import router as reports_finance_router
@@ -270,6 +271,7 @@ def create_app() -> FastAPI:
     app.include_router(menu_router, prefix=API_PREFIX)
     app.include_router(online_order_router, prefix=API_PREFIX)
     app.include_router(online_orders_router, prefix=API_PREFIX)
+    app.include_router(online_tent_router, prefix=API_PREFIX)
     app.include_router(menu_entries_router, prefix=API_PREFIX)
     app.include_router(purchasing_router, prefix=API_PREFIX)
     app.include_router(stocktake_router, prefix=API_PREFIX)
