@@ -1,6 +1,6 @@
 # 97 — 寄售帳篷上官網（POS 維護、自動推送）
 
-> 狀態：**規格草案，待店主審**（2026-10-30）。決策紀錄見 `docs/adr/ADR-033-consignment-tents-on-website.md`。
+> 狀態：**已採納**（2026-10-30，店主八項裁示）。決策紀錄見 `docs/adr/ADR-033-consignment-tents-on-website.md`。
 > 官網頁面已依 Claude Design「Lukeng Tents」實作於另一個 repo `~/lukeng-homepage`
 > （分支 `feat/tents-page`，未部署），目前讀示範資料。本文件定義 POS 這一端與雲端的串接。
 
@@ -17,20 +17,25 @@
 | 2 | 哪些商品上官網 | **逐件勾「上架官網」**，沒勾的不出現 |
 | 3 | 「已有人保留」 | POS 加 **「保留中」勾選**，只影響官網顯示，**不擋結帳** |
 | 4 | 價格 | **顯示 POS 售價**（含稅 `listed_price`） |
+| 5 | 只限寄售品 | 是（帳篷一律寄售） |
+| 6 | 保留中的帳篷結帳 | **提醒但不擋**；結帳後保留自動失效 |
+| 7 | 照片上限 | 每頂 8 張 |
+| 8 | 售出後的照片 | **官網與雲端都刪，POS 留著**；退貨回庫照片自動回來（§4.4） |
 
 ## 2. 架構
 
 ```
 POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp.com            官網 lukeng-camp.com
 ───────────────────                     ───────────────────────────────             ─────────────────────
-寄售品＋官網資料 ──(HMAC 簽章 PUT)──▶  /integration/photos/:hash  → R2               tents.html
+寄售品＋官網資料 ──(HMAC 簽章 PUT)──▶  /integration/tent-photos/:hash → R2 tents/     tents.html
   背景工作每分鐘比對內容雜湊             /integration/tents         → D1（最新一份）
   有變才推                                                                          
                                         GET /api/tents   ◀─────────(fetch，CORS)───  tents.js
-                                        GET /photos/:hash.webp ◀───(img)───────────  
+                                        GET /tent-photos/:hash.webp ◀(img)──────────  
 ```
 
-- **沿用線上點餐的雲端**（同一個 Worker、同一組整合密鑰、同一套簽章與防重放、同一個照片桶）。
+- **沿用線上點餐的雲端**（同一個 Worker、同一組整合密鑰、同一套簽章與防重放、同一個 R2 桶；
+  帳篷照片放獨立的 `tents/` 前綴，才能放心刪除而不碰到菜單照片）。
   雲端永遠不連進店內（ADR-027）。不另建第二個要維護的雲端服務。
 - 官網仍是純靜態網站，只是清單改從 `https://order.lukeng-camp.com/api/tents` 讀。
 - 店裡電腦關機時，官網照樣顯示最後一次推送的清單。
@@ -93,7 +98,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 | `name` | `serialized_items.name` |
 | `color`／`nights` | 官網資料 |
 | `missing`／`defects`／`extras` | 官網資料，拆成陣列 |
-| `photos` | 照片雜湊陣列；雲端回應時轉成 `https://order.lukeng-camp.com/photos/<hash>.webp` |
+| `photos` | 照片雜湊陣列（**售出的一律空陣列**，§4.4）；雲端回應時轉成 `https://order.lukeng-camp.com/tent-photos/<hash>.webp` |
 | `video` | `video_url` |
 | `price` | `listed_price`（含稅，整數元） |
 | `status` | 依 §4.1：`available`／`reserved`／`sold` |
@@ -111,17 +116,28 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
   **跟上次推成功的不同才推**。所以存檔、結帳、退貨後，官網約 1 分鐘內更新；
   不必去改銷售、退貨、寄售的程式。
 - 店員在 POS 存檔後立刻試推一次，畫面直接顯示「已更新到官網」或錯誤原因。
-- 順序：先推還沒推過的照片（`/integration/photos/:hash`，已有分雲端的推送紀錄 `online_pushed_media`），
-  再推清單。中途失敗下一輪重試；雲端冪等。
+- 順序：直接推清單；雲端若回 409 `missing_photo`（附缺的雜湊），就把那幾張推上去
+  （`/integration/tent-photos/:hash`）再推一次清單。POS 不另記哪些照片推過——雲端有沒有才算數，
+  照片被雲端刪掉後（§4.4）重新上架也會自動補推。中途失敗下一輪重試；雲端冪等。
 - 新表 `online_tent_publications`（`store_id`、`cloud`、`content_sha256`、`version`、`pushed_at`、
   `last_error`）記錄推送結果，POS 畫面顯示上次同步時間與錯誤。
 - 雲端沒設定（網址或密鑰空白）時什麼都不做，POS 頁面提示「尚未設定」。
+
+### 4.4 售出後刪照片（裁示 8）
+
+- 售出的帳篷在推送內容裡 `photos` 一律是空陣列；官網「最近售出」與詳情頁只顯示色塊與「已售出」，不顯示照片。
+- 雲端每收到一份清單，就把 R2 `tents/` 底下**不再被清單引用**的照片刪掉——售出、下架、還給寄售人的都一樣。
+- POS 的 `online_tent_listing_photos` 不刪。退貨讓商品回到 IN_STOCK 時，照片重新出現在清單，
+  雲端回 `missing_photo`，POS 自動補推。
 
 ## 5. 雲端（`online-order/`）
 
 - `PUT /integration/tents`（簽章，上限 256 KB）：body＝`{version, syncedAt, soldDays, tents:[…]}`。
   `version` 只能往前（比照菜單），舊的回 409。存進 D1 新表 `tent_listing`（每店一列，存整份 JSON）。
-  照片雜湊必須都已存在 R2，否則回 409 `missing_photo`。
+  照片雜湊必須都已存在 R2 `tents/`，否則回 409 `{"error":"missing_photo","missing":[…]}`，清單不更新。
+  更新成功後刪掉 `tents/` 底下沒被新清單引用的照片。
+- `PUT /integration/tent-photos/:hash`（簽章）：存到 R2 `tents/<hash>.webp`，驗證內容雜湊（比照菜單照片）。
+- `GET /tent-photos/:hash.webp`（公開）：讀 R2 `tents/`；被刪掉的回 404。
 - `GET /api/tents`（公開）：回最新一份，照片雜湊轉成絕對網址。
   `Access-Control-Allow-Origin` 只給 `https://lukeng-camp.com`、`https://www.lukeng-camp.com`；
   `Cache-Control: public, max-age=60`。還沒推過回 `{meta:{…}, tents:[]}`。
@@ -133,6 +149,8 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 
 - 清單：在庫的寄售品，欄位有編號、品牌、名稱、售價、上架官網、保留中、資料齊不齊
   （沒照片、沒填露數會標示）。最上方顯示「官網上次更新：10/30 14:20」或錯誤。
+- POS 結帳掃到「保留中」的帳篷：跳提醒「這頂在官網標示保留中，確定要賣？」，可以照賣（裁示 6）；
+  結帳後保留勾選自動清掉（退貨回庫時不會又變成保留中）。
 - 編輯：顏色、使用露數、缺件／瑕疵／額外配件（多行文字框，一行一項）、YouTube 網址、
   照片（上傳、排序、刪除，第一張是封面），以及兩個勾選。
 - 「上架官網」與「保留中」的變更寫 `audit_log`（誰、何時、哪一件、前後值）。
@@ -140,6 +158,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 ## 7. 官網（`~/lukeng-homepage`）
 
 - `tents.js` 的資料網址改成 `https://order.lukeng-camp.com/api/tents`，拿掉 `site/api/tents.json` 示範檔。
+- 售出的帳篷沒有照片：詳情頁不顯示「搭好全景／照片準備中」佔位格，只顯示色塊＋「已售出」。
 - 部署順序：雲端（Worker＋D1 migration）→ POS 升級並至少上架一頂 → 官網。
   官網上線前清單不能是示範資料。
 
@@ -155,9 +174,6 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 
 W1–W3 動到 migration 與共用背景工作，依序做（CLAUDE.md §10）。每波 Codex 審查。
 
-## 9. 待確認
+## 9. 已確認（2026-10-30）
 
-1. **上架只限寄售品？** 建議是（帳篷一律寄售）。若之後買斷的二手帳篷也要上，再放寬。
-2. **「保留中」的商品在 POS 結帳時要不要提醒店員？** 建議**提醒但不擋**（「這頂在官網標示保留中，確定要賣？」），
-   結帳後保留自動失效。
-3. **照片上限 8 張**可以嗎？
+見 §1 裁示 5–8。
