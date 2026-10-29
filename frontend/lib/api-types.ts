@@ -3156,6 +3156,157 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/tents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tent Listings
+         * @description 在庫的寄售品與官網資料。
+         */
+        get: operations["listTentListings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/by-item-code/{item_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tent Reserved
+         * @description POS 掃到商品時查：官網上是不是標「已有人保留」（提醒不擋）。
+         */
+        get: operations["getTentReservedByItemCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Tents
+         * @description 立刻推一次（存檔後畫面會呼叫）；內容沒變就不推。雲端出錯只記下原因，不回錯誤碼。
+         */
+        post: operations["publishTents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tent Publish Status
+         * @description 官網同步狀態：上次推送時間、錯誤、POS 上有沒有還沒推上去的變更。
+         */
+        get: operations["getTentPublishStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Tent Listing */
+        put: operations["saveTentListing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/{item_id}/photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Tent Listing Photo
+         * @description 加一張照片到最後：轉成 WebP、長邊 1200、去掉 EXIF（含 GPS），同菜單照片。
+         */
+        post: operations["addTentListingPhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/{item_id}/photos/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder Tent Listing Photos */
+        put: operations["reorderTentListingPhotos"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/{item_id}/photos/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Tent Listing Photo */
+        delete: operations["removeTentListingPhoto"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-orders": {
         parameters: {
             query?: never;
@@ -5323,6 +5474,14 @@ export interface components {
          * @enum {string}
          */
         BackupTrigger: "SCHEDULED" | "MANUAL";
+        /** Body_addTentListingPhoto */
+        Body_addTentListingPhoto: {
+            /**
+             * File
+             * @description JPEG／PNG／WebP／HEIC，10 MB 以內
+             */
+            file: string;
+        };
         /** Body_uploadMenuItemPhoto */
         Body_uploadMenuItemPhoto: {
             /**
@@ -12313,6 +12472,108 @@ export interface components {
          * @enum {string}
          */
         TenderType: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY";
+        /**
+         * TentListingRead
+         * @description POS「官網帳篷」清單的一列：序號品本身的欄位＋官網資料（還沒填過就是預設值）。
+         */
+        TentListingRead: {
+            /** Brand Name */
+            brand_name: string | null;
+            /** Color */
+            color?: string | null;
+            /** Defects */
+            defects?: string[];
+            /** Extras */
+            extras?: string[];
+            /** Item Code */
+            item_code: string;
+            /** Item Id */
+            item_id: number;
+            /** Listed Price */
+            listed_price: string;
+            /** Missing */
+            missing?: string[];
+            /** Name */
+            name: string;
+            /** Nights */
+            nights?: number | null;
+            /** Photos */
+            photos: string[];
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
+            /**
+             * Reserved
+             * @default false
+             */
+            reserved: boolean;
+            /** Updated At */
+            updated_at: string | null;
+            /** Video Url */
+            video_url?: string | null;
+        };
+        /**
+         * TentListingWriteRequest
+         * @description 整筆替換。缺件／瑕疵／配件一項一筆，空白項目自動去掉；空白字串視為沒填。
+         */
+        TentListingWriteRequest: {
+            /** Color */
+            color?: string | null;
+            /** Defects */
+            defects?: string[];
+            /** Extras */
+            extras?: string[];
+            /** Missing */
+            missing?: string[];
+            /** Nights */
+            nights?: number | null;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
+            /**
+             * Reserved
+             * @default false
+             */
+            reserved: boolean;
+            /** Video Url */
+            video_url?: string | null;
+        };
+        /**
+         * TentPhotoOrderRequest
+         * @description 照片新順序：必須剛好是現有的那幾張。
+         */
+        TentPhotoOrderRequest: {
+            /** Photos */
+            photos: string[];
+        };
+        /**
+         * TentPublishStatusRead
+         * @description 官網同步狀態（POS「官網帳篷」最上方顯示）。
+         */
+        TentPublishStatusRead: {
+            /** Configured */
+            configured: boolean;
+            /** Last Attempt At */
+            last_attempt_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Pending */
+            pending: boolean;
+            /** Pushed At */
+            pushed_at: string | null;
+        };
+        /**
+         * TentReservedRead
+         * @description POS 結帳提醒用：這件在官網上是不是「已有人保留」。
+         */
+        TentReservedRead: {
+            /** Reserved */
+            reserved: boolean;
+        };
         /** TerminalCreateRequest */
         TerminalCreateRequest: {
             /** Installation Id */
@@ -18813,6 +19074,234 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OnlineTableRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listTentListings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentListingRead"][];
+                };
+            };
+        };
+    };
+    getTentReservedByItemCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentReservedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publishTents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPublishStatusRead"];
+                };
+            };
+        };
+    };
+    getTentPublishStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPublishStatusRead"];
+                };
+            };
+        };
+    };
+    saveTentListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TentListingWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addTentListingPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_addTentListingPhoto"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorderTentListingPhotos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TentPhotoOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentListingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    removeTentListingPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentListingRead"];
                 };
             };
             /** @description Validation Error */

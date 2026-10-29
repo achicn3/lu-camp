@@ -37,6 +37,7 @@ const MORE_NAV: NavItem[] = [
   { href: "/signing", label: "簽署紀錄", ready: true },
   { href: "/inventory", label: "庫存", ready: true },
   { href: "/consignment", label: "寄售付款", ready: true },
+  { href: "/consignment/tents", label: "官網寄售帳篷", ready: true },
   { href: "/purchasing", label: "採購補貨", ready: true },
   { href: "/stocktake", label: "盤點", ready: true },
   { href: "/campaigns", label: "門市活動", ready: true, managerOnly: true },

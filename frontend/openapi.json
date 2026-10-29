@@ -1496,6 +1496,21 @@
         "title": "BackupTrigger",
         "type": "string"
       },
+      "Body_addTentListingPhoto": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "JPEG／PNG／WebP／HEIC，10 MB 以內",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_addTentListingPhoto",
+        "type": "object"
+      },
       "Body_uploadMenuItemPhoto": {
         "properties": {
           "file": {
@@ -20609,6 +20624,299 @@
         "title": "TenderType",
         "type": "string"
       },
+      "TentListingRead": {
+        "additionalProperties": false,
+        "description": "POS「官網帳篷」清單的一列：序號品本身的欄位＋官網資料（還沒填過就是預設值）。",
+        "properties": {
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "defects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Defects",
+            "type": "array"
+          },
+          "extras": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extras",
+            "type": "array"
+          },
+          "item_code": {
+            "title": "Item Code",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "integer"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 9999.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "photos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "published": {
+            "default": false,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "reserved": {
+            "default": false,
+            "title": "Reserved",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "item_id",
+          "item_code",
+          "name",
+          "brand_name",
+          "listed_price",
+          "photos",
+          "updated_at"
+        ],
+        "title": "TentListingRead",
+        "type": "object"
+      },
+      "TentListingWriteRequest": {
+        "additionalProperties": false,
+        "description": "整筆替換。缺件／瑕疵／配件一項一筆，空白項目自動去掉；空白字串視為沒填。",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "defects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Defects",
+            "type": "array"
+          },
+          "extras": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extras",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 9999.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "published": {
+            "default": false,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "reserved": {
+            "default": false,
+            "title": "Reserved",
+            "type": "boolean"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "title": "TentListingWriteRequest",
+        "type": "object"
+      },
+      "TentPhotoOrderRequest": {
+        "additionalProperties": false,
+        "description": "照片新順序：必須剛好是現有的那幾張。",
+        "properties": {
+          "photos": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Photos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "photos"
+        ],
+        "title": "TentPhotoOrderRequest",
+        "type": "object"
+      },
+      "TentPublishStatusRead": {
+        "description": "官網同步狀態（POS「官網帳篷」最上方顯示）。",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          }
+        },
+        "required": [
+          "configured",
+          "pending",
+          "pushed_at",
+          "last_error",
+          "last_attempt_at"
+        ],
+        "title": "TentPublishStatusRead",
+        "type": "object"
+      },
+      "TentReservedRead": {
+        "description": "POS 結帳提醒用：這件在官網上是不是「已有人保留」。",
+        "properties": {
+          "reserved": {
+            "title": "Reserved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reserved"
+        ],
+        "title": "TentReservedRead",
+        "type": "object"
+      },
       "TerminalCreateRequest": {
         "properties": {
           "installation_id": {
@@ -31833,6 +32141,367 @@
           }
         ],
         "summary": "Rotate Online Table Code",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents": {
+      "get": {
+        "description": "在庫的寄售品與官網資料。",
+        "operationId": "listTentListings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TentListingRead"
+                  },
+                  "title": "Response Listtentlistings",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tent Listings",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/by-item-code/{item_code}": {
+      "get": {
+        "description": "POS 掃到商品時查：官網上是不是標「已有人保留」（提醒不擋）。",
+        "operationId": "getTentReservedByItemCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_code",
+            "required": true,
+            "schema": {
+              "title": "Item Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentReservedRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tent Reserved",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/publish": {
+      "post": {
+        "description": "立刻推一次（存檔後畫面會呼叫）；內容沒變就不推。雲端出錯只記下原因，不回錯誤碼。",
+        "operationId": "publishTents",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPublishStatusRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Tents",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/status": {
+      "get": {
+        "description": "官網同步狀態：上次推送時間、錯誤、POS 上有沒有還沒推上去的變更。",
+        "operationId": "getTentPublishStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPublishStatusRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tent Publish Status",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/{item_id}": {
+      "put": {
+        "operationId": "saveTentListing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TentListingWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentListingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Tent Listing",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/{item_id}/photos": {
+      "post": {
+        "description": "加一張照片到最後：轉成 WebP、長邊 1200、去掉 EXIF（含 GPS），同菜單照片。",
+        "operationId": "addTentListingPhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_addTentListingPhoto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentListingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Tent Listing Photo",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/{item_id}/photos/order": {
+      "put": {
+        "operationId": "reorderTentListingPhotos",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TentPhotoOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentListingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reorder Tent Listing Photos",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/{item_id}/photos/{sha256}": {
+      "delete": {
+        "operationId": "removeTentListingPhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentListingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Tent Listing Photo",
         "tags": [
           "online-order"
         ]

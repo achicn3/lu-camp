@@ -13,6 +13,8 @@ import {
 } from "react";
 
 import { offerDisplay, targetSummary } from "@/features/campaigns/campaigns";
+import { withWebReservedNote } from "@/features/consignment-tents/tentText";
+import { isWebReserved } from "@/features/consignment-tents/webReserved";
 import { menuPhotoUrl } from "@/features/menu/menuPhoto";
 import { MemberPanel } from "@/features/pos/MemberPanel";
 import {
@@ -248,7 +250,7 @@ function ScanBar({
         qty: 1,
         itemCode: item.item_code,
         maxQty: 1,
-        note: item.note,
+        note: withWebReservedNote(item.note, await isWebReserved(item.item_code)),
         brandId: item.brand_id,
       };
     }

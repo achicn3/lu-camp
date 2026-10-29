@@ -600,6 +600,52 @@ describe("/pos 結帳頁", () => {
     expect(screen.queryByRole("dialog", { name: "商品備註提醒" })).toBeNull();
   });
 
+  it("官網標示保留中的寄售帳篷：結帳前提醒、確認後照常成交（docs/97 裁示 6）", async () => {
+    let saleCalls = 0;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/online-order/tents/by-item-code/TENT1"))
+        return json({ reserved: true });
+      if (url.includes("/serialized-items/by-code/TENT1"))
+        return json({ ...TENT, note: null });
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleCalls += 1;
+        return json(
+          { id: 11, store_id: 1, total: "1800", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/print/detail")) return json({ status: "ok" });
+      if (url.includes("/print-detail")) return json({ id: 11 });
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await scan(user, "TENT1");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    const dialog = await screen.findByRole("dialog", { name: "商品備註提醒" });
+    expect(within(dialog).getByText(/官網標示「已有人保留」/)).toBeTruthy();
+    expect(saleCalls).toBe(0);
+    await user.click(within(dialog).getByRole("button", { name: "已確認，繼續結帳" }));
+    await waitFor(() => expect(saleCalls).toBe(1));
+  });
+
   it("還原購物車期間鎖住掃碼與結帳，備註補抓完成才解鎖", async () => {
     // 還原是非同步的（要重新取回每件商品的備註）。等待期間若還能掃碼，晚回來的
     // 還原結果會把新掃的商品整批覆蓋掉；此時若能結帳，備註也還沒補上 → 漏提醒。
