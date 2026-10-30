@@ -128,14 +128,30 @@ export function recurrenceSummary(rule: RecurrenceFields): string {
   return text;
 }
 
-export type ItemTone = "task" | "overdue" | "done" | "closed" | "market" | "other" | "campaign";
+export type ItemTone =
+  | "task"
+  | "overdue"
+  | "done"
+  | "closed"
+  | "market"
+  | "other"
+  | "campaign"
+  | "purchase";
 
-/** 顏色分類：待辦看狀態（過期紅、做完淡），事件看類型，活動一色。 */
+const PURCHASE_KINDS = new Set(["PO_ORDERED", "PO_EXPECTED", "PO_RECEIVED"]);
+
+/** 採購單的日子（下單、預計到貨、到貨；docs/99 §3、1B）。 */
+export function isPurchaseItem(it: AgendaItem): boolean {
+  return PURCHASE_KINDS.has(it.kind);
+}
+
+/** 顏色分類：待辦看狀態（過期紅、做完淡），事件看類型，活動、進貨各一色（逾期未到也標紅）。 */
 export function itemTone(it: AgendaItem): ItemTone {
   if (it.kind === "TASK") {
     if (it.status === "DONE" || it.status === "SKIPPED") return "done";
     return it.overdue ? "overdue" : "task";
   }
+  if (isPurchaseItem(it)) return it.overdue ? "overdue" : "purchase";
   if (it.kind === "EVENT") {
     if (it.event_kind === "CLOSED" || it.event_kind === "TEMP_CLOSED") return "closed";
     return it.event_kind === "MARKET" ? "market" : "other";
@@ -147,6 +163,9 @@ export function itemTone(it: AgendaItem): ItemTone {
 export function itemLabel(it: AgendaItem): string {
   if (it.kind === "CAMPAIGN_START") return `活動開始：${it.title}`;
   if (it.kind === "CAMPAIGN_END") return `活動最後一天：${it.title}`;
+  if (it.kind === "PO_ORDERED") return `下單：${it.title}`;
+  if (it.kind === "PO_EXPECTED") return `預計到貨：${it.title}`;
+  if (it.kind === "PO_RECEIVED") return `到貨：${it.title}`;
   const time = it.start_time ? `${it.start_time.slice(0, 5)} ` : "";
   return `${time}${it.title}`;
 }

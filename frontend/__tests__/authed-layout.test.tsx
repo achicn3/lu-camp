@@ -157,6 +157,8 @@ describe("(authed) layout", () => {
                 upcoming: [],
                 events: [],
                 campaigns: [],
+                deliveries_today: [],
+                deliveries_late: [],
                 consignment_pending_count: 0,
                 badge_count: 4,
               })

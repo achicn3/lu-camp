@@ -24,7 +24,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderStatus, SupplierPaymentTerms
+
+# 付款條件與數字要一致（docs/99 §5.2）：先付、貨到付款不填數字；月結填每月幾號；到貨後填幾天。
+PAYMENT_TERMS_CHECK = (
+    "(payment_terms IS NULL AND payment_terms_value IS NULL)"
+    " OR (payment_terms IN ('PREPAID', 'COD') AND payment_terms_value IS NULL)"
+    " OR (payment_terms = 'MONTHLY' AND payment_terms_value BETWEEN 1 AND 31)"
+    " OR (payment_terms = 'NET_DAYS' AND payment_terms_value BETWEEN 0 AND 365)"
+)
 
 
 def _enum_col(enum_type: type) -> Enum:
@@ -35,10 +43,14 @@ class Supplier(Base, TimestampMixin):
     """店內供應商主檔。
 
     is_active＝啟用中；停用（False）者不出現在建單供應商選單，但保留供既有採購單歷史參照。
+    payment_terms＝預設付款條件（限管理者設定）；採購單送出時快照過去，之後改不影響舊單。
     """
 
     __tablename__ = "suppliers"
-    __table_args__ = (UniqueConstraint("store_id", "name", name="uq_suppliers_store_name"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "name", name="uq_suppliers_store_name"),
+        CheckConstraint(PAYMENT_TERMS_CHECK, name="ck_suppliers_payment_terms"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -46,6 +58,10 @@ class Supplier(Base, TimestampMixin):
     contact: Mapped[str | None] = mapped_column(String(200))
     tax_id: Mapped[str | None] = mapped_column(String(20))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    payment_terms: Mapped[SupplierPaymentTerms | None] = mapped_column(
+        _enum_col(SupplierPaymentTerms)
+    )
+    payment_terms_value: Mapped[int | None] = mapped_column()
 
 
 class PurchaseOrder(Base, TimestampMixin):
@@ -53,9 +69,16 @@ class PurchaseOrder(Base, TimestampMixin):
 
     received_at/received_by 於**全部收足**（RECEIVED）時記錄；部分到貨期間為 None，
     各批收貨時間見各 GoodsReceipt.received_at。
+
+    日期（docs/99 §5）：ordered_on＝實際下單日（送出時定，可選過去；ordered_at 仍是按送出的那一刻，
+    留作稽核）；expected_on＝預計到貨日。payment_terms*＝送出當下快照的供應商付款條件；
+    付款期限由快照與日期即時算出，payment_due_override＝管理者手動改的期限。
     """
 
     __tablename__ = "purchase_orders"
+    __table_args__ = (
+        CheckConstraint(PAYMENT_TERMS_CHECK, name="ck_purchase_orders_payment_terms"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -71,6 +94,13 @@ class PurchaseOrder(Base, TimestampMixin):
     ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    ordered_on: Mapped[date | None] = mapped_column(Date)
+    expected_on: Mapped[date | None] = mapped_column(Date)
+    payment_terms: Mapped[SupplierPaymentTerms | None] = mapped_column(
+        _enum_col(SupplierPaymentTerms)
+    )
+    payment_terms_value: Mapped[int | None] = mapped_column()
+    payment_due_override: Mapped[date | None] = mapped_column(Date)
 
     receipts: Mapped[list["GoodsReceipt"]] = relationship(
         back_populates="purchase_order",

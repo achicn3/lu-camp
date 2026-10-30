@@ -46,8 +46,13 @@ export function TodayPanel({
   const data = today.data;
   const empty =
     data !== undefined &&
-    data.due_today.length + data.overdue.length + data.upcoming.length + data.events.length +
-      data.campaigns.length ===
+    data.due_today.length +
+      data.overdue.length +
+      data.upcoming.length +
+      data.events.length +
+      data.campaigns.length +
+      data.deliveries_today.length +
+      data.deliveries_late.length ===
       0 &&
     data.consignment_pending_count === 0;
 
@@ -163,6 +168,28 @@ export function TodayPanel({
                 onToggle={toggle}
                 onOpen={open}
               />
+            ))}
+          </ul>
+        </>
+      )}
+
+      {data && data.deliveries_today.length > 0 && (
+        <>
+          <h3 className="agenda-today-sub">今天預計到貨</h3>
+          <ul className="agenda-list">
+            {data.deliveries_today.map((item) => (
+              <AgendaRow key={item.key} item={item} />
+            ))}
+          </ul>
+        </>
+      )}
+
+      {data && data.deliveries_late.length > 0 && (
+        <>
+          <h3 className="agenda-today-sub agenda-today-sub-danger">過了預計日還沒到</h3>
+          <ul className="agenda-list">
+            {data.deliveries_late.map((item) => (
+              <AgendaRow key={item.key} item={item} showDate />
             ))}
           </ul>
         </>

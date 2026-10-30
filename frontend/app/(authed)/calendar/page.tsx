@@ -23,6 +23,7 @@ import {
   type AgendaSeries,
   addMonths,
   formatDayHeading,
+  isPurchaseItem,
   itemLabel,
   itemTone,
   listDays,
@@ -45,7 +46,13 @@ import { shiftIsoDate, taipeiDate } from "@/lib/datetime";
 import { useCurrentRole } from "@/lib/useCurrentRole";
 
 type View = "month" | "list";
-type Filters = { task: boolean; event: boolean; campaign: boolean; showDone: boolean };
+type Filters = {
+  task: boolean;
+  event: boolean;
+  campaign: boolean;
+  purchase: boolean;
+  showDone: boolean;
+};
 type DialogState =
   | { type: "new-task"; date?: string }
   | { type: "edit-task"; taskId: number }
@@ -60,10 +67,17 @@ const LIST_DAYS = 14;
 const CELL_CHIPS = 3;
 const FILTER_KEY = "lu-camp.calendar.filters";
 const VIEW_KEY = "lu-camp.calendar.view";
-const DEFAULT_FILTERS: Filters = { task: true, event: true, campaign: true, showDone: false };
+const DEFAULT_FILTERS: Filters = {
+  task: true,
+  event: true,
+  campaign: true,
+  purchase: true,
+  showDone: false,
+};
 const FILTER_LABELS: { key: keyof Omit<Filters, "showDone">; label: string }[] = [
   { key: "task", label: "待辦" },
   { key: "event", label: "事件" },
+  { key: "purchase", label: "進貨" },
   { key: "campaign", label: "活動" },
 ];
 const LEGEND: { tone: string; label: string }[] = [
@@ -72,6 +86,7 @@ const LEGEND: { tone: string; label: string }[] = [
   { tone: "closed", label: "公休／店休" },
   { tone: "market", label: "市集" },
   { tone: "other", label: "其他事件" },
+  { tone: "purchase", label: "進貨" },
   { tone: "campaign", label: "門市活動" },
 ];
 
@@ -118,6 +133,7 @@ function passes(item: AgendaItem, filters: Filters, where: "grid" | "list"): boo
     return where === "list" || filters.showDone || item.status === "OPEN";
   }
   if (item.kind === "EVENT") return filters.event;
+  if (isPurchaseItem(item)) return filters.purchase;
   return filters.campaign;
 }
 

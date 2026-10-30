@@ -4,11 +4,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
 import { Pagination } from "@/features/common/Pagination";
-import { supplierNameError } from "@/features/purchasing/purchasing";
+import { PaymentTermsFields } from "@/features/purchasing/PaymentTermsFields";
+import {
+  paymentTermsLabel,
+  supplierNameError,
+  type TermsChoice,
+  termsPayload,
+} from "@/features/purchasing/purchasing";
 import { extractDetail, PAGE_SIZE, type Supplier } from "@/features/purchasing/shared";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { useCurrentRole } from "@/lib/useCurrentRole";
 
 // ── 供應商建檔 ───────────────────────────────────────────────
 export function SupplierManager() {
@@ -16,6 +23,10 @@ export function SupplierManager() {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [taxId, setTaxId] = useState("");
+  // 付款條件只有管理者能設（docs/99 §7）；店員看不到這兩欄，建檔時也不送。
+  const { isManager } = useCurrentRole();
+  const [terms, setTerms] = useState<TermsChoice>("");
+  const [termsValue, setTermsValue] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
@@ -72,11 +83,18 @@ export function SupplierManager() {
 
   const create = useMutation({
     mutationFn: async () => {
+      let termsBody = {};
+      if (isManager) {
+        const next = termsPayload(terms, termsValue);
+        if ("error" in next) throw new Error(next.error);
+        termsBody = next;
+      }
       const { data, error } = await api.POST("/api/v1/suppliers", {
         body: {
           name: name.trim(),
           contact: contact.trim() === "" ? null : contact.trim(),
           tax_id: taxId.trim() === "" ? null : taxId.trim(),
+          ...termsBody,
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立供應商失敗");
@@ -86,6 +104,8 @@ export function SupplierManager() {
       setName("");
       setContact("");
       setTaxId("");
+      setTerms("");
+      setTermsValue("");
       setFormError(null);
       void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
     },
@@ -118,6 +138,14 @@ export function SupplierManager() {
           <span>統一編號</span>
           <input aria-label="統一編號" value={taxId} onChange={(e) => setTaxId(e.target.value)} />
         </label>
+        {isManager && (
+          <PaymentTermsFields
+            terms={terms}
+            value={termsValue}
+            onTerms={setTerms}
+            onValue={setTermsValue}
+          />
+        )}
         {formError !== null && (
           <p role="alert" className="form-error">
             {formError}
@@ -185,6 +213,7 @@ export function SupplierManager() {
                     <th>名稱</th>
                     <th>聯絡方式</th>
                     <th>統編</th>
+                    <th>付款條件</th>
                     <th>狀態</th>
                     <th>操作</th>
                   </tr>
@@ -195,6 +224,7 @@ export function SupplierManager() {
                       <td>{s.name}</td>
                       <td>{s.contact ?? "—"}</td>
                       <td>{s.tax_id ?? "—"}</td>
+                      <td>{paymentTermsLabel(s.payment_terms, s.payment_terms_value)}</td>
                       <td>
                         <span className={`inv-badge inv-tone-${s.is_active ? "ok" : "muted"}`}>
                           {s.is_active ? "啟用中" : "已停用"}
@@ -275,6 +305,13 @@ function SupplierEditModal({
   const [name, setName] = useState(supplier.name);
   const [contact, setContact] = useState(supplier.contact ?? "");
   const [taxId, setTaxId] = useState(supplier.tax_id ?? "");
+  const { isManager } = useCurrentRole();
+  const [terms, setTerms] = useState<TermsChoice>(supplier.payment_terms ?? "");
+  const [termsValue, setTermsValue] = useState(
+    supplier.payment_terms_value === null || supplier.payment_terms_value === undefined
+      ? ""
+      : String(supplier.payment_terms_value),
+  );
   const [error, setError] = useState<string | null>(null);
   useBodyScrollLock(true);
 
@@ -290,6 +327,17 @@ function SupplierEditModal({
       if (name.trim() !== supplier.name) body.name = name.trim();
       if (nextContact !== (supplier.contact ?? null)) body.contact = nextContact;
       if (nextTaxId !== (supplier.tax_id ?? null)) body.tax_id = nextTaxId;
+      if (isManager) {
+        const next = termsPayload(terms, termsValue);
+        if ("error" in next) throw new Error(next.error);
+        if (
+          next.payment_terms !== (supplier.payment_terms ?? null) ||
+          next.payment_terms_value !== (supplier.payment_terms_value ?? null)
+        ) {
+          body.payment_terms = next.payment_terms;
+          body.payment_terms_value = next.payment_terms_value;
+        }
+      }
       if (Object.keys(body).length === 0) return supplier; // 無更動：不打 API
       const { data, error: err } = await api.PATCH("/api/v1/suppliers/{supplier_id}", {
         params: { path: { supplier_id: supplier.id } },
@@ -326,6 +374,16 @@ function SupplierEditModal({
             onChange={(e) => setTaxId(e.target.value)}
           />
         </label>
+        {isManager && (
+          <PaymentTermsFields
+            terms={terms}
+            value={termsValue}
+            onTerms={setTerms}
+            onValue={setTermsValue}
+            labelPrefix="編輯"
+          />
+        )}
+        <p className="hint">付款條件改了只影響之後送出的採購單，已經下的單照原本的條件。</p>
         {error !== null && (
           <p role="alert" className="form-error">
             {error}

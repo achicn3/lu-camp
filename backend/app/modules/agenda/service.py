@@ -42,6 +42,7 @@ from app.modules.agenda.schemas import (
 )
 from app.modules.campaigns.service import CampaignService
 from app.modules.consignment.service import ConsignmentService
+from app.modules.purchasing.service import PurchaseDate, PurchasingService
 from app.modules.staff.service import StaffService
 from app.modules.user.service import UserService
 from app.shared.enums import (
@@ -54,12 +55,15 @@ from app.shared.exceptions import AgendaForbidden, AgendaItemInvalid, AgendaItem
 
 # 找「下一次」時往後看多遠：每 24 個月一次的規則也找得到。
 _NEXT_LOOKAHEAD = timedelta(days=800)
-# 同一天裡的排序：公休等事件在最上面，再來活動，最後待辦。
+# 同一天裡的排序：公休等事件在最上面，再來活動、進貨，最後待辦。
 _KIND_ORDER = {
     AgendaItemKind.EVENT: 0,
     AgendaItemKind.CAMPAIGN_START: 1,
     AgendaItemKind.CAMPAIGN_END: 2,
-    AgendaItemKind.TASK: 3,
+    AgendaItemKind.PO_EXPECTED: 3,
+    AgendaItemKind.PO_RECEIVED: 4,
+    AgendaItemKind.PO_ORDERED: 5,
+    AgendaItemKind.TASK: 6,
 }
 _TASK_FIELDS = (
     "title",
@@ -543,6 +547,7 @@ class AgendaService:
         items = await self._task_items(store_id, viewer, start, end, today=today)
         items += await self._event_items(store_id, viewer, start, end)
         items += await self._campaign_items(store_id, viewer, start, end)
+        items += await self._purchase_items(store_id, start, end, today=today)
         return sorted(items, key=_sort_key)
 
     async def today_summary(self, store_id: int, viewer: Viewer, *, today: date) -> AgendaTodayRead:
@@ -591,6 +596,15 @@ class AgendaService:
             store_id, status=ConsignmentSettlementStatus.PENDING
         )
         campaigns = await self._campaign_items(store_id, viewer, today, today)
+        purchasing = PurchasingService(self._session)
+        deliveries_today = [
+            self._purchase_item(AgendaItemKind.PO_EXPECTED, entry, today)
+            for entry in (await purchasing.calendar_between(store_id, today, today)).expected
+        ]
+        deliveries_late = [
+            self._purchase_item(AgendaItemKind.PO_EXPECTED, entry, today)
+            for entry in await purchasing.late_deliveries(store_id, today)
+        ]
         due_today.sort(key=_sort_key)
         overdue.sort(key=_sort_key)
         upcoming.sort(key=_sort_key)
@@ -601,6 +615,8 @@ class AgendaService:
             upcoming=upcoming,
             events=sorted(await self._event_items(store_id, viewer, today, today), key=_sort_key),
             campaigns=campaigns,
+            deliveries_today=deliveries_today,
+            deliveries_late=deliveries_late,
             consignment_pending_count=pending,
             badge_count=sum(1 for i in due_today if i.status is AgendaTaskStatus.OPEN)
             + len(overdue),
@@ -903,6 +919,35 @@ class AgendaService:
                 for day in starts
             )
         return items
+
+    @staticmethod
+    def _purchase_item(kind: AgendaItemKind, entry: PurchaseDate, today: date) -> AgendaItemRead:
+        """採購單的一個日期。店員也看得到（採購頁本來就開放），不帶金額。"""
+        key_id = entry.receipt_id if kind is AgendaItemKind.PO_RECEIVED else entry.purchase_order_id
+        return AgendaItemRead(
+            key=f"{kind.value.lower()}:{key_id}",
+            kind=kind,
+            day=entry.day,
+            title=entry.supplier_name,
+            # 預計到貨只列還沒收齊的，所以日子過了就是逾期未到。
+            overdue=kind is AgendaItemKind.PO_EXPECTED and entry.day < today,
+            purchase_order_id=entry.purchase_order_id,
+            href=f"/purchasing/{entry.purchase_order_id}",
+        )
+
+    async def _purchase_items(
+        self, store_id: int, start: date, end: date, *, today: date
+    ) -> list[AgendaItemRead]:
+        calendar = await PurchasingService(self._session).calendar_between(store_id, start, end)
+        return [
+            self._purchase_item(kind, entry, today)
+            for kind, entries in (
+                (AgendaItemKind.PO_ORDERED, calendar.ordered),
+                (AgendaItemKind.PO_EXPECTED, calendar.expected),
+                (AgendaItemKind.PO_RECEIVED, calendar.received),
+            )
+            for entry in entries
+        ]
 
     async def _campaign_items(
         self, store_id: int, viewer: Viewer, start: date, end: date

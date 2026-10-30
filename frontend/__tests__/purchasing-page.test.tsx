@@ -897,6 +897,68 @@ describe("/purchasing/new 建立採購單", () => {
     expect(JSON.parse(createdBody as unknown as string).submit).toBe(false);
   });
 
+  it("送出採購帶實際下單日與預計到貨日（docs/99 §5.1）", async () => {
+    loginAs("CLERK");
+    let createdBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/brands")) return json([]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders") && init.method === "POST") {
+        createdBody = init.body as string;
+        return json(ORDERED_PO, 201);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderNew();
+
+    await pickSupplier(user);
+    await user.type(screen.getByLabelText("搜尋一般商品"), "瓦斯");
+    await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
+    await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
+    await user.type(screen.getByLabelText("預計到貨日（選填）"), "2030-01-05");
+    const orderDay = screen.getByLabelText("實際下單日（送出時）") as HTMLInputElement;
+    await user.clear(orderDay);
+    await user.type(orderDay, "2026-01-02");
+    await user.click(screen.getByRole("button", { name: "送出採購" }));
+
+    await waitFor(() => expect(createdBody).not.toBeNull());
+    const parsed = JSON.parse(createdBody as unknown as string);
+    expect(parsed.submit).toBe(true);
+    expect(parsed.expected_on).toBe("2030-01-05");
+    expect(parsed.ordered_on).toBe("2026-01-02");
+  });
+
+  it("存草稿不帶實際下單日（送出時才定），預計到貨日沒填送 null", async () => {
+    loginAs("CLERK");
+    let createdBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/brands")) return json([]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders") && init.method === "POST") {
+        createdBody = init.body as string;
+        return json({ ...ORDERED_PO, status: "DRAFT" }, 201);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderNew();
+
+    await pickSupplier(user);
+    await user.type(screen.getByLabelText("搜尋一般商品"), "瓦斯");
+    await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
+    await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
+    await user.click(screen.getByRole("button", { name: "存草稿" }));
+
+    await waitFor(() => expect(createdBody).not.toBeNull());
+    const parsed = JSON.parse(createdBody as unknown as string);
+    expect(parsed.submit).toBe(false);
+    expect(parsed).not.toHaveProperty("ordered_on");
+    expect(parsed.expected_on).toBeNull();
+  });
+
   it("從低庫存帶入時採用提示算好的數量（已扣在途）", async () => {
     loginAs("CLERK");
     stubFetch((url) => {

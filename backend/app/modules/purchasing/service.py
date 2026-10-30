@@ -3,7 +3,8 @@
 import hashlib
 import json
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
 from app.core.money import MAX_NTD
+from app.core.time import store_date, store_day_bounds, utc_now
 from app.modules.inventory.service import InventoryService
 from app.modules.purchasing.models import (
     GoodsReceipt,
@@ -19,17 +21,20 @@ from app.modules.purchasing.models import (
     PurchaseOrderLine,
     Supplier,
 )
+from app.modules.purchasing.payment_terms import validate_terms
 from app.modules.purchasing.repository import PurchasingRepository
 from app.modules.purchasing.schemas import (
     InputInvoiceIn,
     InputInvoiceWrite,
     PurchaseOrderCreate,
+    PurchaseOrderScheduleUpdate,
+    PurchaseOrderSubmit,
     PurchaseOrderUpdate,
     ReceiveLineIn,
     SupplierCreate,
     SupplierUpdate,
 )
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderStatus, SupplierPaymentTerms
 from app.shared.exceptions import (
     CrossStoreReference,
     DuplicateInputInvoice,
@@ -49,6 +54,43 @@ from app.shared.exceptions import (
 )
 
 _NONE_RECEIVED: tuple[int, Decimal] = (0, Decimal(0))
+# 還沒收齊、仍在等貨的狀態（行事曆的預計到貨、逾期未到只看這兩種）。
+_AWAITING = (PurchaseOrderStatus.ORDERED, PurchaseOrderStatus.PARTIAL)
+_TERMS_WITH_VALUE = (SupplierPaymentTerms.MONTHLY, SupplierPaymentTerms.NET_DAYS)
+
+
+@dataclass(frozen=True)
+class PurchaseDate:
+    """行事曆上的一個採購日期（docs/99 §3）：哪張單、哪家、哪天。"""
+
+    purchase_order_id: int
+    supplier_name: str
+    day: date
+    receipt_id: int | None = None
+
+
+@dataclass(frozen=True)
+class PurchaseCalendar:
+    ordered: list[PurchaseDate]  # 實際下單日
+    expected: list[PurchaseDate]  # 預計到貨日（只列還沒收齊的）
+    received: list[PurchaseDate]  # 每一批收貨
+
+
+def _terms_snapshot(supplier: Supplier) -> dict[str, Any]:
+    return {
+        "payment_terms": supplier.payment_terms,
+        "payment_terms_value": supplier.payment_terms_value,
+    }
+
+
+def _order_day(requested: date | None) -> date:
+    """實際下單日：空白＝今天（門市時區），不能選未來。"""
+    today = store_date(utc_now())
+    if requested is None:
+        return today
+    if requested > today:
+        raise InvalidPurchaseOrder("實際下單日不能是未來的日子")
+    return requested
 
 
 class PurchasingService:
@@ -61,15 +103,23 @@ class PurchasingService:
         """供庫存判斷可不可以刪：這個商品有沒有採購紀錄。"""
         return await self._repo.product_referenced(store_id, catalog_product_id)
 
-    async def create_supplier(self, store_id: int, payload: SupplierCreate) -> Supplier:
+    async def create_supplier(
+        self, store_id: int, payload: SupplierCreate, *, actor_is_manager: bool = False
+    ) -> Supplier:
         name = payload.name.strip()
         if not name:
             raise InvalidPurchaseOrder("供應商名稱不可空白")
+        if payload.payment_terms is not None or payload.payment_terms_value is not None:
+            if not actor_is_manager:
+                raise PurchasingManagerOnly("付款條件只有管理者能設定")
+            validate_terms(payload.payment_terms, payload.payment_terms_value)
         supplier = Supplier(
             store_id=store_id,
             name=name,
             contact=payload.contact.strip() if payload.contact else None,
             tax_id=payload.tax_id.strip() if payload.tax_id else None,
+            payment_terms=payload.payment_terms,
+            payment_terms_value=payload.payment_terms_value,
         )
         return await self._repo.add_supplier(supplier)
 
@@ -99,7 +149,13 @@ class PurchasingService:
         return supplier
 
     async def update_supplier(
-        self, store_id: int, supplier_id: int, payload: "SupplierUpdate", *, actor_user_id: int
+        self,
+        store_id: int,
+        supplier_id: int,
+        payload: "SupplierUpdate",
+        *,
+        actor_user_id: int,
+        actor_is_manager: bool = False,
     ) -> Supplier:
         """稀疏 PATCH：只更新有帶的欄位（省略維持原值，避免只改名卻清空聯絡/統編）。
         名稱有帶時不可空白；同店重名由唯一約束於 router 轉 409。
@@ -113,7 +169,11 @@ class PurchasingService:
         fields = payload.model_fields_set
         if not fields:
             return supplier
-        before = {"name": supplier.name, "contact": supplier.contact, "tax_id": supplier.tax_id}
+        before = self._supplier_snapshot(supplier)
+        if "payment_terms" in fields or "payment_terms_value" in fields:
+            if not actor_is_manager:
+                raise PurchasingManagerOnly("付款條件只有管理者能設定")
+            self._apply_terms(supplier, payload, fields)
         if "name" in fields:
             name = (payload.name or "").strip()
             if not name:
@@ -132,11 +192,35 @@ class PurchasingService:
             entity_type="supplier",
             entity_id=str(supplier.id),
             before=before,
-            after={"name": supplier.name, "contact": supplier.contact, "tax_id": supplier.tax_id},
+            after=self._supplier_snapshot(supplier),
         )
         # UPDATE 讓 server onupdate 欄（updated_at）過期；重抓以免 router 序列化觸發同步 lazy IO。
         await self._session.refresh(supplier)
         return supplier
+
+    @staticmethod
+    def _supplier_snapshot(supplier: Supplier) -> dict[str, Any]:
+        return {
+            "name": supplier.name,
+            "contact": supplier.contact,
+            "tax_id": supplier.tax_id,
+            "payment_terms": supplier.payment_terms.value if supplier.payment_terms else None,
+            "payment_terms_value": supplier.payment_terms_value,
+        }
+
+    @staticmethod
+    def _apply_terms(supplier: Supplier, payload: SupplierUpdate, fields: set[str]) -> None:
+        """只改條件沒帶數字時：同一種要數字的條件沿用原本的數字，其餘清空（再交給驗證把關）。"""
+        terms = payload.payment_terms if "payment_terms" in fields else supplier.payment_terms
+        if "payment_terms_value" in fields:
+            value = payload.payment_terms_value
+        elif terms in _TERMS_WITH_VALUE and terms == supplier.payment_terms:
+            value = supplier.payment_terms_value
+        else:
+            value = None
+        validate_terms(terms, value)
+        supplier.payment_terms = terms
+        supplier.payment_terms_value = value
 
     async def set_supplier_active(
         self, store_id: int, supplier_id: int, active: bool, *, actor_user_id: int
@@ -198,6 +282,8 @@ class PurchasingService:
 
         # 預設建為草稿；payload.submit=True 則建立即送出（ORDERED、計入待到貨、可收貨）。
         status = PurchaseOrderStatus.ORDERED if payload.submit else PurchaseOrderStatus.DRAFT
+        if not payload.submit and payload.ordered_on is not None:
+            raise InvalidPurchaseOrder("草稿送出時才定實際下單日")
         purchase_order = await self._repo.add_purchase_order(
             PurchaseOrder(
                 store_id=store_id,
@@ -205,6 +291,10 @@ class PurchasingService:
                 supplier_name=supplier.name,  # 快照下單當下的供應商名（改名不改寫歷史）
                 ordered_by=actor_user_id,
                 status=status,
+                ordered_on=_order_day(payload.ordered_on) if payload.submit else None,
+                expected_on=payload.expected_on,
+                # 付款條件跟供應商名一樣在送出當下快照（docs/99 §5.2）；草稿還沒定。
+                **(_terms_snapshot(supplier) if payload.submit else {}),
             )
         )
         for line in payload.lines:
@@ -221,9 +311,17 @@ class PurchasingService:
         return purchase_order
 
     async def submit_purchase_order(
-        self, store_id: int, purchase_order_id: int, *, actor_user_id: int
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        *,
+        actor_user_id: int,
+        payload: PurchaseOrderSubmit | None = None,
     ) -> PurchaseOrder:
-        """草稿送出 → ORDERED（計入待到貨、可收貨）。僅草稿可送出。"""
+        """草稿送出 → ORDERED（計入待到貨、可收貨）。僅草稿可送出。
+
+        實際下單日空白＝今天（可選過去、不能未來）；付款條件在此時從供應商快照（docs/99 §5）。
+        """
         purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
         if purchase_order is None:
             raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
@@ -243,6 +341,11 @@ class PurchasingService:
         purchase_order.ordered_at = datetime.now(UTC)
         purchase_order.ordered_by = actor_user_id
         purchase_order.supplier_name = supplier.name
+        purchase_order.ordered_on = _order_day(payload.ordered_on if payload else None)
+        if payload is not None and "expected_on" in payload.model_fields_set:
+            purchase_order.expected_on = payload.expected_on
+        purchase_order.payment_terms = supplier.payment_terms
+        purchase_order.payment_terms_value = supplier.payment_terms_value
         await self._session.flush()
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
@@ -367,6 +470,10 @@ class PurchasingService:
             )
         purchase_order.supplier_id = supplier.id
         purchase_order.supplier_name = supplier.name
+        if purchase_order.status != PurchaseOrderStatus.DRAFT:
+            # 換了供應商就是跟另一家的約定：付款條件跟著重新快照（草稿要送出時才快照）。
+            purchase_order.payment_terms = supplier.payment_terms
+            purchase_order.payment_terms_value = supplier.payment_terms_value
 
     @staticmethod
     def _apply_lines(
@@ -478,6 +585,107 @@ class PurchasingService:
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
         return refreshed
+
+    async def update_schedule(
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        payload: PurchaseOrderScheduleUpdate,
+        *,
+        actor_user_id: int,
+        actor_is_manager: bool,
+    ) -> PurchaseOrder:
+        """改實際下單日、預計到貨日、付款期限（docs/99 §5.1、§7）；沒送的欄位不動。
+
+        預計到貨日店員也能改（到貨資訊，不是改單內容）；實際下單日送出後限管理者；
+        付款期限限管理者，送 null＝恢復自動計算。改下單日與期限寫稽核。
+        """
+        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
+        if purchase_order is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        if purchase_order.status == PurchaseOrderStatus.CANCELLED:
+            raise PurchaseOrderNotEditable(f"採購單 {purchase_order_id} 已取消，日期不能改")
+        fields = payload.model_fields_set
+        before = self._schedule_snapshot(purchase_order)
+        if "expected_on" in fields:
+            if purchase_order.status == PurchaseOrderStatus.RECEIVED:
+                raise PurchaseOrderNotEditable("已經收齊的採購單不用再改預計到貨日")
+            purchase_order.expected_on = payload.expected_on
+        if "ordered_on" in fields:
+            if purchase_order.status == PurchaseOrderStatus.DRAFT:
+                raise PurchaseOrderNotEditable("草稿送出時才定實際下單日")
+            if not actor_is_manager:
+                raise PurchasingManagerOnly("已下單的採購單，實際下單日只有管理者能改")
+            if payload.ordered_on is None:
+                raise InvalidPurchaseOrder("已下單的採購單一定要有實際下單日")
+            purchase_order.ordered_on = _order_day(payload.ordered_on)
+        if "payment_due_on" in fields:
+            if purchase_order.status == PurchaseOrderStatus.DRAFT:
+                raise PurchaseOrderNotEditable("草稿還沒有付款期限")
+            if not actor_is_manager:
+                raise PurchasingManagerOnly("付款期限只有管理者能改")
+            purchase_order.payment_due_override = payload.payment_due_on
+        after = self._schedule_snapshot(purchase_order)
+        await self._session.flush()
+        if {k: v for k, v in before.items() if k != "expected_on"} != {
+            k: v for k, v in after.items() if k != "expected_on"
+        }:
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="UPDATE_PURCHASE_ORDER_SCHEDULE",
+                entity_type="purchase_order",
+                entity_id=str(purchase_order.id),
+                before=before,
+                after=after,
+            )
+        refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
+        if refreshed is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        return refreshed
+
+    @staticmethod
+    def _schedule_snapshot(purchase_order: PurchaseOrder) -> dict[str, Any]:
+        def iso(value: date | None) -> str | None:
+            return value.isoformat() if value else None
+
+        return {
+            "ordered_on": iso(purchase_order.ordered_on),
+            "expected_on": iso(purchase_order.expected_on),
+            "payment_due_override": iso(purchase_order.payment_due_override),
+        }
+
+    async def calendar_between(self, store_id: int, start: date, end: date) -> PurchaseCalendar:
+        """行事曆用（docs/99 §3）：[start, end] 內的下單日、還沒收齊的預計到貨日、每一批收貨。"""
+        start_at, end_at = store_day_bounds(start)[0], store_day_bounds(end)[1]
+        return PurchaseCalendar(
+            ordered=[
+                PurchaseDate(po_id, name, day)
+                for po_id, name, day in await self._repo.ordered_between(store_id, start, end)
+            ],
+            expected=[
+                PurchaseDate(po_id, name, day)
+                for po_id, name, day in await self._repo.expected_between(
+                    store_id, start, end, statuses=_AWAITING
+                )
+            ],
+            received=[
+                PurchaseDate(po_id, name, store_date(at), receipt_id)
+                for receipt_id, po_id, name, at in await self._repo.receipts_between(
+                    store_id, start_at, end_at
+                )
+            ],
+        )
+
+    async def late_deliveries(self, store_id: int, today: date) -> list[PurchaseDate]:
+        """過了預計到貨日還沒收齊的採購單（「今天」的逾期未到）。"""
+        return [
+            PurchaseDate(po_id, name, day)
+            for po_id, name, day in await self._repo.expected_before(
+                store_id, today, statuses=_AWAITING
+            )
+        ]
 
     async def input_invoices_in_period(
         self, store_id: int, date_from: datetime, date_to: datetime

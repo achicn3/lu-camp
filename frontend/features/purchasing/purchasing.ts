@@ -142,3 +142,55 @@ export function toUpdatePayload(lines: DraftLine[]): {
     received_qty: lines[idx].receivedQty ?? 0,
   }));
 }
+
+// ── 日期與付款條件（docs/99 §5、行事曆 1B）──────────────────────
+
+type PaymentTerms = components["schemas"]["SupplierPaymentTerms"];
+
+/** 付款條件的白話說明（供應商與採購單明細共用）。 */
+export function paymentTermsLabel(terms: PaymentTerms | null | undefined, value: number | null | undefined): string {
+  switch (terms) {
+    case "PREPAID":
+      return "先付（下單就付）";
+    case "COD":
+      return "貨到付款";
+    case "MONTHLY":
+      return `月結（每月 ${value ?? "?"} 號付上個月的）`;
+    case "NET_DAYS":
+      return `到貨後 ${value ?? "?"} 天內付`;
+    default:
+      return "未設定";
+  }
+}
+
+/** 還在等貨（已下單、部分到貨），而且預計到貨日已經過了。 */
+export function isLateDelivery(
+  po: { status: PurchaseOrderStatus; expected_on?: string | null },
+  today: string,
+): boolean {
+  if (po.status !== "ORDERED" && po.status !== "PARTIAL") return false;
+  return po.expected_on !== null && po.expected_on !== undefined && po.expected_on < today;
+}
+
+export type TermsChoice = PaymentTerms | "";
+
+/** 供應商表單的付款條件 → API 欄位；月結要 1–31、到貨後要 0–365（與後端同一套規則）。 */
+export function termsPayload(
+  terms: TermsChoice,
+  valueText: string,
+):
+  | { payment_terms: PaymentTerms | null; payment_terms_value: number | null }
+  | { error: string } {
+  if (terms === "") return { payment_terms: null, payment_terms_value: null };
+  if (terms === "PREPAID" || terms === "COD") return { payment_terms: terms, payment_terms_value: null };
+  const text = valueText.trim();
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
+  if (terms === "MONTHLY") {
+    return value >= 1 && value <= 31
+      ? { payment_terms: terms, payment_terms_value: value }
+      : { error: "月結要填每月幾號付（1 到 31）" };
+  }
+  return value >= 0 && value <= 365
+    ? { payment_terms: terms, payment_terms_value: value }
+    : { error: "到貨後幾天付要填 0 到 365" };
+}

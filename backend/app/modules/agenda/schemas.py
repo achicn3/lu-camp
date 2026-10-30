@@ -321,6 +321,7 @@ class AgendaItemRead(BaseModel):
     event_kind: AgendaEventKind | None = None
     campaign_id: int | None = None
     campaign_status: CampaignStatus | None = None
+    purchase_order_id: int | None = None
     href: str | None = None
 
 
@@ -339,5 +340,7 @@ class AgendaTodayRead(BaseModel):
     upcoming: list[AgendaItemRead]  # 快到期：在各自的提前天數內
     events: list[AgendaItemRead]  # 今天的公休、市集等
     campaigns: list[AgendaItemRead]  # 今天開始或結束的門市活動
+    deliveries_today: list[AgendaItemRead]  # 今天預計到貨（還沒收齊的採購單）
+    deliveries_late: list[AgendaItemRead]  # 過了預計到貨日還沒收齊
     consignment_pending_count: int  # 寄售待撥款筆數
     badge_count: int  # 導覽列數字：今天到期（未完成）＋已過期

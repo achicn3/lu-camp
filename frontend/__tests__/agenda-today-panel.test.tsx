@@ -43,6 +43,7 @@ function item(partial: Partial<AgendaItem> & Pick<AgendaItem, "key" | "day" | "t
     event_kind: null,
     campaign_id: null,
     campaign_status: null,
+    purchase_order_id: null,
     href: null,
     ...partial,
   };
@@ -56,6 +57,8 @@ function today(partial: Partial<AgendaToday> = {}): AgendaToday {
     upcoming: [],
     events: [],
     campaigns: [],
+    deliveries_today: [],
+    deliveries_late: [],
     consignment_pending_count: 0,
     badge_count: 0,
     ...partial,
@@ -149,6 +152,49 @@ describe("今天區塊", () => {
 
     await user.click(within(panel).getByRole("button", { name: "付房租" }));
     expect(push).toHaveBeenCalledWith("/calendar?day=2026-11-12");
+  });
+
+  it("今天預計到貨與過了預計日還沒到的進貨，點了到那張採購單（1B）", async () => {
+    stubFetch((url) =>
+      url.includes("/agenda/today")
+        ? json(
+            today({
+              deliveries_today: [
+                item({
+                  key: "po_expected:12",
+                  kind: "PO_EXPECTED",
+                  day: "2026-11-10",
+                  title: "露營批發",
+                  purchase_order_id: 12,
+                  href: "/purchasing/12",
+                }),
+              ],
+              deliveries_late: [
+                item({
+                  key: "po_expected:9",
+                  kind: "PO_EXPECTED",
+                  day: "2026-11-05",
+                  title: "咖啡豆行",
+                  purchase_order_id: 9,
+                  overdue: true,
+                  href: "/purchasing/9",
+                }),
+              ],
+            }),
+          )
+        : null,
+    );
+    renderPanel();
+    const panel = await screen.findByRole("region", { name: "今天" });
+    expect(await within(panel).findByText("今天預計到貨")).toBeTruthy();
+    expect(within(panel).getByText("過了預計日還沒到")).toBeTruthy();
+    expect(
+      within(panel).getByRole("link", { name: "預計到貨：露營批發" }).getAttribute("href"),
+    ).toBe("/purchasing/12");
+    expect(
+      within(panel).getByRole("link", { name: "預計到貨：咖啡豆行" }).getAttribute("href"),
+    ).toBe("/purchasing/9");
+    expect(within(panel).queryByText("今天沒有待辦，也沒有快到期的事。")).toBeNull();
   });
 
   it("沒有事要講清楚；讀不到要講出來，不能說成沒事", async () => {

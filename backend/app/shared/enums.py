@@ -869,9 +869,25 @@ class AgendaEventKind(StrEnum):
 
 
 class AgendaItemKind(StrEnum):
-    """行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。"""
+    """行事曆彙整的一列是什麼（docs/99 §3）。1C 再加付款與付款期限。"""
 
     TASK = "TASK"  # 待辦（單次、或重複待辦的某一次）
     EVENT = "EVENT"  # 事件（公休、市集…）
     CAMPAIGN_START = "CAMPAIGN_START"  # 門市活動開始日
     CAMPAIGN_END = "CAMPAIGN_END"  # 門市活動最後一天
+    PO_ORDERED = "PO_ORDERED"  # 採購單實際下單日（1B）
+    PO_EXPECTED = "PO_EXPECTED"  # 採購單預計到貨日，只列還沒收齊的（1B）
+    PO_RECEIVED = "PO_RECEIVED"  # 採購單的每一批到貨（1B）
+
+
+class SupplierPaymentTerms(StrEnum):
+    """供應商付款條件（docs/99 §5.2）：下單時快照到採購單，用來算付款期限。
+
+    PREPAID＝先付（下單日）；COD＝貨到付款（第一批到貨日，沒到貨用預計到貨日）；
+    MONTHLY＝月結，每月 X 號付上個月收的貨；NET_DAYS＝到貨後 N 天。
+    """
+
+    PREPAID = "PREPAID"
+    COD = "COD"
+    MONTHLY = "MONTHLY"
+    NET_DAYS = "NET_DAYS"

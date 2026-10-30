@@ -1548,12 +1548,15 @@
         "type": "object"
       },
       "AgendaItemKind": {
-        "description": "行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。",
+        "description": "行事曆彙整的一列是什麼（docs/99 §3）。1C 再加付款與付款期限。",
         "enum": [
           "TASK",
           "EVENT",
           "CAMPAIGN_START",
-          "CAMPAIGN_END"
+          "CAMPAIGN_END",
+          "PO_ORDERED",
+          "PO_EXPECTED",
+          "PO_RECEIVED"
         ],
         "title": "AgendaItemKind",
         "type": "string"
@@ -1715,6 +1718,17 @@
             "default": false,
             "title": "Overdue",
             "type": "boolean"
+          },
+          "purchase_order_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Order Id"
           },
           "series_id": {
             "anyOf": [
@@ -2543,6 +2557,20 @@
             "title": "Consignment Pending Count",
             "type": "integer"
           },
+          "deliveries_late": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Deliveries Late",
+            "type": "array"
+          },
+          "deliveries_today": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Deliveries Today",
+            "type": "array"
+          },
           "due_today": {
             "items": {
               "$ref": "#/components/schemas/AgendaItemRead"
@@ -2584,6 +2612,8 @@
           "upcoming",
           "events",
           "campaigns",
+          "deliveries_today",
+          "deliveries_late",
           "consignment_pending_count",
           "badge_count"
         ],
@@ -16463,6 +16493,18 @@
       },
       "PurchaseOrderCreate": {
         "properties": {
+          "expected_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected On"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/PurchaseOrderLineCreate"
@@ -16470,6 +16512,18 @@
             "minItems": 1,
             "title": "Lines",
             "type": "array"
+          },
+          "ordered_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered On"
           },
           "submit": {
             "default": false,
@@ -16615,6 +16669,18 @@
             "title": "Created At",
             "type": "string"
           },
+          "expected_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected On"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -16634,6 +16700,56 @@
           "ordered_by": {
             "title": "Ordered By",
             "type": "integer"
+          },
+          "ordered_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered On"
+          },
+          "payment_due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Due On"
+          },
+          "payment_due_overridden": {
+            "default": false,
+            "title": "Payment Due Overridden",
+            "type": "boolean"
+          },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_terms_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Value"
           },
           "receipts": {
             "default": [],
@@ -16709,6 +16825,49 @@
         "title": "PurchaseOrderRead",
         "type": "object"
       },
+      "PurchaseOrderScheduleUpdate": {
+        "description": "改採購單的日期（docs/99 §5.1）；沒送的欄位不動。\n\n預計到貨日店員也能改；實際下單日送出後限管理者；付款期限限管理者，送 null＝恢復自動計算。",
+        "properties": {
+          "expected_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected On"
+          },
+          "ordered_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered On"
+          },
+          "payment_due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Due On"
+          }
+        },
+        "title": "PurchaseOrderScheduleUpdate",
+        "type": "object"
+      },
       "PurchaseOrderStatus": {
         "description": "採購單狀態機。\n\nDRAFT ─送出→ ORDERED ─分批收貨→ PARTIAL ─收足→ RECEIVED；\nDRAFT/ORDERED ─取消→ CANCELLED（僅在尚未收任何貨時可取消）。",
         "enum": [
@@ -16720,6 +16879,37 @@
         ],
         "title": "PurchaseOrderStatus",
         "type": "string"
+      },
+      "PurchaseOrderSubmit": {
+        "description": "草稿送出時可一併填實際下單日（空白＝今天）與預計到貨日。整個 body 可省略。",
+        "properties": {
+          "expected_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected On"
+          },
+          "ordered_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordered On"
+          }
+        },
+        "title": "PurchaseOrderSubmit",
+        "type": "object"
       },
       "PurchaseOrderUpdate": {
         "description": "整張覆寫：原有明細沒帶到的就刪除。",
@@ -21998,6 +22188,27 @@
             "title": "Name",
             "type": "string"
           },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_terms_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Value"
+          },
           "tax_id": {
             "anyOf": [
               {
@@ -22016,6 +22227,17 @@
         ],
         "title": "SupplierCreate",
         "type": "object"
+      },
+      "SupplierPaymentTerms": {
+        "description": "供應商付款條件（docs/99 §5.2）：下單時快照到採購單，用來算付款期限。\n\nPREPAID＝先付（下單日）；COD＝貨到付款（第一批到貨日，沒到貨用預計到貨日）；\nMONTHLY＝月結，每月 X 號付上個月收的貨；NET_DAYS＝到貨後 N 天。",
+        "enum": [
+          "PREPAID",
+          "COD",
+          "MONTHLY",
+          "NET_DAYS"
+        ],
+        "title": "SupplierPaymentTerms",
+        "type": "string"
       },
       "SupplierRead": {
         "properties": {
@@ -22047,6 +22269,27 @@
             "title": "Name",
             "type": "string"
           },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_terms_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Value"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -22075,6 +22318,8 @@
           "contact",
           "tax_id",
           "is_active",
+          "payment_terms",
+          "payment_terms_value",
           "created_at",
           "updated_at"
         ],
@@ -22108,6 +22353,27 @@
               }
             ],
             "title": "Name"
+          },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_terms_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Value"
           },
           "tax_id": {
             "anyOf": [
@@ -36578,9 +36844,67 @@
         ]
       }
     },
+    "/api/v1/purchase-orders/{purchase_order_id}/schedule": {
+      "patch": {
+        "description": "改實際下單日、預計到貨日、付款期限（docs/99 §5.1）。各欄位誰能改見 docs/99 §7。",
+        "operationId": "updatePurchaseOrderSchedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_order_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseOrderScheduleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Purchase Order Schedule",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
     "/api/v1/purchase-orders/{purchase_order_id}/submit": {
       "post": {
-        "description": "草稿送出 → 已下單（計入待到貨、可收貨）。",
+        "description": "草稿送出 → 已下單（計入待到貨、可收貨）。可一併填實際下單日（空白＝今天）與預計到貨日。",
         "operationId": "submitPurchaseOrder",
         "parameters": [
           {
@@ -36593,6 +36917,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PurchaseOrderSubmit"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -40798,7 +41139,7 @@
         ]
       },
       "patch": {
-        "description": "編輯供應商名稱/聯絡方式/統編。",
+        "description": "編輯供應商名稱/聯絡方式/統編；付款條件限管理者（docs/99 §7）。",
         "operationId": "updateSupplier",
         "parameters": [
           {

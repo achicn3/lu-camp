@@ -144,7 +144,8 @@
 
 ### 5.2 供應商付款條件
 
-供應商資料新增「付款條件」（選填）：
+供應商資料新增「付款條件」（選填，限管理者）。採購單**送出時把當下的條件記下來**（跟供應商名稱的做法一樣），
+之後供應商改條件不影響已經下的單：
 
 | 條件 | 付款期限怎麼算 |
 |---|---|
@@ -371,10 +372,11 @@
   未建列的過去日期視為「已過期」，未來的只在彙整時算出來顯示。
 - `agenda_events`：`kind`（CLOSED／TEMP_CLOSED／MARKET／OTHER）、`title`、`note`、`starts_on`、`ends_on`、
   `start_time`、`end_time`、`manager_only`、重複規則欄位（同上）、`archived_at`。
-- `purchase_orders` 加：`ordered_on`（date；migration 以 `ordered_at` 的店面日期回填）、`expected_on`、
-  `payment_due_on`、`payment_due_manual`（bool）。
+- `purchase_orders` 加：`ordered_on`（date；migration 以 `ordered_at` 的店面日期回填已送出的單）、`expected_on`、
+  `payment_terms`／`payment_terms_value`（**送出時從供應商快照**，換供應商時重新快照）、`payment_due_override`
+  （管理者手動改的期限）。付款期限不存：依快照與日期即時算出（`purchasing/payment_terms.py`），手動改過的優先。
 - `suppliers` 加：`payment_terms`（PREPAID／COD／MONTHLY／NET_DAYS，可空）、`payment_terms_value`
-  （月結的 X 號或 N 天）。
+  （月結的 X 號或 N 天）；兩張表都有同一條 CHECK 守「條件與數字一致」。
 - `payments`：`paid_on`、`amount`（> 0）、`method`（CASH_DRAWER／TRANSFER／CARD／MOBILE／OTHER）、
   `supplier_id`（可空）、`payee_name`（快照）、`note`、`cash_movement_id`（可空、唯一）、
   `voided_at`、`voided_by`、`void_reason`、`void_cash_movement_id`、`created_by`、`idempotency_key`＋`request_fingerprint`。
@@ -400,7 +402,7 @@
 4. 已付＝有效付款分配合計；還欠＝應付 − 已付 − 結清金額；每月支出只算有效付款、依店面時區的付款日。
 5. 重複規則：29–31 號在小月落到月底；2/29 在平年落到 2/28；每 N 個月從開始月份起算；
    改規則不改已完成或已略過的那幾次。
-6. 付款期限依付款條件計算；`payment_due_manual` 為真時不再自動覆寫。
+6. 付款期限依送出時快照的付款條件計算；`payment_due_override` 有值時以它為準，清空＝恢復自動。
 7. 新增付款帶 Idempotency-Key：網路重送不會重複付款、不會重複扣抽屜（沿用收貨與現金異動的做法）。
 8. 店員從任何 API（含彙整、今天）都拿不到付款金額與「只限管理者」的項目。
 9. 店員記付款只能是：抽屜現金、單一採購單、該單付款條件為貨到付款、金額 ≤ 還欠；其餘一律拒絕（裁示 10）。
@@ -411,8 +413,10 @@
 - `/agenda/tasks`、`/agenda/task-series`、`/agenda/events`：新增、修改、封存；
   `POST /agenda/tasks/{id}/done|skip|reopen`（重複規則的某一次用 `series_id`＋`occurrence_on` 指定）。
 - `/staff-members`：清單、新增、修改、停用。
-- `PATCH /purchase-orders/{id}/schedule`：實際下單日、預計到貨日、付款期限（各自的權限見 §7）。
-- `PATCH /suppliers/{id}`：加付款條件欄位。
+- `PATCH /purchase-orders/{id}/schedule`：實際下單日、預計到貨日、付款期限（各自的權限見 §7；送 null 清空）。
+- `POST /purchase-orders`（`submit=true` 時可帶 `ordered_on`、都可帶 `expected_on`）、
+  `POST /purchase-orders/{id}/submit`（選填 body：`ordered_on`、`expected_on`）。
+- `POST`／`PATCH /suppliers`：加付款條件欄位（限管理者）。
 - `GET /expenses/payables?supplier_id=`：還欠錢的單（付款期限早的在前）。
 - `GET /expenses/purchase-order-balances?ids=`：採購頁顯示應付、已付、還欠、狀態。
 - `POST /expenses/payments`（Idempotency-Key）、`GET /expenses/payments?from=&to=`、`POST /expenses/payments/{id}/void`。

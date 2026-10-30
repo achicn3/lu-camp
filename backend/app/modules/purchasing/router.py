@@ -16,6 +16,8 @@ from app.modules.purchasing.schemas import (
     InputInvoiceWrite,
     PurchaseOrderCreate,
     PurchaseOrderRead,
+    PurchaseOrderScheduleUpdate,
+    PurchaseOrderSubmit,
     PurchaseOrderUpdate,
     ReceiptAmountRead,
     ReceivePurchaseOrderRequest,
@@ -102,7 +104,9 @@ async def create_supplier(
 ) -> SupplierRead:
     svc = PurchasingService(session)
     try:
-        supplier = await svc.create_supplier(user.store_id, payload)
+        supplier = await svc.create_supplier(
+            user.store_id, payload, actor_is_manager=user.role == UserRole.MANAGER
+        )
     except DomainError as exc:
         await session.rollback()
         raise _map_domain_error(exc) from exc
@@ -159,11 +163,15 @@ async def get_supplier(supplier_id: int, session: SessionDep, user: CurrentUserD
 async def update_supplier(
     supplier_id: int, payload: SupplierUpdate, session: SessionDep, user: CurrentUserDep
 ) -> SupplierRead:
-    """編輯供應商名稱/聯絡方式/統編。"""
+    """編輯供應商名稱/聯絡方式/統編；付款條件限管理者（docs/99 §7）。"""
     svc = PurchasingService(session)
     try:
         supplier = await svc.update_supplier(
-            user.store_id, supplier_id, payload, actor_user_id=user.id
+            user.store_id,
+            supplier_id,
+            payload,
+            actor_user_id=user.id,
+            actor_is_manager=user.role == UserRole.MANAGER,
         )
     except DomainError as exc:
         await session.rollback()
@@ -244,13 +252,16 @@ async def create_purchase_order(
     operation_id="submitPurchaseOrder",
 )
 async def submit_purchase_order(
-    purchase_order_id: int, session: SessionDep, user: CurrentUserDep
+    purchase_order_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    payload: PurchaseOrderSubmit | None = None,
 ) -> PurchaseOrderRead:
-    """草稿送出 → 已下單（計入待到貨、可收貨）。"""
+    """草稿送出 → 已下單（計入待到貨、可收貨）。可一併填實際下單日（空白＝今天）與預計到貨日。"""
     svc = PurchasingService(session)
     try:
         purchase_order = await svc.submit_purchase_order(
-            user.store_id, purchase_order_id, actor_user_id=user.id
+            user.store_id, purchase_order_id, actor_user_id=user.id, payload=payload
         )
     except DomainError as exc:
         await session.rollback()
@@ -271,6 +282,34 @@ async def update_purchase_order(
     svc = PurchasingService(session)
     try:
         purchase_order = await svc.update_purchase_order(
+            user.store_id,
+            purchase_order_id,
+            payload,
+            actor_user_id=user.id,
+            actor_is_manager=user.role == UserRole.MANAGER,
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return PurchaseOrderRead.from_model(purchase_order)
+
+
+@router.patch(
+    "/purchase-orders/{purchase_order_id}/schedule",
+    response_model=PurchaseOrderRead,
+    operation_id="updatePurchaseOrderSchedule",
+)
+async def update_purchase_order_schedule(
+    purchase_order_id: int,
+    payload: PurchaseOrderScheduleUpdate,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> PurchaseOrderRead:
+    """改實際下單日、預計到貨日、付款期限（docs/99 §5.1）。各欄位誰能改見 docs/99 §7。"""
+    svc = PurchasingService(session)
+    try:
+        purchase_order = await svc.update_schedule(
             user.store_id,
             purchase_order_id,
             payload,

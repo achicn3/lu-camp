@@ -8,8 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from sqlalchemy import inspect
 
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
+from app.core.time import store_date
 from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, PurchaseOrderLine
-from app.shared.enums import PurchaseOrderStatus
+from app.modules.purchasing.payment_terms import payment_due_on
+from app.shared.enums import PurchaseOrderStatus, SupplierPaymentTerms
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
@@ -18,6 +20,9 @@ class SupplierCreate(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     contact: str | None = Field(default=None, max_length=200)
     tax_id: str | None = Field(default=None, max_length=20)
+    # 付款條件（限管理者；docs/99 §5.2）：月結填每月幾號付、到貨後填幾天，其他不填數字。
+    payment_terms: SupplierPaymentTerms | None = None
+    payment_terms_value: int | None = None
 
 
 class SupplierUpdate(BaseModel):
@@ -30,6 +35,8 @@ class SupplierUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=150)
     contact: str | None = Field(default=None, max_length=200)
     tax_id: str | None = Field(default=None, max_length=20)
+    payment_terms: SupplierPaymentTerms | None = None
+    payment_terms_value: int | None = None
 
 
 class SupplierRead(BaseModel):
@@ -41,6 +48,8 @@ class SupplierRead(BaseModel):
     contact: str | None
     tax_id: str | None
     is_active: bool
+    payment_terms: SupplierPaymentTerms | None
+    payment_terms_value: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -66,6 +75,27 @@ class PurchaseOrderCreate(BaseModel):
     lines: list[PurchaseOrderLineCreate] = Field(min_length=1)
     # False（預設）建為草稿；True 建立即送出（ORDERED、計入待到貨、可收貨）。
     submit: bool = False
+    # 實際下單日（只有建立即送出才能填；空白＝今天，不能選未來）；預計到貨日草稿也能先填。
+    ordered_on: date | None = None
+    expected_on: date | None = None
+
+
+class PurchaseOrderSubmit(BaseModel):
+    """草稿送出時可一併填實際下單日（空白＝今天）與預計到貨日。整個 body 可省略。"""
+
+    ordered_on: date | None = None
+    expected_on: date | None = None
+
+
+class PurchaseOrderScheduleUpdate(BaseModel):
+    """改採購單的日期（docs/99 §5.1）；沒送的欄位不動。
+
+    預計到貨日店員也能改；實際下單日送出後限管理者；付款期限限管理者，送 null＝恢復自動計算。
+    """
+
+    ordered_on: date | None = None
+    expected_on: date | None = None
+    payment_due_on: date | None = None
 
 
 class PurchaseOrderLineUpdate(PurchaseOrderLineCreate):
@@ -133,6 +163,13 @@ class PurchaseOrderRead(BaseModel):
     lines: list[PurchaseOrderLineRead]
     # 各收貨批次（分批收貨；每批可各自選填進項發票）。未收貨 → 空陣列。
     receipts: list["GoodsReceiptRead"] = []
+    # docs/99 §5：實際下單日、預計到貨日、送出時快照的付款條件、付款期限（手動改過的優先）。
+    ordered_on: date | None = None
+    expected_on: date | None = None
+    payment_terms: SupplierPaymentTerms | None = None
+    payment_terms_value: int | None = None
+    payment_due_on: date | None = None
+    payment_due_overridden: bool = False
 
     @classmethod
     def from_model(cls, purchase_order: PurchaseOrder) -> "PurchaseOrderRead":
@@ -142,14 +179,25 @@ class PurchaseOrderRead(BaseModel):
         # 載入（同步 context 讀取會觸發 lazy IO → MissingGreenlet），而新建 PO 必無收貨單，
         # 以 unloaded 檢查安全視為空。
         insp = inspect(purchase_order)
-        receipts = (
-            []
-            if "receipts" in insp.unloaded
-            else [GoodsReceiptRead.from_model(r) for r in purchase_order.receipts]
+        loaded = [] if "receipts" in insp.unloaded else list(purchase_order.receipts)
+        receipts = [GoodsReceiptRead.from_model(r) for r in loaded]
+        first_received_on = min((store_date(r.received_at) for r in loaded), default=None)
+        computed_due = payment_due_on(
+            purchase_order.payment_terms,
+            purchase_order.payment_terms_value,
+            ordered_on=purchase_order.ordered_on,
+            expected_on=purchase_order.expected_on,
+            first_received_on=first_received_on,
         )
         return cls.model_validate(
             {
                 "receipts": receipts,
+                "ordered_on": purchase_order.ordered_on,
+                "expected_on": purchase_order.expected_on,
+                "payment_terms": purchase_order.payment_terms,
+                "payment_terms_value": purchase_order.payment_terms_value,
+                "payment_due_on": purchase_order.payment_due_override or computed_due,
+                "payment_due_overridden": purchase_order.payment_due_override is not None,
                 "id": purchase_order.id,
                 "store_id": purchase_order.store_id,
                 "supplier_id": purchase_order.supplier_id,

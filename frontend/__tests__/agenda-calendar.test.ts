@@ -6,6 +6,7 @@ import {
   addMonths,
   formatDayHeading,
   groupOverdue,
+  itemLabel,
   itemTone,
   listDays,
   monthGrid,
@@ -35,6 +36,7 @@ function item(partial: Partial<AgendaItem> & Pick<AgendaItem, "key" | "day">): A
     event_kind: null,
     campaign_id: null,
     campaign_status: null,
+    purchase_order_id: null,
     href: null,
     ...partial,
   };
@@ -139,6 +141,20 @@ describe("顏色分類與過期分組", () => {
     expect(itemTone(item({ key: "g", day: "2026-11-01", kind: "CAMPAIGN_START" }))).toBe(
       "campaign",
     );
+    for (const kind of ["PO_ORDERED", "PO_EXPECTED", "PO_RECEIVED"] as const) {
+      expect(itemTone(item({ key: kind, day: "2026-11-01", kind }))).toBe("purchase");
+    }
+    // 預計到貨過了還沒到：跟過期的待辦一樣標紅
+    expect(
+      itemTone(item({ key: "late", day: "2026-11-01", kind: "PO_EXPECTED", overdue: true })),
+    ).toBe("overdue");
+  });
+
+  it("進貨的三種日子在格子裡加上前綴", () => {
+    const po = { day: "2026-11-01", title: "露營批發", purchase_order_id: 12 };
+    expect(itemLabel(item({ key: "a", kind: "PO_ORDERED", ...po }))).toBe("下單：露營批發");
+    expect(itemLabel(item({ key: "b", kind: "PO_EXPECTED", ...po }))).toBe("預計到貨：露營批發");
+    expect(itemLabel(item({ key: "c", kind: "PO_RECEIVED", ...po }))).toBe("到貨：露營批發");
   });
 
   it("同一個重複待辦過期好幾次，合成一組；單次待辦各自一組", () => {

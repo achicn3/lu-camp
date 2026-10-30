@@ -12,6 +12,7 @@
   --warn: #b8860b;
   --danger: #b23a2e;
   --info: #2c6e8f;
+  --purchase: #8a5a2b; /* 行事曆的「進貨」：大地棕，與其他功能色分得開 */
 
   /* 字體：可讀為先；數字用等寬對齊金額（本地後備堆疊，不依賴建置期下載） */
   --font-display: "Fraunces", Georgia, "Noto Serif TC", serif;
@@ -7102,6 +7103,9 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 }
 .agenda-tone-campaign {
   --agenda-tone: var(--success);
+}
+.agenda-tone-purchase {
+  --agenda-tone: var(--purchase);
 }
 
 .agenda-page-head {

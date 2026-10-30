@@ -4002,6 +4002,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-orders/{purchase_order_id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Purchase Order Schedule
+         * @description 改實際下單日、預計到貨日、付款期限（docs/99 §5.1）。各欄位誰能改見 docs/99 §7。
+         */
+        patch: operations["updatePurchaseOrderSchedule"];
+        trace?: never;
+    };
     "/api/v1/purchase-orders/{purchase_order_id}/submit": {
         parameters: {
             query?: never;
@@ -4013,7 +4033,7 @@ export interface paths {
         put?: never;
         /**
          * Submit Purchase Order
-         * @description 草稿送出 → 已下單（計入待到貨、可收貨）。
+         * @description 草稿送出 → 已下單（計入待到貨、可收貨）。可一併填實際下單日（空白＝今天）與預計到貨日。
          */
         post: operations["submitPurchaseOrder"];
         delete?: never;
@@ -5202,7 +5222,7 @@ export interface paths {
         head?: never;
         /**
          * Update Supplier
-         * @description 編輯供應商名稱/聯絡方式/統編。
+         * @description 編輯供應商名稱/聯絡方式/統編；付款條件限管理者（docs/99 §7）。
          */
         patch: operations["updateSupplier"];
         trace?: never;
@@ -5777,10 +5797,10 @@ export interface components {
         };
         /**
          * AgendaItemKind
-         * @description 行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。
+         * @description 行事曆彙整的一列是什麼（docs/99 §3）。1C 再加付款與付款期限。
          * @enum {string}
          */
-        AgendaItemKind: "TASK" | "EVENT" | "CAMPAIGN_START" | "CAMPAIGN_END";
+        AgendaItemKind: "TASK" | "EVENT" | "CAMPAIGN_START" | "CAMPAIGN_END" | "PO_ORDERED" | "PO_EXPECTED" | "PO_RECEIVED";
         /**
          * AgendaItemRead
          * @description 行事曆上的一列。
@@ -5828,6 +5848,8 @@ export interface components {
              * @default false
              */
             overdue: boolean;
+            /** Purchase Order Id */
+            purchase_order_id?: number | null;
             /** Series Id */
             series_id?: number | null;
             /** Start Time */
@@ -6049,6 +6071,10 @@ export interface components {
             campaigns: components["schemas"]["AgendaItemRead"][];
             /** Consignment Pending Count */
             consignment_pending_count: number;
+            /** Deliveries Late */
+            deliveries_late: components["schemas"]["AgendaItemRead"][];
+            /** Deliveries Today */
+            deliveries_today: components["schemas"]["AgendaItemRead"][];
             /** Due Today */
             due_today: components["schemas"]["AgendaItemRead"][];
             /** Events */
@@ -11183,8 +11209,12 @@ export interface components {
         };
         /** PurchaseOrderCreate */
         PurchaseOrderCreate: {
+            /** Expected On */
+            expected_on?: string | null;
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineCreate"][];
+            /** Ordered On */
+            ordered_on?: string | null;
             /**
              * Submit
              * @default false
@@ -11245,6 +11275,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Expected On */
+            expected_on?: string | null;
             /** Id */
             id: number;
             /** Lines */
@@ -11256,6 +11288,18 @@ export interface components {
             ordered_at: string;
             /** Ordered By */
             ordered_by: number;
+            /** Ordered On */
+            ordered_on?: string | null;
+            /** Payment Due On */
+            payment_due_on?: string | null;
+            /**
+             * Payment Due Overridden
+             * @default false
+             */
+            payment_due_overridden: boolean;
+            payment_terms?: components["schemas"]["SupplierPaymentTerms"] | null;
+            /** Payment Terms Value */
+            payment_terms_value?: number | null;
             /**
              * Receipts
              * @default []
@@ -11281,6 +11325,20 @@ export interface components {
             updated_at: string;
         };
         /**
+         * PurchaseOrderScheduleUpdate
+         * @description 改採購單的日期（docs/99 §5.1）；沒送的欄位不動。
+         *
+         *     預計到貨日店員也能改；實際下單日送出後限管理者；付款期限限管理者，送 null＝恢復自動計算。
+         */
+        PurchaseOrderScheduleUpdate: {
+            /** Expected On */
+            expected_on?: string | null;
+            /** Ordered On */
+            ordered_on?: string | null;
+            /** Payment Due On */
+            payment_due_on?: string | null;
+        };
+        /**
          * PurchaseOrderStatus
          * @description 採購單狀態機。
          *
@@ -11289,6 +11347,16 @@ export interface components {
          * @enum {string}
          */
         PurchaseOrderStatus: "DRAFT" | "ORDERED" | "PARTIAL" | "RECEIVED" | "CANCELLED";
+        /**
+         * PurchaseOrderSubmit
+         * @description 草稿送出時可一併填實際下單日（空白＝今天）與預計到貨日。整個 body 可省略。
+         */
+        PurchaseOrderSubmit: {
+            /** Expected On */
+            expected_on?: string | null;
+            /** Ordered On */
+            ordered_on?: string | null;
+        };
         /**
          * PurchaseOrderUpdate
          * @description 整張覆寫：原有明細沒帶到的就刪除。
@@ -13156,9 +13224,21 @@ export interface components {
             contact?: string | null;
             /** Name */
             name: string;
+            payment_terms?: components["schemas"]["SupplierPaymentTerms"] | null;
+            /** Payment Terms Value */
+            payment_terms_value?: number | null;
             /** Tax Id */
             tax_id?: string | null;
         };
+        /**
+         * SupplierPaymentTerms
+         * @description 供應商付款條件（docs/99 §5.2）：下單時快照到採購單，用來算付款期限。
+         *
+         *     PREPAID＝先付（下單日）；COD＝貨到付款（第一批到貨日，沒到貨用預計到貨日）；
+         *     MONTHLY＝月結，每月 X 號付上個月收的貨；NET_DAYS＝到貨後 N 天。
+         * @enum {string}
+         */
+        SupplierPaymentTerms: "PREPAID" | "COD" | "MONTHLY" | "NET_DAYS";
         /** SupplierRead */
         SupplierRead: {
             /** Contact */
@@ -13174,6 +13254,9 @@ export interface components {
             is_active: boolean;
             /** Name */
             name: string;
+            payment_terms: components["schemas"]["SupplierPaymentTerms"] | null;
+            /** Payment Terms Value */
+            payment_terms_value: number | null;
             /** Store Id */
             store_id: number;
             /** Tax Id */
@@ -13196,6 +13279,9 @@ export interface components {
             contact?: string | null;
             /** Name */
             name?: string | null;
+            payment_terms?: components["schemas"]["SupplierPaymentTerms"] | null;
+            /** Payment Terms Value */
+            payment_terms_value?: number | null;
             /** Tax Id */
             tax_id?: string | null;
         };
@@ -21622,6 +21708,41 @@ export interface operations {
             };
         };
     };
+    updatePurchaseOrderSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     submitPurchaseOrder: {
         parameters: {
             query?: never;
@@ -21631,7 +21752,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderSubmit"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

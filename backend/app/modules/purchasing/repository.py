@@ -369,6 +369,83 @@ class PurchasingRepository:
         rows = (await self._session.execute(stmt)).all()
         return [(row[0], row[1]) for row in rows]
 
+    async def ordered_between(
+        self, store_id: int, start: date, end: date
+    ) -> list[tuple[int, str, date]]:
+        """實際下單日落在 [start, end] 的已送出採購單（不含草稿、取消）。"""
+        rows = await self._session.execute(
+            select(PurchaseOrder.id, PurchaseOrder.supplier_name, PurchaseOrder.ordered_on)
+            .where(
+                PurchaseOrder.store_id == store_id,
+                PurchaseOrder.ordered_on >= start,
+                PurchaseOrder.ordered_on <= end,
+                PurchaseOrder.status.in_(
+                    [
+                        PurchaseOrderStatus.ORDERED,
+                        PurchaseOrderStatus.PARTIAL,
+                        PurchaseOrderStatus.RECEIVED,
+                    ]
+                ),
+            )
+            .order_by(PurchaseOrder.ordered_on, PurchaseOrder.id)
+        )
+        return [(po_id, name, day) for po_id, name, day in rows.all() if day is not None]
+
+    async def expected_between(
+        self,
+        store_id: int,
+        start: date,
+        end: date,
+        *,
+        statuses: tuple[PurchaseOrderStatus, ...],
+    ) -> list[tuple[int, str, date]]:
+        rows = await self._session.execute(
+            select(PurchaseOrder.id, PurchaseOrder.supplier_name, PurchaseOrder.expected_on)
+            .where(
+                PurchaseOrder.store_id == store_id,
+                PurchaseOrder.expected_on >= start,
+                PurchaseOrder.expected_on <= end,
+                PurchaseOrder.status.in_(statuses),
+            )
+            .order_by(PurchaseOrder.expected_on, PurchaseOrder.id)
+        )
+        return [(po_id, name, day) for po_id, name, day in rows.all() if day is not None]
+
+    async def expected_before(
+        self, store_id: int, day: date, *, statuses: tuple[PurchaseOrderStatus, ...]
+    ) -> list[tuple[int, str, date]]:
+        rows = await self._session.execute(
+            select(PurchaseOrder.id, PurchaseOrder.supplier_name, PurchaseOrder.expected_on)
+            .where(
+                PurchaseOrder.store_id == store_id,
+                PurchaseOrder.expected_on < day,
+                PurchaseOrder.status.in_(statuses),
+            )
+            .order_by(PurchaseOrder.expected_on, PurchaseOrder.id)
+        )
+        return [(po_id, name, due) for po_id, name, due in rows.all() if due is not None]
+
+    async def receipts_between(
+        self, store_id: int, start: datetime, end: datetime
+    ) -> list[tuple[int, int, str, datetime]]:
+        """收貨時間落在 [start, end) 的每一批：(收貨 id, 採購單 id, 供應商名快照, 收貨時間)。"""
+        rows = await self._session.execute(
+            select(
+                GoodsReceipt.id,
+                GoodsReceipt.purchase_order_id,
+                PurchaseOrder.supplier_name,
+                GoodsReceipt.received_at,
+            )
+            .join(PurchaseOrder, PurchaseOrder.id == GoodsReceipt.purchase_order_id)
+            .where(
+                GoodsReceipt.store_id == store_id,
+                GoodsReceipt.received_at >= start,
+                GoodsReceipt.received_at < end,
+            )
+            .order_by(GoodsReceipt.received_at, GoodsReceipt.id)
+        )
+        return [(rid, po_id, name, at) for rid, po_id, name, at in rows.all()]
+
     async def lock_purchase_order(
         self, store_id: int, purchase_order_id: int
     ) -> PurchaseOrder | None:

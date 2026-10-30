@@ -16,12 +16,14 @@ import {
   lineRemaining,
   poStatusBadge,
 } from "@/features/purchasing/purchasing";
+import { PurchaseOrderSchedule } from "@/features/purchasing/PurchaseOrderSchedule";
 import { ReceiveDialog } from "@/features/purchasing/ReceiveDialog";
 import { dt, extractDetail, money, type PurchaseOrder } from "@/features/purchasing/shared";
 import { useCatalogBrandNames } from "@/features/purchasing/useCatalogBrandNames";
 import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
+import { taipeiDate } from "@/lib/datetime";
 import { parseNtd } from "@/lib/money";
 
 export function PurchaseOrderDetail({
@@ -36,6 +38,8 @@ export function PurchaseOrderDetail({
   const [receiving, setReceiving] = useState(openReceive);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // 草稿送出時的實際下單日（docs/99 §5.1）：預設今天；電話或 LINE 先下單、隔天才補登就選前一天。
+  const [submitDay, setSubmitDay] = useState(() => taipeiDate());
 
   const order = useQuery({
     queryKey: ["purchase-orders", "detail", poId],
@@ -77,6 +81,7 @@ export function PurchaseOrderDetail({
     mutationFn: async (target: PurchaseOrder) => {
       const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/submit", {
         params: { path: { purchase_order_id: target.id } },
+        body: { ordered_on: submitDay === "" ? null : submitDay },
       });
       if (!data) throw new Error(extractDetail(error) ?? "送出失敗");
       return data;
@@ -84,6 +89,7 @@ export function PurchaseOrderDetail({
     onSuccess: () => {
       setActionError(null);
       refresh();
+      void queryClient.invalidateQueries({ queryKey: ["agenda"] });
     },
     onError: (err: Error) => setActionError(err.message),
   });
@@ -132,8 +138,8 @@ export function PurchaseOrderDetail({
             <dd>{po.supplier_name}</dd>
           </div>
           <div>
-            <dt>{po.status === "DRAFT" ? "建立時間" : "下單時間"}</dt>
-            <dd>{dt(po.status === "DRAFT" ? po.created_at : po.ordered_at)}</dd>
+            <dt>建立時間</dt>
+            <dd>{dt(po.created_at)}</dd>
           </div>
           <div>
             <dt>收貨完成</dt>
@@ -144,6 +150,8 @@ export function PurchaseOrderDetail({
             <dd className="money">{money(po.total_cost)}</dd>
           </div>
         </dl>
+
+        <PurchaseOrderSchedule po={po} />
 
         {notice !== null && (
           <p role="status" className="hint pur-notice">
@@ -239,6 +247,17 @@ export function PurchaseOrderDetail({
           canCancel(po.status) ||
           editable) && (
           <div className="pur-detail-actions">
+            {canSubmit(po.status) && (
+              <label className="field pur-submit-day">
+                <span className="field-label">實際下單日</span>
+                <input
+                  type="date"
+                  value={submitDay}
+                  max={taipeiDate()}
+                  onChange={(e) => setSubmitDay(e.target.value)}
+                />
+              </label>
+            )}
             {canSubmit(po.status) && (
               <button
                 type="button"

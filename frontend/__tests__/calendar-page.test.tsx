@@ -49,6 +49,7 @@ function item(partial: Partial<AgendaItem> & Pick<AgendaItem, "key" | "day" | "t
     event_kind: null,
     campaign_id: null,
     campaign_status: null,
+    purchase_order_id: null,
     href: null,
     ...partial,
   };
@@ -94,6 +95,8 @@ function stubFetch(extra?: (url: string, method: string, body: string) => Respon
           upcoming: [],
           events: [],
           campaigns: [],
+          deliveries_today: [],
+          deliveries_late: [],
           consignment_pending_count: 0,
           badge_count: 0,
         });

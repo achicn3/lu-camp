@@ -7,7 +7,13 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Pagination } from "@/features/common/Pagination";
-import { canReceive, canSubmit, poStatusBadge } from "@/features/purchasing/purchasing";
+import { formatSlashDate } from "@/features/agenda/calendar";
+import {
+  canReceive,
+  canSubmit,
+  isLateDelivery,
+  poStatusBadge,
+} from "@/features/purchasing/purchasing";
 import {
   dt,
   extractDetail,
@@ -18,6 +24,7 @@ import {
   type PurchaseOrder,
 } from "@/features/purchasing/shared";
 import { api } from "@/lib/api";
+import { taipeiDate } from "@/lib/datetime";
 
 export function PurchaseOrderTable() {
   const router = useRouter();
@@ -157,7 +164,7 @@ export function PurchaseOrderTable() {
               <tr>
                 <th>單號</th>
                 <th>供應商</th>
-                <th>建立 / 下單時間</th>
+                <th>下單 / 到貨</th>
                 <th>品項</th>
                 <th>到貨</th>
                 <th>總額</th>
@@ -168,6 +175,10 @@ export function PurchaseOrderTable() {
             <tbody>
               {rows.map((po) => {
                 const badge = poStatusBadge(po.status);
+                // 還在等貨的單才顯示預計到貨；過了還沒收齊標「逾期未到」（docs/99 §3）。
+                const awaiting =
+                  po.status === "DRAFT" || po.status === "ORDERED" || po.status === "PARTIAL";
+                const late = isLateDelivery(po, taipeiDate());
                 const ordered = po.lines.reduce((sum, l) => sum + l.qty, 0);
                 const received = po.lines.reduce((sum, l) => sum + l.received_qty, 0);
                 return (
@@ -187,7 +198,15 @@ export function PurchaseOrderTable() {
                     </td>
                     <td>{po.supplier_name}</td>
                     <td>
-                      {dt(po.status === "DRAFT" ? po.created_at : po.ordered_at)}
+                      {po.status === "DRAFT" || !po.ordered_on
+                        ? `建立 ${dt(po.created_at)}`
+                        : `下單 ${formatSlashDate(po.ordered_on)}`}
+                      {po.expected_on && awaiting && (
+                        <span className={`row-sub${late ? " pur-late" : ""}`}>
+                          預計到貨 {formatSlashDate(po.expected_on)}
+                          {late ? "・逾期未到" : ""}
+                        </span>
+                      )}
                       {po.received_at && (
                         <span className="row-sub">收貨 {dt(po.received_at)}</span>
                       )}

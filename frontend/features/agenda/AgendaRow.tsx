@@ -40,6 +40,7 @@ export function AgendaRow({
   if (item.end_day) meta.push(`到 ${formatDayHeading(item.end_day)}`);
   if (item.assignee_name) meta.push(item.assignee_name);
   if (item.series_id !== null && item.series_id !== undefined) meta.push("重複");
+  if (item.purchase_order_id) meta.push(`採購單 #${item.purchase_order_id}`);
   if (item.status === "SKIPPED") meta.push("這次不用做");
   if (item.manager_only) meta.push("只有管理者看得到");
 
@@ -75,7 +76,11 @@ export function AgendaRow({
         {title}
         {(meta.length > 0 || item.overdue) && (
           <span className="agenda-row-meta">
-            {item.overdue && <span className="agenda-tag-overdue">已過期</span>}
+            {item.overdue && (
+              <span className="agenda-tag-overdue">
+                {item.kind === "PO_EXPECTED" ? "逾期未到" : "已過期"}
+              </span>
+            )}
             {meta.join("・")}
           </span>
         )}

@@ -29,6 +29,7 @@ import { extractDetail, nextDraftKey, type PurchaseOrder } from "@/features/purc
 import { useCatalogBrandNames } from "@/features/purchasing/useCatalogBrandNames";
 import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
+import { taipeiDate } from "@/lib/datetime";
 import {
   canDiscardIdempotencyKey,
   clearPendingCatalogCreate,
@@ -389,6 +390,10 @@ export function CreatePurchaseOrderForm({
     },
   });
 
+  // 行事曆 1B（docs/99 §5.1）：預計到貨日草稿也能先填；實際下單日預設今天，送出時才用。
+  const [expectedOn, setExpectedOn] = useState("");
+  const [orderedOn, setOrderedOn] = useState(() => taipeiDate());
+
   const create = useMutation({
     mutationFn: async (submit: boolean) => {
       if (supplierId === null) throw new Error("請選擇供應商");
@@ -402,7 +407,14 @@ export function CreatePurchaseOrderForm({
         return data;
       }
       const { data, error } = await api.POST("/api/v1/purchase-orders", {
-        body: { supplier_id: supplierId, lines: toLinePayload(lines), submit },
+        body: {
+          supplier_id: supplierId,
+          lines: toLinePayload(lines),
+          submit,
+          expected_on: expectedOn === "" ? null : expectedOn,
+          // 實際下單日只在「送出採購」時帶（草稿送出時才定，docs/99 §5.1）。
+          ...(submit ? { ordered_on: orderedOn === "" ? null : orderedOn } : {}),
+        },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立採購單失敗");
       return data;
@@ -916,6 +928,19 @@ export function CreatePurchaseOrderForm({
           </div>
         ) : (
           <div className="pur-create-actions">
+            <label className="field pur-submit-day">
+              <span className="field-label">預計到貨日（選填）</span>
+              <input type="date" value={expectedOn} onChange={(e) => setExpectedOn(e.target.value)} />
+            </label>
+            <label className="field pur-submit-day">
+              <span className="field-label">實際下單日（送出時）</span>
+              <input
+                type="date"
+                value={orderedOn}
+                max={taipeiDate()}
+                onChange={(e) => setOrderedOn(e.target.value)}
+              />
+            </label>
             <button
               type="button"
               className="btn-secondary"

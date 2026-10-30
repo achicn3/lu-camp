@@ -22,6 +22,7 @@ from app.modules.agenda.schemas import (
 )
 from app.modules.agenda.service import AgendaService, Viewer
 from app.modules.campaigns.models import Campaign
+from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, Supplier
 from app.modules.staff.schemas import StaffMemberUpdate
 from app.modules.staff.service import StaffService
 from app.shared.enums import (
@@ -30,6 +31,7 @@ from app.shared.enums import (
     AgendaTaskStatus,
     CampaignKind,
     CampaignStatus,
+    PurchaseOrderStatus,
     RecurrenceKind,
 )
 from app.shared.exceptions import AgendaForbidden, AgendaItemInvalid, AgendaItemNotFound
@@ -709,3 +711,62 @@ async def test_changing_only_the_end_date_keeps_the_schedule(db_session: AsyncSe
     # 沒有重新起算，也就不必把以前沒做的那幾次另外建列：過期清單照舊
     overdue_after = (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue
     assert [i.key for i in overdue_after] == [i.key for i in overdue_before]
+
+
+async def test_purchase_dates_show_on_the_calendar_and_today(db_session: AsyncSession) -> None:
+    """docs/99 §3、1B：採購單的下單日、還沒收齊的預計到貨日、每一批到貨都上行事曆；
+    「今天」列出今天預計到貨與過了預計日還沒到的。店員也看得到（採購頁本來就開放）。"""
+    shop = await seed_store(db_session)
+    mgr, clerk = _viewers(shop)
+    supplier = Supplier(store_id=shop.store_id, name="露營批發")
+    db_session.add(supplier)
+    await db_session.flush()
+
+    def order(status: PurchaseOrderStatus, ordered_on: date, expected_on: date) -> PurchaseOrder:
+        return PurchaseOrder(
+            store_id=shop.store_id,
+            supplier_id=supplier.id,
+            supplier_name=supplier.name,
+            ordered_by=shop.manager_id,
+            status=status,
+            ordered_on=ordered_on,
+            expected_on=expected_on,
+        )
+
+    waiting = order(PurchaseOrderStatus.ORDERED, date(2026, 11, 2), date(2026, 11, 12))
+    late = order(PurchaseOrderStatus.PARTIAL, date(2026, 11, 3), date(2026, 11, 5))
+    done = order(PurchaseOrderStatus.RECEIVED, date(2026, 11, 1), date(2026, 11, 4))
+    draft = order(PurchaseOrderStatus.DRAFT, date(2026, 11, 1), date(2026, 11, 20))
+    draft.ordered_on = None
+    db_session.add_all([waiting, late, done, draft])
+    await db_session.flush()
+    # 台北 11/6 上午十點收到第一批（UTC 02:00）
+    db_session.add(
+        GoodsReceipt(
+            store_id=shop.store_id,
+            purchase_order_id=late.id,
+            received_by=shop.clerk_id,
+            received_at=datetime(2026, 11, 6, 2, 0, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+    svc = AgendaService(db_session)
+
+    feed = await svc.feed(shop.store_id, clerk, NOV_1, NOV_30, today=TODAY)
+    entries = [(i.kind, i.day, i.purchase_order_id, i.overdue) for i in feed]
+    assert entries == [
+        (AgendaItemKind.PO_ORDERED, date(2026, 11, 1), done.id, False),
+        (AgendaItemKind.PO_ORDERED, date(2026, 11, 2), waiting.id, False),
+        (AgendaItemKind.PO_ORDERED, date(2026, 11, 3), late.id, False),
+        (AgendaItemKind.PO_EXPECTED, date(2026, 11, 5), late.id, True),  # 過了還沒收齊
+        (AgendaItemKind.PO_RECEIVED, date(2026, 11, 6), late.id, False),
+        (AgendaItemKind.PO_EXPECTED, date(2026, 11, 12), waiting.id, False),
+    ]
+    assert feed[0].title == "露營批發"
+    assert feed[0].href == f"/purchasing/{done.id}"
+
+    today = await svc.today_summary(shop.store_id, clerk, today=TODAY)
+    assert [i.purchase_order_id for i in today.deliveries_late] == [late.id]
+    assert today.deliveries_today == []
+    on_the_day = await svc.today_summary(shop.store_id, mgr, today=date(2026, 11, 12))
+    assert [i.purchase_order_id for i in on_the_day.deliveries_today] == [waiting.id]
