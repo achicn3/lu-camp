@@ -737,6 +737,17 @@ a.btn-ghost {
   min-width: 0;
   position: sticky;
   top: calc(var(--app-header-height) + var(--sp-4));
+  /* 面板比畫面高時（開發票多出統編／載具／捐贈碼），光 sticky 不夠：底下的載具與結帳鈕
+     要等左欄購物車＋菜單整個捲完才露出來。限高在畫面內、自己捲，結帳鈕釘在面板底。 */
+  max-height: calc(100dvh - var(--app-header-height) - 2 * var(--sp-4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pos-right > .pos-checkout {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  box-shadow: 0 calc(-1 * var(--sp-3)) 0 var(--surface);
 }
 @media (max-width: 1080px) {
   .pos-grid {
@@ -746,6 +757,12 @@ a.btn-ghost {
     position: static;
     max-width: none;
     width: 100%;
+    max-height: none;
+    overflow-y: visible;
+  }
+  .pos-right > .pos-checkout {
+    position: static;
+    box-shadow: none;
   }
 }
 /* 金額摘要：贈品價值與折扣分列，不混在應付總額裡。 */
