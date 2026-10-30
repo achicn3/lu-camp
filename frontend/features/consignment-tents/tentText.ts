@@ -24,7 +24,7 @@ export function missingInfo(tent: Tent): string[] {
   return gaps;
 }
 
-export const WEB_RESERVED_NOTE = "官網標示「已有人保留」，確定要賣給這位客人嗎？";
+export const WEB_RESERVED_NOTE = "官網標示「已有人保留」，賣之前請先確認";
 
 /** POS 掃到官網保留中的帳篷：把提醒併進商品備註，結帳前的確認視窗就會列出來（提醒不擋）。 */
 export function withWebReservedNote(note: string | null | undefined, reserved: boolean): string | null {
