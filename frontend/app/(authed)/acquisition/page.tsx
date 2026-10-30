@@ -139,7 +139,12 @@ type Row = ItemDraft & {
   costManual: boolean;
   /** 已填好、收合成一行摘要（新增下一列時自動收合，點摘要可展開再改）。 */
   collapsed?: boolean;
+  /** 寄售帳篷預售帶入（docs/102）：送出後這件接手那筆預售的官網資料與照片。 */
+  presaleListingId?: number | null;
+  presaleCode?: string | null;
 };
+
+type TentPresale = components["schemas"]["TentPresaleRead"];
 
 
 // ── 品名輸入（純提示 autocomplete）──
@@ -215,6 +220,7 @@ function CollapsedRow({
   const cost = parseNtd(row.acquisitionCost);
   const listed = parseNtd(row.listedPrice);
   const parts = [
+    row.presaleCode ? `預售 ${row.presaleCode}` : null,
     row.name,
     row.grade ? GRADE_LABEL[row.grade] : "未選成色",
     type === "BUYOUT" && cost !== null ? `收 ${formatNtd(cost)}${qty > 1 ? ` × ${qty}` : ""}` : null,
@@ -225,6 +231,58 @@ function CollapsedRow({
       <span className="acq-row-collapsed-no">編輯第 {index + 1} 列</span>
       <span>{parts.join("・")}</span>
     </button>
+  );
+}
+
+/**
+ * 寄售帳篷預售帶入（docs/102）：帳篷先前以預售放上官網，現在送到店了。選了就帶入品名、品牌、
+ * 上架售價（店員可改，以這張寄售單為準）；送出後官網那頂直接變現貨、照片與官網資料全部沿用。
+ */
+function PresalePicker({
+  row,
+  presales,
+  onChange,
+}: {
+  row: Row;
+  presales: TentPresale[];
+  onChange: (patch: Partial<Row>) => void;
+}) {
+  return (
+    <label className="field acq-presale">
+      <span className="field-label">從預售帶入（選填：帳篷先前已放上官網預售）</span>
+      <select
+        value={row.presaleListingId ?? ""}
+        onChange={(e) => {
+          const picked = presales.find((p) => String(p.listing_id) === e.target.value);
+          if (!picked) {
+            onChange({ presaleListingId: null, presaleCode: null });
+            return;
+          }
+          onChange({
+            presaleListingId: picked.listing_id,
+            presaleCode: picked.presale_code,
+            name: picked.name,
+            brandId: picked.brand_id,
+            brandName: picked.brand_name,
+            productModelId: null,
+            modelName: null,
+            listedPrice: picked.price,
+          });
+        }}
+      >
+        <option value="">不帶入</option>
+        {row.presaleListingId && !presales.some((p) => p.listing_id === row.presaleListingId) && (
+          <option value={row.presaleListingId}>{row.presaleCode}</option>
+        )}
+        {presales.map((p) => (
+          <option key={p.listing_id} value={p.listing_id}>
+            {[p.presale_code, p.brand_name, p.name, `賣家 ${p.seller_name}`]
+              .filter(Boolean)
+              .join("・")}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -293,10 +351,13 @@ function ItemRowCard({
   feeRate,
   taxRateLoading,
   taxRateUnavailable,
+  presales,
 }: {
   type: AcqType;
   index: number;
   row: Row;
+  /** 可以帶入的預售（還沒被別列選走的）；只有寄售用。 */
+  presales: TentPresale[];
   categories: Category[];
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
@@ -508,6 +569,9 @@ function ItemRowCard({
           </button>
         </span>
       </div>
+      {type === "CONSIGNMENT" && (presales.length > 0 || row.presaleListingId) && (
+        <PresalePicker row={row} presales={presales} onChange={onChange} />
+      )}
       <div className="acq-row-grid">
         <CreatableCombobox
           label="品牌"
@@ -1107,6 +1171,16 @@ export default function AcquisitionPage() {
   // 管理者才顯示作廢入口（後端 ManagerDep 為最終權威；前端隱藏僅為 UX）。token 在頁面生命週期內不變。
   const isManager = useMemo(() => decodeSession()?.role === "MANAGER", []);
 
+  // 寄售帳篷預售（docs/102）：只在寄售分頁讀；讀不到就不顯示帶入（不擋收購）。
+  const presalesQuery = useQuery({
+    queryKey: ["online-tents", "presales"],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/online-order/tents/presales");
+      return data ?? [];
+    },
+    enabled: type === "CONSIGNMENT",
+  });
+
   const settings = useQuery({
     queryKey: ["settings"],
     queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
@@ -1279,6 +1353,10 @@ export default function AcquisitionPage() {
       // 一列一則，展開後每件都帶同一則（2026-09-04 裁示）。空白送 null，
       // 避免建出「有備註但內容是空白」的商品害 POS 跳空提醒。
       note: r.note.trim() || null,
+      // 預售帶入只限寄售；沒選就不送，維持舊指紋。
+      ...(type === "CONSIGNMENT" && r.presaleListingId
+        ? { presale_listing_id: r.presaleListingId }
+        : {}),
       ...(type === "BUYOUT"
         ? { acquisition_cost: ntd(r.acquisitionCost) }
         : r.commissionPct === ""
@@ -1402,6 +1480,11 @@ export default function AcquisitionPage() {
       setSignTaskId(null); // 完成即解除手持切結綁定，下一單重新推送
       setFormKey((k) => k + 1);
       void queryClient.invalidateQueries({ queryKey: ["cash-session"] });
+      // 帶入過的預售已轉成寄售；官網也要儘快換成現貨（推不上去背景每分鐘會再推）
+      void queryClient.invalidateQueries({ queryKey: ["online-tents"] });
+      if (rows.some((r) => r.presaleListingId)) {
+        void api.POST("/api/v1/online-order/tents/publish").catch(() => undefined);
+      }
     },
     onError: (e: Error) => setErrors([e.message]),
   });
@@ -1668,7 +1751,14 @@ export default function AcquisitionPage() {
                     r.rowKey === row.rowKey
                       ? [
                           r.name.trim() ? { ...r, collapsed: true } : r,
-                          { ...r, rowKey: newIdempotencyKey(), collapsed: false },
+                          {
+                            ...r,
+                            rowKey: newIdempotencyKey(),
+                            collapsed: false,
+                            // 一筆預售只能帶入一件
+                            presaleListingId: null,
+                            presaleCode: null,
+                          },
                         ]
                       : [r],
                   ),
@@ -1683,6 +1773,13 @@ export default function AcquisitionPage() {
               feeRate={feeRate}
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
+              presales={(presalesQuery.data ?? []).filter(
+                (p) =>
+                  !rows.some(
+                    (other) =>
+                      other.rowKey !== row.rowKey && other.presaleListingId === p.listing_id,
+                  ),
+              )}
             />
               </div>
             </div>

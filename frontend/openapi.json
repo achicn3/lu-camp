@@ -334,6 +334,17 @@
             ],
             "title": "Note"
           },
+          "presale_listing_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presale Listing Id"
+          },
           "product_model_id": {
             "anyOf": [
               {
@@ -2936,6 +2947,21 @@
           "file"
         ],
         "title": "Body_addTentListingPhoto",
+        "type": "object"
+      },
+      "Body_addTentPresalePhoto": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "JPEG／PNG／WebP／HEIC，10 MB 以內",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_addTentPresalePhoto",
         "type": "object"
       },
       "Body_uploadMenuItemPhoto": {
@@ -22689,6 +22715,276 @@
         "title": "TentPhotoOrderRequest",
         "type": "object"
       },
+      "TentPresaleRead": {
+        "additionalProperties": false,
+        "description": "POS 預售清單的一列（還沒取消、還沒轉寄售的）。",
+        "properties": {
+          "brand_id": {
+            "title": "Brand Id",
+            "type": "integer"
+          },
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "defects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Defects",
+            "type": "array"
+          },
+          "extras": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extras",
+            "type": "array"
+          },
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "integer"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 9999.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "photos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "presale_code": {
+            "title": "Presale Code",
+            "type": "string"
+          },
+          "price": {
+            "title": "Price",
+            "type": "string"
+          },
+          "published": {
+            "default": false,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "reserved": {
+            "default": false,
+            "title": "Reserved",
+            "type": "boolean"
+          },
+          "seller_name": {
+            "title": "Seller Name",
+            "type": "string"
+          },
+          "seller_phone": {
+            "title": "Seller Phone",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "brand_id",
+          "name",
+          "price",
+          "seller_name",
+          "seller_phone",
+          "listing_id",
+          "presale_code",
+          "brand_name",
+          "photos",
+          "updated_at"
+        ],
+        "title": "TentPresaleRead",
+        "type": "object"
+      },
+      "TentPresaleWriteRequest": {
+        "additionalProperties": false,
+        "description": "預售（docs/102）整筆替換：官網資料＋帳篷本身＋賣家聯絡方式（只在 POS）。",
+        "properties": {
+          "brand_id": {
+            "title": "Brand Id",
+            "type": "integer"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "defects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Defects",
+            "type": "array"
+          },
+          "extras": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extras",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 9999.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 99999999.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price"
+          },
+          "published": {
+            "default": false,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "reserved": {
+            "default": false,
+            "title": "Reserved",
+            "type": "boolean"
+          },
+          "seller_name": {
+            "title": "Seller Name",
+            "type": "string"
+          },
+          "seller_phone": {
+            "title": "Seller Phone",
+            "type": "string"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "brand_id",
+          "name",
+          "price",
+          "seller_name",
+          "seller_phone"
+        ],
+        "title": "TentPresaleWriteRequest",
+        "type": "object"
+      },
       "TentPublishStatusRead": {
         "description": "官網同步狀態（POS「官網帳篷」最上方顯示）。",
         "properties": {
@@ -35122,6 +35418,349 @@
           }
         ],
         "summary": "Get Tent Reserved",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales": {
+      "get": {
+        "description": "還沒取消、還沒轉寄售的預售（含賣家聯絡方式，只在 POS）。",
+        "operationId": "listTentPresales",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TentPresaleRead"
+                  },
+                  "title": "Response Listtentpresales",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tent Presales",
+        "tags": [
+          "online-order"
+        ]
+      },
+      "post": {
+        "operationId": "createTentPresale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TentPresaleWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPresaleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Tent Presale",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales/{listing_id}": {
+      "put": {
+        "operationId": "saveTentPresale",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TentPresaleWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPresaleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Tent Presale",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales/{listing_id}/cancel": {
+      "post": {
+        "description": "賣家不賣了／帳篷沒送來：官網拿掉，POS 留紀錄。",
+        "operationId": "cancelTentPresale",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Tent Presale",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales/{listing_id}/photos": {
+      "post": {
+        "operationId": "addTentPresalePhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_addTentPresalePhoto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPresaleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Tent Presale Photo",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales/{listing_id}/photos/order": {
+      "put": {
+        "operationId": "reorderTentPresalePhotos",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TentPhotoOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPresaleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reorder Tent Presale Photos",
+        "tags": [
+          "online-order"
+        ]
+      }
+    },
+    "/api/v1/online-order/tents/presales/{listing_id}/photos/{sha256}": {
+      "delete": {
+        "operationId": "removeTentPresalePhoto",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "listing_id",
+            "required": true,
+            "schema": {
+              "title": "Listing Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TentPresaleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Tent Presale Photo",
         "tags": [
           "online-order"
         ]

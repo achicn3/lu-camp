@@ -3472,6 +3472,115 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/online-order/tents/presales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tent Presales
+         * @description 還沒取消、還沒轉寄售的預售（含賣家聯絡方式，只在 POS）。
+         */
+        get: operations["listTentPresales"];
+        put?: never;
+        /** Create Tent Presale */
+        post: operations["createTentPresale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/presales/{listing_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Tent Presale */
+        put: operations["saveTentPresale"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/presales/{listing_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Tent Presale
+         * @description 賣家不賣了／帳篷沒送來：官網拿掉，POS 留紀錄。
+         */
+        post: operations["cancelTentPresale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/presales/{listing_id}/photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Tent Presale Photo */
+        post: operations["addTentPresalePhoto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/presales/{listing_id}/photos/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder Tent Presale Photos */
+        put: operations["reorderTentPresalePhotos"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/online-order/tents/presales/{listing_id}/photos/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Tent Presale Photo */
+        delete: operations["removeTentPresalePhoto"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/online-order/tents/publish": {
         parameters: {
             query?: never;
@@ -5391,6 +5500,8 @@ export interface components {
             name: string;
             /** Note */
             note?: string | null;
+            /** Presale Listing Id */
+            presale_listing_id?: number | null;
             /** Product Model Id */
             product_model_id?: number | null;
             /** Resale Discount Pct */
@@ -6211,6 +6322,14 @@ export interface components {
         BackupTrigger: "SCHEDULED" | "MANUAL";
         /** Body_addTentListingPhoto */
         Body_addTentListingPhoto: {
+            /**
+             * File
+             * @description JPEG／PNG／WebP／HEIC，10 MB 以內
+             */
+            file: string;
+        };
+        /** Body_addTentPresalePhoto */
+        Body_addTentPresalePhoto: {
             /**
              * File
              * @description JPEG／PNG／WebP／HEIC，10 MB 以內
@@ -13400,6 +13519,99 @@ export interface components {
         TentPhotoOrderRequest: {
             /** Photos */
             photos: string[];
+        };
+        /**
+         * TentPresaleRead
+         * @description POS 預售清單的一列（還沒取消、還沒轉寄售的）。
+         */
+        TentPresaleRead: {
+            /** Brand Id */
+            brand_id: number;
+            /** Brand Name */
+            brand_name: string | null;
+            /** Color */
+            color?: string | null;
+            /** Defects */
+            defects?: string[];
+            /** Extras */
+            extras?: string[];
+            /** Listing Id */
+            listing_id: number;
+            /** Missing */
+            missing?: string[];
+            /** Name */
+            name: string;
+            /** Nights */
+            nights?: number | null;
+            /** Note */
+            note?: string | null;
+            /** Photos */
+            photos: string[];
+            /** Presale Code */
+            presale_code: string;
+            /** Price */
+            price: string;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
+            /**
+             * Reserved
+             * @default false
+             */
+            reserved: boolean;
+            /** Seller Name */
+            seller_name: string;
+            /** Seller Phone */
+            seller_phone: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Video Url */
+            video_url?: string | null;
+        };
+        /**
+         * TentPresaleWriteRequest
+         * @description 預售（docs/102）整筆替換：官網資料＋帳篷本身＋賣家聯絡方式（只在 POS）。
+         */
+        TentPresaleWriteRequest: {
+            /** Brand Id */
+            brand_id: number;
+            /** Color */
+            color?: string | null;
+            /** Defects */
+            defects?: string[];
+            /** Extras */
+            extras?: string[];
+            /** Missing */
+            missing?: string[];
+            /** Name */
+            name: string;
+            /** Nights */
+            nights?: number | null;
+            /** Note */
+            note?: string | null;
+            /** Price */
+            price: number | string;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
+            /**
+             * Reserved
+             * @default false
+             */
+            reserved: boolean;
+            /** Seller Name */
+            seller_name: string;
+            /** Seller Phone */
+            seller_phone: string;
+            /** Video Url */
+            video_url?: string | null;
         };
         /**
          * TentPublishStatusRead
@@ -20658,6 +20870,225 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TentReservedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listTentPresales: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"][];
+                };
+            };
+        };
+    };
+    createTentPresale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TentPresaleWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saveTentPresale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TentPresaleWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelTentPresale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addTentPresalePhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_addTentPresalePhoto"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorderTentPresalePhotos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TentPhotoOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    removeTentPresalePhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listing_id: number;
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TentPresaleRead"];
                 };
             };
             /** @description Validation Error */

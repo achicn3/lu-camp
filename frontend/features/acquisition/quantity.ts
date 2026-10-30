@@ -36,7 +36,10 @@ export function qtyErrors(index: number, qty: string): string[] {
  * 買斷填 3 件後切到寄售，店員看到一列寄售品、系統卻建了三件，畫面上完全沒有線索
  * （Codex 對抗式審查 High）。件數的語意屬於買斷，就在這裡一次收斂。
  */
-export function expandByQty(rows: QuantityRow[], type: AcqType = "BUYOUT"): ItemDraft[] {
+export function expandByQty<T extends QuantityRow>(
+  rows: T[],
+  type: AcqType = "BUYOUT",
+): Omit<T, "qty">[] {
   return rows.flatMap(({ qty, ...item }) => {
     const count = type === "BUYOUT" ? parseQty(qty) : 1;
     // 不合法的件數在送出前已被 qtyErrors 擋下；這裡 fail closed 回 0 筆，

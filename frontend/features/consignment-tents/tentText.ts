@@ -1,7 +1,7 @@
 // 寄售帳篷官網資料（docs/97）的純函式：多行文字框 ↔ 一行一項、資料齊不齊、POS 保留提醒文字。
 import type { components } from "@/lib/api-types";
 
-type Tent = components["schemas"]["TentListingRead"];
+type Tent = Pick<components["schemas"]["TentListingRead"], "photos" | "nights" | "color">;
 
 /** 文字框內容拆成一行一項：去掉頭尾空白與空行。 */
 export function linesToList(text: string): string[] {

@@ -6990,6 +6990,33 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   border-color: var(--ink);
   color: var(--ink);
 }
+.tents-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.tents-badge-presale {
+  margin-left: var(--sp-2);
+  border-color: var(--warn);
+  color: var(--warn);
+  font-family: var(--font-body);
+}
+.tents-seller {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.acq-presale {
+  margin-bottom: var(--sp-3);
+}
+.tents-actions {
+  white-space: nowrap;
+}
+.tents-actions > * + * {
+  margin-left: var(--sp-2);
+}
 .tents-dialog {
   max-width: 640px;
   max-height: calc(100vh - 32px);
