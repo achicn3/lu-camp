@@ -13,7 +13,8 @@ POS 的寄售序號品已有品牌、售價、狀態，但沒有顏色、露數�
 
 1. **POS 主動推、雲端不連進店內**，與 ADR-027 同一原則。
 2. **沿用線上點餐的雲端**（order.lukeng-camp.com）：新增 `PUT /integration/tents`（HMAC）與公開
-   `GET /api/tents`（只允許官網網域的 CORS）。照片走新的 `/integration/tent-photos`，存同一個 R2 桶的 `tent-photos/` 前綴（見第 7 點）。
+   `GET /api/tents`。**對外網址掛在官網網域**（lukeng-camp.com/api/tents、/tent-photos/*）：官網 Worker 經
+   service binding 轉給雲端，雲端只對內部主機名 `tents.internal` 提供，點餐網址上 404（店主裁示：帳篷資料不放點餐網域）。照片走新的 `/integration/tent-photos`，存同一個 R2 桶的 `tent-photos/` 前綴（見第 7 點）。
 3. POS 在 `onlineorder` 模組新增 `online_tent_listings`、`online_tent_listing_photos`、
    `online_tent_publications`，只存 POS 原本沒有的欄位；售價、品牌、狀態讀序號品本身。照片沿用 `menu_photos`。
 4. **以內容雜湊驅動推送**：背景工作每 60 秒組清單、比對雜湊，有變才推；存檔後另外立即試推一次。
@@ -26,6 +27,8 @@ POS 的寄售序號品已有品牌、售價、狀態，但沒有顏色、露數�
 ## 替代方案
 
 - **官網 Worker 自己收推送、自建 R2**：要再做一套簽章、防重放、照片上傳和部署設定，跟線上點餐重複。不採用。
+- **另開子網域（api.lukeng-camp.com）＋CORS**：官網可維持純靜態，但照片網址不在品牌網域下、要多管一個子網域與 CORS。
+  店主選官網自己的網域。
 - **POS 每次在銷售／退貨／寄售流程裡呼叫推送**：要改好幾個模組，漏一個就不同步；斷網時還要補推機制。
   雜湊比對自動涵蓋所有會改到清單的事件。不採用。
 - **把官網要的欄位直接加在 `serialized_items`**：讓核心庫存表背著只給官網用的欄位，非帳篷商品也都多了空欄。不採用。

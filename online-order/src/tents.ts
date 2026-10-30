@@ -1,14 +1,15 @@
-// 寄售帳篷上官網（docs/97 §5）：店內 POS 推清單（簽章），官網公開讀（只給官網網域 CORS）。
+// 寄售帳篷上官網（docs/97 §5）：店內 POS 推清單（簽章）；官網 Worker 經內部連線讀（點餐網址不提供）。
 // 清單引用的照片必須先傳到 R2 tent-photos/；收下新清單後，沒被引用的帳篷照片（售出、下架）一律刪掉。
 import { error, json, sha256Hex } from "./http";
 import { HASH } from "./media";
 
 export const TENTS_MAX_BYTES = 256 * 1024;
+/** 官網 Worker 經 service binding 呼叫時用的主機名；外部網路的請求不會是這個主機名。 */
+export const TENTS_HOST = "tents.internal";
 const MAX_TENTS = 300;
 const MAX_LIST = 20;
 const PHOTO_PREFIX = "tent-photos/";
 const SOLD_DAYS_DEFAULT = 30;
-const ALLOWED_ORIGINS = new Set(["https://lukeng-camp.com", "https://www.lukeng-camp.com"]);
 const STATUSES = new Set(["available", "reserved", "sold"]);
 const YOUTUBE =
   /^https?:\/\/(?:www\.|m\.)?(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))[\w-]{11}(?:[?&#/].*)?$/;
@@ -118,26 +119,17 @@ export async function publishTents(env: Env, storeId: number, raw: Uint8Array): 
   return json({ version: feed.version });
 }
 
-function corsHeaders(req: Request): Record<string, string> {
-  const origin = req.headers.get("Origin");
-  const headers: Record<string, string> = { "Cache-Control": "public, max-age=60", Vary: "Origin" };
-  if (origin !== null && ALLOWED_ORIGINS.has(origin)) headers["Access-Control-Allow-Origin"] = origin;
-  return headers;
-}
+const CACHE = { "Cache-Control": "public, max-age=60" };
 
-export async function readTents(env: Env, storeId: number, req: Request): Promise<Response> {
+export async function readTents(env: Env, storeId: number): Promise<Response> {
   const row = await env.DB.prepare("SELECT json FROM tent_listing WHERE store_id = ?")
     .bind(storeId)
     .first<{ json: string }>();
-  const headers = corsHeaders(req);
   if (row === null) {
-    return json({ meta: { syncedAt: null, soldDays: SOLD_DAYS_DEFAULT }, tents: [] }, 200, headers);
+    return json({ meta: { syncedAt: null, soldDays: SOLD_DAYS_DEFAULT }, tents: [] }, 200, CACHE);
   }
   const feed = JSON.parse(row.json) as Feed;
-  const origin = new URL(req.url).origin;
-  const tents = feed.tents.map((t) => ({
-    ...t,
-    photos: t.photos.map((h) => `${origin}/${PHOTO_PREFIX}${h}.webp`),
-  }));
-  return json({ meta: { syncedAt: feed.syncedAt, soldDays: feed.soldDays }, tents }, 200, headers);
+  // 相對網址：官網把 /tent-photos/* 轉到這裡，照片網址就掛在官網網域底下。
+  const tents = feed.tents.map((t) => ({ ...t, photos: t.photos.map((h) => `/${PHOTO_PREFIX}${h}.webp`) }));
+  return json({ meta: { syncedAt: feed.syncedAt, soldDays: feed.soldDays }, tents }, 200, CACHE);
 }

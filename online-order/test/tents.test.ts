@@ -1,10 +1,15 @@
-// 寄售帳篷上官網（docs/97 §5）：店內 POS 推清單與照片，官網公開讀。
+// 寄售帳篷上官網（docs/97 §5）：店內 POS 推清單與照片，官網 Worker 經內部連線讀。
 // 版本只往前；照片要先傳才收清單；沒被清單引用的帳篷照片（售出、下架）一律刪掉；
-// 公開讀取只給官網網域 CORS。
+// 點餐網址上讀不到帳篷資料。
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
 import { get, integration, sha256Hex, webp } from "./helpers";
+
+/** 官網 Worker 經 service binding 呼叫時的主機名（src/tents.ts TENTS_HOST）。 */
+function internal(path: string): Promise<Response> {
+  return exports.default.fetch(new Request(`https://tents.internal${path}`));
+}
 
 type Tent = Record<string, unknown>;
 
@@ -42,7 +47,7 @@ async function putPhoto(seed: number): Promise<string> {
 
 describe("寄售帳篷清單", () => {
   it("還沒推過：回空清單", async () => {
-    const resp = await get("/api/tents");
+    const resp = await internal("/api/tents");
     expect(resp.status).toBe(200);
     expect(await resp.json()).toEqual({ meta: { syncedAt: null, soldDays: 30 }, tents: [] });
   });
@@ -51,13 +56,14 @@ describe("寄售帳篷清單", () => {
     const hash = await putPhoto(1);
     const put = await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [hash] })]));
     expect(put.status).toBe(200);
-    const resp = await get("/api/tents");
+    const resp = await internal("/api/tents");
     expect(resp.headers.get("Cache-Control")).toBe("public, max-age=60");
     const body = (await resp.json()) as { meta: Tent; tents: Tent[] };
     expect(body.meta).toEqual({ syncedAt: "2026-10-30T14:20:00+08:00", soldDays: 30 });
-    expect(body.tents[0]?.photos).toEqual([`https://order.test/tent-photos/${hash}.webp`]);
+    // 相對網址：照片掛在官網網域底下
+    expect(body.tents[0]?.photos).toEqual([`/tent-photos/${hash}.webp`]);
     expect(body.tents[0]?.name).toBe("Amenity Dome M");
-    const photo = await get(`/tent-photos/${hash}.webp`);
+    const photo = await internal(`/tent-photos/${hash}.webp`);
     expect(photo.status).toBe(200);
     expect(photo.headers.get("Content-Type")).toBe("image/webp");
   });
@@ -72,7 +78,7 @@ describe("寄售帳篷清單", () => {
     const resp = await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [missing] })]));
     expect(resp.status).toBe(409);
     expect(await resp.json()).toEqual({ error: "missing_photo", missing: [missing] });
-    expect(((await (await get("/api/tents")).json()) as { tents: Tent[] }).tents).toEqual([]);
+    expect(((await (await internal("/api/tents")).json()) as { tents: Tent[] }).tents).toEqual([]);
   });
 
   it("版本只往前：舊版 409、同版同內容冪等、同版不同內容 409", async () => {
@@ -95,8 +101,8 @@ describe("寄售帳篷清單", () => {
     const sold = tent({ id: "T-1", status: "sold", photos: [] });
     const resp = await integration("PUT", "/integration/tents", feed(2, [tent({ photos: [keep] }), sold]));
     expect(resp.status).toBe(200);
-    expect((await get(`/tent-photos/${keep}.webp`)).status).toBe(200);
-    expect((await get(`/tent-photos/${drop}.webp`)).status).toBe(404);
+    expect((await internal(`/tent-photos/${keep}.webp`)).status).toBe(200);
+    expect((await internal(`/tent-photos/${drop}.webp`)).status).toBe(404);
     expect((await get(`/photos/${menuHash}.webp`)).status).toBe(200);
   });
 
@@ -104,7 +110,7 @@ describe("寄售帳篷清單", () => {
     const hash = await putPhoto(1);
     await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [hash] })]));
     await integration("PUT", "/integration/tents", feed(2, [tent({ status: "sold" })]));
-    expect((await get(`/tent-photos/${hash}.webp`)).status).toBe(404);
+    expect((await internal(`/tent-photos/${hash}.webp`)).status).toBe(404);
     const again = await integration("PUT", "/integration/tents", feed(3, [tent({ photos: [hash] })]));
     expect(again.status).toBe(409);
     await putPhoto(1);
@@ -123,20 +129,20 @@ describe("寄售帳篷清單", () => {
     expect(resp.status).toBe(422);
   });
 
-  it("CORS 只給官網網域", async () => {
-    const ok = await get("/api/tents", { Origin: "https://lukeng-camp.com" });
-    expect(ok.headers.get("Access-Control-Allow-Origin")).toBe("https://lukeng-camp.com");
-    expect(ok.headers.get("Vary")).toContain("Origin");
-    const www = await get("/api/tents", { Origin: "https://www.lukeng-camp.com" });
-    expect(www.headers.get("Access-Control-Allow-Origin")).toBe("https://www.lukeng-camp.com");
-    const evil = await get("/api/tents", { Origin: "https://evil.example" });
-    expect(evil.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  it("點餐網址上讀不到帳篷清單與照片", async () => {
+    const hash = await putPhoto(1);
+    await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [hash] })]));
+    expect((await get("/api/tents")).status).toBe(404);
+    expect((await get(`/tent-photos/${hash}.webp`)).status).toBe(404);
+    // 內部主機名只開這兩條，點餐的端點不在這裡
+    expect((await internal("/api/menu")).status).toBe(404);
+    expect((await internal(`/photos/${hash}.webp`)).status).toBe(404);
   });
 
   it("帳篷照片只收 WebP 且雜湊要對", async () => {
     const hash = await sha256Hex(webp(1));
     expect((await integration("PUT", `/integration/tent-photos/${hash}`, webp(2))).status).toBe(422);
-    expect((await get(`/tent-photos/${"0".repeat(64)}.webp`)).status).toBe(404);
+    expect((await internal(`/tent-photos/${"0".repeat(64)}.webp`)).status).toBe(404);
   });
 });
 

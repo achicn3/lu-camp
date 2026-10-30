@@ -21,6 +21,7 @@
 | 6 | 保留中的帳篷結帳 | **提醒但不擋**；結帳後保留自動失效 |
 | 7 | 照片上限 | 每頂 8 張 |
 | 8 | 售出後的照片 | **官網與雲端都刪，POS 留著**；退貨回庫照片自動回來（§4.4） |
+| 9 | 對外網址 | **官網自己的網域**，不放在點餐網址底下（§2） |
 
 ## 2. 架構
 
@@ -30,14 +31,17 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 寄售品＋官網資料 ──(HMAC 簽章 PUT)──▶  /integration/tent-photos/:hash → R2 tent-photos/     tents.html
   背景工作每分鐘比對內容雜湊             /integration/tents         → D1（最新一份）
   有變才推                                                                          
-                                        GET /api/tents   ◀─────────(fetch，CORS)───  tents.js
-                                        GET /tent-photos/:hash.webp ◀(img)──────────  
+                                        GET /api/tents              ◀─┐  官網 Worker：lukeng-camp.com/api/tents
+                                        GET /tent-photos/:hash.webp ◀─┘  與 /tent-photos/* 經內部連線轉過來
 ```
 
 - **沿用線上點餐的雲端**（同一個 Worker、同一組整合密鑰、同一套簽章與防重放、同一個 R2 桶；
   帳篷照片放獨立的 `tent-photos/` 前綴，才能放心刪除而不碰到菜單照片）。
   雲端永遠不連進店內（ADR-027）。不另建第二個要維護的雲端服務。
-- 官網仍是純靜態網站，只是清單改從 `https://order.lukeng-camp.com/api/tents` 讀。
+- **對外網址用官網自己的網域**（店主裁示 9，2026-10-30）：`lukeng-camp.com/api/tents`、
+  `lukeng-camp.com/tent-photos/<hash>.webp`。官網 Worker 只把這兩個路徑經 Cloudflare 內部連線
+  （service binding，主機名 `tents.internal`）轉給線上點餐雲端，其餘仍是靜態檔。
+  **點餐網址 order.lukeng-camp.com 上這兩條一律 404**，帳篷資料不會出現在點餐網域。
 - 店裡電腦關機時，官網照樣顯示最後一次推送的清單。
 
 ## 3. POS 資料
@@ -98,7 +102,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 | `name` | `serialized_items.name` |
 | `color`／`nights` | 官網資料 |
 | `missing`／`defects`／`extras` | 官網資料，拆成陣列 |
-| `photos` | 照片雜湊陣列（**售出的一律空陣列**，§4.4）；雲端回應時轉成 `https://order.lukeng-camp.com/tent-photos/<hash>.webp` |
+| `photos` | 照片雜湊陣列（**售出的一律空陣列**，§4.4）；雲端回應時轉成相對網址 `/tent-photos/<hash>.webp`（掛在官網網域下） |
 | `video` | `video_url` |
 | `price` | `listed_price`（含稅，整數元） |
 | `status` | 依 §4.1：`available`／`reserved`／`sold` |
@@ -137,10 +141,11 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
   照片雜湊必須都已存在 R2 `tent-photos/`，否則回 409 `{"error":"missing_photo","missing":[…]}`，清單不更新。
   更新成功後刪掉 `tent-photos/` 底下沒被新清單引用的照片。
 - `PUT /integration/tent-photos/:hash`（簽章）：存到 R2 `tent-photos/<hash>.webp`，驗證內容雜湊（比照菜單照片）。
-- `GET /tent-photos/:hash.webp`（公開）：讀 R2 `tent-photos/`；被刪掉的回 404。
-- `GET /api/tents`（公開）：回最新一份，照片雜湊轉成絕對網址。
-  `Access-Control-Allow-Origin` 只給 `https://lukeng-camp.com`、`https://www.lukeng-camp.com`；
-  `Cache-Control: public, max-age=60`。還沒推過回 `{meta:{…}, tents:[]}`。
+- 只在主機名 `tents.internal`（官網 Worker 的內部連線）提供，點餐網址上 404：
+  - `GET /tent-photos/:hash.webp`：讀 R2 `tent-photos/`；被刪掉的回 404。
+  - `GET /api/tents`：回最新一份，照片轉成相對網址；`Cache-Control: public, max-age=60`。
+    還沒推過回 `{meta:{…}, tents:[]}`。
+- `wrangler.jsonc` 的 `run_worker_first` 要含 `/tent-photos/*`，否則會被靜態資產（點餐頁）接走。
 - D1 migration `0017_tent_listing.sql`。
 
 ## 6. POS 畫面
@@ -158,7 +163,9 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 
 ## 7. 官網（`~/lukeng-homepage`）
 
-- `tents.js` 的資料網址改成 `https://order.lukeng-camp.com/api/tents`，拿掉 `site/api/tents.json` 示範檔。
+- 官網 Worker（`src/worker.js`）：`/api/tents`、`/tent-photos/*` 經 service binding `TENTS`
+  （→ `lu-camp-online-order`）轉過去，只轉路徑、不帶客人的標頭；其他 `/api/*` 404；其餘靜態檔。
+- `tents.js` 讀同網域的 `/api/tents`，拿掉 `site/api/tents.json` 示範檔。
 - 售出的帳篷沒有照片：詳情頁不顯示「搭好全景／照片準備中」佔位格，只顯示色塊＋「已售出」。
 - 部署順序：雲端（Worker＋D1 migration）→ POS 升級並至少上架一頂 → 官網。
   官網上線前清單不能是示範資料。
@@ -168,7 +175,7 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
 | 波次 | 內容 | 測試 |
 |---|---|---|
 | W1 | POS 後端：三張表＋migration、`TentListingService`（編輯、驗證、組清單、雜湊）、API | 單元＋整合（狀態對照、只限寄售、資料外洩白名單、雜湊不變不推） |
-| W2 | 雲端：`/integration/tents`、`/api/tents`、D1 migration | vitest（簽章、版本往前、缺照片、CORS） |
+| W2 | 雲端：`/integration/tents`、`/api/tents`、D1 migration | vitest（簽章、版本往前、缺照片、點餐網址讀不到） |
 | W3 | POS 推送：背景工作、存檔後試推、推送紀錄 | 整合（假雲端） |
 | W4 | POS 畫面「官網帳篷」 | 前端測試＋瀏覽器煙霧 `frontend/scripts/tents-listing-smoke.mjs` |
 | W5 | 官網接正式資料、部署、MacBook 升級說明（docs/98） | 實機確認 |
