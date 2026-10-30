@@ -630,3 +630,19 @@ async def test_hidden_row_is_not_reachable_through_a_public_series(
     # 一鍵略過也不能順手改到看不到的那一次
     await svc.skip_overdue(shop.store_id, clerk, series.id, today=TODAY)
     assert hidden.status is AgendaTaskStatus.OPEN
+
+
+async def test_event_update_checks_length_after_merging(db_session: AsyncSession) -> None:
+    """Codex 1A 第二輪 P2：只改結束日也要檢查最長天數，不能撞到資料庫約束變成系統錯誤。"""
+    shop = await seed_store(db_session)
+    mgr, _ = _viewers(shop)
+    svc = AgendaService(db_session)
+    event = await svc.create_event(
+        shop.store_id,
+        mgr,
+        AgendaEventCreate(kind=AgendaEventKind.MARKET, title="市集", starts_on=NOV_1),
+    )
+    with pytest.raises(AgendaItemInvalid):
+        await svc.update_event(
+            shop.store_id, mgr, event.id, AgendaEventUpdate(ends_on=date(2027, 12, 31))
+        )

@@ -23,6 +23,7 @@ from app.modules.agenda.recurrence import (
 )
 from app.modules.agenda.repository import AgendaRepository
 from app.modules.agenda.schemas import (
+    MAX_EVENT_DAYS,
     MAX_FEED_DAYS,
     MAX_LEAD_DAYS,
     AgendaEventCreate,
@@ -476,6 +477,10 @@ class AgendaService:
             event.ends_on = event.starts_on + length
         if event.ends_on < event.starts_on:
             raise AgendaItemInvalid("結束日不能早於開始日")
+        # schema 只在開始、結束日都有送時檢查天數；只改其中一個要在合併後再檢查一次，
+        # 否則會撞到資料庫約束變成系統錯誤（Codex 1A 第二輪 P2）。
+        if event.ends_on - event.starts_on > timedelta(days=MAX_EVENT_DAYS):
+            raise AgendaItemInvalid(f"一個事件最多 {MAX_EVENT_DAYS} 天")
         current = _event_rule(event)
         if "recurrence" in fields:
             fresh = changes.recurrence

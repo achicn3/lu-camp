@@ -289,6 +289,19 @@ try {
   await page.locator(".agenda-listview").getByText(assignedTitle).waitFor({ timeout: 10000 });
   ok("平板的清單看法列出今天的待辦", true);
   await page.screenshot({ path: join(SHOTS, "04-tablet-list.png") });
+
+  // 10b) 從「今天」點過期的待辦會帶 ?day=：清單要從那天開始（Codex 1A 第二輪 P2），
+  // 看法（未來兩週）也要記住，不會被拉回月曆。
+  const past = shift(today, -3);
+  await page.goto(`${BASE}/calendar?day=${past}`, { waitUntil: "networkidle" });
+  const rangeTitle = page.locator(".agenda-listview .agenda-month-nav h2");
+  await rangeTitle.waitFor({ timeout: 10000 });
+  const pastLabel = `${Number(past.slice(5, 7))}/${Number(past.slice(8, 10))}（`;
+  ok(
+    "連結帶日期時，清單從那天開始、看法沿用未來兩週",
+    ((await rangeTitle.textContent()) ?? "").startsWith(pastLabel),
+    (await rangeTitle.textContent()) ?? "",
+  );
   const noHorizontalScroll = await page.evaluate(
     () => document.documentElement.scrollWidth <= window.innerWidth + 1,
   );

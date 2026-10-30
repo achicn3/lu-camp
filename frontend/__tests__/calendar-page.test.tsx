@@ -6,10 +6,11 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const nav = vi.hoisted(() => ({ day: "2026-11-10" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => "/calendar",
-  useSearchParams: () => new URLSearchParams("day=2026-11-10"),
+  useSearchParams: () => new URLSearchParams(`day=${nav.day}`),
 }));
 
 import CalendarPage from "@/app/(authed)/calendar/page";
@@ -111,6 +112,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  nav.day = "2026-11-10";
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-10T02:00:00Z"));
   window.localStorage.clear();
@@ -327,6 +329,43 @@ describe("/calendar 行事曆", () => {
     );
     const post = calls.find((c) => c.method === "POST" && c.url.includes("/agenda/tasks/32/status"))!;
     expect(JSON.parse(post.body)).toEqual({ status: "OPEN" });
+  });
+
+  it("平板清單從連結指定的那天開始：從「今天」點過期的待辦要找得到（Codex 1A 第二輪 P2）", async () => {
+    nav.day = "2026-11-03";
+    window.localStorage.setItem("lu-camp.calendar.view", JSON.stringify("list"));
+    const stale = item({
+      key: "task:21",
+      day: "2026-11-03",
+      title: "回覆舊報價",
+      task_id: 21,
+      overdue: true,
+    });
+    stubFetch((url) =>
+      url.includes("/agenda/items")
+        ? json({ start: "2026-11-03", end: "2026-11-16", items: [stale, ...ITEMS] })
+        : null,
+    );
+    renderPage();
+
+    expect(await screen.findByText("11/3（二） ～ 11/16（一）")).toBeTruthy();
+    expect(await screen.findByText("回覆舊報價")).toBeTruthy();
+    const query = calls.find((c) => c.url.includes("/agenda/items"))!;
+    expect(query.url).toContain("start=2026-11-03");
+  });
+
+  it("看法（月曆／未來兩週）記在這台裝置上，下次打開沿用", async () => {
+    stubFetch();
+    const first = renderPage();
+    const user = userEvent.setup();
+    await screen.findByRole("complementary", { name: "11/10（二） 的項目" });
+    await user.click(screen.getByRole("radio", { name: "未來兩週" }));
+    first.unmount();
+
+    renderPage();
+    expect(
+      (await screen.findByRole("radio", { name: "未來兩週" })).getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("點重複待辦的那一次，打開「只改這一次」", async () => {

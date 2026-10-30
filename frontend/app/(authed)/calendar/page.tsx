@@ -99,10 +99,12 @@ function store(key: string, value: unknown) {
 
 function initialView(): View {
   try {
-    const saved = window.localStorage.getItem(VIEW_KEY);
+    // 存的時候是 JSON（同篩選），讀回來要先解開才比得對。
+    const raw = window.localStorage.getItem(VIEW_KEY);
+    const saved: unknown = raw === null ? null : JSON.parse(raw);
     if (saved === "month" || saved === "list") return saved;
   } catch {
-    // 讀不到就依螢幕寬度決定。
+    // 讀不到或壞掉就依螢幕寬度決定。
   }
   // 平板、手機的月曆格子太小，預設用清單（docs/99 §9）。
   return window.matchMedia?.("(max-width: 900px)").matches ? "list" : "month";
@@ -140,7 +142,8 @@ function CalendarView() {
     month: Number(firstDay.slice(5, 7)),
   }));
   const [selected, setSelected] = useState(firstDay);
-  const [listStart, setListStart] = useState(today);
+  // 清單從連結指定的那天開始：平板預設是清單，從「今天」點過期的待辦要看得到它（Codex 1A 第二輪 P2）。
+  const [listStart, setListStart] = useState(firstDay);
   const [filters, setFilters] = useState<Filters>(() => loadStored(FILTER_KEY, DEFAULT_FILTERS));
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionError, setActionError] = useState<string | null>(null);

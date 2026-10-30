@@ -306,6 +306,12 @@ async def test_event_input_checks(client: httpx.AsyncClient, db_session: AsyncSe
     )
     assert not_repeating.status_code == 422, not_repeating.text
 
+    # 只改結束日、超過一年：要回看得懂的 422，不是撞到資料庫約束的 500（Codex 1A 第二輪 P2）
+    too_long = await client.patch(
+        f"{API}/events/{single.json()['id']}", json={"ends_on": _day(400)}, headers=clerk
+    )
+    assert too_long.status_code == 422, too_long.text
+
     times = await client.post(
         f"{API}/events",
         json={
