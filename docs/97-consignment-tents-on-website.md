@@ -146,7 +146,14 @@ POS（店內 MacBook）                     線上點餐雲端 order.lukeng-camp
   - `GET /api/tents`：回最新一份，照片轉成相對網址；`Cache-Control: public, max-age=60`。
     還沒推過回 `{meta:{…}, tents:[]}`。
 - `wrangler.jsonc` 的 `run_worker_first` 要含 `/tent-photos/*`，否則會被靜態資產（點餐頁）接走。
-- D1 migration `0017_tent_listing.sql`。
+- **同店一次只處理一份**（D1 `tent_lock`，期限 60 秒）：驗照片、寫清單、清照片整段持鎖；拿不到回 409 `busy`，
+  POS 記下原因、下一輪再推。清照片時每刪一批前再確認鎖還是自己的（請求卡太久被接手就停手）。
+- D1 migration `0017_tent_listing.sql`、`0018_tent_lock.sql`。
+
+### 5.1 已接受的殘餘風險（店主裁示 2026-10-30）
+
+- 保留中的帳篷在背景工作兩次檢查之間（約 1 分鐘）**賣掉又退貨**，保留勾選不會被清掉，官網仍顯示「已有人保留」。
+  徹底解決要在結帳流程加程式，違反「不能影響 POS」；實務上幾乎不會發生，發生時店員在「官網寄售帳篷」取消勾選即可。
 
 ## 6. POS 畫面
 

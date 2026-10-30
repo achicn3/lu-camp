@@ -75,24 +75,54 @@ async function missingPhotos(env: Env, hashes: string[]): Promise<string[]> {
   return missing;
 }
 
+const LOCK_MS = 60_000;
+
+/** 拿同店的處理鎖；別人持有且沒過期就拿不到（回 null）。D1 單一 UPSERT，判斷與寫入是同一步。 */
+async function acquireLock(env: Env, storeId: number): Promise<string | null> {
+  const token = crypto.randomUUID();
+  const now = Date.now();
+  const res = await env.DB.prepare(
+    "INSERT INTO tent_lock (store_id, token, expires_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT (store_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at " +
+      "WHERE tent_lock.expires_at < ?",
+  )
+    .bind(storeId, token, now + LOCK_MS, now)
+    .run();
+  return res.meta.changes === 1 ? token : null;
+}
+
+async function releaseLock(env: Env, storeId: number, token: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM tent_lock WHERE store_id = ? AND token = ?").bind(storeId, token).run();
+}
+
+async function holdsLock(env: Env, storeId: number, token: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT token, expires_at FROM tent_lock WHERE store_id = ?")
+    .bind(storeId)
+    .first<{ token: string; expires_at: number }>();
+  return row !== null && row.token === token && row.expires_at > Date.now();
+}
+
 /**
  * 刪掉沒被清單引用的帳篷照片（售出、下架、還給寄售人的）。只動 tent-photos/。
  *
- * 保留的是「刪的當下 D1 裡最新那份清單」用到的照片，再加上 `alsoKeep`（呼叫端這次的清單）——
- * 不能只照呼叫端的清單刪：較舊的請求晚一步才刪時，會刪到更新那份清單的照片（Codex 對抗審查）。
- * 剩下極窄的交錯時間差由 POS 每 30 分鐘重新確認一次清單補回（缺照片會回 409，POS 自動補傳）。
+ * 呼叫端必須持有同店的處理鎖（publishTents），清單寫入與清照片不會交錯（Codex 對抗審查第一、三輪）。
+ * 保留的是 D1 裡最新那份清單用到的照片；每刪一批前再確認鎖還是自己的——請求卡太久、鎖被別人接手時
+ * 就停手（下一份清單會再清）。
  */
-export async function sweepPhotos(env: Env, storeId: number, alsoKeep: string[] = []): Promise<void> {
+export async function sweepPhotos(env: Env, storeId: number, token: string): Promise<void> {
   const row = await env.DB.prepare("SELECT json FROM tent_listing WHERE store_id = ?")
     .bind(storeId)
     .first<{ json: string }>();
   const current = row === null ? [] : (JSON.parse(row.json) as Feed).tents.flatMap((t) => t.photos);
-  const keep = new Set([...current, ...alsoKeep].map((h) => `${PHOTO_PREFIX}${h}.webp`));
+  const keep = new Set(current.map((h) => `${PHOTO_PREFIX}${h}.webp`));
   let cursor: string | undefined;
   do {
     const page = await env.MEDIA.list({ prefix: PHOTO_PREFIX, cursor });
     const stale = page.objects.map((o) => o.key).filter((k) => !keep.has(k));
-    if (stale.length > 0) await env.MEDIA.delete(stale);
+    if (stale.length > 0) {
+      if (!(await holdsLock(env, storeId, token))) return;
+      await env.MEDIA.delete(stale);
+    }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
 }
@@ -105,6 +135,16 @@ export async function publishTents(env: Env, storeId: number, raw: Uint8Array): 
     return error("invalid_json", 422);
   }
   if (!validFeed(feed)) return error("invalid_feed", 422);
+  const token = await acquireLock(env, storeId);
+  if (token === null) return error("busy", 409);
+  try {
+    return await publishLocked(env, storeId, feed, token);
+  } finally {
+    await releaseLock(env, storeId, token);
+  }
+}
+
+async function publishLocked(env: Env, storeId: number, feed: Feed, token: string): Promise<Response> {
   const text = JSON.stringify(feed);
   const digest = await sha256Hex(new TextEncoder().encode(text));
   const current = await env.DB.prepare("SELECT version, sha256 FROM tent_listing WHERE store_id = ?")
@@ -126,7 +166,7 @@ export async function publishTents(env: Env, storeId: number, raw: Uint8Array): 
   )
     .bind(storeId, feed.version, text, digest, feed.syncedAt)
     .run();
-  await sweepPhotos(env, storeId, hashes);
+  await sweepPhotos(env, storeId, token);
   return json({ version: feed.version });
 }
 

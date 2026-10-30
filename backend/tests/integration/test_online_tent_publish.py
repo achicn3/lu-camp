@@ -51,6 +51,7 @@ class FakeWorker:
     photos: set[str] = field(default_factory=set)
     feeds: list[dict[str, Any]] = field(default_factory=list)
     fail_status: int | None = None
+    fail_error: str = "boom"
     # 收下清單後故意讓回應遺失（模擬雲端已存、POS 沒收到）
     drop_response: bool = False
     # 端點用的雲端綁哪家店（seed 之後才知道 id）
@@ -70,7 +71,7 @@ class FakeWorker:
         path = request.url.path
         self.calls.append((request.method, path))
         if self.fail_status is not None:
-            return httpx.Response(self.fail_status, json={"error": "boom"})
+            return httpx.Response(self.fail_status, json={"error": self.fail_error})
         if path.startswith("/integration/tent-photos/"):
             sha = path.rsplit("/", 1)[1]
             assert hashlib.sha256(body).hexdigest() == sha
@@ -438,3 +439,19 @@ async def test_change_during_a_running_push_goes_out_right_after_it(
     await TentPublishService(db_session, client).publish(ctx.store_id, now=datetime.now(UTC))
     assert seen == [False]  # 第二個請求沒有等
     assert [t["status"] for f in worker.feeds for t in f["tents"]] == ["available", "reserved"]
+
+
+async def test_cloud_busy_is_explained_and_retried(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    """雲端同店正在處理另一份（鎖住）：記下看得懂的原因，下一輪再推。"""
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    worker.fail_status, worker.fail_error = 409, "busy"
+    busy = await svc.publish(ctx.store_id, now=datetime.now(UTC))
+    assert busy.pushed is False
+    assert busy.last_error is not None and "正在處理" in busy.last_error
+    worker.fail_status = None
+    assert (await svc.publish(ctx.store_id, now=datetime.now(UTC))).pushed is True

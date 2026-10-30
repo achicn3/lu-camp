@@ -150,6 +150,8 @@ class TentPublishService:
         if 200 <= code < 300:
             return None
         reason = str(data.get("error") or "")
+        if code == 409 and reason == "busy":
+            return "官網雲端正在處理上一份清單，會自動再試"
         return f"官網雲端拒收（{code} {reason}），會自動再試".strip()[:_MAX_ERROR_CHARS]
 
     async def _missing_photos(

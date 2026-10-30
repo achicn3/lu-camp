@@ -107,13 +107,38 @@ describe("寄售帳篷清單", () => {
     expect((await get(`/photos/${menuHash}.webp`)).status).toBe(200);
   });
 
-  it("較舊的請求晚一步才清照片：不會刪到最新清單用的照片", async () => {
+  it("同店一次只處理一份：別的請求持鎖時回 busy，清單與照片都不動", async () => {
+    const hash = await putPhoto(1);
+    await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [hash] })]));
+    await env.DB.prepare("INSERT INTO tent_lock (store_id, token, expires_at) VALUES (1, 'other', ?)")
+      .bind(Date.now() + 60_000)
+      .run();
+    const busy = await integration("PUT", "/integration/tents", feed(2, []));
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toEqual({ error: "busy" });
+    expect((await internal(`/tent-photos/${hash}.webp`)).status).toBe(200);
+    const body = (await (await internal("/api/tents")).json()) as { tents: Tent[] };
+    expect(body.tents).toHaveLength(1);
+  });
+
+  it("卡死的請求鎖過期後可以接手；處理完一定放鎖", async () => {
+    await env.DB.prepare("INSERT INTO tent_lock (store_id, token, expires_at) VALUES (1, 'stale', ?)")
+      .bind(Date.now() - 1)
+      .run();
+    expect((await integration("PUT", "/integration/tents", feed(1, [tent()]))).status).toBe(200);
+    const left = await env.DB.prepare("SELECT count(*) AS n FROM tent_lock").first<{ n: number }>();
+    expect(left?.n).toBe(0);
+  });
+
+  it("清照片前發現鎖已經不是自己的（請求卡太久）：不刪", async () => {
     const shared = await putPhoto(1);
     expect((await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [shared] })]))).status).toBe(200);
     const fresh = await putPhoto(2);
-    expect((await integration("PUT", "/integration/tents", feed(2, [tent({ photos: [shared, fresh] })]))).status).toBe(200);
-    // 模擬 v1 那個請求現在才跑到清照片這一步（它自己的清單沒有 fresh）
-    await sweepPhotos(env, 1, [shared]);
+    await env.DB.prepare("INSERT INTO tent_lock (store_id, token, expires_at) VALUES (1, 'newer', ?)")
+      .bind(Date.now() + 60_000)
+      .run();
+    // 模擬一個鎖已經過期被別人接手的舊請求，現在才跑到清照片
+    await sweepPhotos(env, 1, "mine-but-expired");
     expect((await internal(`/tent-photos/${fresh}.webp`)).status).toBe(200);
     expect((await internal(`/tent-photos/${shared}.webp`)).status).toBe(200);
   });
