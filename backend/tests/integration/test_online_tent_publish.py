@@ -406,3 +406,35 @@ async def test_publish_while_another_is_running_returns_at_once(
     assert worker.calls == []
     # 鎖放開後照常推
     assert (await svc.publish(ctx.store_id, now=datetime.now(UTC))).pushed is True
+
+
+async def test_change_during_a_running_push_goes_out_right_after_it(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    """推送進行中又有人按「立即更新」：不排隊，但進行中那份推完會馬上再推一輪最新內容。"""
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    row = await db_session.scalar(
+        select(OnlineTentListing).where(OnlineTentListing.serialized_item_id == ctx.item.id)
+    )
+    assert row is not None
+    seen: list[bool] = []
+    real = worker.handler
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/integration/tents" and not seen:
+            # 第一份還在推的時候：店員又改了資料、按了立即更新
+            row.reserved = True
+            await db_session.flush()
+            busy = await svc.publish(ctx.store_id, now=datetime.now(UTC))
+            seen.append(busy.pushed)
+        return real(request)
+
+    client = OnlineOrderClient(
+        CLOUD, SECRET, store_id=ctx.store_id, transport=httpx.MockTransport(handler)
+    )
+    await TentPublishService(db_session, client).publish(ctx.store_id, now=datetime.now(UTC))
+    assert seen == [False]  # 第二個請求沒有等
+    assert [t["status"] for f in worker.feeds for t in f["tents"]] == ["available", "reserved"]

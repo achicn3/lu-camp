@@ -10,7 +10,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,15 @@ REVERIFY_AFTER = timedelta(minutes=30)
 # 同一個後端行程裡一次只推一份（背景工作與店員按的「立即更新」）。不用資料列鎖：
 # 那要拿著交易等雲端回應。
 _PUBLISH_LOCK = asyncio.Lock()
+
+
+@dataclass
+class _PublishState:
+    # 推送進行中又有人要推：記一筆，進行中那份推完馬上再推一輪最新內容（不排隊、不拿連線等）。
+    rerun: bool = False
+
+
+_STATE = _PublishState()
 
 
 @dataclass(frozen=True)
@@ -58,31 +67,45 @@ class TentPublishService:
         # 先放開呼叫端已開的交易（例如驗證登入時查過資料庫），再看要不要推。
         await self._session.commit()
         if _PUBLISH_LOCK.locked():
-            # 已經有一份在推：不排隊（排隊時呼叫端可能還拿著連線），進行中那份推完後有漏的，
-            # 下一輪背景推送（最多 1 分鐘）會補上（Codex 第二輪）。
+            # 已經有一份在推：不排隊（排隊時呼叫端可能還拿著連線，Codex 第二輪），
+            # 留話給進行中那份，它推完會再推一輪最新內容。
+            _STATE.rerun = True
             return TentPublishResult(configured=True, pushed=False, last_error=None)
         async with _PUBLISH_LOCK:
-            await self._tents.clear_reserved_for_sold(store_id)
-            feed = await self._tents.build_feed(store_id, now=now)
-            digest = feed_sha256(feed)
-            pub = await self._publication(store_id, client.base_url)
-            if _up_to_date(pub, digest, now):
-                await self._session.commit()
-                return TentPublishResult(configured=True, pushed=False, last_error=None)
-            # 版本用時間（毫秒），但一定比上次大：時鐘倒退也只會往前。
-            version = max(int(now.timestamp() * 1000), (pub.version or 0) + 1)
-            payload = {"version": version, "syncedAt": taipei_iso(now), **feed}
+            rounds = [await self._publish_locked(store_id, client, now)]
+            while _STATE.rerun:
+                _STATE.rerun = False
+                rounds.append(await self._publish_locked(store_id, client, datetime.now(UTC)))
+        return TentPublishResult(
+            configured=True,
+            pushed=any(r.pushed for r in rounds),
+            last_error=rounds[-1].last_error,
+        )
+
+    async def _publish_locked(
+        self, store_id: int, client: OnlineOrderClient, now: datetime
+    ) -> TentPublishResult:
+        await self._tents.clear_reserved_for_sold(store_id)
+        feed = await self._tents.build_feed(store_id, now=now)
+        digest = feed_sha256(feed)
+        pub = await self._publication(store_id, client.base_url)
+        if _up_to_date(pub, digest, now):
             await self._session.commit()
-            error = await self._push(client, payload)
-            pub = await self._publication(store_id, client.base_url)
-            pub.last_attempt_at = now
-            pub.version = version
-            if error is None:
-                pub.content_sha256 = digest
-                pub.pushed_at = now
-            pub.last_error = error
-            await self._repo.save_publication(pub)
-            await self._session.commit()
+            return TentPublishResult(configured=True, pushed=False, last_error=None)
+        # 版本用時間（毫秒），但一定比上次大：時鐘倒退也只會往前。
+        version = max(int(now.timestamp() * 1000), (pub.version or 0) + 1)
+        payload = {"version": version, "syncedAt": taipei_iso(now), **feed}
+        await self._session.commit()
+        error = await self._push(client, payload)
+        pub = await self._publication(store_id, client.base_url)
+        pub.last_attempt_at = now
+        pub.version = version
+        if error is None:
+            pub.content_sha256 = digest
+            pub.pushed_at = now
+        pub.last_error = error
+        await self._repo.save_publication(pub)
+        await self._session.commit()
         return TentPublishResult(configured=True, pushed=error is None, last_error=error)
 
     async def status(self, store_id: int, *, now: datetime) -> TentPublishStatusRead:
