@@ -7045,10 +7045,18 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 }
 .tents-photo-actions {
   display: flex;
-  justify-content: space-between;
+  gap: 2px;
+}
+.tents-photo-actions button {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--sp-1);
+  white-space: nowrap;
 }
 .tents-photo-upload {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
 }
 .tents-photo-upload.is-disabled {
   opacity: 0.5;
