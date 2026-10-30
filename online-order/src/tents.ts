@@ -75,8 +75,19 @@ async function missingPhotos(env: Env, hashes: string[]): Promise<string[]> {
   return missing;
 }
 
-/** 刪掉沒被清單引用的帳篷照片（售出、下架、還給寄售人的）。只動 tent-photos/。 */
-async function sweepPhotos(env: Env, keep: Set<string>): Promise<void> {
+/**
+ * 刪掉沒被清單引用的帳篷照片（售出、下架、還給寄售人的）。只動 tent-photos/。
+ *
+ * 保留的是「刪的當下 D1 裡最新那份清單」用到的照片，再加上 `alsoKeep`（呼叫端這次的清單）——
+ * 不能只照呼叫端的清單刪：較舊的請求晚一步才刪時，會刪到更新那份清單的照片（Codex 對抗審查）。
+ * 剩下極窄的交錯時間差由 POS 每 30 分鐘重新確認一次清單補回（缺照片會回 409，POS 自動補傳）。
+ */
+export async function sweepPhotos(env: Env, storeId: number, alsoKeep: string[] = []): Promise<void> {
+  const row = await env.DB.prepare("SELECT json FROM tent_listing WHERE store_id = ?")
+    .bind(storeId)
+    .first<{ json: string }>();
+  const current = row === null ? [] : (JSON.parse(row.json) as Feed).tents.flatMap((t) => t.photos);
+  const keep = new Set([...current, ...alsoKeep].map((h) => `${PHOTO_PREFIX}${h}.webp`));
   let cursor: string | undefined;
   do {
     const page = await env.MEDIA.list({ prefix: PHOTO_PREFIX, cursor });
@@ -115,7 +126,7 @@ export async function publishTents(env: Env, storeId: number, raw: Uint8Array): 
   )
     .bind(storeId, feed.version, text, digest, feed.syncedAt)
     .run();
-  await sweepPhotos(env, new Set(hashes.map((h) => `${PHOTO_PREFIX}${h}.webp`)));
+  await sweepPhotos(env, storeId, hashes);
   return json({ version: feed.version });
 }
 

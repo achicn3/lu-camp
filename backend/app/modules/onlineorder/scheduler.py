@@ -99,18 +99,33 @@ async def publish_tents_once() -> None:
         logger.info("consignment tents published")
 
 
+async def _publish_tents_logged() -> None:
+    try:
+        await publish_tents_once()
+    except Exception:
+        logger.exception("consignment tents publish failed")
+
+
 async def scheduler_loop(stop_event: asyncio.Event) -> None:
+    # 推帳篷另開一個工作跑：照片上傳可能很久，不能拖住拉單與心跳
+    # （雲端 2 分鐘沒心跳就暫停線上接單）。
+    # 上一輪還沒推完就不開新的一輪。
+    tents_task: asyncio.Task[None] | None = None
     last_tents = float("-inf")
-    while not stop_event.is_set():
-        try:
-            await tick_once()
-        except Exception:
-            logger.exception("online order tick failed")
-        if time.monotonic() - last_tents >= TENT_PUBLISH_INTERVAL_SECONDS:
-            last_tents = time.monotonic()
+    try:
+        while not stop_event.is_set():
             try:
-                await publish_tents_once()
+                await tick_once()
             except Exception:
-                logger.exception("consignment tents publish failed")
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop_event.wait(), timeout=PULL_INTERVAL_SECONDS)
+                logger.exception("online order tick failed")
+            due = time.monotonic() - last_tents >= TENT_PUBLISH_INTERVAL_SECONDS
+            if due and (tents_task is None or tents_task.done()):
+                last_tents = time.monotonic()
+                tents_task = asyncio.create_task(_publish_tents_logged())
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=PULL_INTERVAL_SECONDS)
+    finally:
+        if tents_task is not None and not tents_task.done():
+            tents_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await tents_task

@@ -213,6 +213,21 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "COALESCE(md5(string_agg(row_to_json(r)::text, ',' ORDER BY id)), '-') "
         "FROM online_retail_listings r",
     ),
+    # 寄售帳篷官網資料（docs/97）：店員填的露數、缺件、瑕疵、配件與照片順序，弄丟要逐頂重填重拍。
+    (
+        "官網寄售帳篷-資料（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY id)), '-') "
+        "FROM online_tent_listings t",
+    ),
+    (
+        "官網寄售帳篷-照片（筆數／內容指紋）",
+        "SELECT count(*)::text || '/' || "
+        "COALESCE(md5(string_agg("
+        "listing_id::text || ':' || position::text || ':' || photo_sha256, ',' "
+        "ORDER BY listing_id, position)), '-') "
+        "FROM online_tent_listing_photos",
+    ),
     # 手沖體驗卡（docs/63 §4）：店主手寫的卡面文字與搭配，弄丟要整批重打。
     (
         "線上點餐-體驗卡（筆數／內容指紋）",

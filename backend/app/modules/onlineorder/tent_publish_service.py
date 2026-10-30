@@ -1,11 +1,16 @@
 """寄售帳篷清單推到雲端（docs/97 §4.3）：內容雜湊沒變就不推；雲端說缺照片就補傳再推一次。
 
 背景工作每 60 秒呼叫一次，店員存檔後畫面也會呼叫一次。POS 不記哪些照片推過——雲端有沒有才算數
-（售出後雲端會刪照片，退貨回庫時再補）。雲端連不上或拒收只記下原因、下次重試，不影響 POS 其他功能。
+（售出後雲端會刪照片，退貨回庫時再補）。雲端連不上或拒收只記下原因、下次重試，不影響 POS 其他功能：
+連雲端之前一律先 commit，**不會拿著資料庫連線等雲端**（等很久時不能讓 POS 其他功能搶不到連線）。
+
+內容沒變也每 30 分鐘重送一次：雲端會再確認照片都在（不在就回缺照片、這裡補傳），
+極少數交錯時被誤刪的照片也會自己補回（Codex 對抗審查）。
 """
 
+import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +23,10 @@ from app.modules.onlineorder.tent_service import TentListingService, feed_sha256
 from app.shared.exceptions import OnlineOrderPushFailed
 
 _MAX_ERROR_CHARS = 300
+REVERIFY_AFTER = timedelta(minutes=30)
+# 同一個後端行程裡一次只推一份（背景工作與店員按的「立即更新」）。不用資料列鎖：
+# 那要拿著交易等雲端回應。
+_PUBLISH_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -42,27 +51,32 @@ class TentPublishService:
         return self._client
 
     async def publish(self, store_id: int, *, now: datetime) -> TentPublishResult:
-        """內容有變才推；結果寫進推送紀錄（呼叫端負責 commit）。"""
+        """內容有變（或上次失敗、或超過 30 分鐘沒確認）才推；結果寫進推送紀錄並 commit。"""
         client = self._client_for(store_id)
         if client is None:
             return TentPublishResult(configured=False, pushed=False, last_error=None)
-        await self._tents.clear_reserved_for_sold(store_id)
-        feed = await self._tents.build_feed(store_id, now=now)
-        digest = feed_sha256(feed)
-        pub = await self._publication(store_id, client.base_url)
-        if pub.content_sha256 == digest:
-            return TentPublishResult(configured=True, pushed=False, last_error=pub.last_error)
-        # 版本用時間（毫秒），但一定比上次大：時鐘倒退也只會往前。
-        version = max(int(now.timestamp() * 1000), (pub.version or 0) + 1)
-        payload = {"version": version, "syncedAt": taipei_iso(now), **feed}
-        error = await self._push(client, payload)
-        pub.last_attempt_at = now
-        pub.version = version
-        if error is None:
-            pub.content_sha256 = digest
-            pub.pushed_at = now
-        pub.last_error = error
-        await self._repo.save_publication(pub)
+        async with _PUBLISH_LOCK:
+            await self._tents.clear_reserved_for_sold(store_id)
+            feed = await self._tents.build_feed(store_id, now=now)
+            digest = feed_sha256(feed)
+            pub = await self._publication(store_id, client.base_url)
+            if _up_to_date(pub, digest, now):
+                await self._session.commit()
+                return TentPublishResult(configured=True, pushed=False, last_error=None)
+            # 版本用時間（毫秒），但一定比上次大：時鐘倒退也只會往前。
+            version = max(int(now.timestamp() * 1000), (pub.version or 0) + 1)
+            payload = {"version": version, "syncedAt": taipei_iso(now), **feed}
+            await self._session.commit()
+            error = await self._push(client, payload)
+            pub = await self._publication(store_id, client.base_url)
+            pub.last_attempt_at = now
+            pub.version = version
+            if error is None:
+                pub.content_sha256 = digest
+                pub.pushed_at = now
+            pub.last_error = error
+            await self._repo.save_publication(pub)
+            await self._session.commit()
         return TentPublishResult(configured=True, pushed=error is None, last_error=error)
 
     async def status(self, store_id: int, *, now: datetime) -> TentPublishStatusRead:
@@ -79,19 +93,18 @@ class TentPublishService:
         digest = feed_sha256(await self._tents.build_feed(store_id, now=now))
         return TentPublishStatusRead(
             configured=True,
-            pending=pub is None or pub.content_sha256 != digest,
+            # 上次推失敗也算還沒上官網：雲端可能停在別的內容（回應遺失時）。
+            pending=pub is None or pub.content_sha256 != digest or pub.last_error is not None,
             pushed_at=None if pub is None else pub.pushed_at,
             last_error=None if pub is None else pub.last_error,
             last_attempt_at=None if pub is None else pub.last_attempt_at,
         )
 
     async def _publication(self, store_id: int, cloud: str) -> OnlineTentPublication:
-        """鎖住這家店對這個雲端的紀錄：背景工作與店員按的同時發生時只會有一個在推。"""
-        pub = await self._repo.publication(store_id, cloud, for_update=True)
+        pub = await self._repo.publication(store_id, cloud)
         if pub is None:
             pub = OnlineTentPublication(store_id=store_id, cloud=cloud)
             await self._repo.save_publication(pub)
-            pub = await self._repo.publication(store_id, cloud, for_update=True) or pub
         return pub
 
     async def _push(self, client: OnlineOrderClient, payload: dict[str, object]) -> str | None:
@@ -99,7 +112,9 @@ class TentPublishService:
         try:
             code, data = await client.put_tents(payload)
             if code == 409 and data.get("error") == "missing_photo":
-                await self._upload_missing(client, payload, data.get("missing"))
+                photos = await self._missing_photos(payload, data.get("missing"))
+                for sha, content in photos.items():
+                    await client.put_tent_photo(sha, content)
                 code, data = await client.put_tents(payload)
         except OnlineOrderPushFailed as exc:
             return str(exc)[:_MAX_ERROR_CHARS]
@@ -108,16 +123,30 @@ class TentPublishService:
         reason = str(data.get("error") or "")
         return f"官網雲端拒收（{code} {reason}），會自動再試".strip()[:_MAX_ERROR_CHARS]
 
-    async def _upload_missing(
-        self, client: OnlineOrderClient, payload: dict[str, object], missing: object
-    ) -> None:
+    async def _missing_photos(
+        self, payload: dict[str, object], missing: object
+    ) -> dict[str, bytes]:
+        """先把要補傳的照片從資料庫讀出來、commit 放開連線，再上傳。只補這份清單用到的。"""
         tents = payload.get("tents")
         wanted = {
             sha for t in (tents if isinstance(tents, list) else []) for sha in t.get("photos", [])
         }
+        out: dict[str, bytes] = {}
         for sha in missing if isinstance(missing, list) else []:
             if not isinstance(sha, str) or sha not in wanted:
                 continue
             content = await self._menu.photo_content(sha)
             if content is not None:
-                await client.put_tent_photo(sha, content)
+                out[sha] = content
+        await self._session.commit()
+        return out
+
+
+def _up_to_date(pub: OnlineTentPublication, digest: str, now: datetime) -> bool:
+    """內容沒變、上次成功、而且 30 分鐘內確認過，才可以不推。"""
+    return (
+        pub.content_sha256 == digest
+        and pub.last_error is None
+        and pub.pushed_at is not None
+        and now - pub.pushed_at < REVERIFY_AFTER
+    )

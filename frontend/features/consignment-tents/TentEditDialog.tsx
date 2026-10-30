@@ -115,7 +115,7 @@ function TentPhotos({
   return (
     <fieldset className="tents-photos">
       <legend className="field-label">
-        照片（{tent.photos.length}/{MAX_PHOTOS}，第一張是封面；建議順序：搭好全景、內部空間、收納狀態、額外配件、瑕疵特寫）
+        照片（選填，{tent.photos.length}/{MAX_PHOTOS}，第一張是封面；建議順序：搭好全景、內部空間、收納狀態、額外配件、瑕疵特寫）
       </legend>
       <ol className="tents-photo-list">
         {tent.photos.map((sha, index) => (
@@ -298,7 +298,7 @@ export function TentEditDialog({
           <textarea rows={2} value={extras} onChange={(e) => setExtras(e.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">搭帳影片（YouTube 網址，可設為不公開）</span>
+          <span className="field-label">搭帳影片（選填，YouTube 網址，可設為不公開）</span>
           <input
             inputMode="url"
             placeholder="https://youtu.be/…"

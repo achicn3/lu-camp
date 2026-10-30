@@ -15,7 +15,7 @@ export function listToLines(items: readonly string[]): string {
   return items.join("\n");
 }
 
-/** 上架前提醒店員還缺什麼（不擋存檔：照片可以之後補）。 */
+/** 提醒店員還可以補什麼（全部選填，不擋上架）。 */
 export function missingInfo(tent: Tent): string[] {
   const gaps: string[] = [];
   if (tent.photos.length === 0) gaps.push("沒照片");

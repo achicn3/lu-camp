@@ -6950,7 +6950,7 @@ body:has(.intake-customer, .acq-select-void-dialog) {
   white-space: nowrap;
 }
 .tents-gaps {
-  color: var(--danger);
+  color: var(--warn);
 }
 .tents-gaps-none {
   color: var(--ink-soft);

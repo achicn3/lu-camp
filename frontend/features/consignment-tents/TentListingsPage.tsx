@@ -116,7 +116,7 @@ export function TentListingsPage() {
           <h1 className="page-title">官網寄售帳篷</h1>
           <p className="hint">
             勾「上架官網」的寄售品會出現在官網寄售帳篷頁；售價、品牌、名稱照 POS 商品資料。
-            賣掉後官網會移到「最近售出」並拿掉照片，30 天後消失。
+            照片、影片、顏色、露數都可以不填，不填也能上架。賣掉後官網會移到「最近售出」並拿掉照片與影片，30 天後消失。
           </p>
         </div>
       </div>
@@ -146,7 +146,7 @@ export function TentListingsPage() {
                 <th>商品</th>
                 <th>售價</th>
                 <th>官網</th>
-                <th>還缺</th>
+                <th>可以補上</th>
                 <th />
               </tr>
             </thead>

@@ -179,7 +179,8 @@ class TentListingService:
                     "defects": list(row.defects),
                     "extras": list(row.extras),
                     "photos": [] if sold else photos[row.id],
-                    "video": row.video_url,
+                    # 售出後照片、影片都不放（裁示 8、2026-10-30 售出隱藏影片）
+                    "video": None if sold else row.video_url,
                     "price": int(item.listed_price),
                     "status": status,
                     "listedAt": row.created_at.astimezone(TAIPEI).date().isoformat(),

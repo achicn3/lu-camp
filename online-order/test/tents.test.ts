@@ -1,9 +1,10 @@
 // 寄售帳篷上官網（docs/97 §5）：店內 POS 推清單與照片，官網 Worker 經內部連線讀。
 // 版本只往前；照片要先傳才收清單；沒被清單引用的帳篷照片（售出、下架）一律刪掉；
 // 點餐網址上讀不到帳篷資料。
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
+import { sweepPhotos } from "../src/tents";
 import { get, integration, sha256Hex, webp } from "./helpers";
 
 /** 官網 Worker 經 service binding 呼叫時的主機名（src/tents.ts TENTS_HOST）。 */
@@ -104,6 +105,17 @@ describe("寄售帳篷清單", () => {
     expect((await internal(`/tent-photos/${keep}.webp`)).status).toBe(200);
     expect((await internal(`/tent-photos/${drop}.webp`)).status).toBe(404);
     expect((await get(`/photos/${menuHash}.webp`)).status).toBe(200);
+  });
+
+  it("較舊的請求晚一步才清照片：不會刪到最新清單用的照片", async () => {
+    const shared = await putPhoto(1);
+    expect((await integration("PUT", "/integration/tents", feed(1, [tent({ photos: [shared] })]))).status).toBe(200);
+    const fresh = await putPhoto(2);
+    expect((await integration("PUT", "/integration/tents", feed(2, [tent({ photos: [shared, fresh] })]))).status).toBe(200);
+    // 模擬 v1 那個請求現在才跑到清照片這一步（它自己的清單沒有 fresh）
+    await sweepPhotos(env, 1, [shared]);
+    expect((await internal(`/tent-photos/${fresh}.webp`)).status).toBe(200);
+    expect((await internal(`/tent-photos/${shared}.webp`)).status).toBe(200);
   });
 
   it("退貨回庫照片又出現：補傳後清單收下", async () => {

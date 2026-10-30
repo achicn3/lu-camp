@@ -153,6 +153,7 @@ try {
   const sold = after.body.tents.find((t) => t.id === "TENT-WEB-01");
   ok("官網標示已售出", sold?.status === "sold");
   ok("售出不帶照片", sold?.photos.length === 0);
+  ok("售出不帶影片", sold?.video === null);
   ok("雲端照片已刪", (await fetch(`${SITE}${first.photos[0]}`)).status === 404);
   await site.goto(`${SITE}/tents.html`, { waitUntil: "networkidle" });
   await site.locator(".tl-sold").waitFor();

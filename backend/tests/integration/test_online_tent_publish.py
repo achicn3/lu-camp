@@ -4,6 +4,7 @@
 雲端出錯記下原因、下次重試；推之前清掉已售出的保留勾選；沒設定雲端時什麼都不做。
 """
 
+import asyncio
 import hashlib
 import hmac
 import io
@@ -15,6 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+import pytest
 import pytest_asyncio
 from PIL import Image
 from sqlalchemy import select
@@ -25,6 +27,7 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import SerializedItem
+from app.modules.onlineorder import scheduler
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.models import OnlineTentListing
 from app.modules.onlineorder.router import get_online_order_client
@@ -48,6 +51,8 @@ class FakeWorker:
     photos: set[str] = field(default_factory=set)
     feeds: list[dict[str, Any]] = field(default_factory=list)
     fail_status: int | None = None
+    # 收下清單後故意讓回應遺失（模擬雲端已存、POS 沒收到）
+    drop_response: bool = False
     # 端點用的雲端綁哪家店（seed 之後才知道 id）
     store_id: int = 0
 
@@ -77,6 +82,8 @@ class FakeWorker:
             if missing:
                 return httpx.Response(409, json={"error": "missing_photo", "missing": missing})
             self.feeds.append(feed)
+            if self.drop_response:
+                raise httpx.ReadTimeout("response lost", request=request)
             return httpx.Response(200, json={"version": feed["version"]})
         return httpx.Response(404, json={"error": "not_found"})
 
@@ -294,3 +301,92 @@ async def test_status_and_publish_endpoints(
 async def test_scheduler_publish_is_a_no_op_without_cloud_settings() -> None:
     """沒設定雲端網址／密鑰：背景工作不推帳篷清單。"""
     await publish_tents_once()
+
+
+async def test_lost_response_does_not_suppress_the_corrective_push(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    """雲端其實收下了、回應卻遺失；店員把內容改回上次成功的樣子，仍要再推（Codex 對抗審查）。"""
+    c, worker = api
+    ctx = await seed(db_session)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    now = datetime.now(UTC)
+    assert (await svc.publish(ctx.store_id, now=now)).pushed is True  # 空清單
+    await _list_it(c, ctx)
+    worker.drop_response = True
+    lost = await svc.publish(ctx.store_id, now=now + timedelta(seconds=1))
+    assert lost.pushed is False
+    assert worker.feeds[-1]["tents"] != []  # 雲端停在有這頂的版本
+    worker.drop_response = False
+    worker.store_id = ctx.store_id
+    pending = await c.get(f"{API}/status", headers=_auth(ctx.clerk))
+    assert pending.json()["pending"] is True
+    # 改回空清單：和上次「成功」的內容一樣，但上次失敗過，一定要推
+    await _list_it(c, ctx, published=False)
+    again = await svc.publish(ctx.store_id, now=now + timedelta(seconds=2))
+    assert again.pushed is True
+    assert worker.feeds[-1]["tents"] == []
+
+
+async def test_unchanged_feed_is_reconfirmed_every_30_minutes(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    """內容沒變也定期重送，雲端藉此確認照片都在（不在就回缺照片、補傳）。"""
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    now = datetime.now(UTC)
+    await svc.publish(ctx.store_id, now=now)
+    assert (await svc.publish(ctx.store_id, now=now + timedelta(minutes=29))).pushed is False
+    assert (await svc.publish(ctx.store_id, now=now + timedelta(minutes=31))).pushed is True
+    assert len(worker.feeds) == 2
+
+
+async def test_sold_tent_feed_drops_video_too(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx, video_url="https://youtu.be/cSArnUe7cEY")
+    ctx.item.status, ctx.item.sold_date = SerializedItemStatus.SOLD, datetime.now(UTC)
+    await db_session.flush()
+    await TentPublishService(db_session, _client(worker, ctx.store_id)).publish(
+        ctx.store_id, now=datetime.now(UTC)
+    )
+    sold = worker.feeds[-1]["tents"][0]
+    assert (sold["status"], sold["photos"], sold["video"]) == ("sold", [], None)
+
+
+async def test_slow_tent_publish_never_delays_order_pulling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """推帳篷卡住（照片上傳很慢）時，拉單／心跳照常每輪跑（雲端 2 分鐘沒心跳會暫停線上接單）。"""
+    ticks = 0
+    publishes = 0
+    release = asyncio.Event()
+
+    async def tick() -> None:
+        nonlocal ticks
+        ticks += 1
+
+    async def slow_publish() -> None:
+        nonlocal publishes
+        publishes += 1
+        await release.wait()
+
+    monkeypatch.setattr(scheduler, "tick_once", tick)
+    monkeypatch.setattr(scheduler, "publish_tents_once", slow_publish)
+    monkeypatch.setattr(scheduler, "PULL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(scheduler, "TENT_PUBLISH_INTERVAL_SECONDS", 0)
+    stop = asyncio.Event()
+    loop = asyncio.create_task(scheduler.scheduler_loop(stop))
+    for _ in range(200):
+        if ticks >= 5:
+            break
+        await asyncio.sleep(0.01)
+    stop.set()
+    await asyncio.wait_for(loop, timeout=2)
+    assert ticks >= 5
+    # 上一輪還沒推完就不會再開新的一輪
+    assert publishes == 1
