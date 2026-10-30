@@ -401,7 +401,9 @@ async def test_feed_sends_only_whitelisted_fields_and_no_photos_when_sold(
     assert set(entry) == {
         "id", "brand", "name", "color", "nights", "missing", "defects", "extras",
         "photos", "video", "price", "status", "listedAt", "updatedAt",
+        "presale", "formerIds",
     }  # fmt: skip
+    assert (entry["presale"], entry["formerIds"]) == (False, [])
     assert entry["brand"] is None
     assert entry["price"] == 6800
     assert entry["photos"] == [sha]

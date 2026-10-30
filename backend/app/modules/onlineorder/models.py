@@ -432,19 +432,41 @@ class OnlineTentListing(Base, TimestampMixin):
 
     售價、品牌、名稱、狀態一律讀序號品本身；`published`＝上架官網、`reserved`＝官網顯示已有人保留
     （不是庫存保留，不擋結帳）。缺件／瑕疵／配件各存一個字串陣列。
+
+    預售（docs/102）：帳篷還在賣家家裡、沒有序號品（`serialized_item_id` 為 NULL），品牌／名稱／售價
+    與賣家聯絡方式存在 presale_*。到店建寄售單時接上序號品，presale_* 留作紀錄、之後一律讀序號品。
     """
 
     __tablename__ = "online_tent_listings"
     __table_args__ = (
         UniqueConstraint("store_id", "serialized_item_id", name="uq_online_tent_listings_item"),
+        UniqueConstraint("store_id", "presale_code", name="uq_online_tent_listings_presale_code"),
         CheckConstraint("nights IS NULL OR nights >= 0", name="ck_online_tent_listings_nights"),
+        CheckConstraint(
+            "serialized_item_id IS NOT NULL OR (presale_code IS NOT NULL"
+            " AND presale_name IS NOT NULL AND presale_price IS NOT NULL)",
+            name="ck_online_tent_listings_item_or_presale",
+        ),
+        CheckConstraint(
+            "presale_price IS NULL OR presale_price > 0",
+            name="ck_online_tent_listings_presale_price",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
-    serialized_item_id: Mapped[int] = mapped_column(
+    serialized_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("serialized_items.id", ondelete="CASCADE"), index=True
     )
+    presale_code: Mapped[str | None] = mapped_column(String(20))
+    presale_brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
+    presale_name: Mapped[str | None] = mapped_column(String(100))
+    presale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    presale_seller_name: Mapped[str | None] = mapped_column(String(50))
+    presale_seller_phone: Mapped[str | None] = mapped_column(String(30))
+    presale_note: Mapped[str | None] = mapped_column(String(500))
+    presale_cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     reserved: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     color: Mapped[str | None] = mapped_column(String(30))

@@ -16,6 +16,8 @@ from app.modules.onlineorder.tent_schemas import (
     TentListingRead,
     TentListingWriteRequest,
     TentPhotoOrderRequest,
+    TentPresaleRead,
+    TentPresaleWriteRequest,
     TentPublishStatusRead,
     TentReservedRead,
 )
@@ -26,6 +28,7 @@ from app.shared.exceptions import (
     OnlineTentListingNotFound,
     OnlineTentPhotoOrderInvalid,
     OnlineTentPhotoRejected,
+    OnlineTentPresaleUnavailable,
 )
 
 router = APIRouter(prefix="/online-order/tents", tags=["online-order"])
@@ -40,15 +43,28 @@ _ERRORS = (
     OnlineTentListingNotFound,
     OnlineTentPhotoOrderInvalid,
     OnlineTentPhotoRejected,
+    OnlineTentPresaleUnavailable,
 )
 
 
 def _error(exc: Exception) -> HTTPException:
-    if isinstance(exc, (OnlineTentListingNotEditable, OnlineTentPhotoRejected)):
+    if isinstance(
+        exc, (OnlineTentListingNotEditable, OnlineTentPhotoRejected, OnlineTentPresaleUnavailable)
+    ):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, (MenuPhotoInvalid, OnlineTentPhotoOrderInvalid)):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="照片超過 10 MB，請先縮小再上傳",
+        )
+    return data
 
 
 @router.get("", response_model=list[TentListingRead], operation_id="listTentListings")
@@ -88,6 +104,133 @@ async def get_tent_reserved(item_code: str, session: SessionDep, user: AuthDep) 
     return TentReservedRead(reserved=reserved)
 
 
+# ── 預售（docs/102）：帳篷還在賣家家裡就先上官網 ──
+
+
+@router.get("/presales", response_model=list[TentPresaleRead], operation_id="listTentPresales")
+async def list_tent_presales(session: SessionDep, user: AuthDep) -> list[TentPresaleRead]:
+    """還沒取消、還沒轉寄售的預售（含賣家聯絡方式，只在 POS）。"""
+    return await TentListingService(session).list_presales(user.store_id)
+
+
+@router.post(
+    "/presales",
+    response_model=TentPresaleRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createTentPresale",
+)
+async def create_tent_presale(
+    body: TentPresaleWriteRequest, session: SessionDep, user: AuthDep
+) -> TentPresaleRead:
+    try:
+        result = await TentListingService(session).create_presale(
+            user.store_id, body, actor_user_id=user.id
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.put(
+    "/presales/{listing_id}", response_model=TentPresaleRead, operation_id="saveTentPresale"
+)
+async def save_tent_presale(
+    listing_id: int, body: TentPresaleWriteRequest, session: SessionDep, user: AuthDep
+) -> TentPresaleRead:
+    try:
+        result = await TentListingService(session).save_presale(
+            user.store_id, listing_id, body, actor_user_id=user.id
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.post(
+    "/presales/{listing_id}/cancel",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="cancelTentPresale",
+)
+async def cancel_tent_presale(listing_id: int, session: SessionDep, user: AuthDep) -> None:
+    """賣家不賣了／帳篷沒送來：官網拿掉，POS 留紀錄。"""
+    try:
+        await TentListingService(session).cancel_presale(
+            user.store_id, listing_id, actor_user_id=user.id
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+
+
+@router.post(
+    "/presales/{listing_id}/photos",
+    response_model=TentPresaleRead,
+    operation_id="addTentPresalePhoto",
+)
+async def add_tent_presale_photo(
+    listing_id: int,
+    session: SessionDep,
+    user: AuthDep,
+    file: Annotated[UploadFile, File(description="JPEG／PNG／WebP／HEIC，10 MB 以內")],
+) -> TentPresaleRead:
+    data = await _read_upload(file)
+    try:
+        result = await TentListingService(session).add_presale_photo(
+            user.store_id, listing_id, data
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.put(
+    "/presales/{listing_id}/photos/order",
+    response_model=TentPresaleRead,
+    operation_id="reorderTentPresalePhotos",
+)
+async def reorder_tent_presale_photos(
+    listing_id: int, body: TentPhotoOrderRequest, session: SessionDep, user: AuthDep
+) -> TentPresaleRead:
+    try:
+        result = await TentListingService(session).reorder_presale_photos(
+            user.store_id, listing_id, body.photos
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+    return result
+
+
+@router.delete(
+    "/presales/{listing_id}/photos/{sha256}",
+    response_model=TentPresaleRead,
+    operation_id="removeTentPresalePhoto",
+)
+async def remove_tent_presale_photo(
+    listing_id: int, sha256: str, session: SessionDep, user: AuthDep
+) -> TentPresaleRead:
+    try:
+        result = await TentListingService(session).remove_presale_photo(
+            user.store_id, listing_id, sha256
+        )
+    except _ERRORS as exc:
+        await session.rollback()
+        raise _error(exc) from exc
+    await session.commit()
+    return result
+
+
+# ── 在庫寄售品 ──
+
+
 @router.put("/{item_id}", response_model=TentListingRead, operation_id="saveTentListing")
 async def save_tent_listing(
     item_id: int, body: TentListingWriteRequest, session: SessionDep, user: AuthDep
@@ -113,12 +256,7 @@ async def add_tent_listing_photo(
     file: Annotated[UploadFile, File(description="JPEG／PNG／WebP／HEIC，10 MB 以內")],
 ) -> TentListingRead:
     """加一張照片到最後：轉成 WebP、長邊 1200、去掉 EXIF（含 GPS），同菜單照片。"""
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="照片超過 10 MB，請先縮小再上傳",
-        )
+    data = await _read_upload(file)
     try:
         result = await TentListingService(session).add_photo(
             user.store_id, item_id, data, actor_user_id=user.id

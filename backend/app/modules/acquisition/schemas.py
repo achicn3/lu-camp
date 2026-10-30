@@ -63,6 +63,8 @@ class AcquisitionItemIn(BaseModel):
     commission_pct: int | None = Field(default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX)
     # 商品備註（選填）：驗機當下就記下狀況/作業提醒，POS 結帳會據此跳提醒。
     note: str | None = Field(default=None, max_length=500)
+    # 寄售帳篷預售帶入（docs/102，選填、只限寄售）：這件接手那筆預售的官網資料與照片。
+    presale_listing_id: int | None = None
 
     @field_validator("note")
     @classmethod
@@ -163,6 +165,8 @@ class AcquisitionCreate(BaseModel):
             raise ValueError(f"{self.type} 必須提供至少一筆 items 且不得提供 lot")
         for item in self.items:
             if self.type == AcquisitionType.BUYOUT:
+                if item.presale_listing_id is not None:
+                    raise ValueError("只有寄售可以從預售帶入")
                 if item.acquisition_cost is None:
                     raise ValueError("BUYOUT 每筆 item 必須提供 acquisition_cost")
                 if item.commission_pct is not None:
@@ -182,6 +186,12 @@ class AcquisitionCombinedFields(BaseModel):
     note: str | None = None
     items: list[AcquisitionItemIn] = Field(min_length=1, max_length=200)
     lots: list[AcquisitionLotIn] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def _no_presale(self) -> Self:
+        if any(item.presale_listing_id is not None for item in self.items):
+            raise ValueError("只有寄售可以從預售帶入")
+        return self
 
 
 class AcquisitionCombinedCreate(AcquisitionCombinedFields):

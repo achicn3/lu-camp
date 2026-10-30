@@ -37,7 +37,36 @@ class TentListingRepository:
                 OnlineTentListing.serialized_item_id.in_(item_ids),
             )
         )
-        return {r.serialized_item_id: r for r in rows}
+        return {r.serialized_item_id: r for r in rows if r.serialized_item_id is not None}
+
+    async def presale(
+        self, store_id: int, listing_id: int, *, for_update: bool = False
+    ) -> OnlineTentListing | None:
+        """預售列（不論是否已取消或已轉寄售）；不是預售的列一律找不到。"""
+        stmt = select(OnlineTentListing).where(
+            OnlineTentListing.store_id == store_id,
+            OnlineTentListing.id == listing_id,
+            OnlineTentListing.presale_code.is_not(None),
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row: OnlineTentListing | None = await self._session.scalar(stmt)
+        return row
+
+    async def open_presales(self, store_id: int) -> list[OnlineTentListing]:
+        """還沒取消、還沒轉寄售的預售，新的在前。"""
+        return list(
+            await self._session.scalars(
+                select(OnlineTentListing)
+                .where(
+                    OnlineTentListing.store_id == store_id,
+                    OnlineTentListing.presale_code.is_not(None),
+                    OnlineTentListing.serialized_item_id.is_(None),
+                    OnlineTentListing.presale_cancelled_at.is_(None),
+                )
+                .order_by(OnlineTentListing.id.desc())
+            )
+        )
 
     async def published(self, store_id: int) -> Sequence[OnlineTentListing]:
         return list(

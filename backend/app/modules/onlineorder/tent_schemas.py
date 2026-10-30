@@ -96,6 +96,76 @@ class TentListingRead(TentListingWriteRequest):
     """官網資料最後修改時間；還沒填過＝null。"""
 
 
+MAX_PRESALE_NAME_CHARS = 100
+MAX_SELLER_NAME_CHARS = 50
+MAX_SELLER_PHONE_CHARS = 30
+MAX_PRESALE_NOTE_CHARS = 500
+
+
+def _required_text(value: str, limit: int) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("必填")
+    if len(cleaned) > limit:
+        raise ValueError(f"最多 {limit} 個字")
+    return cleaned
+
+
+class TentPresaleWriteRequest(TentListingWriteRequest):
+    """預售（docs/102）整筆替換：官網資料＋帳篷本身＋賣家聯絡方式（只在 POS）。"""
+
+    brand_id: int
+    name: str
+    price: Decimal = Field(gt=0, le=Decimal("99999999"))
+    """含稅售價（客人實付），整數元。"""
+    seller_name: str
+    seller_phone: str
+    note: str | None = None
+    """只給店員看。"""
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        return _required_text(value, MAX_PRESALE_NAME_CHARS)
+
+    @field_validator("seller_name")
+    @classmethod
+    def _seller_name(cls, value: str) -> str:
+        return _required_text(value, MAX_SELLER_NAME_CHARS)
+
+    @field_validator("seller_phone")
+    @classmethod
+    def _seller_phone(cls, value: str) -> str:
+        return _required_text(value, MAX_SELLER_PHONE_CHARS)
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, value: str | None) -> str | None:
+        cleaned = _blank_to_none(value)
+        if cleaned is not None and len(cleaned) > MAX_PRESALE_NOTE_CHARS:
+            raise ValueError(f"備註最多 {MAX_PRESALE_NOTE_CHARS} 個字")
+        return cleaned
+
+    @field_validator("price")
+    @classmethod
+    def _whole(cls, value: Decimal) -> Decimal:
+        if value != value.to_integral_value():
+            raise ValueError("售價要是整數元")
+        return value
+
+
+class TentPresaleRead(TentPresaleWriteRequest):
+    """POS 預售清單的一列（還沒取消、還沒轉寄售的）。"""
+
+    price: NTDOut
+    listing_id: int
+    presale_code: str
+    brand_name: str | None
+    photos: list[str]
+    """照片內容雜湊，第一張是封面；圖檔在 `GET /menu-photos/{sha}.webp`。"""
+    updated_at: datetime
+
+
 class TentPhotoOrderRequest(BaseModel):
     """照片新順序：必須剛好是現有的那幾張。"""
 

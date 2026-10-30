@@ -42,6 +42,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.service import AcquisitionItemOverview, InventoryService
+from app.modules.onlineorder.tent_service import TentListingService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
@@ -320,6 +321,9 @@ class AcquisitionService:
                     item.pop("resale_discount_pct", None)
                 if isinstance(item, dict) and item.get("note") is None:
                     item.pop("note", None)
+                # 預售帶入同為後加欄位（docs/102）：沒帶時退化成舊指紋。
+                if isinstance(item, dict) and item.get("presale_listing_id") is None:
+                    item.pop("presale_listing_id", None)
         lot = payload.get("lot")
         if isinstance(lot, dict) and lot.get("note") is None:
             lot.pop("note", None)
@@ -937,6 +941,7 @@ class AcquisitionService:
                 data,
                 default_commission_pct=default_commission_pct,
                 pending_listing=pending_listing,
+                actor_user_id=clerk_user_id,
             )
             lot_code = None
             basket_code = None
@@ -1413,6 +1418,7 @@ class AcquisitionService:
         data: AcquisitionCreate,
         *,
         default_commission_pct: int | None,
+        actor_user_id: int,
         pending_listing: bool = False,
     ) -> tuple[list[str], Decimal]:
         assert data.items is not None  # schema 已驗證
@@ -1476,6 +1482,11 @@ class AcquisitionService:
                 ref_id=acquisition_id,
                 serialized_item_id=created.id,
             )
+            if item.presale_listing_id is not None:
+                # 同一交易：接不上就整張寄售單失敗（docs/102 §6）
+                await TentListingService(self._session).take_presale(
+                    store_id, item.presale_listing_id, created.id, actor_user_id=actor_user_id
+                )
             item_codes.append(code)
         return item_codes, total_cash
 

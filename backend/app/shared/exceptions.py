@@ -679,6 +679,10 @@ class OnlineTentPhotoOrderInvalid(DomainError):
     """照片排序的內容和現有照片不符。"""
 
 
+class OnlineTentPresaleUnavailable(DomainError):
+    """寄售帳篷預售已取消或已轉成寄售，不能再改或再帶入（docs/102）。"""
+
+
 class OnlineOrderNotConfigured(DomainError):
     """線上點餐尚未設定（沒有雲端網址或整合密鑰）。"""
 
