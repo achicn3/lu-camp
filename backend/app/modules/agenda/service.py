@@ -408,14 +408,16 @@ class AgendaService:
         series = await self._visible_series(store_id, viewer, series_id)
         rule = _series_rule(series)
         taken = (await self._repo.materialized_dates([series.id])).get(series.id, set())
-        skipped = 0
-        for day in occurrences_between(rule, rule.starts_on, today - _DAY):
-            if day in taken:
-                continue
-            row = self._new_occurrence(series, day, actor_user_id=viewer.user_id)
+        new_rows = [
+            self._new_occurrence(series, day, actor_user_id=viewer.user_id)
+            for day in occurrences_between(rule, rule.starts_on, today - _DAY)
+            if day not in taken
+        ]
+        for row in new_rows:
             self._apply_status(row, AgendaTaskStatus.SKIPPED, viewer.user_id)
-            await self._repo.add(row)
-            skipped += 1
+        # 用了好幾年沒打勾可能有上千筆：一次寫入，不要一筆一筆來回。
+        await self._repo.add_all(new_rows)
+        skipped = len(new_rows)
         for row in await self._repo.open_rows_of_series(series.id):
             if not viewer.can_see(row.manager_only):
                 continue
@@ -704,9 +706,13 @@ class AgendaService:
     ) -> None:
         """改規則前：舊規則下今天以前沒建列的那幾次，先建成未完成的列，才不會一改就消失。"""
         taken = (await self._repo.materialized_dates([series.id])).get(series.id, set())
-        for day in occurrences_between(rule, rule.starts_on, today - _DAY):
-            if day not in taken:
-                await self._repo.add(self._new_occurrence(series, day, actor_user_id=actor_user_id))
+        await self._repo.add_all(
+            [
+                self._new_occurrence(series, day, actor_user_id=actor_user_id)
+                for day in occurrences_between(rule, rule.starts_on, today - _DAY)
+                if day not in taken
+            ]
+        )
 
     # ── 內部：組回應 ──────────────────────────────────────
 

@@ -14,8 +14,8 @@ from datetime import date, timedelta
 from app.shared.enums import RecurrenceKind
 from app.shared.exceptions import InvalidRecurrence
 
-# 一次最多列幾個發生日：防呆上限（每週七天都選也要五年以上才碰到），不是業務規則。
-MAX_OCCURRENCES = 2000
+# 不設「最多幾個」的上限：每天最多一次，筆數不會超過查詢的天數；以前的日子要全部算到，
+# 截掉會讓用了好幾年的重複待辦少算過期、略過不乾淨（Codex 1A 第三輪 P2）。
 # 「每 N 個月」的 N：1 就是每月（用 MONTHLY），上限兩年。
 MIN_INTERVAL_MONTHS = 2
 MAX_INTERVAL_MONTHS = 24
@@ -68,9 +68,9 @@ def validate_recurrence(rule: Recurrence) -> Recurrence:
 
 
 def occurrences_between(
-    rule: Recurrence, start: date, end: date, *, limit: int = MAX_OCCURRENCES
+    rule: Recurrence, start: date, end: date, *, limit: int | None = None
 ) -> list[date]:
-    """`[start, end]`（含兩端）內的發生日，由早到晚；最多 `limit` 個。"""
+    """`[start, end]`（含兩端）內的發生日，由早到晚；給了 `limit` 就只取前幾個（找下一次用）。"""
     low = max(start, rule.starts_on)
     high = end if rule.ends_on is None else min(end, rule.ends_on)
     if low > high:
@@ -115,10 +115,14 @@ def _clamped(year: int, month: int, day: int) -> date:
     return date(year, month, min(day, calendar.monthrange(year, month)[1]))
 
 
-def _weekly(weekdays: set[int], low: date, high: date, limit: int) -> list[date]:
+def _full(found: list[date], limit: int | None) -> bool:
+    return limit is not None and len(found) >= limit
+
+
+def _weekly(weekdays: set[int], low: date, high: date, limit: int | None) -> list[date]:
     found: list[date] = []
     day = low
-    while day <= high and len(found) < limit:
+    while day <= high and not _full(found, limit):
         if day.weekday() in weekdays:
             found.append(day)
         day += timedelta(days=1)
@@ -126,7 +130,7 @@ def _weekly(weekdays: set[int], low: date, high: date, limit: int) -> list[date]
 
 
 def _monthly(
-    anchor: date, interval: int, day: int, low: date, high: date, limit: int
+    anchor: date, interval: int, day: int, low: date, high: date, limit: int | None
 ) -> list[date]:
     anchor_index = anchor.year * 12 + anchor.month - 1
     low_index = low.year * 12 + low.month - 1
@@ -134,7 +138,7 @@ def _monthly(
     steps = max(0, -(-(low_index - anchor_index) // interval))
     found: list[date] = []
     index = anchor_index + steps * interval
-    while len(found) < limit:
+    while not _full(found, limit):
         year, month_zero = divmod(index, 12)
         candidate = _clamped(year, month_zero + 1, day)
         if candidate > high:
@@ -145,12 +149,12 @@ def _monthly(
     return found
 
 
-def _yearly(month: int, day: int, low: date, high: date, limit: int) -> list[date]:
+def _yearly(month: int, day: int, low: date, high: date, limit: int | None) -> list[date]:
     found: list[date] = []
     for year in range(low.year, high.year + 1):
         candidate = _clamped(year, month, day)
         if low <= candidate <= high:
             found.append(candidate)
-            if len(found) >= limit:
+            if _full(found, limit):
                 break
     return found

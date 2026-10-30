@@ -18,6 +18,11 @@ class AgendaRepository:
         self._session.add(row)
         await self._session.flush()
 
+    async def add_all(self, rows: list[AgendaTask]) -> None:
+        """一次寫入多筆（補建好幾年沒打勾的那幾次時，不要一筆一筆來回）。"""
+        self._session.add_all(rows)
+        await self._session.flush()
+
     # ── 待辦 ──────────────────────────────────────────────
 
     async def get_task(self, store_id: int, task_id: int) -> AgendaTask | None:

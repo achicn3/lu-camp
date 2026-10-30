@@ -9,7 +9,6 @@ from datetime import date
 import pytest
 
 from app.modules.agenda.recurrence import (
-    MAX_OCCURRENCES,
     Recurrence,
     is_occurrence,
     occurrences_between,
@@ -142,11 +141,20 @@ def test_empty_when_window_is_before_start_or_inverted() -> None:
     assert occurrences_between(rule, date(2026, 11, 30), date(2026, 11, 1)) == []
 
 
-def test_occurrence_list_is_capped() -> None:
-    every_day = _weekly(0, 1, 2, 3, 4, 5, 6, starts_on=date(2000, 1, 1))
-    found = occurrences_between(every_day, date(2000, 1, 1), date(2099, 12, 31))
-    assert len(found) == MAX_OCCURRENCES
-    assert found[0] == date(2000, 1, 1)
+def test_long_history_is_not_silently_truncated() -> None:
+    """Codex 1A 第三輪 P2：以前的日子要全部算到；每天最多一次，所以筆數不會超過天數。"""
+    every_day = _weekly(0, 1, 2, 3, 4, 5, 6, starts_on=date(2020, 1, 1))
+    found = occurrences_between(every_day, date(2020, 1, 1), date(2026, 11, 9))
+    assert len(found) == (date(2026, 11, 9) - date(2020, 1, 1)).days + 1
+    assert found[-1] == date(2026, 11, 9)
+
+
+def test_explicit_limit_still_applies() -> None:
+    """找「下一次」只要第一個：明確給上限時照上限停。"""
+    every_day = _weekly(0, 1, 2, 3, 4, 5, 6, starts_on=date(2020, 1, 1))
+    assert occurrences_between(every_day, date(2026, 11, 10), date(2027, 11, 10), limit=1) == [
+        date(2026, 11, 10)
+    ]
 
 
 def test_is_occurrence() -> None:

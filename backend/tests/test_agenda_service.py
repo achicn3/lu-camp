@@ -646,3 +646,31 @@ async def test_event_update_checks_length_after_merging(db_session: AsyncSession
         await svc.update_event(
             shop.store_id, mgr, event.id, AgendaEventUpdate(ends_on=date(2027, 12, 31))
         )
+
+
+async def test_overdue_counts_every_missed_day_of_a_long_running_series(
+    db_session: AsyncSession,
+) -> None:
+    """Codex 1A 第三輪 P2：用了好幾年的每天重複待辦，以前沒做的每一天都要算到、都能一鍵略過。"""
+    shop = await seed_store(db_session)
+    mgr, _ = _viewers(shop)
+    svc = AgendaService(db_session)
+    started = date(2020, 1, 1)
+    series = await svc.create_series(
+        shop.store_id,
+        mgr,
+        AgendaSeriesCreate(
+            title="檢查冰箱溫度",
+            starts_on=started,
+            lead_days=0,
+            recurrence=_weekly(0, 1, 2, 3, 4, 5, 6),
+        ),
+    )
+    missed = (TODAY - started).days
+
+    overdue = (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue
+    assert len(overdue) == missed
+    assert overdue[-1].day == date(2026, 11, 9)
+
+    assert await svc.skip_overdue(shop.store_id, mgr, series.id, today=TODAY) == missed
+    assert (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue == []
