@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import store_day_bounds
+from app.modules.agenda.models import AgendaTask
 from app.modules.agenda.schemas import (
     AgendaEventCreate,
     AgendaEventUpdate,
@@ -547,3 +548,85 @@ async def test_clearing_the_date_needs_clearing_the_time_too(db_session: AsyncSe
     )
     assert undated.due_on is None
     assert [t.title for t in await svc.list_undated(shop.store_id, mgr)] == ["打電話給房東"]
+
+
+async def test_series_visibility_change_carries_over_to_existing_rows(
+    db_session: AsyncSession,
+) -> None:
+    """Codex 1A 第一輪 P1：把全店看得到的重複待辦改成只限管理者，已經建列的那幾次也要跟著藏起來。"""
+    shop = await seed_store(db_session)
+    mgr, clerk = _viewers(shop)
+    svc = AgendaService(db_session)
+    series = await svc.create_series(
+        shop.store_id,
+        mgr,
+        AgendaSeriesCreate(title="付房租", starts_on=NOV_1, recurrence=_weekly(0)),
+    )
+    await svc.set_occurrence_status(
+        shop.store_id, clerk, series.id, date(2026, 11, 2), AgendaTaskStatus.DONE
+    )
+
+    await svc.update_series(
+        shop.store_id, mgr, series.id, AgendaSeriesUpdate(manager_only=True), today=TODAY
+    )
+
+    assert await svc.feed(shop.store_id, clerk, NOV_1, NOV_30, today=TODAY) == []
+    assert (await svc.today_summary(shop.store_id, clerk, today=TODAY)).overdue == []
+    with pytest.raises(AgendaItemNotFound):
+        await svc.set_occurrence_status(
+            shop.store_id, clerk, series.id, date(2026, 11, 9), AgendaTaskStatus.DONE
+        )
+    mgr_days = [i.day for i in await svc.feed(shop.store_id, mgr, NOV_1, NOV_30, today=TODAY)]
+    assert date(2026, 11, 2) in mgr_days
+
+
+async def test_one_occurrence_cannot_change_visibility_on_its_own(
+    db_session: AsyncSession,
+) -> None:
+    """只限管理者是整個重複待辦的設定；單獨改某一次，會跟規則對不起來。"""
+    shop = await seed_store(db_session)
+    mgr, _ = _viewers(shop)
+    svc = AgendaService(db_session)
+    series = await svc.create_series(
+        shop.store_id,
+        mgr,
+        AgendaSeriesCreate(title="叫牛奶", starts_on=NOV_1, recurrence=_weekly(0)),
+    )
+    row = await svc.set_occurrence_status(
+        shop.store_id, mgr, series.id, date(2026, 11, 2), AgendaTaskStatus.DONE
+    )
+    with pytest.raises(AgendaItemInvalid):
+        await svc.update_task(shop.store_id, mgr, row.id, AgendaTaskUpdate(manager_only=True))
+
+
+async def test_hidden_row_is_not_reachable_through_a_public_series(
+    db_session: AsyncSession,
+) -> None:
+    """防呆：就算資料裡出現「規則公開、某一次隱藏」，店員也不能經由規則讀到或改到那一次。"""
+    shop = await seed_store(db_session)
+    mgr, clerk = _viewers(shop)
+    svc = AgendaService(db_session)
+    series = await svc.create_series(
+        shop.store_id,
+        mgr,
+        AgendaSeriesCreate(title="叫牛奶", starts_on=NOV_1, recurrence=_weekly(0)),
+    )
+    row = await svc.update_occurrence(
+        shop.store_id, mgr, series.id, date(2026, 11, 2), AgendaOccurrenceUpdate(note="私事")
+    )
+    hidden = await db_session.get(AgendaTask, row.id)
+    assert hidden is not None
+    hidden.manager_only = True
+    await db_session.flush()
+
+    with pytest.raises(AgendaItemNotFound):
+        await svc.update_occurrence(
+            shop.store_id, clerk, series.id, date(2026, 11, 2), AgendaOccurrenceUpdate()
+        )
+    with pytest.raises(AgendaItemNotFound):
+        await svc.set_occurrence_status(
+            shop.store_id, clerk, series.id, date(2026, 11, 2), AgendaTaskStatus.DONE
+        )
+    # 一鍵略過也不能順手改到看不到的那一次
+    await svc.skip_overdue(shop.store_id, clerk, series.id, today=TODAY)
+    assert hidden.status is AgendaTaskStatus.OPEN

@@ -16,6 +16,9 @@ import type { components } from "@/lib/api-types";
 
 export const AGENDA_KEY = ["agenda"] as const;
 
+// 寫入成功後「回傳」重抓的 promise（不是丟掉）：這樣送出中的狀態會一直維持到新資料回來，
+// 畫面上「先打勾」的效果才不會在重抓的空檔彈回未勾、再消失（煙霧實測抓到的閃爍）。
+
 type TaskStatus = components["schemas"]["AgendaTaskStatus"];
 
 /** 後端擋下的原因照實給店員看。422 的欄位錯誤是陣列，取第一則並拿掉框架前綴。 */
@@ -63,7 +66,10 @@ export function useUndatedTasks() {
   return useQuery({
     queryKey: [...AGENDA_KEY, "undated"],
     queryFn: async (): Promise<AgendaTask[]> => {
-      const { data, error } = await api.GET("/api/v1/agenda/tasks/undated");
+      // 連做完的一起拿：畫面收在「做完的 N 筆」，按錯了才找得回來。
+      const { data, error } = await api.GET("/api/v1/agenda/tasks/undated", {
+        params: { query: { include_resolved: true } },
+      });
       if (!data) throw new Error(errorMessage(error, "讀取沒有日期的待辦失敗"));
       return data;
     },
@@ -134,7 +140,7 @@ export function useTaskStatus() {
       if (!data) throw new Error(errorMessage(error, "更新失敗"));
       return data;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
   });
 }
 
@@ -164,7 +170,7 @@ export function useItemStatus() {
       if (!data) throw new Error(errorMessage(error, "更新失敗"));
       return data;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
   });
 }
 
@@ -179,7 +185,7 @@ export function useSkipOverdue() {
       if (!data) throw new Error(errorMessage(error, "略過失敗"));
       return data.skipped;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
   });
 }
 
@@ -204,7 +210,7 @@ export function useAgendaDelete() {
               });
       if (!result.response.ok) throw new Error(errorMessage(result.error, "刪除失敗"));
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
   });
 }
 
@@ -220,6 +226,6 @@ export function useEventOccurrence() {
       if (!data) throw new Error(errorMessage(error, "更新失敗"));
       return data;
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: AGENDA_KEY }),
   });
 }

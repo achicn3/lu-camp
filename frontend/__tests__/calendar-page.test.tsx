@@ -267,6 +267,68 @@ describe("/calendar 行事曆", () => {
     });
   });
 
+  it("換月時右邊跟著選新月份的第一天；換回本月選今天（Codex 1A 第一輪 P2）", async () => {
+    stubFetch();
+    renderPage();
+    const user = userEvent.setup();
+    await screen.findByRole("complementary", { name: "11/10（二） 的項目" });
+
+    await user.click(screen.getByRole("button", { name: "下個月" }));
+    expect(await screen.findByRole("complementary", { name: "12/1（二） 的項目" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "上個月" }));
+    expect(await screen.findByRole("complementary", { name: "11/10（二） 的項目" })).toBeTruthy();
+  });
+
+  it("沒有日期的待辦：做完的收在「做完的 N 筆」，點開可以取消打勾（Codex 1A 第一輪 P2）", async () => {
+    const undated = (id: number, title: string, status: "OPEN" | "DONE") => ({
+      id,
+      title,
+      note: null,
+      due_on: null,
+      due_time: null,
+      assignee_staff_id: null,
+      assignee_name: null,
+      manager_only: false,
+      link_href: null,
+      lead_days: 3,
+      series_id: null,
+      occurrence_on: null,
+      status,
+      resolved_at: status === "DONE" ? "2026-11-09T02:00:00Z" : null,
+      resolved_by_name: status === "DONE" ? "dev-manager" : null,
+      created_at: "2026-11-01T02:00:00Z",
+    });
+    stubFetch((url, method) => {
+      if (url.includes("/agenda/tasks/undated")) {
+        return url.includes("include_resolved=true")
+          ? json([undated(31, "整理倉庫", "OPEN"), undated(32, "換濾心", "DONE")])
+          : json([undated(31, "整理倉庫", "OPEN")]);
+      }
+      if (method === "POST" && url.includes("/agenda/tasks/32/status")) {
+        return json(undated(32, "換濾心", "OPEN"));
+      }
+      return null;
+    });
+    renderPage();
+    const user = userEvent.setup();
+
+    const card = (await screen.findByText("沒有日期的待辦")).closest(".card") as HTMLElement;
+    await within(card).findByText("整理倉庫");
+    expect(within(card).queryByText("換濾心")).toBeNull();
+
+    await user.click(within(card).getByRole("button", { name: "做完的 1 筆" }));
+    const box = within(card).getByRole("checkbox", { name: "換濾心" }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    await user.click(box);
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.url.includes("/agenda/tasks/32/status")),
+      ).toBe(true),
+    );
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/agenda/tasks/32/status"))!;
+    expect(JSON.parse(post.body)).toEqual({ status: "OPEN" });
+  });
+
   it("點重複待辦的那一次，打開「只改這一次」", async () => {
     stubFetch();
     renderPage();

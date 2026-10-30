@@ -7343,6 +7343,9 @@ button.agenda-row-title:hover {
   max-width: none;
   margin-bottom: var(--sp-3);
 }
+.agenda-done-toggle {
+  align-self: flex-start;
+}
 .agenda-today-wide {
   max-width: none;
   margin-bottom: var(--sp-5);

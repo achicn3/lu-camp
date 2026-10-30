@@ -206,6 +206,36 @@ try {
   created.tasks.push(feed3.items.find((i) => i.title === assignedTitle)?.task_id);
   await page.screenshot({ path: join(SHOTS, "02-calendar-month.png") });
 
+  // 7b) 換月：右邊跟著換到新月份的第一天（Codex 1A 第一輪 P2）
+  const nextMonth = shift(`${today.slice(0, 7)}-01`, 40).slice(0, 7);
+  const [nm, nd] = [Number(nextMonth.slice(5, 7)), 1];
+  await page.getByRole("button", { name: "下個月" }).click();
+  await page.locator(`aside[aria-label^="${nm}/${nd}（"]`).waitFor({ timeout: 10000 });
+  ok("換月後右邊是新月份的第一天", true);
+  await page.getByRole("button", { name: "今天", exact: true }).click();
+  await dayPanel.getByText(assignedTitle).waitFor({ timeout: 10000 });
+
+  // 7c) 沒有日期的待辦：打勾後收進「做完的 N 筆」，按錯可以改回來（Codex 1A 第一輪 P2）
+  const undatedTitle = `整理倉庫-${run}`;
+  const undatedRes = await context.request.fetch(`${API}/api/v1/agenda/tasks`, {
+    method: "POST",
+    headers,
+    data: { title: undatedTitle },
+  });
+  assert.ok(undatedRes.ok(), `建沒有日期的待辦失敗：${undatedRes.status()}`);
+  const undatedId = (await undatedRes.json()).id;
+  created.tasks.push(undatedId);
+  await page.reload({ waitUntil: "networkidle" });
+  const undatedCard = page.locator(".card", { has: page.getByRole("heading", { name: "沒有日期的待辦" }) });
+  // 打勾後這一列會收進「做完的」，元素隨即離開清單，所以用 click 而不是 check（check 會回頭驗狀態）。
+  await undatedCard.getByRole("checkbox", { name: undatedTitle }).click();
+  await undatedCard.getByRole("checkbox", { name: undatedTitle }).waitFor({ state: "detached", timeout: 10000 });
+  await undatedCard.getByRole("button", { name: /^做完的 \d+ 筆$/ }).click();
+  await undatedCard.getByRole("checkbox", { name: undatedTitle }).uncheck();
+  await page.waitForTimeout(500);
+  const reopened = await apiGet(`/api/v1/agenda/tasks/${undatedId}`);
+  ok("沒有日期的待辦做完後可以在「做完的」改回來", reopened.status === "OPEN", reopened.status);
+
   // 8) 過期好幾次的重複待辦（兩週前開始、每天一次）→ 首頁一行顯示、一鍵略過
   const overdueTitle = `補發票紙-${run}`;
   const overdueRes = await context.request.fetch(`${API}/api/v1/agenda/task-series`, {

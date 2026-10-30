@@ -27,6 +27,7 @@ import {
   itemTone,
   listDays,
   monthGrid,
+  monthStart,
   openFirst,
   type PendingToggle,
   pendingDoneFor,
@@ -267,7 +268,14 @@ function CalendarView() {
           filters={filters}
           busy={status.isPending}
           pending={pending}
-          onMonth={(delta) => setCursor(addMonths(cursor.year, cursor.month, delta))}
+          onMonth={(delta) => {
+            // 右邊的當天清單要跟著換：停在別的月份的日子，資料已經不含那天，會誤報「沒有安排」
+            // （Codex 1A 第一輪 P2）。換到今天所在的月份就選今天，其餘選該月第一天。
+            const next = addMonths(cursor.year, cursor.month, delta);
+            const first = monthStart(next.year, next.month);
+            setCursor(next);
+            setSelected(today.slice(0, 7) === first.slice(0, 7) ? today : first);
+          }}
           onToday={() => {
             setCursor({ year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)) });
             setSelected(today);
@@ -568,10 +576,16 @@ function ListView({
   );
 }
 
+// 沒有日期的待辦不會出現在月曆上：做完的若直接消失，按錯就救不回來（Codex 1A 第一輪 P2）。
+// 做完的收在最下面「做完的 N 筆」，點開可以取消打勾。
 function UndatedCard({ onEdit }: { onEdit: (taskId: number) => void }) {
   const undated = useUndatedTasks();
   const status = useTaskStatus();
   const [error, setError] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const tasks = undated.data ?? [];
+  const open = tasks.filter((t) => t.status === "OPEN");
+  const done = tasks.filter((t) => t.status !== "OPEN");
   return (
     <div className="card">
       <h2>沒有日期的待辦</h2>
@@ -581,10 +595,13 @@ function UndatedCard({ onEdit }: { onEdit: (taskId: number) => void }) {
           {error ?? undated.error?.message}
         </p>
       )}
-      {undated.data?.length === 0 && <p className="hint">目前沒有。</p>}
+      {undated.isSuccess && open.length === 0 && <p className="hint">目前沒有。</p>}
       <ul className="agenda-list">
-        {(undated.data ?? []).map((task) => (
-          <li key={task.id} className="agenda-row agenda-tone-task">
+        {[...open, ...(showDone ? done : [])].map((task) => (
+          <li
+            key={task.id}
+            className={`agenda-row ${task.status === "OPEN" ? "agenda-tone-task" : "agenda-tone-done"}`}
+          >
             <input
               type="checkbox"
               className="agenda-check"
@@ -617,6 +634,16 @@ function UndatedCard({ onEdit }: { onEdit: (taskId: number) => void }) {
           </li>
         ))}
       </ul>
+      {done.length > 0 && (
+        <button
+          type="button"
+          className="btn-ghost agenda-done-toggle"
+          aria-expanded={showDone}
+          onClick={() => setShowDone(!showDone)}
+        >
+          {showDone ? "收起做完的" : `做完的 ${done.length} 筆`}
+        </button>
+      )}
     </div>
   );
 }

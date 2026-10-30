@@ -86,6 +86,13 @@ class AgendaRepository:
         )
         return list(rows.all())
 
+    async def rows_of_series(self, series_id: int) -> list[AgendaTask]:
+        """某個重複待辦已經建列的每一次（任何狀態、含封存），改整體設定時一起改用。"""
+        rows = await self._session.scalars(
+            select(AgendaTask).where(AgendaTask.series_id == series_id)
+        )
+        return list(rows.all())
+
     async def materialized_dates(self, series_ids: list[int]) -> dict[int, set[date]]:
         """各重複待辦已經建列的那幾次（任何狀態、含封存），算「還沒建列的」時要扣掉。"""
         found: dict[int, set[date]] = defaultdict(set)

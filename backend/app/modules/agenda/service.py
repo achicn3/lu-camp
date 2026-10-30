@@ -227,6 +227,12 @@ class AgendaService:
         fields = changes.model_fields_set
         if "manager_only" in fields:
             self._guard_manager_only(viewer, bool(changes.manager_only))
+            # 只限管理者是整個重複待辦的設定：單獨改某一次，經由規則的端點就會看得到它
+            # （Codex 1A 第一輪 P1）。
+            if task.series_id is not None and changes.manager_only != task.manager_only:
+                raise AgendaItemInvalid(
+                    "重複待辦的某一次不能單獨設定「只有管理者看得到」，請改整個重複待辦"
+                )
         if "assignee_staff_id" in fields and changes.assignee_staff_id != task.assignee_staff_id:
             await self._check_assignee(store_id, changes.assignee_staff_id)
         due_on = changes.due_on if "due_on" in fields else task.due_on
@@ -338,9 +344,15 @@ class AgendaService:
             _store_rule(series, new_rule)
             series.starts_on = new_rule.starts_on
             series.ends_on = new_rule.ends_on
+        was_manager_only = series.manager_only
         for name in _SERIES_DISPLAY_FIELDS:
             if name in fields:
                 setattr(series, name, getattr(changes, name))
+        if series.manager_only != was_manager_only:
+            # 已經建列的那幾次（做完、略過、改過的）跟著改，否則改成只限管理者之後，
+            # 店員仍看得到以前那幾次的名稱與備註（Codex 1A 第一輪 P1）。
+            for row in await self._repo.rows_of_series(series.id):
+                row.manager_only = series.manager_only
         await self._session.flush()
         return await self._series_read(store_id, series, today=today)
 
@@ -363,7 +375,7 @@ class AgendaService:
     ) -> AgendaTaskRead:
         """完成／略過重複待辦的某一次（還沒建列就建）。"""
         series = await self._visible_series(store_id, viewer, series_id)
-        row = await self._occurrence_row(series, occurrence_on, actor_user_id=viewer.user_id)
+        row = await self._occurrence_row(series, occurrence_on, viewer=viewer)
         self._apply_status(row, status, viewer.user_id)
         await self._session.flush()
         return await self._task_read(store_id, row)
@@ -378,7 +390,7 @@ class AgendaService:
     ) -> AgendaTaskRead:
         """只改這一次（改期、改時間、備註、負責人），不影響其他次。"""
         series = await self._visible_series(store_id, viewer, series_id)
-        row = await self._occurrence_row(series, occurrence_on, actor_user_id=viewer.user_id)
+        row = await self._occurrence_row(series, occurrence_on, viewer=viewer)
         fields = changes.model_fields_set
         if "assignee_staff_id" in fields and changes.assignee_staff_id != row.assignee_staff_id:
             await self._check_assignee(store_id, changes.assignee_staff_id)
@@ -404,6 +416,8 @@ class AgendaService:
             await self._repo.add(row)
             skipped += 1
         for row in await self._repo.open_rows_of_series(series.id):
+            if not viewer.can_see(row.manager_only):
+                continue
             if row.due_on is not None and row.due_on < today:
                 self._apply_status(row, AgendaTaskStatus.SKIPPED, viewer.user_id)
                 skipped += 1
@@ -656,17 +670,20 @@ class AgendaService:
         )
 
     async def _occurrence_row(
-        self, series: AgendaTaskSeries, day: date, *, actor_user_id: int
+        self, series: AgendaTaskSeries, day: date, *, viewer: Viewer
     ) -> AgendaTask:
-        """某一次的那一列；還沒建就建（要是規則上真的有這一次）。"""
+        """某一次的那一列；還沒建就建（要是規則上真的有這一次）。
+
+        那一列本身也要這個人看得到：規則看得到不代表每一次都看得到（Codex 1A 第一輪 P1）。
+        """
         existing = await self._repo.get_occurrence(series.id, day)
         if existing is not None:
-            if existing.archived_at is not None:
-                raise AgendaItemNotFound("這一次已經刪除")
+            if existing.archived_at is not None or not viewer.can_see(existing.manager_only):
+                raise AgendaItemNotFound("找不到這一次")
             return existing
         if not is_occurrence(_series_rule(series), day):
             raise AgendaItemInvalid(f"{day.isoformat()} 不是這個重複待辦的其中一次")
-        row = self._new_occurrence(series, day, actor_user_id=actor_user_id)
+        row = self._new_occurrence(series, day, actor_user_id=viewer.user_id)
         try:
             async with self._session.begin_nested():
                 await self._repo.add(row)
