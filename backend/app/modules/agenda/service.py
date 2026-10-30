@@ -7,7 +7,7 @@
 - 「今天」由呼叫端傳入（router 用門市時區的今天），邊界才測得準。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, time, timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -339,12 +339,16 @@ class AgendaService:
             changes.recurrence if changes.recurrence is not None else _fields_of(old_rule),
             changes.starts_on if changes.starts_on is not None else old_rule.starts_on,
         )
-        if requested != old_rule:
+        if replace(requested, ends_on=None) != replace(old_rule, ends_on=None):
             await self._keep_missed(series, old_rule, today=today, actor_user_id=viewer.user_id)
             new_rule = _rule(_fields_of(requested), max(requested.starts_on, today))
             _store_rule(series, new_rule)
             series.starts_on = new_rule.starts_on
             series.ends_on = new_rule.ends_on
+        elif requested.ends_on != old_rule.ends_on:
+            # 只改「重複到哪天」：排程不動、不重新起算。每幾個月是從開始月份數的，
+            # 一重算就整個錯開（Codex 1A 第四輪 P2）。
+            series.ends_on = requested.ends_on
         was_manager_only = series.manager_only
         for name in _SERIES_DISPLAY_FIELDS:
             if name in fields:
@@ -506,8 +510,12 @@ class AgendaService:
     async def set_event_occurrence_cancelled(
         self, store_id: int, viewer: Viewer, event_id: int, on: date, *, cancelled: bool
     ) -> AgendaEventRead:
-        """取消或恢復重複事件的某一次（例：這個週一照常營業）。不重複的事件直接刪除。"""
-        event = await self._visible_event(store_id, viewer, event_id)
+        """取消或恢復重複事件的某一次（例：這個週一照常營業）。不重複的事件直接刪除。
+
+        先鎖住這筆事件再讀取消清單：兩台同時取消不同的日子時，不鎖的話後提交的會把先提交的
+        蓋掉（Codex 1A 第四輪 P2）。
+        """
+        event = await self._visible_event(store_id, viewer, event_id, for_update=True)
         rule = _event_rule(event)
         if rule is None:
             raise AgendaItemInvalid("不重複的事件請直接刪除")
@@ -635,8 +643,10 @@ class AgendaService:
             raise AgendaItemNotFound(f"找不到重複待辦 {series_id}")
         return series
 
-    async def _visible_event(self, store_id: int, viewer: Viewer, event_id: int) -> AgendaEvent:
-        event = await self._repo.get_event(store_id, event_id)
+    async def _visible_event(
+        self, store_id: int, viewer: Viewer, event_id: int, *, for_update: bool = False
+    ) -> AgendaEvent:
+        event = await self._repo.get_event(store_id, event_id, for_update=for_update)
         if event is None or not viewer.can_see(event.manager_only):
             raise AgendaItemNotFound(f"找不到事件 {event_id}")
         return event

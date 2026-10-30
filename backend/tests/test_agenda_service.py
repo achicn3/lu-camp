@@ -674,3 +674,38 @@ async def test_overdue_counts_every_missed_day_of_a_long_running_series(
 
     assert await svc.skip_overdue(shop.store_id, mgr, series.id, today=TODAY) == missed
     assert (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue == []
+
+
+async def test_changing_only_the_end_date_keeps_the_schedule(db_session: AsyncSession) -> None:
+    """Codex 1A 第四輪 P2：只改「重複到哪天」不重新起算——每幾個月的排程從開始月份數，
+    一重算就整個錯開（二月起每兩個月，延長結束日後不能變成十一月、一月…）。"""
+    shop = await seed_store(db_session)
+    mgr, _ = _viewers(shop)
+    svc = AgendaService(db_session)
+    every_two = RecurrenceFields(
+        kind=RecurrenceKind.EVERY_N_MONTHS, day_of_month=10, interval_months=2
+    )
+    series = await svc.create_series(
+        shop.store_id,
+        mgr,
+        AgendaSeriesCreate(
+            title="交發票給記帳士", starts_on=date(2026, 2, 1), recurrence=every_two
+        ),
+    )
+    overdue_before = (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue
+
+    extended = await svc.update_series(
+        shop.store_id,
+        mgr,
+        series.id,
+        AgendaSeriesUpdate(recurrence=every_two.model_copy(update={"until": date(2027, 6, 30)})),
+        today=TODAY,
+    )
+    assert extended.starts_on == date(2026, 2, 1)
+    assert extended.recurrence.until == date(2027, 6, 30)
+    assert extended.next_on == date(2026, 12, 10)
+    feed = await svc.feed(shop.store_id, mgr, NOV_1, date(2027, 1, 31), today=TODAY)
+    assert [i.day for i in feed] == [date(2026, 12, 10)]
+    # 沒有重新起算，也就不必把以前沒做的那幾次另外建列：過期清單照舊
+    overdue_after = (await svc.today_summary(shop.store_id, mgr, today=TODAY)).overdue
+    assert [i.key for i in overdue_after] == [i.key for i in overdue_before]

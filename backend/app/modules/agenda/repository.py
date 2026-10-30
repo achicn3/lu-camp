@@ -135,14 +135,18 @@ class AgendaRepository:
 
     # ── 事件 ──────────────────────────────────────────────
 
-    async def get_event(self, store_id: int, event_id: int) -> AgendaEvent | None:
-        event: AgendaEvent | None = await self._session.scalar(
-            select(AgendaEvent).where(
-                AgendaEvent.store_id == store_id,
-                AgendaEvent.id == event_id,
-                AgendaEvent.archived_at.is_(None),
-            )
+    async def get_event(
+        self, store_id: int, event_id: int, *, for_update: bool = False
+    ) -> AgendaEvent | None:
+        """for_update=True 時上列鎖，讓「讀取消清單→改→寫回」序列化。"""
+        stmt = select(AgendaEvent).where(
+            AgendaEvent.store_id == store_id,
+            AgendaEvent.id == event_id,
+            AgendaEvent.archived_at.is_(None),
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        event: AgendaEvent | None = await self._session.scalar(stmt)
         return event
 
     async def active_events(self, store_id: int) -> list[AgendaEvent]:
