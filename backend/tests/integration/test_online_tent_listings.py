@@ -11,6 +11,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import httpx
+import pytest
 import pytest_asyncio
 from PIL import Image
 from sqlalchemy import select
@@ -22,6 +23,7 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import Brand, SerializedItem
+from app.modules.onlineorder.tent_repository import TentListingRepository
 from app.modules.onlineorder.tent_service import TentListingService, feed_sha256
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -443,3 +445,38 @@ async def test_sold_items_lose_their_reserved_mark(
     await db_session.flush()
     feed = await svc.build_feed(s.store_id, now=datetime.now(UTC))
     assert feed["tents"][0]["status"] == "available"
+
+
+async def test_first_photo_upload_racing_a_save_keeps_the_saved_details(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """第一次上傳照片與第一次存檔同時：存檔先建好那筆，上傳不得用空白預設值蓋掉（Codex 第二輪）。"""
+    s = await seed(db_session)
+    tent = await item(db_session, s, "T-1")
+    saved = await client.put(f"{BASE}/{tent.id}", json=body(), headers=auth(s.clerk))
+    assert saved.status_code == 200, saved.text
+    # 重現交錯：上傳那邊查的時候還看不到存檔建的那筆（之後才撞到唯一鍵）
+    real_by_item = TentListingRepository.by_item
+    calls = 0
+
+    async def stale_first_look(
+        self: TentListingRepository, store_id: int, item_id: int, *, for_update: bool = False
+    ) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return await real_by_item(self, store_id, item_id, for_update=for_update)
+
+    monkeypatch.setattr(TentListingRepository, "by_item", stale_first_look)
+    up = await client.post(
+        f"{BASE}/{tent.id}/photos",
+        files={"file": ("p.jpg", _jpeg(), "image/jpeg")},
+        headers=auth(s.clerk),
+    )
+    assert up.status_code == 200, up.text
+    row = up.json()
+    assert len(row["photos"]) == 1
+    assert row["published"] is True
+    assert row["defects"] == ["外帳頂部一處淡色污漬，不影響防水"]
+    assert row["video_url"] == "https://youtu.be/cSArnUe7cEY"

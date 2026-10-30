@@ -55,6 +55,12 @@ class TentPublishService:
         client = self._client_for(store_id)
         if client is None:
             return TentPublishResult(configured=False, pushed=False, last_error=None)
+        # 先放開呼叫端已開的交易（例如驗證登入時查過資料庫），再看要不要推。
+        await self._session.commit()
+        if _PUBLISH_LOCK.locked():
+            # 已經有一份在推：不排隊（排隊時呼叫端可能還拿著連線），進行中那份推完後有漏的，
+            # 下一輪背景推送（最多 1 分鐘）會補上（Codex 第二輪）。
+            return TentPublishResult(configured=True, pushed=False, last_error=None)
         async with _PUBLISH_LOCK:
             await self._tents.clear_reserved_for_sold(store_id)
             feed = await self._tents.build_feed(store_id, now=now)

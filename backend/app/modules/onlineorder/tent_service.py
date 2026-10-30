@@ -87,7 +87,7 @@ class TentListingService:
         row = await self._repo.by_item(store_id, item.id, for_update=True)
         after = body.model_dump()
         if row is None:
-            row = await self._create(store_id, item.id, body)
+            row, _created = await self._create(store_id, item.id, body, replace_on_conflict=True)
             await self._audit(store_id, actor_user_id, "CREATE", row.id, None, after)
         else:
             before = TentListingWriteRequest.model_validate(row).model_dump()
@@ -106,15 +106,20 @@ class TentListingService:
         item = await self._editable_item(store_id, item_id)
         row = await self._repo.by_item(store_id, item.id, for_update=True)
         if row is None:
-            row = await self._create(store_id, item.id, TentListingWriteRequest())
-            await self._audit(
-                store_id,
-                actor_user_id,
-                "CREATE",
-                row.id,
-                None,
-                TentListingWriteRequest().model_dump(),
+            # 只是幫照片建一筆空的；若同時有人剛存檔建好了，
+            # 就用那筆、不套空白預設值（Codex 第二輪）。
+            row, created = await self._create(
+                store_id, item.id, TentListingWriteRequest(), replace_on_conflict=False
             )
+            if created:
+                await self._audit(
+                    store_id,
+                    actor_user_id,
+                    "CREATE",
+                    row.id,
+                    None,
+                    TentListingWriteRequest().model_dump(),
+                )
         current = (await self._repo.photos([row.id]))[row.id]
         if sha in current:
             raise OnlineTentPhotoRejected("這張照片已經傳過了")
@@ -236,10 +241,19 @@ class TentListingService:
         return item, row, (await self._repo.photos([row.id]))[row.id]
 
     async def _create(
-        self, store_id: int, item_id: int, body: TentListingWriteRequest
-    ) -> OnlineTentListing:
+        self,
+        store_id: int,
+        item_id: int,
+        body: TentListingWriteRequest,
+        *,
+        replace_on_conflict: bool,
+    ) -> tuple[OnlineTentListing, bool]:
+        """建一筆並回 (那筆, 是不是這次建的)。
+
+        兩邊同時第一次建同一件：唯一鍵擋下的那位改用對方剛建的那筆。`replace_on_conflict`
+        ＝存檔（整筆替換，照自己的內容蓋過去）；上傳照片只是需要一筆，不可以蓋掉別人存的內容。
+        """
         row = OnlineTentListing(store_id=store_id, serialized_item_id=item_id, **body.model_dump())
-        # 兩個人同時第一次存同一件：唯一鍵擋下的那位改成更新對方剛建的那筆。
         try:
             async with self._session.begin_nested():
                 await self._repo.save(row)
@@ -247,11 +261,12 @@ class TentListingService:
             existing = await self._repo.by_item(store_id, item_id, for_update=True)
             if existing is None:
                 raise
-            for key, value in body.model_dump().items():
-                setattr(existing, key, value)
-            await self._repo.save(existing)
-            return existing
-        return row
+            if replace_on_conflict:
+                for key, value in body.model_dump().items():
+                    setattr(existing, key, value)
+                await self._repo.save(existing)
+            return existing, False
+        return row, True
 
     async def _brands(self, store_id: int, items: list[SerializedItem]) -> dict[int, str]:
         ids = sorted({i.brand_id for i in items if i.brand_id is not None})

@@ -27,7 +27,7 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import SerializedItem
-from app.modules.onlineorder import scheduler
+from app.modules.onlineorder import scheduler, tent_publish_service
 from app.modules.onlineorder.client import OnlineOrderClient
 from app.modules.onlineorder.models import OnlineTentListing
 from app.modules.onlineorder.router import get_online_order_client
@@ -390,3 +390,19 @@ async def test_slow_tent_publish_never_delays_order_pulling(
     assert ticks >= 5
     # 上一輪還沒推完就不會再開新的一輪
     assert publishes == 1
+
+
+async def test_publish_while_another_is_running_returns_at_once(
+    api: tuple[httpx.AsyncClient, FakeWorker], db_session: AsyncSession
+) -> None:
+    """已有一份在推：不排隊（排隊會拿著資料庫連線等），直接回、交給下一輪補（Codex 第二輪）。"""
+    c, worker = api
+    ctx = await seed(db_session)
+    await _list_it(c, ctx)
+    svc = TentPublishService(db_session, _client(worker, ctx.store_id))
+    async with tent_publish_service._PUBLISH_LOCK:
+        busy = await asyncio.wait_for(svc.publish(ctx.store_id, now=datetime.now(UTC)), timeout=2)
+    assert (busy.configured, busy.pushed) == (True, False)
+    assert worker.calls == []
+    # 鎖放開後照常推
+    assert (await svc.publish(ctx.store_id, now=datetime.now(UTC))).pushed is True
