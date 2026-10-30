@@ -1193,6 +1193,1403 @@
         "title": "AdjustmentScope",
         "type": "string"
       },
+      "AgendaEventCreate": {
+        "properties": {
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgendaEventKind"
+          },
+          "manager_only": {
+            "default": false,
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecurrenceFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "starts_on"
+        ],
+        "title": "AgendaEventCreate",
+        "type": "object"
+      },
+      "AgendaEventKind": {
+        "description": "行事曆事件類型（docs/99 §4.3）：只顯示，不影響 POS 與線上點餐。",
+        "enum": [
+          "CLOSED",
+          "TEMP_CLOSED",
+          "MARKET",
+          "OTHER"
+        ],
+        "title": "AgendaEventKind",
+        "type": "string"
+      },
+      "AgendaEventOccurrenceRequest": {
+        "description": "取消（或恢復）重複事件的某一次，例：這個週一照常營業。",
+        "properties": {
+          "cancelled": {
+            "default": true,
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "on": {
+            "format": "date",
+            "title": "On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "title": "AgendaEventOccurrenceRequest",
+        "type": "object"
+      },
+      "AgendaEventRead": {
+        "properties": {
+          "cancelled_dates": {
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Cancelled Dates",
+            "type": "array"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgendaEventKind"
+          },
+          "manager_only": {
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecurrenceFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "note",
+          "starts_on",
+          "ends_on",
+          "start_time",
+          "end_time",
+          "manager_only",
+          "recurrence",
+          "cancelled_dates"
+        ],
+        "title": "AgendaEventRead",
+        "type": "object"
+      },
+      "AgendaEventUpdate": {
+        "properties": {
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgendaEventKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manager_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Only"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecurrenceFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "starts_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts On"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "AgendaEventUpdate",
+        "type": "object"
+      },
+      "AgendaFeedRead": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "items"
+        ],
+        "title": "AgendaFeedRead",
+        "type": "object"
+      },
+      "AgendaItemKind": {
+        "description": "行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。",
+        "enum": [
+          "TASK",
+          "EVENT",
+          "CAMPAIGN_START",
+          "CAMPAIGN_END"
+        ],
+        "title": "AgendaItemKind",
+        "type": "string"
+      },
+      "AgendaItemRead": {
+        "description": "行事曆上的一列。\n\n`key` 穩定，可當畫面的 key；操作時看 task_id、series_id＋occurrence_on 或 event_id。",
+        "properties": {
+          "assignee_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Name"
+          },
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "campaign_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "end_day": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Day"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "event_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgendaEventKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgendaItemKind"
+          },
+          "lead_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Days"
+          },
+          "manager_only": {
+            "default": false,
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "occurrence_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence On"
+          },
+          "overdue": {
+            "default": false,
+            "title": "Overdue",
+            "type": "boolean"
+          },
+          "series_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Id"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgendaTaskStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "day",
+          "title"
+        ],
+        "title": "AgendaItemRead",
+        "type": "object"
+      },
+      "AgendaOccurrenceUpdate": {
+        "description": "只改重複待辦的這一次（例：這週改週二叫牛奶）。",
+        "properties": {
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due On"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "AgendaOccurrenceUpdate",
+        "type": "object"
+      },
+      "AgendaSeriesCreate": {
+        "description": "重複待辦：從 `starts_on` 起依規則出現，每一次都是獨立的一筆。",
+        "properties": {
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "lead_days": {
+            "default": 3,
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Lead Days",
+            "type": "integer"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "default": false,
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "$ref": "#/components/schemas/RecurrenceFields"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "starts_on",
+          "recurrence"
+        ],
+        "title": "AgendaSeriesCreate",
+        "type": "object"
+      },
+      "AgendaSeriesRead": {
+        "properties": {
+          "assignee_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Name"
+          },
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lead_days": {
+            "title": "Lead Days",
+            "type": "integer"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "next_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next On"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "$ref": "#/components/schemas/RecurrenceFields"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "note",
+          "due_time",
+          "assignee_staff_id",
+          "assignee_name",
+          "manager_only",
+          "link_href",
+          "lead_days",
+          "starts_on",
+          "recurrence",
+          "next_on"
+        ],
+        "title": "AgendaSeriesRead",
+        "type": "object"
+      },
+      "AgendaSeriesUpdate": {
+        "description": "改規則或開始日：之前沒做的那幾次照舊留著提醒，新規則從今天起算（ADR-034 決定 6）。",
+        "properties": {
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "lead_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Days"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Only"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecurrenceFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "starts_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts On"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "AgendaSeriesUpdate",
+        "type": "object"
+      },
+      "AgendaSkipOverdueRead": {
+        "properties": {
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "skipped"
+        ],
+        "title": "AgendaSkipOverdueRead",
+        "type": "object"
+      },
+      "AgendaTaskCreate": {
+        "description": "單次待辦。沒有日期的放「沒有日期」清單；有時間就一定要有日期。",
+        "properties": {
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due On"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "lead_days": {
+            "default": 3,
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Lead Days",
+            "type": "integer"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "default": false,
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "AgendaTaskCreate",
+        "type": "object"
+      },
+      "AgendaTaskRead": {
+        "description": "一筆待辦：單次的，或重複待辦已經被打勾、略過、修改過的那一次。",
+        "properties": {
+          "assignee_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Name"
+          },
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due On"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lead_days": {
+            "title": "Lead Days",
+            "type": "integer"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "title": "Manager Only",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "occurrence_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence On"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Name"
+          },
+          "series_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgendaTaskStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "note",
+          "due_on",
+          "due_time",
+          "assignee_staff_id",
+          "assignee_name",
+          "manager_only",
+          "link_href",
+          "lead_days",
+          "series_id",
+          "occurrence_on",
+          "status",
+          "resolved_at",
+          "resolved_by_name",
+          "created_at"
+        ],
+        "title": "AgendaTaskRead",
+        "type": "object"
+      },
+      "AgendaTaskStatus": {
+        "description": "待辦狀態（docs/99 §4.1）。OPEN 未完成；DONE 完成；SKIPPED 略過（重複待辦的某一次不用做）。",
+        "enum": [
+          "OPEN",
+          "DONE",
+          "SKIPPED"
+        ],
+        "title": "AgendaTaskStatus",
+        "type": "string"
+      },
+      "AgendaTaskStatusRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AgendaTaskStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AgendaTaskStatusRequest",
+        "type": "object"
+      },
+      "AgendaTaskUpdate": {
+        "properties": {
+          "assignee_staff_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Staff Id"
+          },
+          "due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due On"
+          },
+          "due_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Time"
+          },
+          "lead_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Days"
+          },
+          "link_href": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Href"
+          },
+          "manager_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Only"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "AgendaTaskUpdate",
+        "type": "object"
+      },
+      "AgendaTodayRead": {
+        "description": "首頁與開店前檢查的「今天」（docs/99 §8）。只含這個人看得到的。",
+        "properties": {
+          "badge_count": {
+            "title": "Badge Count",
+            "type": "integer"
+          },
+          "campaigns": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "consignment_pending_count": {
+            "title": "Consignment Pending Count",
+            "type": "integer"
+          },
+          "due_today": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Due Today",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "overdue": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Overdue",
+            "type": "array"
+          },
+          "today": {
+            "format": "date",
+            "title": "Today",
+            "type": "string"
+          },
+          "upcoming": {
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemRead"
+            },
+            "title": "Upcoming",
+            "type": "array"
+          }
+        },
+        "required": [
+          "today",
+          "due_today",
+          "overdue",
+          "upcoming",
+          "events",
+          "campaigns",
+          "consignment_pending_count",
+          "badge_count"
+        ],
+        "title": "AgendaTodayRead",
+        "type": "object"
+      },
       "AgingBuckets": {
         "description": "未兌付負債帳齡分桶（依發出時間）。",
         "properties": {
@@ -15750,6 +17147,83 @@
         "title": "ReconciliationReport",
         "type": "object"
       },
+      "RecurrenceFields": {
+        "description": "重複規則（不含開始日：待辦用 `starts_on`、事件用自己的開始日當起點）。",
+        "properties": {
+          "day_of_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day Of Month"
+          },
+          "interval_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Months"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecurrenceKind"
+          },
+          "month_of_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month Of Year"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "RecurrenceFields",
+        "type": "object"
+      },
+      "RecurrenceKind": {
+        "description": "行事曆重複規則（docs/99 §4.2）。不做「每天」：每天的事放開店前檢查。\n\nWEEKLY＝每週幾（可複選）；MONTHLY＝每月幾號（29–31 遇小月落月底）；\nEVERY_N_MONTHS＝每 N 個月的幾號（從開始月份起算）；YEARLY＝每年幾月幾號（2/29 遇平年落 2/28）。",
+        "enum": [
+          "WEEKLY",
+          "MONTHLY",
+          "EVERY_N_MONTHS",
+          "YEARLY"
+        ],
+        "title": "RecurrenceKind",
+        "type": "string"
+      },
       "ReferencePriceSummary": {
         "description": "歷史參考價（2026-09-25 店主要求）：同款通常差不多，店員不必每次重查。\n\nlatest 是最近一件**有填**參考價的；low／high 是期間內有填的最低與最高。",
         "properties": {
@@ -20018,6 +21492,109 @@
         "title": "StaffCartSessionRead",
         "type": "object"
       },
+      "StaffMemberCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "StaffMemberCreate",
+        "type": "object"
+      },
+      "StaffMemberRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "user_id",
+          "is_active"
+        ],
+        "title": "StaffMemberRead",
+        "type": "object"
+      },
+      "StaffMemberUpdate": {
+        "description": "沒送的欄位不動；`user_id` 明確送 null＝取消帳號對應。",
+        "properties": {
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "title": "StaffMemberUpdate",
+        "type": "object"
+      },
       "StaffPickRef": {
         "description": "店員推薦的一項：餐飲品項、手沖體驗卡或帶著走商品（retail 的 id 是一般商品 id）。",
         "properties": {
@@ -21889,6 +23466,1065 @@
         "summary": "List Void Items",
         "tags": [
           "acquisition"
+        ]
+      }
+    },
+    "/api/v1/agenda/events": {
+      "get": {
+        "operationId": "listAgendaEvents",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgendaEventRead"
+                  },
+                  "title": "Response Listagendaevents",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agenda Events",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "post": {
+        "operationId": "createAgendaEvent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaEventCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaEventRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Agenda Event",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/events/{event_id}": {
+      "delete": {
+        "operationId": "deleteAgendaEvent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Agenda Event",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "get": {
+        "operationId": "getAgendaEvent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaEventRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agenda Event",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "patch": {
+        "operationId": "updateAgendaEvent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaEventUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaEventRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Agenda Event",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/events/{event_id}/occurrences": {
+      "post": {
+        "description": "取消或恢復重複事件的某一次（例：這個週一照常營業）。",
+        "operationId": "setAgendaEventOccurrence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaEventOccurrenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaEventRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Agenda Event Occurrence",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/items": {
+      "get": {
+        "operationId": "listAgendaItems",
+        "parameters": [
+          {
+            "description": "第一天（含）",
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "description": "第一天（含）",
+              "format": "date",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "description": "最後一天（含）；一次最多 93 天",
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "description": "最後一天（含）；一次最多 93 天",
+              "format": "date",
+              "title": "End",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaFeedRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agenda Items",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/task-series": {
+      "get": {
+        "operationId": "listAgendaTaskSeries",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgendaSeriesRead"
+                  },
+                  "title": "Response Listagendataskseries",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "post": {
+        "operationId": "createAgendaTaskSeries",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaSeriesCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaSeriesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/task-series/{series_id}": {
+      "delete": {
+        "description": "之後不再出現；已完成、已略過的那幾次留作紀錄。",
+        "operationId": "deleteAgendaTaskSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "get": {
+        "operationId": "getAgendaTaskSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaSeriesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "patch": {
+        "description": "改規則或開始日時，之前沒做的那幾次照舊留著提醒，新規則從今天起算。",
+        "operationId": "updateAgendaTaskSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaSeriesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaSeriesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/task-series/{series_id}/occurrences/{occurrence_on}": {
+      "patch": {
+        "description": "只改這一次（改期、時間、備註、負責人）。",
+        "operationId": "updateAgendaOccurrence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "occurrence_on",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Occurrence On",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaOccurrenceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Agenda Occurrence",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/task-series/{series_id}/occurrences/{occurrence_on}/status": {
+      "post": {
+        "description": "完成／略過重複待辦的某一次。",
+        "operationId": "setAgendaOccurrenceStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "occurrence_on",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Occurrence On",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaTaskStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Agenda Occurrence Status",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/task-series/{series_id}/skip-overdue": {
+      "post": {
+        "description": "今天以前沒做的那幾次全部略過。",
+        "operationId": "skipOverdueAgendaTaskSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "title": "Series Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaSkipOverdueRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Skip Overdue Agenda Task Series",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/tasks": {
+      "post": {
+        "operationId": "createAgendaTask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaTaskCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Agenda Task",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/tasks/undated": {
+      "get": {
+        "description": "「沒有日期」清單（預設只列還沒完成的）。",
+        "operationId": "listUndatedAgendaTasks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_resolved",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Resolved",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgendaTaskRead"
+                  },
+                  "title": "Response Listundatedagendatasks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Undated Agenda Tasks",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/tasks/{task_id}": {
+      "delete": {
+        "description": "刪除＝封存。重複待辦的某一次不能刪，要用略過（422）。",
+        "operationId": "deleteAgendaTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Agenda Task",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "get": {
+        "operationId": "getAgendaTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agenda Task",
+        "tags": [
+          "agenda"
+        ]
+      },
+      "patch": {
+        "operationId": "updateAgendaTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaTaskUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Agenda Task",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/tasks/{task_id}/status": {
+      "post": {
+        "description": "完成／略過／取消完成（按錯了要能取消）。",
+        "operationId": "setAgendaTaskStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgendaTaskStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Agenda Task Status",
+        "tags": [
+          "agenda"
+        ]
+      }
+    },
+    "/api/v1/agenda/today": {
+      "get": {
+        "description": "首頁、開店前檢查與導覽列數字用。",
+        "operationId": "getAgendaToday",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaTodayRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agenda Today",
+        "tags": [
+          "agenda"
         ]
       }
     },
@@ -37464,6 +40100,159 @@
         "summary": "Sign On Tablet",
         "tags": [
           "signing"
+        ]
+      }
+    },
+    "/api/v1/staff-members": {
+      "get": {
+        "operationId": "listStaffMembers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StaffMemberRead"
+                  },
+                  "title": "Response Liststaffmembers",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Staff Members",
+        "tags": [
+          "staff"
+        ]
+      },
+      "post": {
+        "operationId": "createStaffMember",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffMemberCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMemberRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Staff Member",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/staff-members/{member_id}": {
+      "patch": {
+        "operationId": "updateStaffMember",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffMemberUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMemberRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Staff Member",
+        "tags": [
+          "staff"
         ]
       }
     },

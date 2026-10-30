@@ -136,4 +136,49 @@ describe("(authed) layout", () => {
     expect(qc.getQueryData(["reports", "access"])).toBeUndefined();
     expect(replaceMock).toHaveBeenCalledWith("/login");
   });
+
+  it("行事曆數字：今天到期還沒做＋已過期；讀不到就不顯示（不能顯示成 0）", async () => {
+    const respond = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    let agendaOk = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/agenda/today")) {
+          return agendaOk
+            ? respond({
+                today: "2026-11-10",
+                due_today: [],
+                overdue: [],
+                upcoming: [],
+                events: [],
+                campaigns: [],
+                consignment_pending_count: 0,
+                badge_count: 4,
+              })
+            : respond({ detail: "壞掉了" }, 500);
+        }
+        return respond({ id: 1, role: readTokenRole() ?? "CLERK", store_id: 1 });
+      }),
+    );
+    setToken(makeToken("CLERK"));
+    renderLayout(<p>受保護內容</p>);
+    const nav = screen.getByRole("navigation", { name: "主要導覽" });
+    const calendarLink = await within(nav).findByRole("link", { name: /行事曆/ });
+    expect(await within(calendarLink).findByLabelText("4 件今天到期或已過期")).toBeDefined();
+    cleanup();
+
+    agendaOk = false;
+    renderLayout(<p>受保護內容</p>, new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    const again = await within(screen.getByRole("navigation", { name: "主要導覽" })).findByRole(
+      "link",
+      { name: /行事曆/ },
+    );
+    await waitFor(() => expect(within(again).queryByText("0")).toBeNull());
+    expect(within(again).queryByLabelText(/件今天到期或已過期/)).toBeNull();
+  });
 });

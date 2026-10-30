@@ -306,6 +306,16 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT md5(COALESCE(string_agg(ticket_date::text || ':' || ticket_no || ':'"
         " || status || ':' || COALESCE(link,'-'), ',' ORDER BY id),'')) FROM call_tickets",
     ),
+    # 行事曆（docs/99）：店員記的待辦、重複規則、公休與市集，弄丟就得一筆一筆重打。
+    # 待辦連狀態與日期一起比對：打勾的紀錄沒還原，過期的重複待辦會整批冒回來。
+    (
+        "行事曆-待辦（筆數／狀態指紋）",
+        "SELECT count(*)::text || '/' || COALESCE(md5(string_agg(id::text || ':' || status"
+        " || ':' || COALESCE(due_on::text, '-'), ',' ORDER BY id)), '-') FROM agenda_tasks",
+    ),
+    ("行事曆-重複待辦數", "SELECT count(*) FROM agenda_task_series"),
+    ("行事曆-事件數", "SELECT count(*) FROM agenda_events"),
+    ("員工名單-人數", "SELECT count(*) FROM staff_members"),
     ("稽核-筆數", "SELECT count(*) FROM audit_log"),
 ]
 

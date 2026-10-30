@@ -75,6 +75,7 @@
 - [MacBook 正式機：升級到 2026-10-10 版（販售籃可選現有散裝、組合價可只有一樣）](./81-macbook-upgrade-basket-from-existing-and-single-bundle.md)
 - [MacBook 正式機：升級到 2026-10-14 版（桌號低消、「不知道點什麼？」）](./83-macbook-upgrade-table-minimums.md)
 - [行事曆：待辦、進貨付款、支出、排班與預約](./99-calendar-tasks-and-payments.md)
+- [MacBook 正式機：升級到 2026-10-30 版（行事曆：待辦與事件）](./100-macbook-upgrade-calendar-agenda.md)
 
 ## 評估與後續實作
 

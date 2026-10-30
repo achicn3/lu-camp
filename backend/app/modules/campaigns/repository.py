@@ -55,6 +55,25 @@ class CampaignRepository:
             stmt = stmt.limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    async def list_overlapping(
+        self, store_id: int, start: datetime, end: datetime, *, statuses: set[CampaignStatus]
+    ) -> list[Campaign]:
+        """生效窗 [starts_at, ends_at) 與 [start, end) 有交集、狀態在 statuses 內的活動。
+
+        行事曆標活動開始日與最後一天用（docs/99 §3）。
+        """
+        stmt = (
+            select(Campaign)
+            .where(
+                Campaign.store_id == store_id,
+                Campaign.starts_at < end,
+                Campaign.ends_at > start,
+                Campaign.status.in_(statuses),
+            )
+            .order_by(Campaign.starts_at, Campaign.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def count(self, store_id: int, *, status: CampaignStatus | None = None) -> int:
         """符合同一組篩選的活動總筆數（不分頁；清單頁算總頁數用）。"""
         stmt = select(func.count()).select_from(Campaign).where(Campaign.store_id == store_id)

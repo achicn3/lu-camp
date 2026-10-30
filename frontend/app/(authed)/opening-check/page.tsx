@@ -17,6 +17,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { TodayPanel } from "@/features/agenda/TodayPanel";
 import { DailyStockPanel, useDailyStock } from "@/features/menu/DailyStockPanel";
 import {
   deviceKey,
@@ -277,6 +278,9 @@ export default function OpeningCheckPage() {
           <DailyStockPanel entries={stockEntries} />
         </div>
       )}
+
+      {/* 只顯示、不算進「全部完成」（docs/99 裁示 13）：待辦不該擋住開店。 */}
+      <TodayPanel heading="今天的行事曆" />
 
       <div className="card">
         <h2>今日確認事項</h2>

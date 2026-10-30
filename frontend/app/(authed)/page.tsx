@@ -2,9 +2,11 @@
 // 首頁：模組入口卡片（與導覽列同步；管理專屬卡片依 DB 現值角色收斂，同 nav——Codex 波次三）。
 import Link from "next/link";
 
+import { TodayPanel } from "@/features/agenda/TodayPanel";
 import { useCurrentRole } from "@/lib/useCurrentRole";
 
 const MODULES: { title: string; description: string; href: string; managerOnly?: boolean }[] = [
+  { title: "行事曆", description: "待辦、公休與市集、活動日期", href: "/calendar" },
   { title: "POS 結帳", description: "掃碼、購物車、餐飲點餐、收現找零、列印", href: "/pos" },
   { title: "現金對帳", description: "開帳／異動／結帳差異", href: "/cash" },
   { title: "會員/賣方", description: "查詢、建檔、點數、寄售與往來", href: "/contacts" },
@@ -24,6 +26,7 @@ export default function HomePage() {
   return (
     <section>
       <h1 className="page-title">門市作業</h1>
+      <TodayPanel wide />
       <div className="module-grid">
         {MODULES.filter((module) => !module.managerOnly || isManager).map((module) => (
           <Link key={module.title} href={module.href} className="module-card module-card-link">

@@ -836,3 +836,42 @@ class OnlineOutboxStatus(StrEnum):
     PENDING = "PENDING"
     SENT = "SENT"
     DEAD = "DEAD"
+
+
+class RecurrenceKind(StrEnum):
+    """行事曆重複規則（docs/99 §4.2）。不做「每天」：每天的事放開店前檢查。
+
+    WEEKLY＝每週幾（可複選）；MONTHLY＝每月幾號（29–31 遇小月落月底）；
+    EVERY_N_MONTHS＝每 N 個月的幾號（從開始月份起算）；YEARLY＝每年幾月幾號（2/29 遇平年落 2/28）。
+    """
+
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    EVERY_N_MONTHS = "EVERY_N_MONTHS"
+    YEARLY = "YEARLY"
+
+
+class AgendaTaskStatus(StrEnum):
+    """待辦狀態（docs/99 §4.1）。OPEN 未完成；DONE 完成；SKIPPED 略過（重複待辦的某一次不用做）。"""
+
+    OPEN = "OPEN"
+    DONE = "DONE"
+    SKIPPED = "SKIPPED"
+
+
+class AgendaEventKind(StrEnum):
+    """行事曆事件類型（docs/99 §4.3）：只顯示，不影響 POS 與線上點餐。"""
+
+    CLOSED = "CLOSED"  # 公休
+    TEMP_CLOSED = "TEMP_CLOSED"  # 臨時店休
+    MARKET = "MARKET"  # 市集／擺攤
+    OTHER = "OTHER"
+
+
+class AgendaItemKind(StrEnum):
+    """行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。"""
+
+    TASK = "TASK"  # 待辦（單次、或重複待辦的某一次）
+    EVENT = "EVENT"  # 事件（公休、市集…）
+    CAMPAIGN_START = "CAMPAIGN_START"  # 門市活動開始日
+    CAMPAIGN_END = "CAMPAIGN_END"  # 門市活動最後一天

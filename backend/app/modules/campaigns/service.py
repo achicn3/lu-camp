@@ -315,6 +315,12 @@ class CampaignService:
     ) -> list[Campaign]:
         return await self._repo.list_campaigns(store_id, status=status, limit=limit, offset=offset)
 
+    async def list_overlapping(
+        self, store_id: int, start: datetime, end: datetime, *, statuses: set[CampaignStatus]
+    ) -> list[Campaign]:
+        """與 [start, end) 有交集的活動（行事曆標開始日、最後一天用；docs/99 §3）。"""
+        return await self._repo.list_overlapping(store_id, start, end, statuses=statuses)
+
     async def count_campaigns(self, store_id: int, *, status: CampaignStatus | None = None) -> int:
         """符合同一組篩選的活動總筆數（清單頁算總頁數用）。"""
         return await self._repo.count(store_id, status=status)

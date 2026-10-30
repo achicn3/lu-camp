@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
+import { useAgendaToday } from "@/features/agenda/api";
 import { AGENT_SIMULATED_EVENT, fetchSimulatedDevices } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
@@ -21,6 +22,7 @@ type NavItem = { href: string; label: string; ready: boolean; managerOnly?: bool
 // MORE＝其餘功能，收進「更多」側邊選單（點漢堡開啟）。
 const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "首頁", ready: true },
+  { href: "/calendar", label: "行事曆", ready: true },
   { href: "/pos", label: "POS 結帳", ready: true },
   { href: "/sales", label: "交易紀錄", ready: true },
   { href: "/cash", label: "現金對帳", ready: true },
@@ -140,6 +142,9 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   // 「今天有沒有導過」記在瀏覽器：導向是**這台裝置**的行為，完成狀態才是每店每日共用的。
   // 與檢查頁共用同一份判斷（含裝置狀態）：兩邊各自算會出現「頁面說沒做完、選單說做完了」。
   const openingCheck = useOpeningCheckStatus(token !== null && decodeSession() !== null);
+  // 行事曆數字（docs/99 §8）：今天到期還沒做＋已過期，只算這個人看得到的。讀不到就不顯示數字，
+  // 不顯示 0——「0」會被讀成「都做完了」。
+  const agendaToday = useAgendaToday(token !== null && decodeSession() !== null);
 
   useEffect(() => {
     const data = openingCheck.today.data;
@@ -166,6 +171,16 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     item.ready ? (
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
+        {item.href === "/calendar" &&
+          agendaToday.isSuccess &&
+          agendaToday.data.badge_count > 0 && (
+            <span
+              className="nav-badge"
+              aria-label={`${agendaToday.data.badge_count} 件今天到期或已過期`}
+            >
+              {agendaToday.data.badge_count}
+            </span>
+          )}
         {item.href === "/opening-check" && openingCheck.incomplete && (
           <span className="nav-dot" aria-label="開店前檢查尚未完成" />
         )}

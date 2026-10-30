@@ -20,6 +20,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
+from app.modules.agenda.router import router as agenda_router
 from app.modules.backup.router import router as backup_router
 from app.modules.backup.scheduler import (
     reconcile_orphaned_jobs_on_startup,
@@ -59,6 +60,7 @@ from app.modules.settings.router import router as settings_router
 from app.modules.signing.router import agreements_router as signing_agreements_router
 from app.modules.signing.router import kiosk_router as signing_kiosk_router
 from app.modules.signing.router import staff_router as signing_staff_router
+from app.modules.staff.router import router as staff_router
 from app.modules.stocktake.router import router as stocktake_router
 from app.modules.store.router import router as store_router
 from app.modules.storecredit.router import router as storecredit_router
@@ -279,6 +281,8 @@ def create_app() -> FastAPI:
     app.include_router(signing_staff_router, prefix=API_PREFIX)
     app.include_router(signing_agreements_router, prefix=API_PREFIX)
     app.include_router(opening_check_router, prefix=API_PREFIX)
+    app.include_router(agenda_router, prefix=API_PREFIX)
+    app.include_router(staff_router, prefix=API_PREFIX)
     app.include_router(signing_kiosk_router, prefix=API_PREFIX)
     app.include_router(customer_display_staff_router, prefix=API_PREFIX)
     app.include_router(customer_display_kiosk_router, prefix=API_PREFIX)

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.core.audit  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.acquisition.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.agenda.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.backup.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.callticket.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.campaigns.models  # 註冊模型到 metadata（autogenerate 用）
@@ -25,6 +26,7 @@ import app.modules.returns.models  # 註冊模型到 metadata（autogenerate 用
 import app.modules.sales.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.settings.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.signing.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.staff.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.stocktake.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.store.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.storecredit.models  # 註冊模型到 metadata（autogenerate 用）

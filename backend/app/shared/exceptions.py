@@ -29,6 +29,34 @@ class OpeningCheckConflict(DomainError):
     """開店前檢查的今日狀態列建立衝突（同一早兩台裝置同時開頁）。"""
 
 
+class InvalidRecurrence(DomainError):
+    """行事曆重複規則不合法（缺欄位、超出範圍、不存在的日期、結束早於開始）。"""
+
+
+class AgendaItemNotFound(DomainError):
+    """找不到待辦、重複待辦或事件（不存在、已刪除、不屬本店或無權查看）。"""
+
+
+class AgendaItemInvalid(DomainError):
+    """待辦或事件的內容不合法（例：指定的日期不是這個重複待辦的其中一次）。"""
+
+
+class AgendaForbidden(DomainError):
+    """店員不能建立或改成「只限管理者」的待辦、事件。"""
+
+
+class StaffMemberNotFound(DomainError):
+    """找不到員工（不存在或不屬本店）。"""
+
+
+class StaffMemberConflict(DomainError):
+    """員工名單衝突（同店同名、同一個系統帳號對到兩位員工）。"""
+
+
+class StaffMemberInvalid(DomainError):
+    """員工資料不合法（對應的系統帳號不屬本店、或是手持簽署裝置的帳號）。"""
+
+
 class ReasonConflict(DomainError):
     """原因代碼衝突（同店同 code 已存在）。"""
 

@@ -180,6 +180,282 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agenda/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agenda Events */
+        get: operations["listAgendaEvents"];
+        put?: never;
+        /** Create Agenda Event */
+        post: operations["createAgendaEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Agenda Event */
+        get: operations["getAgendaEvent"];
+        put?: never;
+        post?: never;
+        /** Delete Agenda Event */
+        delete: operations["deleteAgendaEvent"];
+        options?: never;
+        head?: never;
+        /** Update Agenda Event */
+        patch: operations["updateAgendaEvent"];
+        trace?: never;
+    };
+    "/api/v1/agenda/events/{event_id}/occurrences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Agenda Event Occurrence
+         * @description 取消或恢復重複事件的某一次（例：這個週一照常營業）。
+         */
+        post: operations["setAgendaEventOccurrence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agenda Items */
+        get: operations["listAgendaItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/task-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agenda Task Series */
+        get: operations["listAgendaTaskSeries"];
+        put?: never;
+        /** Create Agenda Task Series */
+        post: operations["createAgendaTaskSeries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/task-series/{series_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Agenda Task Series */
+        get: operations["getAgendaTaskSeries"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agenda Task Series
+         * @description 之後不再出現；已完成、已略過的那幾次留作紀錄。
+         */
+        delete: operations["deleteAgendaTaskSeries"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Agenda Task Series
+         * @description 改規則或開始日時，之前沒做的那幾次照舊留著提醒，新規則從今天起算。
+         */
+        patch: operations["updateAgendaTaskSeries"];
+        trace?: never;
+    };
+    "/api/v1/agenda/task-series/{series_id}/occurrences/{occurrence_on}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Agenda Occurrence
+         * @description 只改這一次（改期、時間、備註、負責人）。
+         */
+        patch: operations["updateAgendaOccurrence"];
+        trace?: never;
+    };
+    "/api/v1/agenda/task-series/{series_id}/occurrences/{occurrence_on}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Agenda Occurrence Status
+         * @description 完成／略過重複待辦的某一次。
+         */
+        post: operations["setAgendaOccurrenceStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/task-series/{series_id}/skip-overdue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip Overdue Agenda Task Series
+         * @description 今天以前沒做的那幾次全部略過。
+         */
+        post: operations["skipOverdueAgendaTaskSeries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Agenda Task */
+        post: operations["createAgendaTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/tasks/undated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Undated Agenda Tasks
+         * @description 「沒有日期」清單（預設只列還沒完成的）。
+         */
+        get: operations["listUndatedAgendaTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Agenda Task */
+        get: operations["getAgendaTask"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agenda Task
+         * @description 刪除＝封存。重複待辦的某一次不能刪，要用略過（422）。
+         */
+        delete: operations["deleteAgendaTask"];
+        options?: never;
+        head?: never;
+        /** Update Agenda Task */
+        patch: operations["updateAgendaTask"];
+        trace?: never;
+    };
+    "/api/v1/agenda/tasks/{task_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Agenda Task Status
+         * @description 完成／略過／取消完成（按錯了要能取消）。
+         */
+        post: operations["setAgendaTaskStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agenda Today
+         * @description 首頁、開店前檢查與導覽列數字用。
+         */
+        get: operations["getAgendaToday"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agreements": {
         parameters: {
             query?: never;
@@ -4714,6 +4990,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/staff-members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Staff Members */
+        get: operations["listStaffMembers"];
+        put?: never;
+        /** Create Staff Member */
+        post: operations["createStaffMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff-members/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Staff Member */
+        patch: operations["updateStaffMember"];
+        trace?: never;
+    };
     "/api/v1/stocktakes": {
         parameters: {
             query?: never;
@@ -5354,6 +5665,404 @@ export interface components {
          * @enum {string}
          */
         AdjustmentScope: "ORDER" | "ITEM";
+        /** AgendaEventCreate */
+        AgendaEventCreate: {
+            /** End Time */
+            end_time?: string | null;
+            /** Ends On */
+            ends_on?: string | null;
+            kind: components["schemas"]["AgendaEventKind"];
+            /**
+             * Manager Only
+             * @default false
+             */
+            manager_only: boolean;
+            /** Note */
+            note?: string | null;
+            recurrence?: components["schemas"]["RecurrenceFields"] | null;
+            /** Start Time */
+            start_time?: string | null;
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgendaEventKind
+         * @description 行事曆事件類型（docs/99 §4.3）：只顯示，不影響 POS 與線上點餐。
+         * @enum {string}
+         */
+        AgendaEventKind: "CLOSED" | "TEMP_CLOSED" | "MARKET" | "OTHER";
+        /**
+         * AgendaEventOccurrenceRequest
+         * @description 取消（或恢復）重複事件的某一次，例：這個週一照常營業。
+         */
+        AgendaEventOccurrenceRequest: {
+            /**
+             * Cancelled
+             * @default true
+             */
+            cancelled: boolean;
+            /**
+             * On
+             * Format: date
+             */
+            on: string;
+        };
+        /** AgendaEventRead */
+        AgendaEventRead: {
+            /** Cancelled Dates */
+            cancelled_dates: string[];
+            /** End Time */
+            end_time: string | null;
+            /**
+             * Ends On
+             * Format: date
+             */
+            ends_on: string;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["AgendaEventKind"];
+            /** Manager Only */
+            manager_only: boolean;
+            /** Note */
+            note: string | null;
+            recurrence: components["schemas"]["RecurrenceFields"] | null;
+            /** Start Time */
+            start_time: string | null;
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+            /** Title */
+            title: string;
+        };
+        /** AgendaEventUpdate */
+        AgendaEventUpdate: {
+            /** End Time */
+            end_time?: string | null;
+            /** Ends On */
+            ends_on?: string | null;
+            kind?: components["schemas"]["AgendaEventKind"] | null;
+            /** Manager Only */
+            manager_only?: boolean | null;
+            /** Note */
+            note?: string | null;
+            recurrence?: components["schemas"]["RecurrenceFields"] | null;
+            /** Start Time */
+            start_time?: string | null;
+            /** Starts On */
+            starts_on?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** AgendaFeedRead */
+        AgendaFeedRead: {
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+            /** Items */
+            items: components["schemas"]["AgendaItemRead"][];
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+        };
+        /**
+         * AgendaItemKind
+         * @description 行事曆彙整的一列是什麼（docs/99 §3）。1B／1C 再加採購單與付款。
+         * @enum {string}
+         */
+        AgendaItemKind: "TASK" | "EVENT" | "CAMPAIGN_START" | "CAMPAIGN_END";
+        /**
+         * AgendaItemRead
+         * @description 行事曆上的一列。
+         *
+         *     `key` 穩定，可當畫面的 key；操作時看 task_id、series_id＋occurrence_on 或 event_id。
+         */
+        AgendaItemRead: {
+            /** Assignee Name */
+            assignee_name?: string | null;
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Campaign Id */
+            campaign_id?: number | null;
+            campaign_status?: components["schemas"]["CampaignStatus"] | null;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** End Day */
+            end_day?: string | null;
+            /** End Time */
+            end_time?: string | null;
+            /** Event Id */
+            event_id?: number | null;
+            event_kind?: components["schemas"]["AgendaEventKind"] | null;
+            /** Href */
+            href?: string | null;
+            /** Key */
+            key: string;
+            kind: components["schemas"]["AgendaItemKind"];
+            /** Lead Days */
+            lead_days?: number | null;
+            /**
+             * Manager Only
+             * @default false
+             */
+            manager_only: boolean;
+            /** Note */
+            note?: string | null;
+            /** Occurrence On */
+            occurrence_on?: string | null;
+            /**
+             * Overdue
+             * @default false
+             */
+            overdue: boolean;
+            /** Series Id */
+            series_id?: number | null;
+            /** Start Time */
+            start_time?: string | null;
+            status?: components["schemas"]["AgendaTaskStatus"] | null;
+            /** Task Id */
+            task_id?: number | null;
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgendaOccurrenceUpdate
+         * @description 只改重複待辦的這一次（例：這週改週二叫牛奶）。
+         */
+        AgendaOccurrenceUpdate: {
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Due On */
+            due_on?: string | null;
+            /** Due Time */
+            due_time?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * AgendaSeriesCreate
+         * @description 重複待辦：從 `starts_on` 起依規則出現，每一次都是獨立的一筆。
+         */
+        AgendaSeriesCreate: {
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Due Time */
+            due_time?: string | null;
+            /**
+             * Lead Days
+             * @default 3
+             */
+            lead_days: number;
+            /** Link Href */
+            link_href?: string | null;
+            /**
+             * Manager Only
+             * @default false
+             */
+            manager_only: boolean;
+            /** Note */
+            note?: string | null;
+            recurrence: components["schemas"]["RecurrenceFields"];
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+            /** Title */
+            title: string;
+        };
+        /** AgendaSeriesRead */
+        AgendaSeriesRead: {
+            /** Assignee Name */
+            assignee_name: string | null;
+            /** Assignee Staff Id */
+            assignee_staff_id: number | null;
+            /** Due Time */
+            due_time: string | null;
+            /** Id */
+            id: number;
+            /** Lead Days */
+            lead_days: number;
+            /** Link Href */
+            link_href: string | null;
+            /** Manager Only */
+            manager_only: boolean;
+            /** Next On */
+            next_on: string | null;
+            /** Note */
+            note: string | null;
+            recurrence: components["schemas"]["RecurrenceFields"];
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgendaSeriesUpdate
+         * @description 改規則或開始日：之前沒做的那幾次照舊留著提醒，新規則從今天起算（ADR-034 決定 6）。
+         */
+        AgendaSeriesUpdate: {
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Due Time */
+            due_time?: string | null;
+            /** Lead Days */
+            lead_days?: number | null;
+            /** Link Href */
+            link_href?: string | null;
+            /** Manager Only */
+            manager_only?: boolean | null;
+            /** Note */
+            note?: string | null;
+            recurrence?: components["schemas"]["RecurrenceFields"] | null;
+            /** Starts On */
+            starts_on?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** AgendaSkipOverdueRead */
+        AgendaSkipOverdueRead: {
+            /** Skipped */
+            skipped: number;
+        };
+        /**
+         * AgendaTaskCreate
+         * @description 單次待辦。沒有日期的放「沒有日期」清單；有時間就一定要有日期。
+         */
+        AgendaTaskCreate: {
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Due On */
+            due_on?: string | null;
+            /** Due Time */
+            due_time?: string | null;
+            /**
+             * Lead Days
+             * @default 3
+             */
+            lead_days: number;
+            /** Link Href */
+            link_href?: string | null;
+            /**
+             * Manager Only
+             * @default false
+             */
+            manager_only: boolean;
+            /** Note */
+            note?: string | null;
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgendaTaskRead
+         * @description 一筆待辦：單次的，或重複待辦已經被打勾、略過、修改過的那一次。
+         */
+        AgendaTaskRead: {
+            /** Assignee Name */
+            assignee_name: string | null;
+            /** Assignee Staff Id */
+            assignee_staff_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Due On */
+            due_on: string | null;
+            /** Due Time */
+            due_time: string | null;
+            /** Id */
+            id: number;
+            /** Lead Days */
+            lead_days: number;
+            /** Link Href */
+            link_href: string | null;
+            /** Manager Only */
+            manager_only: boolean;
+            /** Note */
+            note: string | null;
+            /** Occurrence On */
+            occurrence_on: string | null;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By Name */
+            resolved_by_name: string | null;
+            /** Series Id */
+            series_id: number | null;
+            status: components["schemas"]["AgendaTaskStatus"];
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgendaTaskStatus
+         * @description 待辦狀態（docs/99 §4.1）。OPEN 未完成；DONE 完成；SKIPPED 略過（重複待辦的某一次不用做）。
+         * @enum {string}
+         */
+        AgendaTaskStatus: "OPEN" | "DONE" | "SKIPPED";
+        /** AgendaTaskStatusRequest */
+        AgendaTaskStatusRequest: {
+            status: components["schemas"]["AgendaTaskStatus"];
+        };
+        /** AgendaTaskUpdate */
+        AgendaTaskUpdate: {
+            /** Assignee Staff Id */
+            assignee_staff_id?: number | null;
+            /** Due On */
+            due_on?: string | null;
+            /** Due Time */
+            due_time?: string | null;
+            /** Lead Days */
+            lead_days?: number | null;
+            /** Link Href */
+            link_href?: string | null;
+            /** Manager Only */
+            manager_only?: boolean | null;
+            /** Note */
+            note?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * AgendaTodayRead
+         * @description 首頁與開店前檢查的「今天」（docs/99 §8）。只含這個人看得到的。
+         */
+        AgendaTodayRead: {
+            /** Badge Count */
+            badge_count: number;
+            /** Campaigns */
+            campaigns: components["schemas"]["AgendaItemRead"][];
+            /** Consignment Pending Count */
+            consignment_pending_count: number;
+            /** Due Today */
+            due_today: components["schemas"]["AgendaItemRead"][];
+            /** Events */
+            events: components["schemas"]["AgendaItemRead"][];
+            /** Overdue */
+            overdue: components["schemas"]["AgendaItemRead"][];
+            /**
+             * Today
+             * Format: date
+             */
+            today: string;
+            /** Upcoming */
+            upcoming: components["schemas"]["AgendaItemRead"][];
+        };
         /**
          * AgingBuckets
          * @description 未兌付負債帳齡分桶（依發出時間）。
@@ -10754,6 +11463,32 @@ export interface components {
             store_id: number;
         };
         /**
+         * RecurrenceFields
+         * @description 重複規則（不含開始日：待辦用 `starts_on`、事件用自己的開始日當起點）。
+         */
+        RecurrenceFields: {
+            /** Day Of Month */
+            day_of_month?: number | null;
+            /** Interval Months */
+            interval_months?: number | null;
+            kind: components["schemas"]["RecurrenceKind"];
+            /** Month Of Year */
+            month_of_year?: number | null;
+            /** Until */
+            until?: string | null;
+            /** Weekdays */
+            weekdays?: number[];
+        };
+        /**
+         * RecurrenceKind
+         * @description 行事曆重複規則（docs/99 §4.2）。不做「每天」：每天的事放開店前檢查。
+         *
+         *     WEEKLY＝每週幾（可複選）；MONTHLY＝每月幾號（29–31 遇小月落月底）；
+         *     EVERY_N_MONTHS＝每 N 個月的幾號（從開始月份起算）；YEARLY＝每年幾月幾號（2/29 遇平年落 2/28）。
+         * @enum {string}
+         */
+        RecurrenceKind: "WEEKLY" | "MONTHLY" | "EVERY_N_MONTHS" | "YEARLY";
+        /**
          * ReferencePriceSummary
          * @description 歷史參考價（2026-09-25 店主要求）：同款通常差不多，店員不必每次重查。
          *
@@ -12237,6 +12972,36 @@ export interface components {
              */
             updated_at: string;
         };
+        /** StaffMemberCreate */
+        StaffMemberCreate: {
+            /** Name */
+            name: string;
+            /** User Id */
+            user_id?: number | null;
+        };
+        /** StaffMemberRead */
+        StaffMemberRead: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** User Id */
+            user_id: number | null;
+        };
+        /**
+         * StaffMemberUpdate
+         * @description 沒送的欄位不動；`user_id` 明確送 null＝取消帳號對應。
+         */
+        StaffMemberUpdate: {
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** User Id */
+            user_id?: number | null;
+        };
         /**
          * StaffPickRef
          * @description 店員推薦的一項：餐飲品項、手沖體驗卡或帶著走商品（retail 的 id 是一般商品 id）。
@@ -13060,6 +13825,688 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listAgendaEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaEventRead"][];
+                };
+            };
+        };
+    };
+    createAgendaEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaEventCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAgendaEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteAgendaEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateAgendaEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaEventUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setAgendaEventOccurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaEventOccurrenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listAgendaItems: {
+        parameters: {
+            query: {
+                /** @description 第一天（含） */
+                start: string;
+                /** @description 最後一天（含）；一次最多 93 天 */
+                end: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaFeedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaSeriesRead"][];
+                };
+            };
+        };
+    };
+    createAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaSeriesCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaSeriesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaSeriesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaSeriesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaSeriesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateAgendaOccurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+                occurrence_on: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaOccurrenceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setAgendaOccurrenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+                occurrence_on: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaTaskStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skipOverdueAgendaTaskSeries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaSkipOverdueRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createAgendaTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaTaskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listUndatedAgendaTasks: {
+        parameters: {
+            query?: {
+                include_resolved?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAgendaTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteAgendaTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateAgendaTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaTaskUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setAgendaTaskStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgendaTaskStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAgendaToday: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaTodayRead"];
                 };
             };
         };
@@ -21893,6 +23340,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listStaffMembers: {
+        parameters: {
+            query?: {
+                include_inactive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMemberRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createStaffMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffMemberCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMemberRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateStaffMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffMemberUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMemberRead"];
                 };
             };
             /** @description Validation Error */
