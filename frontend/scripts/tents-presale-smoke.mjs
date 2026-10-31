@@ -155,6 +155,7 @@ try {
   await page.waitForTimeout(300);
   ok("帶入品名與售價",
     (await acqRow.getByLabel("上架售價（含稅與手續費）").inputValue()) === "14999");
+  ok("賣家電話跟預售登記的一樣：不提醒", (await acqRow.locator(".acq-presale-warn").count()) === 0);
   await pickGrade(acqRow, "A");
   const cat = acqRow.getByLabel("分類");
   await cat.click();
@@ -186,7 +187,45 @@ try {
     (await site.locator(".td-ctas .td-cta-sub").count()) === 1 && (await site.locator(".td-presale-note").count()) === 0);
   await site.screenshot({ path: join(SHOTS, "08-site-detail-after-convert.png"), fullPage: true });
 
-  // 5) 手機寬度的官網清單
+  // 5) 賣家對不上：另建一筆預售（別的電話），收購頁選原賣家 → 提醒但不擋（不送出，事後取消）
+  const api = process.env.SMOKE_API_BASE ?? "http://localhost:8000";
+  const { access_token: token } = await (
+    await fetch(`${api}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "dev-manager", password: "dev-test-123456" }),
+    })
+  ).json();
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const [snowPeak] = await (await fetch(`${api}/api/v1/brands?q=Snow%20Peak`, { headers: auth })).json();
+  const other = await (
+    await fetch(`${api}/api/v1/online-order/tents/presales`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        brand_id: snowPeak.id, name: `對不上-${RUN}`, price: "5000",
+        seller_name: "陳大華", seller_phone: "0987-654-321",
+      }),
+    })
+  ).json();
+  await page.goto(`${BASE}/acquisition`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "收購" }).first().waitFor({ timeout: 15000 });
+  await page.getByRole("tab", { name: "寄售" }).click();
+  await page.getByLabel("賣方搜尋").fill(SELLER);
+  await page.getByRole("button", { name: new RegExp(SELLER) }).first().click();
+  const row2 = page.locator(".acq-row").first();
+  await row2.getByLabel(/從預售帶入/).selectOption(String(other.listing_id));
+  const warn = row2.locator(".acq-presale-warn");
+  await warn.waitFor({ timeout: 5000 });
+  ok("賣家電話對不上：提醒預售登記的賣家", (await warn.textContent()).includes("陳大華（0987-654-321）"));
+  ok("提醒不擋送出", await page.getByRole("button", { name: "送出收購" }).isEnabled());
+  await row2.screenshot({ path: join(SHOTS, "10-acq-seller-mismatch.png") });
+  await fetch(`${api}/api/v1/online-order/tents/presales/${other.listing_id}/cancel`, {
+    method: "POST",
+    headers: auth,
+  });
+
+  // 6) 手機寬度的官網清單
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await phone.goto(`${SITE}/tents.html`, { waitUntil: "networkidle" });
   await phone.screenshot({ path: join(SHOTS, "09-site-list-mobile.png"), fullPage: false });

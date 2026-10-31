@@ -142,6 +142,8 @@ type Row = ItemDraft & {
   /** 寄售帳篷預售帶入（docs/102）：送出後這件接手那筆預售的官網資料與照片。 */
   presaleListingId?: number | null;
   presaleCode?: string | null;
+  /** 預售登記的賣家（只拿來比對、提醒，不送出）。 */
+  presaleSeller?: { name: string; phone: string } | null;
 };
 
 type TentPresale = components["schemas"]["TentPresaleRead"];
@@ -238,29 +240,44 @@ function CollapsedRow({
  * 寄售帳篷預售帶入（docs/102）：帳篷先前以預售放上官網，現在送到店了。選了就帶入品名、品牌、
  * 上架售價（店員可改，以這張寄售單為準）；送出後官網那頂直接變現貨、照片與官網資料全部沿用。
  */
+function digitsOnly(phone: string): string {
+  return phone.replace(/\D/g, "");
+}
+
 function PresalePicker({
   row,
   presales,
+  sellerPhone,
   onChange,
 }: {
   row: Row;
   presales: TentPresale[];
+  /** 目前選的賣家電話；還沒選賣家為 null。 */
+  sellerPhone: string | null;
   onChange: (patch: Partial<Row>) => void;
 }) {
+  // 只提醒、不擋：賣家換過手機、或請家人代送都可能對不上（店主 2026-10-31）。
+  const mismatch =
+    row.presaleListingId &&
+    row.presaleSeller &&
+    sellerPhone !== null &&
+    digitsOnly(sellerPhone) !== digitsOnly(row.presaleSeller.phone);
   return (
-    <label className="field acq-presale">
+    <div className="acq-presale">
+    <label className="field">
       <span className="field-label">從預售帶入（選填：帳篷先前已放上官網預售）</span>
       <select
         value={row.presaleListingId ?? ""}
         onChange={(e) => {
           const picked = presales.find((p) => String(p.listing_id) === e.target.value);
           if (!picked) {
-            onChange({ presaleListingId: null, presaleCode: null });
+            onChange({ presaleListingId: null, presaleCode: null, presaleSeller: null });
             return;
           }
           onChange({
             presaleListingId: picked.listing_id,
             presaleCode: picked.presale_code,
+            presaleSeller: { name: picked.seller_name, phone: picked.seller_phone },
             name: picked.name,
             brandId: picked.brand_id,
             brandName: picked.brand_name,
@@ -283,6 +300,12 @@ function PresalePicker({
         ))}
       </select>
     </label>
+    {mismatch && row.presaleSeller && (
+      <p className="acq-presale-warn" role="status">
+        預售登記的賣家是 {row.presaleSeller.name}（{row.presaleSeller.phone}），跟目前選的賣家電話不同，請確認是同一個人。
+      </p>
+    )}
+    </div>
   );
 }
 
@@ -352,12 +375,15 @@ function ItemRowCard({
   taxRateLoading,
   taxRateUnavailable,
   presales,
+  sellerPhone,
 }: {
   type: AcqType;
   index: number;
   row: Row;
   /** 可以帶入的預售（還沒被別列選走的）；只有寄售用。 */
   presales: TentPresale[];
+  /** 目前選的賣家電話（預售登記的賣家對不上時提醒）。 */
+  sellerPhone: string | null;
   categories: Category[];
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
@@ -570,7 +596,12 @@ function ItemRowCard({
         </span>
       </div>
       {type === "CONSIGNMENT" && (presales.length > 0 || row.presaleListingId) && (
-        <PresalePicker row={row} presales={presales} onChange={onChange} />
+        <PresalePicker
+          row={row}
+          presales={presales}
+          sellerPhone={sellerPhone}
+          onChange={onChange}
+        />
       )}
       <div className="acq-row-grid">
         <CreatableCombobox
@@ -1758,6 +1789,7 @@ export default function AcquisitionPage() {
                             // 一筆預售只能帶入一件
                             presaleListingId: null,
                             presaleCode: null,
+                            presaleSeller: null,
                           },
                         ]
                       : [r],
@@ -1773,6 +1805,7 @@ export default function AcquisitionPage() {
               feeRate={feeRate}
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
+              sellerPhone={seller?.phone ?? null}
               presales={(presalesQuery.data ?? []).filter(
                 (p) =>
                   !rows.some(

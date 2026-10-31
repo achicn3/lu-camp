@@ -66,7 +66,7 @@ function renderPage() {
   return render(<AcquisitionPage />, { wrapper: Wrapper });
 }
 
-function stub() {
+function stub(presale: Presale = PRESALE) {
   const submitted: Record<string, unknown>[] = [];
   const calls: string[] = [];
   vi.stubGlobal(
@@ -86,7 +86,7 @@ function stub() {
           premium_rate: "0.10",
         });
       }
-      if (url.includes("/online-order/tents/presales")) return json([PRESALE]);
+      if (url.includes("/online-order/tents/presales")) return json([presale]);
       if (url.includes("/online-order/tents/publish")) return json({});
       if (url.includes("/online-order/tents")) return json([]);
       if (url.includes("/categories/") && url.includes("/pricing-rules")) return json([]);
@@ -162,6 +162,39 @@ describe("/acquisition 從預售帶入", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.startsWith("POST") && c.endsWith("/tents/publish"))).toBe(true),
     );
+  });
+
+  it("選的賣家電話跟預售登記的不同：提醒確認，但照樣可以送出", async () => {
+    const { submitted } = stub({ ...PRESALE, seller_name: "陳大華", seller_phone: "0987-654-321" });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("tab", { name: "寄售" }));
+    await user.type(screen.getByLabelText("賣方搜尋"), "王");
+    await user.click(await screen.findByRole("button", { name: /王小明/ }));
+    await user.selectOptions(await screen.findByLabelText(/從預售帶入/), "41");
+
+    const warning = await screen.findByText(/預售登記的賣家是 陳大華（0987-654-321）/);
+    expect(warning.textContent).toContain("跟目前選的賣家電話不同");
+
+    await user.click(screen.getByRole("radio", { name: "A 近全新/精品" }));
+    await user.click(screen.getByLabelText("分類"));
+    await user.click(await screen.findByRole("option", { name: "帳篷" }));
+    await user.click(screen.getByRole("button", { name: "送出收購" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+  });
+
+  it("電話一樣（格式不同也算）就不提醒", async () => {
+    stub({ ...PRESALE, seller_phone: "0912-345-678" });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("tab", { name: "寄售" }));
+    await user.type(screen.getByLabelText("賣方搜尋"), "王");
+    await user.click(await screen.findByRole("button", { name: /王小明/ }));
+    await user.selectOptions(await screen.findByLabelText(/從預售帶入/), "41");
+    await screen.findByDisplayValue("NEW X5");
+    expect(screen.queryByText(/預售登記的賣家是/)).toBeNull();
   });
 
   it("買斷不出現預售帶入", async () => {

@@ -7011,6 +7011,17 @@ body:has(.intake-customer, .acq-select-void-dialog) {
 .acq-presale {
   margin-bottom: var(--sp-3);
 }
+.acq-presale .field {
+  margin: 0;
+}
+.acq-presale-warn {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface);
+  color: var(--warn);
+  font-size: var(--text-sm);
+}
 .acq-presale select {
   min-height: var(--tap-min);
   border: 1px solid var(--border);
